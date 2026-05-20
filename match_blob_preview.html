@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Match Blob Preview — correct previous shape</title>
+<style>
+  html, body { margin: 0; padding: 0; background: linear-gradient(180deg, #6B8AB8 0%, #84A6CB 50%, #B7D5E8 100%); min-height: 100vh; font-family: -apple-system, BlinkMacSystemFont, sans-serif; color: #fff; }
+  .wrap { display: flex; flex-direction: column; align-items: center; padding: 40px 16px; gap: 36px; }
+  h1 { margin: 0; font-weight: 700; font-size: 18px; letter-spacing: 0.4px; text-transform: uppercase; opacity: 0.9; }
+  .label { margin-top: 10px; font-size: 13px; opacity: 0.85; text-align: center; }
+  .stage { width: 410px; height: 290px; background: rgba(0,0,0,0.05); border-radius: 12px; position: relative; }
+  .stage svg { position: absolute; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Match blob — restored previous shape at new size</h1>
+
+  <div>
+    <div class="stage">
+      <!--
+        BLUE (behind) — the previous "good" version:
+          viewBox -4 0 116 130
+          7 cubic segments, anchor (68,6) leans right,
+          strong left bulge with control point at x=-2 (protrudes outside x=0).
+      -->
+      <svg style="left: 27px; top: 18px; z-index: 1;" width="201" height="245" viewBox="-4 0 116 130">
+        <path
+          d="M 68 6
+             C 82 6, 90 16, 92 30
+             C 94 48, 90 66, 84 82
+             C 78 96, 70 108, 60 116
+             C 46 124, 28 124, 18 116
+             C 8 108, 4 94, 2 78
+             C -2 60, 2 38, 10 22
+             C 22 10, 44 4, 68 6 Z"
+          fill="#FFFFFF"
+          stroke="#2147C9"
+          stroke-width="7"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          vector-effect="non-scaling-stroke" />
+      </svg>
+
+      <!--
+        CORAL (front) — the previous "good" version:
+          viewBox -4 0 116 130
+          8 cubic segments, anchor (42,6) leans left,
+          concave waist via control points (30,70) and (30,58) deep inside the path,
+          full rounded right side reaches x ≈ 108.
+      -->
+      <svg style="left: 213px; top: 18px; z-index: 2;" width="195" height="245" viewBox="-4 0 116 130">
+        <path
+          d="M 42 6
+             C 60 4, 76 12, 86 28
+             C 98 46, 102 70, 98 90
+             C 92 110, 76 122, 56 124
+             C 38 124, 22 122, 12 110
+             C 6 98, 10 86, 16 76
+             C 20 64, 22 56, 18 50
+             C 14 38, 10 22, 16 12
+             C 22 6, 32 5, 42 6 Z"
+          fill="#FFFFFF"
+          stroke="#FF7F50"
+          stroke-width="7"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          vector-effect="non-scaling-stroke" />
+      </svg>
+    </div>
+    <div class="label">
+      Previous shape (viewBox -4 0 116 130) — strong left bulge on blue, concave waist on coral.<br/>
+      Blue: 201 × 245 at (27, 18). Coral: 195 × 245 at (213, 18). Overlap: ~15 px (slight).
+    </div>
+  </div>
+
+  <div>
+    <h1 style="font-size: 14px;">Outline study — large</h1>
+    <div style="display: flex; gap: 32px;">
+      <svg width="240" height="290" viewBox="-4 0 116 130">
+        <path
+          d="M 68 6
+             C 82 6, 90 16, 92 30
+             C 94 48, 90 66, 84 82
+             C 78 96, 70 108, 60 116
+             C 46 124, 28 124, 18 116
+             C 8 108, 4 94, 2 78
+             C -2 60, 2 38, 10 22
+             C 22 10, 44 4, 68 6 Z"
+          fill="#FFFFFF"
+          stroke="#2147C9"
+          stroke-width="6"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          vector-effect="non-scaling-stroke" />
+      </svg>
+      <svg width="240" height="290" viewBox="-4 0 116 130">
+        <path
+          d="M 42 6
+             C 60 4, 78 14, 90 32
+             C 102 52, 108 76, 100 94
+             C 92 110, 76 122, 56 124
+             C 38 124, 24 118, 18 106
+             C 14 96, 18 86, 22 78
+             C 30 70, 30 58, 24 50
+             C 18 38, 12 24, 18 14
+             C 24 6, 32 5, 42 6 Z"
+          fill="#FFFFFF"
+          stroke="#FF7F50"
+          stroke-width="6"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          vector-effect="non-scaling-stroke" />
+      </svg>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

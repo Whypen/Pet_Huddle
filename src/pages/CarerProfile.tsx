@@ -16,6 +16,7 @@ import {
   Rabbit, Save, Stethoscope, Sun, X, Zap
 } from "lucide-react";
 import { UserAvatar } from "@/components/ui/UserAvatar";
+import { isVerifiedProfile } from "@/lib/verification";
 import { canonicalizeSocialAlbumEntries, resolveSocialAlbumUrlList } from "@/lib/socialAlbum";
 import carerPlaceholderImg from "@/assets/Profile Placeholder.png";
 import { WalletOnboardingModal } from "@/components/wallet/WalletOnboardingModal";
@@ -349,7 +350,7 @@ const CarerProfile: React.FC = () => {
         return age > 18 || (age === 18 && (m > 0 || (m === 0 && now.getDate() >= birth.getDate())));
       })()
     : false;
-  const isVerified = profile?.is_verified === true;
+  const isVerified = isVerifiedProfile(profile);
   // providerEligible gates the listed flag on every save path.
   // computeListingEligible() still handles profile completeness + Stripe + agreement.
   const providerEligible = isAge18Plus && isVerified;

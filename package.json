@@ -8,6 +8,7 @@
     "dev:fn": "supabase functions serve --env-file supabase/functions/.env",
     "build": "vite build",
     "build:dev": "vite build --mode development",
+    "typecheck": "npm --prefix app run typecheck",
     "ops:edge:harden": "bash scripts/ops/harden-local-edge-runtime.sh",
     "audit:map": "node scripts/self_audit_map.mjs",
     "audit:security": "node scripts/security_posture_audit.mjs",

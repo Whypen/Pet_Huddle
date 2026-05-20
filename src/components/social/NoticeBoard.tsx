@@ -28,6 +28,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { isVerifiedProfile } from "@/lib/verification";
 import { resolveCopy } from "@/lib/copy";
 import { useUpsellBanner } from "@/contexts/UpsellBannerContext";
 // browser-image-compression is dynamically imported inside prepareComposerMedia
@@ -625,6 +626,8 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   const focusFallbackShownRef = useRef<string | null>(null);
   const feedRequestTokenRef = useRef(0);
   const focusThreadId = params.threadId || searchParams.get("focus") || searchParams.get("thread");
+  const nativeWebMode = searchParams.get("mode");
+  const nativeWebProfileUserId = searchParams.get("profileUser");
   const [profileOpen, setProfileOpen] = useState(false);
   const [profileUserId, setProfileUserId] = useState<string | null>(null);
   const [profileFallbackName, setProfileFallbackName] = useState("");
@@ -653,6 +656,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   const linkPreviewActiveCountRef = useRef(0);
   const linkPreviewAccessRef = useRef<Map<string, number>>(new Map());
   const composerUploadTickerRef = useRef<ReturnType<typeof window.setInterval> | null>(null);
+  const nativeWebModeAppliedRef = useRef<string | null>(null);
   const effectiveTier = (profile?.effective_tier || profile?.tier || "free").toLowerCase();
   const isGoldUser = effectiveTier === "gold";
   const replyWordsUsed = useMemo(() => countWords(replyContent), [replyContent]);
@@ -2182,7 +2186,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
             display_name: profile?.display_name || "You",
             social_id: profile?.social_id || null,
             avatar_url: profile?.avatar_url || null,
-            is_verified: profile?.is_verified === true,
+            is_verified: isVerifiedProfile(profile),
           } as ThreadComment["author"] & { is_verified?: boolean | null },
         };
 
@@ -2556,7 +2560,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
               display_name: profile?.display_name || "You",
               avatar_url: profile?.avatar_url || null,
               verification_status: profile?.verification_status || null,
-              is_verified: profile?.is_verified === true,
+              is_verified: isVerifiedProfile(profile),
             },
           };
           setNotices((prev) => [optimisticThread, ...prev.filter((item) => item.id !== optimisticThread.id)]);
@@ -2604,7 +2608,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   };
 
   // SPRINT 3: Toggle like with green (#22c55e) state
-  const handleSupport = (noticeId: string) => {
+  const handleSupport = useCallback((noticeId: string) => {
     const target = notices.find((item) => item.id === noticeId);
     if (target?.user_id && user?.id) {
       // blockedUsers is already loaded in state; no need for an async round-trip per like.
@@ -2695,7 +2699,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       }
       return newLiked;
     });
-  };
+  }, [blockedUsers, fetchNotices, likedNotices, notices, profile?.display_name, recordSocialFeedEvent, t, upsertNotificationWindow, user?.id]);
 
   const openReportModal = useCallback((targetUserId: string | null, targetName: string | null) => {
     if (!targetUserId || !user?.id) return;
@@ -2887,7 +2891,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
             images,
             created_at,
             user_id,
-            author:profiles!thread_comments_user_id_fkey(display_name, social_id, avatar_url, is_verified)
+            author:profiles!thread_comments_user_id_fkey(display_name, social_id, avatar_url, is_verified, verification_status)
           `)
           .eq("thread_id", threadId)
           .order("created_at", { ascending: true });
@@ -2910,7 +2914,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                     display_name: ((authorObj as Record<string, unknown>).display_name as string | null) ?? null,
                     social_id: ((authorObj as Record<string, unknown>).social_id as string | null) ?? null,
                     avatar_url: ((authorObj as Record<string, unknown>).avatar_url as string | null) ?? null,
-                    is_verified: (authorObj as Record<string, unknown>).is_verified === true,
+                    is_verified: isVerifiedProfile(authorObj),
                   }
                 : null,
           } as ThreadComment;
@@ -3146,6 +3150,54 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     );
     setShareOpen(true);
   }, []);
+
+  useEffect(() => {
+    if (!nativeWebMode) return;
+    const handoffKey = `${nativeWebMode}:${focusThreadId || ""}:${nativeWebProfileUserId || ""}`;
+    if (nativeWebModeAppliedRef.current === handoffKey) return;
+
+    if (nativeWebMode === "compose") {
+      nativeWebModeAppliedRef.current = handoffKey;
+      if (isSocialPostingBlocked) {
+        setSocialRestrictionModalOpen(true);
+        return;
+      }
+      setIsCreateOpen(true);
+      return;
+    }
+
+    if (!focusThreadId) return;
+    const focusedNotice = notices.find((notice) => notice.id === focusThreadId);
+    if (!focusedNotice) return;
+
+    nativeWebModeAppliedRef.current = handoffKey;
+    if (nativeWebMode === "share") {
+      openShareSheet(focusedNotice);
+      return;
+    }
+
+    if (nativeWebMode === "comments") {
+      openCommentsForThread(focusedNotice);
+      return;
+    }
+
+    if (nativeWebMode === "profile") {
+      const targetUserId = nativeWebProfileUserId || focusedNotice.user_id;
+      const targetName = targetUserId === focusedNotice.user_id
+        ? focusedNotice.author?.display_name || "User"
+        : "User";
+      openProfile(targetUserId, targetName, focusedNotice.id);
+    }
+  }, [
+    focusThreadId,
+    isSocialPostingBlocked,
+    nativeWebMode,
+    nativeWebProfileUserId,
+    notices,
+    openCommentsForThread,
+    openProfile,
+    openShareSheet,
+  ]);
 
   const recordShareClick = useCallback(async (threadId: string) => {
     if (!threadId) return;
@@ -4017,7 +4069,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                         type="button"
                         className={cn(
                           "relative w-10 h-10 rounded-full bg-transparent border-[1.5px] flex items-center justify-center overflow-hidden flex-shrink-0",
-                          notice.author?.is_verified === true
+                          isVerifiedProfile(notice.author)
                             ? "border-[rgba(33,69,207,1)]"
                             : "border-[rgba(74,73,101,0.28)]"
                         )}
@@ -4553,7 +4605,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                                         >
                                           {commentSocialId}
                                         </button>
-                                        {(c.author as (ThreadComment["author"] & { is_verified?: boolean | null }))?.is_verified === true ? (
+                                        {isVerifiedProfile(c.author) ? (
                                           <BadgeCheck className="h-3.5 w-3.5 shrink-0 fill-brandBlue text-white" aria-label="Verified" />
                                         ) : null}
                                       </div>

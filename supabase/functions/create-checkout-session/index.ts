@@ -13,7 +13,7 @@ const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") as string, {
 });
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL") as string;
-const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") as string;
+const supabaseServiceKey = (Deno.env.get("HUDDLE_SUPABASE_SERVICE_KEY") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")) as string;
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 const stripeSecret = Deno.env.get("STRIPE_SECRET_KEY") || "";
 const stripeMode = stripeSecret.startsWith("sk_live_") ? "live" : "test";
@@ -159,7 +159,7 @@ const extractUserAccessToken = (req: Request, body: CheckoutRequestBody): string
   const huddleToken = (req.headers.get("x-huddle-access-token") || "").replace(/^Bearer\s+/i, "").trim();
   const bearerToken = (req.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "").trim();
   const anonKey = String(Deno.env.get("SUPABASE_ANON_KEY") || "").trim();
-  const serviceRole = String(Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "").trim();
+  const serviceRole = String((Deno.env.get("HUDDLE_SUPABASE_SERVICE_KEY") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")) || "").trim();
   return [bodyToken, huddleToken, bearerToken].find(
     (token) => isJwt(token) && token !== anonKey && token !== serviceRole,
   ) || "";

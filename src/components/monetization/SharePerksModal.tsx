@@ -7,7 +7,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { fetchLivePrices, FALLBACK_PRICES, getCachedLivePrices, getLastLivePricesSnapshot, resolvePricingHints, type LivePriceMap } from "@/lib/stripePrices";
 import { PriceDisplay } from "@/components/ui/PriceDisplay";
 import { invokeAuthedFunction } from "@/lib/invokeAuthedFunction";
-import { openExternalUrl } from "@/lib/nativeShell";
+import { openExternalUrl, openNativeMembershipOverview } from "@/lib/nativeShell";
 import { toast } from "sonner";
 
 const BRAND_BLUE = "#2145CF";
@@ -44,6 +44,11 @@ export function SharePerksModal({ isOpen, onClose, tier }: Props) {
     country: profile?.location_country ?? undefined,
   });
   const [livePrices, setLivePrices] = useState<LivePriceMap>(cachedPrices ?? FALLBACK_PRICES);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    if (openNativeMembershipOverview()) onClose();
+  }, [isOpen, onClose]);
   const isGold = tier === "gold";
   const features = isGold ? [...FEATURES_BASE, ...FEATURES_GOLD] : FEATURES_BASE;
   const normalizedTier = String(profile?.effective_tier || profile?.tier || tier || "free").toLowerCase();
@@ -83,6 +88,7 @@ export function SharePerksModal({ isOpen, onClose, tier }: Props) {
   }, [isOpen, profile?.id, profile?.location_country, savedPricingCurrency]);
 
   async function handlePurchase() {
+    if (openNativeMembershipOverview()) return;
     if (!isSharePerksPurchasable) {
       toast.error(isMaxFamilyCapacity ? "Max. capacity reached" : "Share Perks is temporarily unavailable. Please try again shortly.");
       return;

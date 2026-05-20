@@ -1101,6 +1101,17 @@ export function VerifyIdentity({
     navigate("/set-profile", { replace: true });
   }, [navigate, setFlowState]);
 
+  const waitForVerificationSession = useCallback(async () => {
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const {
+        data: { session: liveSession },
+      } = await supabase.auth.getSession();
+      if (liveSession?.access_token) return liveSession;
+      await new Promise((resolve) => window.setTimeout(resolve, 250));
+    }
+    return null;
+  }, []);
+
   const ensureAuthForVerification = async (): Promise<boolean> => {
     if (authLoading) {
       // Auth context is still resolving — show feedback so the user knows to retry
@@ -1113,6 +1124,14 @@ export function VerifyIdentity({
       data: { session: liveSession },
     } = await supabase.auth.getSession();
     if (liveSession?.access_token) return true;
+    const recoveredSession = await waitForVerificationSession();
+    if (recoveredSession?.access_token) return true;
+    if (activeSignupFlow) {
+      setHumanErrorMessage("Still preparing your account session. Return to signup and try again.");
+      setCardErrorMessage("Still preparing your account session. Return to signup and try again.");
+      navigate("/signup/verify", { replace: true });
+      return false;
+    }
     setHumanErrorMessage("Please sign in to continue verification.");
     setCardErrorMessage("Please sign in to continue verification.");
     navigate("/auth", { replace: true, state: { from: "/verify-identity" } });
@@ -1395,7 +1414,7 @@ export function VerifyIdentity({
         .eq("id", user.id)
         .maybeSingle();
       if (!error && data) {
-        const isVerified = data.is_verified === true || String(data.verification_status || "").toLowerCase() === "verified";
+        const isVerified = String(data.verification_status || "").toLowerCase() === "verified";
         const cardPassed = String(data.card_verification_status || "").toLowerCase() === "passed";
         const legalNameMatches = expectedLegalName.length === 0
           || String(data.legal_name || "").trim().toLowerCase() === expectedLegalName;
@@ -2353,6 +2372,10 @@ export function VerifyIdentity({
           }
           if (activeSignupFlow) {
             navigate("/signup/verify", { replace: true });
+            return;
+          }
+          if (window.history.length <= 1) {
+            navigate("/settings", { replace: true, state: { openSettingsDrawer: true } });
             return;
           }
           navigate(-1);

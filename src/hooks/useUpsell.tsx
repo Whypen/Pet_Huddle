@@ -9,6 +9,7 @@ import { resolveCopy } from "@/lib/copy";
 import { supabase } from "@/integrations/supabase/client";
 import { getQuotaCapsForTier, normalizeQuotaTier, quotaConfig } from "@/config/quotaConfig";
 import { getRemainingStarsFromSnapshot, resolveStarQuotaTier } from "@/lib/starQuota";
+import { openNativeMembershipOverview } from "@/lib/nativeShell";
 
 export type UpsellType = "star" | "emergency_alert" | "media" | "family_slot" | null;
 
@@ -204,6 +205,7 @@ export const useUpsell = () => {
    */
   const buyAddOn = useCallback((type: UpsellType) => {
     if (!type) return;
+    if (openNativeMembershipOverview()) return;
     // Store selected add-on in session storage for Premium page to auto-select
     sessionStorage.setItem("pending_addon", type);
     window.location.href = "/premium";

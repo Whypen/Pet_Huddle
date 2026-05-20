@@ -27,6 +27,8 @@ interface GlassSheetProps {
   children: React.ReactNode;
   /** Hide the × close button */
   hideClose?: boolean;
+  /** Override the backdrop base z-index; panel renders at +10 */
+  zIndexBase?: number;
 }
 
 export function GlassSheet({
@@ -38,6 +40,7 @@ export function GlassSheet({
   contentClassName,
   children,
   hideClose = false,
+  zIndexBase,
 }: GlassSheetProps) {
   return (
     <AnimatePresence>
@@ -51,6 +54,7 @@ export function GlassSheet({
             exit={{ opacity: 0 }}
             transition={{ duration: 0.18 }}
             className={cn("fixed inset-0 z-[4200] bg-foreground/20 backdrop-blur-sm", backdropClassName)}
+            style={zIndexBase != null ? { zIndex: zIndexBase } : undefined}
             onClick={onClose}
           />
 
@@ -68,7 +72,7 @@ export function GlassSheet({
               "flex flex-col",
               className,
             )}
-            style={{ bottom: "0px" }}
+            style={{ bottom: "0px", ...(zIndexBase != null ? { zIndex: zIndexBase + 10 } : {}) }}
           >
             {/* Drag handle */}
             <div className="absolute top-2.5 left-1/2 -translate-x-1/2 w-10 h-1 rounded-full bg-brandText/20" />

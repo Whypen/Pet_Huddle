@@ -98,6 +98,7 @@ export const NoticeBoardComposerModal = memo(({
           onClick={onClose}
         >
           <motion.div
+            data-huddle-bottom-sheet="true"
             initial={{ y: "100%" }}
             animate={{ y: 0 }}
             exit={{ y: "100%" }}

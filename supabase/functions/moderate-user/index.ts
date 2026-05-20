@@ -34,7 +34,7 @@ Deno.serve(async (req: Request) => {
   if (req.method !== "POST") return json(405, { error: "method_not_allowed" });
 
   const supabaseUrl = String(Deno.env.get("SUPABASE_URL") || "").trim();
-  const serviceRoleKey = String(Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "").trim();
+  const serviceRoleKey = String((Deno.env.get("HUDDLE_SUPABASE_SERVICE_KEY") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")) || "").trim();
   const moderationSecret = String(Deno.env.get("MODERATION_API_KEY") || "").trim();
   if (!supabaseUrl || !serviceRoleKey || !moderationSecret) {
     return json(500, { error: "server_misconfigured" });

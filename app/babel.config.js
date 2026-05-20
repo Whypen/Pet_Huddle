@@ -1,6 +1,7 @@
 module.exports = function (api) {
   api.cache(true);
   return {
-    presets: [["babel-preset-expo", { reanimated: false, worklets: false }]],
+    presets: ["babel-preset-expo"],
+    plugins: ["react-native-worklets-core/plugin"],
   };
 };

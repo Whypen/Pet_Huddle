@@ -24,6 +24,7 @@ import { sendDiscoveryWave } from "@/lib/discoveryActions";
 import { CANONICAL_SOCIAL_ROLE_OPTIONS } from "@/lib/profileOptions";
 import { useSafetyRestrictions } from "@/hooks/useSafetyRestrictions";
 import { RestrictionBanner } from "@/components/safety/RestrictionBanner";
+import { isVerifiedProfile } from "@/lib/verification";
 
 type DiscoveryPet = {
   species?: string | null;
@@ -396,7 +397,7 @@ const Discover = () => {
                 const normalizedCandidateTier = normalizeQuotaTier(row.effective_tier || row.tier || "free");
                 const tierBoost = normalizedCandidateTier === "gold" ? 15 : normalizedCandidateTier === "plus" ? 8 : 0;
                 const freshness = days <= 1 ? 20 : days <= 3 ? 15 : days <= 7 ? 10 : days <= 14 ? 5 : 1;
-                const trust = (row.is_verified ? 25 : 0) + (row.has_car ? 10 : 0);
+                const trust = (isVerifiedProfile(row) ? 25 : 0) + (row.has_car ? 10 : 0);
                 const score = trust + freshness + tierBoost;
                 return {
                   ...row,
@@ -697,10 +698,11 @@ const Discover = () => {
               onClick={() => setShowDiscoveryModal(false)}
             />
             <motion.div
+              data-huddle-bottom-sheet="true"
               initial={{ y: "100%" }}
               animate={{ y: 0 }}
               exit={{ y: "100%" }}
-              className="fixed inset-x-0 bottom-0 z-[2501] bg-card rounded-t-3xl max-w-md mx-auto overflow-hidden"
+              className="fixed inset-x-0 bottom-0 z-[5001] bg-card rounded-t-3xl max-w-md mx-auto max-h-[calc(100svh-env(safe-area-inset-bottom,0px)-8px)] overflow-hidden huddle-sheet-bottom-padding"
             >
               <div className="relative">
                 <button

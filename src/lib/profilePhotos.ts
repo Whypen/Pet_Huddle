@@ -15,6 +15,8 @@ const LEGACY_SOCIAL_ALBUM_BUCKET = "social_album";
 export const PROFILE_PHOTO_RAW_MAX_BYTES = 25 * 1024 * 1024;
 export const PROFILE_PHOTO_FINAL_MAX_BYTES = 1.2 * 1024 * 1024;
 export const PROFILE_PHOTO_LONG_EDGE = 1600;
+const signedUrlCache = new Map<string, { url: string | null; expiresAt: number }>();
+const signedUrlInFlight = new Map<string, Promise<string | null>>();
 
 const ALLOWED_MIME_TYPES = new Set([
   "image/jpeg",
@@ -153,6 +155,24 @@ export const getProfilePhotoPublicUrl = (value: string | null | undefined): stri
 
 const delay = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
+const getCachedSignedUrl = async (bucket: string, path: string, ttlSeconds: number): Promise<string | null> => {
+  const key = `${bucket}:${path}:${ttlSeconds}`;
+  const now = Date.now();
+  const cached = signedUrlCache.get(key);
+  if (cached && cached.expiresAt > now) return cached.url;
+  const inFlight = signedUrlInFlight.get(key);
+  if (inFlight) return inFlight;
+  const request = supabase.storage.from(bucket).createSignedUrl(path, ttlSeconds).then(({ data }) => {
+    const url = data?.signedUrl ?? null;
+    signedUrlCache.set(key, { url, expiresAt: now + Math.max(5_000, Math.min(ttlSeconds * 1000, 55 * 60 * 1000)) });
+    return url;
+  }).finally(() => {
+    signedUrlInFlight.delete(key);
+  });
+  signedUrlInFlight.set(key, request);
+  return request;
+};
+
 const shouldRetryStorageUpload = (error: unknown): boolean => {
   if (!error || typeof error !== "object") return true;
   const status = Number((error as { statusCode?: unknown; status?: unknown }).statusCode ?? (error as { status?: unknown }).status);
@@ -211,12 +231,11 @@ export const resolveProfilePhotoDisplayUrl = async (
   }
 
   if (cleanValue.startsWith(`${LEGACY_PROFILE_PHOTOS_BUCKET}/`)) {
-    const profileSigned = await supabase.storage.from(LEGACY_PROFILE_PHOTOS_BUCKET).createSignedUrl(cleanValue, ttlSeconds);
-    return profileSigned.data?.signedUrl ?? null;
+    return getCachedSignedUrl(LEGACY_PROFILE_PHOTOS_BUCKET, cleanValue, ttlSeconds);
   }
 
-  const legacySigned = await supabase.storage.from(LEGACY_SOCIAL_ALBUM_BUCKET).createSignedUrl(cleanValue, ttlSeconds);
-  if (legacySigned.data?.signedUrl) return legacySigned.data.signedUrl;
+  const legacySigned = await getCachedSignedUrl(LEGACY_SOCIAL_ALBUM_BUCKET, cleanValue, ttlSeconds);
+  if (legacySigned) return legacySigned;
 
   const avatarPublicUrl = supabase.storage.from(LEGACY_AVATARS_BUCKET).getPublicUrl(cleanValue).data?.publicUrl;
   return avatarPublicUrl ?? null;

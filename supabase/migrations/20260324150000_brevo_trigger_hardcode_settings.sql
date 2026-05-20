@@ -1,6 +1,5 @@
--- Brevo verification trigger: replaces current_setting GUC calls with hardcoded
--- project URL and service role key, since ALTER DATABASE/ROLE requires superuser
--- which is not available on hosted Supabase.
+-- Superseded by 20260427154500_remove_legacy_supabase_jwt_from_db_network_calls.sql.
+-- Do not hardcode Supabase service-role JWTs in database functions.
 
 CREATE OR REPLACE FUNCTION public.notify_brevo_verification_status_changed()
 RETURNS trigger
@@ -16,7 +15,7 @@ BEGIN
     PERFORM net.http_post(
       url     := 'https://ztrbourwcnhrpmzwlrcn.supabase.co/functions/v1/brevo-sync',
       headers := jsonb_build_object(
-        'Authorization', 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp0cmJvdXJ3Y25ocnBtendscmNuIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2OTM1NDY0MywiZXhwIjoyMDg0OTMwNjQzfQ.h4ccDhIeiOhDk9x-YgAGkgME9Nc372_RIWE0nQ9hnNA',
+        'Authorization', 'Bearer removed_legacy_service_role_jwt',
         'Content-Type',  'application/json'
       ),
       body    := jsonb_build_object(

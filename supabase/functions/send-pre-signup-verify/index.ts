@@ -13,11 +13,12 @@ import {
 
 const BREVO_API_KEY    = Deno.env.get("BREVO_API_KEY") ?? "";
 const BREVO_FROM_EMAIL = Deno.env.get("BREVO_FROM_EMAIL") ?? "noreply@huddle.pet";
+const BREVO_VERIFY_TEMPLATE_ID = Number(Deno.env.get("BREVO_VERIFY_TEMPLATE_ID") || "3");
 const APP_URL          = Deno.env.get("APP_URL") ?? "https://huddle.pet";
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL") ?? "",
-  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+  (Deno.env.get("HUDDLE_SUPABASE_SERVICE_KEY") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")) ?? "",
 );
 
 const CORS = {
@@ -95,7 +96,7 @@ serve(async (req: Request) => {
 
     const { data: existingRows, error: existingRowsError } = await supabase
       .from("presignup_tokens")
-      .select("token,email,verified,expires_at,signup_proof,signup_proof_issued_at,signup_proof_expires_at,signup_proof_used_at,created_at")
+        .select("token,email,signal_key,verified,expires_at,signup_proof,signup_proof_issued_at,signup_proof_expires_at,signup_proof_used_at,created_at")
       .eq("email", normalizedEmail)
       .order("created_at", { ascending: false });
 
@@ -126,6 +127,7 @@ serve(async (req: Request) => {
         ok: true,
         token: activePendingRow.token,
         email: activePendingRow.email,
+        signal_key: activePendingRow.signal_key,
         reused: true,
         email_sent: false,
       });
@@ -184,9 +186,11 @@ serve(async (req: Request) => {
     // Insert token row — fail hard if this fails (no token = no verify path)
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
     const nextToken = crypto.randomUUID();
+    const signalKey = crypto.randomUUID();
     const { error: insertError } = await supabase.from("presignup_tokens").insert({
       token: nextToken,
       email: normalizedEmail,
+      signal_key: signalKey,
       verified: false,
       expires_at: expiresAt,
       signup_proof: null,
@@ -201,102 +205,6 @@ serve(async (req: Request) => {
     }
 
     const verifyUrl = `${APP_URL}/verify?token=${encodeURIComponent(nextToken)}&email=${encodeURIComponent(normalizedEmail)}`;
-    const emailHtml = `<!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml">
-  <head>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
-    <meta name="format-detection" content="telephone=no, date=no, address=no, email=no">
-    <meta name="x-apple-disable-message-reformatting">
-    <title>Verify your email to join Huddle!</title>
-  </head>
-  <body aria-disabled="false" style="margin:0;padding:0;background-color:rgb(240,241,245);text-size-adjust:100%;">
-    <table width="100%" border="0" cellpadding="0" cellspacing="0" style="background-color:rgb(240,241,245);border:none;border-collapse:collapse;empty-cells:show;max-width:100%;font-size:16px;font-family:Arial;">
-      <tbody>
-        <tr>
-          <td style="background-color:rgb(240,241,245);padding:20px 0;min-width:5px;user-select:text;border:0 solid transparent;">
-            <table align="center" width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="max-width:600px;min-height:600px;margin:0 auto;background-color:rgb(255,255,255);border:none;border-collapse:collapse;empty-cells:show;font-size:16px;font-family:Arial;">
-              <tbody>
-                <tr>
-                  <td style="background-color:rgb(193,255,114);padding:32px 40px 28px;min-width:5px;user-select:text;border:0 solid transparent;">
-                    <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="border:none;border-collapse:collapse;empty-cells:show;max-width:100%;font-size:16px;font-family:Arial;">
-                      <tbody>
-                        <tr>
-                          <td style="vertical-align:top;text-align:left;min-width:5px;user-select:text;border:0 solid transparent;">
-                            <p style="margin:0 0 6px;font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#414141;">Email Update</p>
-                            <h1 style="margin:0;font-family:Georgia,serif;font-size:28px;font-weight:700;color:#414141;line-height:1.2;">Verify email</h1>
-                          </td>
-                          <td width="60" style="vertical-align:top;text-align:right;padding-left:12px;min-width:5px;user-select:text;border:0 solid transparent;">
-                            <img src="https://ztrbourwcnhrpmzwlrcn.supabase.co/storage/v1/object/public/email-assets/ac541fc72d074e9785486186866a00ab.png" width="44" alt="huddle" style="display:block;width:44px;height:auto;margin-left:auto;cursor:pointer;padding:0 1px;position:relative;max-width:100%;">
-                          </td>
-                        </tr>
-                      </tbody>
-                    </table>
-                  </td>
-                </tr>
-                <tr>
-                  <td style="padding:32px 40px;text-align:left;min-width:5px;user-select:text;border:0 solid transparent;">
-                    <h2 style="margin:0 0 16px;font-family:Georgia,serif;font-size:22px;font-weight:700;color:#414141;">Hi there,</h2>
-                    <p style="margin:0 0 8px;font-family:Arial,Helvetica,sans-serif;font-size:15px;color:#545454;line-height:1.7;">
-                      Tap the email address below to verify your <strong style="font-weight:700;"><span style="color:rgb(33,69,207);">huddle</span></strong> account.
-                    </p>
-                    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:24px 0 0;border:none;border-collapse:collapse;empty-cells:show;max-width:100%;font-size:16px;font-family:Arial;">
-                      <tbody>
-                        <tr>
-                          <td style="background-color:rgb(33,69,207);border-radius:8px;min-width:5px;user-select:text;border:0 solid transparent;">
-                            <a href="${verifyUrl}" style="display:inline-block;padding:14px 28px;font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:700;color:rgb(255,255,255);text-decoration:none;user-select:auto;">Verify email</a>
-                          </td>
-                        </tr>
-                      </tbody>
-                    </table>
-                    <p style="margin:16px 0 0;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#888888;line-height:1.5;">
-                      <strong style="font-weight:700;">Or paste this link into your browser:</strong><br>
-                      <a href="${verifyUrl}" style="color:rgb(33,69,207);text-decoration:none;word-break:break-all;">${verifyUrl}</a>
-                    </p>
-                    <p style="margin:24px 0 0;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#888888;line-height:1.5;">
-                      This link expires in 24 hours for your security. If you didn't create a huddle account, ignore this email.
-                    </p>
-                  </td>
-                </tr>
-                <tr>
-                  <td style="background-color:rgb(193,255,114);padding:14px 40px;min-width:5px;user-select:text;border:0 solid transparent;">
-                    <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="border:none;border-collapse:collapse;empty-cells:show;max-width:100%;font-size:16px;font-family:Arial;">
-                      <tbody>
-                        <tr><td style="font-size:0;height:16px;min-width:5px;user-select:text;border:0 solid transparent;">&nbsp;</td></tr>
-                        <tr>
-                          <td style="text-align:left;min-width:5px;user-select:text;border:0 solid transparent;">
-                            <a href="http://instagram.com/huddle.pet" target="_blank" style="display:block;text-decoration:none;user-select:auto;">
-                              <img src="https://ztrbourwcnhrpmzwlrcn.supabase.co/storage/v1/object/public/email-assets/df93ac507cf208c552ac90463385ce90.png" width="22" alt="Instagram" style="display:block;width:22px;height:auto;cursor:pointer;padding:0 1px;position:relative;max-width:100%;">
-                            </a>
-                          </td>
-                        </tr>
-                        <tr><td style="font-size:0;height:16px;min-width:5px;user-select:text;border:0 solid transparent;">&nbsp;</td></tr>
-                        <tr>
-                          <td style="color:rgb(43,51,198);font-size:13px;font-family:Arial,sans-serif;line-height:1.4;text-align:left;min-width:5px;user-select:text;border:0 solid transparent;">
-                            <span style="font-weight:700;">We want to get this right.</span><br>If you have feedback, DM us on Instagram — we're always listening!
-                          </td>
-                        </tr>
-                        <tr><td style="font-size:0;height:16px;min-width:5px;user-select:text;border:0 solid transparent;"><br></td></tr>
-                        <tr><td style="min-width:5px;user-select:text;border:0 solid transparent;">&nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp;</td></tr>
-                        <tr><td style="font-size:0;height:16px;min-width:5px;user-select:text;border:0 solid transparent;">&nbsp;</td></tr>
-                        <tr>
-                          <td style="color:rgb(84,84,84);font-size:12px;font-family:Arial,sans-serif;line-height:1.4;text-align:left;min-width:5px;user-select:text;border:0 solid transparent;">
-                            This is an automated huddle update — please do not reply to this email.
-                          </td>
-                        </tr>
-                        <tr><td style="font-size:0;height:20px;min-width:5px;user-select:text;border:0 solid transparent;"><br></td></tr>
-                      </tbody>
-                    </table>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </td>
-        </tr>
-      </tbody>
-    </table>
-  </body>
-</html>`;
 
     const res = await fetch("https://api.brevo.com/v3/smtp/email", {
       method: "POST",
@@ -307,9 +215,11 @@ serve(async (req: Request) => {
       body: JSON.stringify({
         sender:      { name: "Team Huddle", email: BREVO_FROM_EMAIL },
         to:          [{ email: normalizedEmail }],
-        subject:     "Verify your email to join Huddle!",
-        htmlContent: emailHtml,
-        textContent: `Verify email\n\nTap the link below:\n${verifyUrl}\n\nThis link expires in 24 hours.`,
+        templateId:  BREVO_VERIFY_TEMPLATE_ID,
+        params:      {
+          email: normalizedEmail,
+          verify_url: verifyUrl,
+        },
       }),
     });
 
@@ -319,7 +229,7 @@ serve(async (req: Request) => {
       return json({ error: "email_send_failed" }, 500);
     }
 
-    return json({ ok: true, token: nextToken, email: normalizedEmail, reused: false, email_sent: true });
+    return json({ ok: true, token: nextToken, email: normalizedEmail, signal_key: signalKey, reused: false, email_sent: true });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error("[send-pre-signup-verify] unexpected error", msg);

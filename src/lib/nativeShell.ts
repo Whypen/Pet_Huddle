@@ -64,6 +64,7 @@ type PickFilesOptions = {
 
 const PENDING_EXTERNAL_FLOW_KEY = "huddle:native:pending-external-flow";
 const NATIVE_DEVICE_ID_KEY = "huddle:native:device-id";
+export const NATIVE_MEMBERSHIP_OVERVIEW_PATH = "/premium";
 
 declare global {
   interface Window {
@@ -221,6 +222,12 @@ export const shouldSuppressWebHeaderForNativeShell = () => {
 
 export const shouldSuppressWebBottomNavForNativeShell = () => {
   return hasNativeShell() && window.__HUDDLE_NATIVE_ROUTE_CHROME__?.suppressWebBottomNav === true;
+};
+
+export const openNativeMembershipOverview = () => {
+  if (!hasNativeShell()) return false;
+  window.location.assign(NATIVE_MEMBERSHIP_OVERVIEW_PATH);
+  return true;
 };
 
 export const syncNativeAuthState = (signedIn: boolean, userId?: string | null) => {

@@ -63,8 +63,8 @@ export function SupportRequestForm({
   const defaultWantsReply = Boolean(knownEmail);
   const [wantsReply, setWantsReply] = useState(defaultWantsReply);
   const requiresReplyEmail = wantsReply && !knownEmail;
-  const effectiveEmail = wantsReply ? knownEmail || replyEmail.trim() : "no-reply@huddle.pet";
-  const needsTurnstile = !user;
+  const effectiveEmail = wantsReply ? knownEmail || replyEmail.trim() : "noreply@huddle.pet";
+  const needsTurnstile = true;
 
   const recordSubmitDiag = (next: Partial<NonNullable<Window["__huddleSupportSubmitDiag"]>>) => {
     if (typeof window === "undefined") return;
@@ -366,6 +366,16 @@ export function SupportRequestForm({
       <div className={compact ? "!flex-row flex gap-2 pt-2" : "flex flex-col gap-2 pt-2 sm:flex-row"}>
         <NeuControl
           type="button"
+          onClick={submitSupport}
+          disabled={submitting}
+          loading={submitting}
+          size="lg"
+          className="flex-1 h-[52px] min-h-[52px]"
+        >
+          Send
+        </NeuControl>
+        <NeuControl
+          type="button"
           onClick={() => {
             resetForm();
             onDone?.();
@@ -376,16 +386,6 @@ export function SupportRequestForm({
           className="flex-1 h-[52px] min-h-[52px]"
         >
           Cancel
-        </NeuControl>
-        <NeuControl
-          type="button"
-          onClick={submitSupport}
-          disabled={submitting}
-          loading={submitting}
-          size="lg"
-          className="flex-1 h-[52px] min-h-[52px]"
-        >
-          Send
         </NeuControl>
       </div>
     </div>

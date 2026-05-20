@@ -12,6 +12,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { resolveCopy } from "@/lib/copy";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
+import { shouldSuppressWebBottomNavForNativeShell } from "@/lib/nativeShell";
 
 const navItems = [
   { icon: Home,          label: "Home",          path: "/" },
@@ -34,7 +35,6 @@ export const BottomNav = () => {
     [profile?.id]
   );
   const [chatUnread, setChatUnread] = useState(0);
-  const realtimeDebounceRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
   const isChatSurface =
     location.pathname.startsWith("/chats") ||
     location.pathname.startsWith("/chat-dialogue") ||
@@ -99,23 +99,7 @@ export const BottomNav = () => {
     };
   }, [profile?.id, recalcUnreadFromBackend, unreadStorageKey]);
 
-  useEffect(() => {
-    if (!profile?.id) return;
-    const channel = supabase
-      .channel(`bottom_nav_unread_${profile.id}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "chat_messages" }, () => {
-        if (realtimeDebounceRef.current !== null) window.clearTimeout(realtimeDebounceRef.current);
-        realtimeDebounceRef.current = window.setTimeout(() => {
-          realtimeDebounceRef.current = null;
-          void recalcUnreadFromBackend(profile.id);
-        }, 350);
-      })
-      .subscribe();
-    return () => {
-      if (realtimeDebounceRef.current !== null) window.clearTimeout(realtimeDebounceRef.current);
-      void supabase.removeChannel(channel);
-    };
-  }, [profile?.id, recalcUnreadFromBackend]);
+  if (shouldSuppressWebBottomNavForNativeShell()) return null;
 
   return (
     <nav

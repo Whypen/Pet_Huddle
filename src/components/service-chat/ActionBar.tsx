@@ -131,7 +131,7 @@ export const ActionBar = ({
         </button>
       </form>
       {!servicePeriodPassed && status === "in_progress" ? (
-        <p className="text-[11px] text-muted-foreground">Mark finished will unlock after the service end time.</p>
+        <p className="text-[11px] text-muted-foreground">Completion can be confirmed from the CARE completion flow.</p>
       ) : null}
     </div>
   );

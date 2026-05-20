@@ -2,8 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { PageHeader } from "@/layouts/PageHeader";
 import { SupportRequestForm } from "@/components/support/SupportRequestForm";
-import { LegalModal } from "@/components/modals/LegalModal";
-import { NeuControl } from "@/components/ui";
+import { hasNativeShell, shouldSuppressWebHeaderForNativeShell } from "@/lib/nativeShell";
 
 declare global {
   interface Window {
@@ -16,13 +15,12 @@ const isNativeContentOnly = () =>
 
 const Support = () => {
   const navigate = useNavigate();
-  const nativeContentOnly = isNativeContentOnly();
-  const [legalModal, setLegalModal] = useState<"terms" | "privacy" | null>(null);
+  const nativeShellChrome = hasNativeShell() || isNativeContentOnly() || shouldSuppressWebHeaderForNativeShell();
   const [sentTicketNumber, setSentTicketNumber] = useState<string | null>(null);
 
   return (
     <div className="h-full min-h-0 w-full max-w-full bg-background overflow-x-hidden flex flex-col">
-      {!nativeContentOnly ? (
+      {!nativeShellChrome ? (
         <PageHeader
           title="Help & Support"
           titleClassName="justify-start"
@@ -32,7 +30,7 @@ const Support = () => {
       ) : null}
 
       <div className="flex-1 min-h-0 overflow-y-auto">
-        <div className={`mx-auto flex w-full max-w-3xl flex-col gap-4 px-4 pb-6 ${nativeContentOnly ? "pt-[72px]" : "pt-[68px]"}`}>
+        <div className={`mx-auto flex w-full max-w-3xl flex-col gap-4 px-4 pb-6 ${nativeShellChrome ? "pt-[72px]" : "pt-[68px]"}`}>
           <section className="rounded-2xl border border-border bg-card p-5 shadow-sm">
             <h2 className="text-lg font-semibold text-foreground">
               {sentTicketNumber ? "Message sent!" : "Need help with huddle?"}
@@ -47,34 +45,8 @@ const Support = () => {
               </div>
             )}
           </section>
-
-          <section className="rounded-2xl border border-border bg-card p-5 shadow-sm">
-            <h2 className="text-lg font-semibold text-foreground">Legal pages</h2>
-            <div className="mt-4 flex flex-col gap-3">
-              <NeuControl
-                type="button"
-                variant="tertiary"
-                size="sm"
-                className="h-auto justify-start px-0 text-left text-primary underline shadow-none"
-                onClick={() => setLegalModal("privacy")}
-              >
-                Privacy Policy
-              </NeuControl>
-              <NeuControl
-                type="button"
-                variant="tertiary"
-                size="sm"
-                className="h-auto justify-start px-0 text-left text-primary underline shadow-none"
-                onClick={() => setLegalModal("terms")}
-              >
-                Terms of Service
-              </NeuControl>
-            </div>
-          </section>
         </div>
       </div>
-      <LegalModal isOpen={legalModal === "terms"} onClose={() => setLegalModal(null)} type="terms" />
-      <LegalModal isOpen={legalModal === "privacy"} onClose={() => setLegalModal(null)} type="privacy" />
     </div>
   );
 };

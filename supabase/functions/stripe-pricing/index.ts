@@ -7,7 +7,7 @@ const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") as string, {
   httpClient: Stripe.createFetchHttpClient(),
 });
 const supabaseUrl = Deno.env.get("SUPABASE_URL") as string;
-const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") as string;
+const supabaseServiceKey = (Deno.env.get("HUDDLE_SUPABASE_SERVICE_KEY") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")) as string;
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 const stripeSecret = Deno.env.get("STRIPE_SECRET_KEY") || "";
 const stripeMode = stripeSecret.startsWith("sk_live_") ? "live" : "test";

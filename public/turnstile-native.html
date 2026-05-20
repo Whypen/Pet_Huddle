@@ -3,6 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <link rel="dns-prefetch" href="//challenges.cloudflare.com" />
+  <link rel="preconnect" href="https://challenges.cloudflare.com" crossorigin />
   <title>huddle verification</title>
   <style>
     html,
@@ -25,20 +27,27 @@
   <div id="native-turnstile"></div>
   <script>
     (function () {
-      var SITE_KEY = "0x4AAAAAAC1AMILxX8-lFNmm";
+      var DEFAULT_SITE_KEY = "0x4AAAAAAC1AMILxX8-lFNmm";
       var SCRIPT_SRC = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
       var ACTION_PATTERN = /^[A-Za-z0-9_-]{1,32}$/;
+      var SITE_KEY_PATTERN = /^0x[A-Za-z0-9_-]{8,128}$/;
+      var startedAt = Date.now();
       var params = new URLSearchParams(window.location.search || "");
       var requestedAction = String(params.get("action") || "support_ticket");
+      var requestedSiteKey = String(params.get("siteKey") || DEFAULT_SITE_KEY);
       var action = ACTION_PATTERN.test(requestedAction) ? requestedAction : "support_ticket";
+      var siteKey = SITE_KEY_PATTERN.test(requestedSiteKey) ? requestedSiteKey : DEFAULT_SITE_KEY;
       var rendered = false;
       var postedTimeout = false;
 
       var post = function (payload) {
         try {
+          payload.elapsedMs = Date.now() - startedAt;
           window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify(payload));
         } catch (error) {}
       };
+
+      post({ type: "turnstile-bootstrap" });
 
       var render = function () {
         if (rendered || !window.turnstile) return;
@@ -48,7 +57,7 @@
 
         try {
           window.turnstile.render(slot, {
-            sitekey: SITE_KEY,
+            sitekey: siteKey,
             action: action,
             theme: "light",
             retry: "auto",
@@ -75,7 +84,10 @@
       script.src = SCRIPT_SRC;
       script.async = true;
       script.defer = true;
-      script.onload = render;
+      script.onload = function () {
+        post({ type: "turnstile-script-loaded" });
+        render();
+      };
       script.onerror = function () {
         post({ type: "turnstile-error", message: "Verification failed to load. Please retry." });
       };

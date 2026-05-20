@@ -14,7 +14,7 @@ const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") as string, {
 });
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL") as string;
-const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") as string;
+const supabaseServiceKey = (Deno.env.get("HUDDLE_SUPABASE_SERVICE_KEY") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")) as string;
 const webhookSecret = Deno.env.get("STRIPE_WEBHOOK_SECRET") as string;
 const allowWebhookTestBypass = Deno.env.get("ALLOW_WEBHOOK_TEST_BYPASS") === "true";
 
@@ -82,6 +82,38 @@ function mapStripeStatusToProfileStatus(status: string): string {
   if (normalized === "past_due" || normalized === "incomplete") return "premium_pending";
   if (normalized === "canceled" || normalized === "unpaid" || normalized === "incomplete_expired") return "premium_cancelled";
   return "premium_pending";
+}
+
+async function insertServiceBookedMessage(chatId: string, senderId: string) {
+  const content = JSON.stringify({ kind: "service_booked" });
+  const { data: existing, error: existingErr } = await supabase
+    .from("chat_messages")
+    .select("id")
+    .eq("chat_id", chatId)
+    .eq("content", content)
+    .limit(1);
+  if (existingErr) {
+    console.warn(`[SERVICE BOOKED MESSAGE] lookup failed: ${existingErr.message}`);
+    return false;
+  }
+  if (Array.isArray(existing) && existing.length > 0) return false;
+
+  const { error: insertErr } = await supabase
+    .from("chat_messages")
+    .insert({ chat_id: chatId, sender_id: senderId, content });
+  if (insertErr) {
+    console.warn(`[SERVICE BOOKED MESSAGE] insert failed: ${insertErr.message}`);
+    return false;
+  }
+  await supabase.from("chats").update({ last_message_at: new Date().toISOString() }).eq("id", chatId);
+  return true;
+}
+
+async function notifyServiceBookingConfirmed(chatId: string) {
+  const { error } = await supabase.rpc("notify_service_booking_confirmed", { p_chat_id: chatId });
+  if (error) {
+    console.warn(`[CHECKOUT COMPLETED] service_booking notification failed: ${error.message}`);
+  }
 }
 
 async function grantSharePerksSlot(userId: string, subscriptionId: string): Promise<void> {
@@ -282,7 +314,7 @@ async function handleCheckoutSessionCompleted(
   event: Stripe.Event
 ): Promise<WebhookResponse> {
   const session = event.data.object as Stripe.Checkout.Session;
-  const userId = session.metadata?.user_id;
+  const userId = session.metadata?.user_id || session.metadata?.requester_id;
   const type = session.metadata?.type;
 
   if (!userId) {
@@ -452,10 +484,23 @@ async function handleCheckoutSessionCompleted(
           ? session.payment_intent
           : (session.payment_intent as { id?: string } | null)?.id ?? null;
       if (paymentIntentId) {
+        const { data: serviceChatForSnapshot, error: snapshotLoadErr } = await supabase
+          .from("service_chats")
+          .select("booking_snapshot_pending, provider_id, requester_id")
+          .eq("chat_id", session.metadata.service_chat_id)
+          .eq("status", "pending")
+          .maybeSingle();
+        if (snapshotLoadErr) {
+          console.error(`[CHECKOUT COMPLETED] service_booking snapshot load failed: ${snapshotLoadErr.message}`);
+        }
         const { error: chatErr } = await supabase
           .from("service_chats")
           .update({
             status: "booked",
+            care_status: "awaiting_handoff",
+            booking_snapshot: serviceChatForSnapshot?.booking_snapshot_pending || null,
+            booking_snapshot_pending: null,
+            stripe_checkout_session_id: session.id,
             stripe_payment_intent_id: paymentIntentId,
             booked_at: new Date().toISOString(),
           })
@@ -464,6 +509,8 @@ async function handleCheckoutSessionCompleted(
         if (chatErr) {
           console.error(`[CHECKOUT COMPLETED] service_booking advance failed: ${chatErr.message}`);
         } else {
+          await insertServiceBookedMessage(session.metadata.service_chat_id, session.metadata.requester_id || session.metadata.user_id || "system");
+          await notifyServiceBookingConfirmed(session.metadata.service_chat_id);
           console.log(`[CHECKOUT COMPLETED] service_booking booked: chat=${session.metadata.service_chat_id} pi=${paymentIntentId}`);
         }
       }
@@ -578,7 +625,7 @@ async function handleSubscriptionDeleted(
   fetch(brevoSyncUrl, {
     method: "POST",
     headers: {
-      "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+      "Authorization": `Bearer ${(Deno.env.get("HUDDLE_SUPABASE_SERVICE_KEY") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"))}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ event: "subscription_changed", user_id: profile.id, tier: "free", subscription_status: "canceled" }),
@@ -701,7 +748,7 @@ async function handleSubscriptionUpdated(
   fetch(brevoSyncUrl, {
     method: "POST",
     headers: {
-      "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+      "Authorization": `Bearer ${(Deno.env.get("HUDDLE_SUPABASE_SERVICE_KEY") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"))}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ event: "subscription_changed", user_id: profile.id, tier, subscription_status: status }),

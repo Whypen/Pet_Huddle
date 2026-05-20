@@ -30,8 +30,9 @@ const DrawerContent = React.forwardRef<
     <DrawerOverlay />
     <DrawerPrimitive.Content
       ref={ref}
+      data-huddle-bottom-sheet="true"
       className={cn(
-        "fixed inset-x-0 bottom-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom,0px))] z-[9000] mt-24 mx-auto w-full max-w-[var(--app-max-width,430px)] max-h-[calc(100svh-var(--nav-height,64px)-env(safe-area-inset-bottom,0px)-8px)] overflow-y-auto flex h-auto flex-col rounded-t-[10px] border bg-background",
+        "fixed inset-x-0 bottom-0 z-[9000] mt-24 mx-auto w-full max-w-[var(--app-max-width,430px)] max-h-[calc(100svh-env(safe-area-inset-bottom,0px)-8px)] overflow-y-auto flex h-auto flex-col rounded-t-[10px] border bg-background huddle-sheet-bottom-padding",
         className,
       )}
       {...props}

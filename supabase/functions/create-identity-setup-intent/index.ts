@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL") as string;
-const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") as string;
+const serviceRoleKey = (Deno.env.get("HUDDLE_SUPABASE_SERVICE_KEY") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")) as string;
 
 const supabase = createClient(supabaseUrl, serviceRoleKey);
 
@@ -10,6 +10,30 @@ type Payload = {
   action?: "create" | "status";
   stripeMode?: "test" | "live" | null;
   attemptId?: string | null;
+};
+
+const sanitizeSetupIntentError = (error: unknown): { code: string; publicMessage: string; status: number } => {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  const normalized = message.trim().toLowerCase();
+  if (normalized.includes("missing_token") || normalized.includes("unauthorized") || normalized.includes("jwt")) {
+    return { code: "unauthorized", publicMessage: "Your session expired. Please sign in again.", status: 401 };
+  }
+  if (normalized.includes("missing_stripe_keys")) {
+    return { code: "missing_stripe_keys", publicMessage: "Card verification is temporarily unavailable.", status: 503 };
+  }
+  if (normalized.includes("stripe_timeout") || normalized.includes("abort")) {
+    return { code: "stripe_timeout", publicMessage: "Card setup is taking too long. Please try again.", status: 504 };
+  }
+  if (normalized.includes("profile_not_found") || normalized.includes("profile_not_ready")) {
+    return { code: "profile_not_ready", publicMessage: "Finish profile setup first, then continue verification.", status: 409 };
+  }
+  if (normalized.includes("blocked_identity")) {
+    return { code: "blocked_identity", publicMessage: BLOCKED_IDENTITY_MESSAGE, status: 409 };
+  }
+  if (normalized.includes("stripe_http_")) {
+    return { code: "stripe_request_failed", publicMessage: "We couldn't verify your card. Please try again.", status: 502 };
+  }
+  return { code: "card_setup_failed", publicMessage: "We couldn't verify your card. Please try again.", status: 500 };
 };
 
 const json = (body: unknown, status = 200) =>
@@ -205,16 +229,21 @@ async function stripeRequest<T>(
       body: init?.body?.toString(),
       signal: controller.signal,
     });
+  } catch (error) {
+    if (String(error instanceof Error ? error.message : error).toLowerCase().includes("abort")) {
+      throw new Error("stripe_timeout");
+    }
+    throw new Error("stripe_request_failed");
   } finally {
     clearTimeout(timeout);
   }
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const errorMessage =
-      typeof payload?.error?.message === "string"
-        ? payload.error.message
+    const errorCode =
+      typeof payload?.error?.code === "string"
+        ? payload.error.code
         : `stripe_http_${response.status}`;
-    throw new Error(errorMessage);
+    throw new Error(errorCode);
   }
   return payload as T;
 }
@@ -614,8 +643,8 @@ serve(async (req: Request) => {
       verificationStatus,
     }));
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error("[create-identity-setup-intent]", message);
-    return withCors(req, json({ error: message || "unknown_error" }, 500));
+    const sanitized = sanitizeSetupIntentError(error);
+    console.error("[create-identity-setup-intent]", sanitized.code);
+    return withCors(req, json({ error: sanitized.code, public_message: sanitized.publicMessage }, sanitized.status));
   }
 });

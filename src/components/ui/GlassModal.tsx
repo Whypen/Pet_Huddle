@@ -26,6 +26,8 @@ interface GlassModalProps {
   children: React.ReactNode;
   /** Hide the × close button */
   hideClose?: boolean;
+  /** Override the backdrop base z-index; container renders at +10 */
+  zIndexBase?: number;
 }
 
 export function GlassModal({
@@ -38,6 +40,7 @@ export function GlassModal({
   className,
   children,
   hideClose = false,
+  zIndexBase,
 }: GlassModalProps) {
   return (
     <AnimatePresence>
@@ -51,11 +54,15 @@ export function GlassModal({
             exit={{ opacity: 0 }}
             transition={{ duration: 0.18 }}
             className={cn("fixed inset-0 z-[9500] bg-foreground/30 backdrop-blur-sm", backdropClassName)}
+            style={zIndexBase != null ? { zIndex: zIndexBase } : undefined}
             onClick={onClose}
           />
 
           {/* Modal surface — E3 glass */}
-          <div className={cn("fixed inset-0 z-[9510] flex items-center justify-center px-4 py-6 pointer-events-none", containerClassName)}>
+          <div
+            className={cn("fixed inset-0 z-[9510] flex items-center justify-center px-4 py-6 pointer-events-none", containerClassName)}
+            style={zIndexBase != null ? { zIndex: zIndexBase + 10 } : undefined}
+          >
             <motion.div
               key="glass-modal-content"
               initial={{ opacity: 0, scale: 0.97, y: 8 }}

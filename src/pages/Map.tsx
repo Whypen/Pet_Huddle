@@ -43,6 +43,7 @@ import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { useSafetyRestrictions } from "@/hooks/useSafetyRestrictions";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { openExternalUrl } from "@/lib/nativeShell";
+import { isVerifiedProfile } from "@/lib/verification";
 
 const extractDistrictFromPlaceLabel = (label: string): string => {
   const parts = label.split(",").map((part) => part.trim()).filter(Boolean);
@@ -52,6 +53,8 @@ const extractDistrictFromPlaceLabel = (label: string): string => {
 
 // Zoom Level 16.5 ≈ ~500m proximity
 const PROXIMITY_ZOOM = 16.5;
+const MAP_BOTTOM_CHROME_OFFSET = "calc(var(--nav-height,64px) + env(safe-area-inset-bottom,0px) + 68px)";
+const MAP_ZOOM_NAV_STACK_OFFSET = "calc(var(--nav-height,64px) + env(safe-area-inset-bottom,0px) + 32px)";
 
 // Set the access token
 mapboxgl.accessToken = MAPBOX_ACCESS_TOKEN;
@@ -1112,7 +1115,9 @@ const MapPage = () => {
       const node = document.querySelector<HTMLElement>(".mapboxgl-ctrl-bottom-right");
       if (!node) return;
       node.style.right = "12px";
-      node.style.bottom = `calc(var(--nav-height,64px) + env(safe-area-inset-bottom) + 120px)`;
+      node.style.bottom = MAP_ZOOM_NAV_STACK_OFFSET;
+      const zoomGroup = node.querySelector<HTMLElement>(".mapboxgl-ctrl-group");
+      if (zoomGroup) zoomGroup.style.transform = "none";
     };
     // One-shot on mount/change, then watch for the node to appear via MutationObserver
     // instead of polling every 500 ms (which caused continuous reflows).
@@ -1283,7 +1288,7 @@ const MapPage = () => {
           if (friendIds.length > 0) {
             const { data: profileRows } = await supabase
               .from("profiles")
-              .select("id,is_verified,gender_genre,hide_from_map")
+              .select("id,is_verified,verification_status,gender_genre,hide_from_map")
               .in("id", friendIds);
             const profileById = new Map<
               string,
@@ -1293,13 +1298,14 @@ const MapPage = () => {
                 (profileRows || []) as Array<{
                   id: string;
                   is_verified?: boolean | null;
+                  verification_status?: string | null;
                   gender_genre?: string | null;
                   hide_from_map?: boolean | null;
                 }>
               ).map((row) => [
                 row.id,
                 {
-                  is_verified: row.is_verified === true,
+                  is_verified: isVerifiedProfile(row),
                   gender_genre: row.gender_genre ?? null,
                   hide_from_map: row.hide_from_map === true,
                 },
@@ -1587,7 +1593,7 @@ const MapPage = () => {
         lat: p.last_lat,
         lng: p.last_lng,
         avatarUrl: p.avatar_url,
-        isVerified: Boolean(p.is_verified),
+        isVerified: isVerifiedProfile(p),
         isInvisible: Boolean(p.is_invisible),
         genderBucket: normalizeGenderBucket(p.gender_genre),
         sessionMarker: p.location_pinned_until,
@@ -1823,7 +1829,7 @@ const MapPage = () => {
             coords={ownMarkerCoords}
             displayName={profile?.display_name || user?.email || "Me"}
             avatarUrl={profile?.avatar_url || null}
-            isVerified={profile?.is_verified === true}
+            isVerified={isVerifiedProfile(profile)}
             isInvisible={isInvisible}
             markerState={ownMarkerState || "active"}
           />
@@ -2101,7 +2107,10 @@ const MapPage = () => {
         }
         .mapboxgl-ctrl-bottom-left,
         .mapboxgl-ctrl-bottom-right {
-          bottom: 80px !important;
+          bottom: ${MAP_ZOOM_NAV_STACK_OFFSET} !important;
+        }
+        .mapboxgl-ctrl-bottom-right .mapboxgl-ctrl-group {
+          transform: none !important;
         }
       `}</style>
 

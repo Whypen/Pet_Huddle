@@ -140,7 +140,6 @@ const SignupName = () => {
               legal_name: data.legal_name || "",
               phone: data.phone?.trim(),
               dob: data.dob,
-              marketing_email_opt_in: data.email_opt_in,
             },
           },
           turnstile_token: signupProof ? undefined : signupTurnstileToken,

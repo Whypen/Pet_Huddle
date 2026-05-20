@@ -1,8 +1,5 @@
--- Fix support-digest-daily cron to use hardcoded project URL + service role key.
--- current_setting('app.settings.*') GUCs require ALTER DATABASE/ROLE (superuser)
--- which is not available on hosted Supabase — they silently return NULL and the
--- cron body errors without any visible failure.
--- Pattern matches 20260324150000_brevo_trigger_hardcode_settings.sql.
+-- Superseded by 20260427154500_remove_legacy_supabase_jwt_from_db_network_calls.sql.
+-- Do not hardcode Supabase service-role JWTs in database cron jobs.
 
 -- Remove the GUC-dependent version created by 20260405120001.
 select cron.unschedule('support-digest-daily');
@@ -15,7 +12,7 @@ select cron.schedule(
   select net.http_post(
     url     := 'https://ztrbourwcnhrpmzwlrcn.supabase.co/functions/v1/support-digest',
     headers := jsonb_build_object(
-      'Authorization', 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp0cmJvdXJ3Y25ocnBtendscmNuIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2OTM1NDY0MywiZXhwIjoyMDg0OTMwNjQzfQ.h4ccDhIeiOhDk9x-YgAGkgME9Nc372_RIWE0nQ9hnNA',
+      'Authorization', 'Bearer removed_legacy_service_role_jwt',
       'Content-Type',  'application/json'
     ),
     body    := '{}'::jsonb

@@ -10,6 +10,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { resolveCopy } from "@/lib/copy";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
+import { isVerifiedProfile } from "@/lib/verification";
 import { formatPetAge, computeNextEvent, formatNextEventLabel, type PetReminder } from "@/utils/petLogic";
 
 interface Pet {
@@ -381,7 +382,7 @@ const Index = () => {
           <div
             className={cn(
               "h-[72px] w-[72px] shrink-0 overflow-hidden rounded-full border-2 bg-[rgba(33,69,207,0.10)]",
-              profile?.is_verified === true ? "border-brandBlue" : "border-[#C9CEDA]"
+              isVerifiedProfile(profile) ? "border-brandBlue" : "border-[#C9CEDA]"
             )}
             aria-hidden
           >
@@ -399,7 +400,7 @@ const Index = () => {
                 {displayName}
               </h1>
               <ProfileBadges
-                isVerified={profile?.is_verified === true}
+                isVerified={isVerifiedProfile(profile)}
                 hasCar={profile?.has_car}
                 size="md"
               />

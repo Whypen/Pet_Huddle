@@ -33,6 +33,7 @@ import {
   normalizeProfilePhotos,
 } from "@/lib/profilePhotos";
 import type { ProfilePhotos } from "@/types/profilePhotos";
+import { isVerifiedProfile } from "@/lib/verification";
 import {
   clearPendingSignupVerification,
   loadPendingSignupVerification,
@@ -265,7 +266,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
   const editScrollRef = useRef<HTMLDivElement | null>(null);
   const viewScrollRef = useRef<HTMLDivElement | null>(null);
   const [memberNumber, setMemberNumber] = useState<number | null>(null);
-  const isIdentityLocked = profile?.is_verified === true;
+  const isIdentityLocked = isVerifiedProfile(profile);
   const profilePhotoDeleteQueueRef = useRef<Set<string>>(new Set());
   const profileCaptionAutosaveTimerRef = useRef<number | null>(null);
   // RULE 14 — keyboard-safe layout: track virtual keyboard offset
@@ -475,9 +476,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     };
   }, [profile?.created_at, user?.created_at]);
   const hasVerifiedLegalName = Boolean(formData.legal_name?.trim()) && (
-    profile?.is_verified === true
-    || String(profile?.verification_status || "").toLowerCase() === "verified"
-    || String(profile?.card_verification_status || "").toLowerCase() === "passed"
+    isVerifiedProfile(profile)
   );
 
   const showDiscoverAgeInfo = Boolean(formData.dob) && isAtLeast13FromDate(formData.dob) && !isAtLeast16FromDate(formData.dob);

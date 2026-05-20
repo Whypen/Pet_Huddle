@@ -482,12 +482,12 @@ const ServiceChat = () => {
     }
     if (status === "booked") {
       if (isProvider) {
-        return { label: "Start service", onClick: () => void startService() };
+        return { label: serviceChat.care_status === "pin_shared" ? "Start care in app" : "Start PIN required", onClick: () => undefined, disabled: true };
       }
-      return { label: "Mark finished", onClick: () => void markFinished(), disabled: !canMarkFinished };
+      return { label: serviceChat.care_status === "pin_shared" ? "Start PIN shared" : "Confirm handoff in app", onClick: () => undefined, disabled: true };
     }
     if (status === "in_progress") {
-      return { label: "Mark finished", onClick: () => void markFinished(), disabled: !canMarkFinished };
+      return { label: "Confirm complete in app", onClick: () => undefined, disabled: true };
     }
     if (status === "completed" && isRequester && !hasReviewed) {
       return { label: "Leave review", onClick: () => setActiveSheet("review") };

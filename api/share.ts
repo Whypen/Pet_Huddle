@@ -19,6 +19,9 @@ type AlertRow = {
 
 const URL_PATTERN = /\bhttps?:\/\/[^\s<>"')]+/gi;
 const SPACE_PATTERN = /\s+/g;
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const IP_RATE_LIMIT_MAX = 120;
+const REQUEST_RATE_BUCKETS = new Map<string, { count: number; windowStart: number }>();
 
 const normalizeSocialId = (value: string | null | undefined) => {
   const trimmed = String(value || "").trim();
@@ -78,6 +81,25 @@ const normalizeHost = (value: MaybeString) => {
     .replace(/\/.*$/, "")
     .trim();
   return token || "huddle.pet";
+};
+
+const getClientIp = (headers: Record<string, MaybeString> = {}): string =>
+  (headers["x-forwarded-for"] || headers["x-real-ip"] || headers["cf-connecting-ip"] || headers["x-client-ip"] || "")
+    .toString()
+    .split(",")[0]
+    .trim()
+    .split(":")[0] || "unknown";
+
+const isWithinRateLimit = (key: string, max: number): { ok: boolean; resetAt?: number } => {
+  const now = Date.now();
+  const bucket = REQUEST_RATE_BUCKETS.get(key);
+  if (!bucket || now - bucket.windowStart >= RATE_LIMIT_WINDOW_MS) {
+    REQUEST_RATE_BUCKETS.set(key, { count: 1, windowStart: now });
+    return { ok: true };
+  }
+  bucket.count += 1;
+  if (bucket.count <= max) return { ok: true };
+  return { ok: false, resetAt: bucket.windowStart + RATE_LIMIT_WINDOW_MS };
 };
 
 const escapeHtml = (value: string) =>
@@ -201,6 +223,17 @@ const parseShareQuery = (req: RequestShape) => {
 };
 
 export default async function handler(req: RequestShape, res: ResponseShape) {
+  const clientIp = getClientIp(req.headers);
+  const ipRate = isWithinRateLimit(`share:ip:${clientIp}`, IP_RATE_LIMIT_MAX);
+  if (!ipRate.ok) {
+    const wait = Math.max(1, Math.ceil(((ipRate.resetAt ?? Date.now()) - Date.now()) / 1000));
+    console.warn("[api/share] rate limit blocked by ip", { ip: clientIp });
+    res.setHeader("Retry-After", String(wait));
+    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+    res.status(429).send("Too many requests");
+    return;
+  }
+
   const host = normalizeHost(req.headers?.["x-forwarded-host"] || req.headers?.host);
   const proto = normalizeProto(req.headers?.["x-forwarded-proto"]);
   const origin = `${proto}://${host}`;

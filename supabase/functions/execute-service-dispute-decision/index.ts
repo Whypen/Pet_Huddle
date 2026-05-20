@@ -11,7 +11,7 @@ const corsHeaders = {
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL") as string,
-  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") as string,
+  (Deno.env.get("HUDDLE_SUPABASE_SERVICE_KEY") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")) as string,
 );
 
 const stripeDefaultSecret = Deno.env.get("STRIPE_SECRET_KEY") || "";
@@ -123,7 +123,7 @@ const extractUserToken = (req: Request, body: Record<string, unknown>) => {
   ].filter((v) => v.length > 0);
 
   const anonKey = String(Deno.env.get("SUPABASE_ANON_KEY") || "").trim();
-  const serviceRole = String(Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "").trim();
+  const serviceRole = String((Deno.env.get("HUDDLE_SUPABASE_SERVICE_KEY") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")) || "").trim();
   return candidates.find((token) => isJwt(token) && token !== anonKey && token !== serviceRole) || null;
 };
 

@@ -1,0 +1,31 @@
+- generic [ref=e2]:
+  - region "Notifications (F8)":
+    - list
+  - region "Notifications alt+T"
+  - generic [ref=e3]:
+    - generic [ref=e4]:
+      - generic [ref=e5]:
+        - img "huddle" [ref=e7]
+        - paragraph [ref=e8]: huddle
+      - generic [ref=e9]:
+        - button "Continue with Email" [ref=e10] [cursor=pointer]:
+          - generic [ref=e11]:
+            - generic [ref=e12]:
+              - img
+            - generic [ref=e13]: Continue with Email
+        - generic [ref=e16]: or
+        - button "Continue with Apple" [ref=e18] [cursor=pointer]:
+          - generic [ref=e19]:
+            - img [ref=e21]
+            - generic [ref=e22]: Continue with Apple
+        - button "Continue with Google" [ref=e23] [cursor=pointer]:
+          - generic [ref=e24]:
+            - generic [ref=e25]:
+              - img
+            - generic [ref=e26]: Continue with Google
+    - generic [ref=e27]:
+      - text: By continuing, you agree to huddle's
+      - button "Terms" [ref=e28] [cursor=pointer]
+      - text: and
+      - button "Privacy Policy" [ref=e29] [cursor=pointer]
+      - text: .

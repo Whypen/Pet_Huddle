@@ -216,23 +216,7 @@ export const useDiscoverLocationGate = (active: boolean) => {
     if (!active) return;
     void refreshLocationState();
 
-    const recheck = () => {
-      void refreshLocationState();
-    };
-
-    const onVisibility = () => {
-      if (document.visibilityState !== "visible") return;
-      recheck();
-    };
-
-    document.addEventListener("visibilitychange", onVisibility);
-    window.addEventListener("focus", recheck);
-    window.addEventListener("huddle:native-resume", recheck as EventListener);
-    return () => {
-      document.removeEventListener("visibilitychange", onVisibility);
-      window.removeEventListener("focus", recheck);
-      window.removeEventListener("huddle:native-resume", recheck as EventListener);
-    };
+    return undefined;
   }, [active, refreshLocationState]);
 
   return useMemo(

@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>huddle · Social &amp; Comms Guidebook</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=DM+Serif+Display:ital@0;1&family=Urbanist:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="styles.css"/>
+
+<script type="application/json" id="tweak-defaults">
+{}
+</script>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="primitives.jsx"></script>
+<script type="text/babel" src="sections-foundations.jsx"></script>
+<script type="text/babel" src="sections-illustration.jsx"></script>
+<script type="text/babel" src="sections-templates.jsx"></script>
+<script type="text/babel" src="sections-donts.jsx"></script>
+
+<script type="text/babel">
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "grain": true,
+  "accent": "coral"
+}/*EDITMODE-END*/;
+
+function Topbar() {
+  return (
+    <div className="topbar">
+      <div className="topbar-inner">
+        <BMark size={28}/>
+        <div className="topbar-title">huddle &middot; Social &amp; Comms Guidebook</div>
+        <div className="topbar-version">v 1.0 · Internal</div>
+        <div className="topbar-spacer"/>
+        <nav className="topbar-nav">
+          <a href="#logo">Logo</a>
+          <a href="#color">Color</a>
+          <a href="#type">Type</a>
+          <a href="#voice">Voice</a>
+          <a href="#illustration">Illustration</a>
+          <a href="#phone">Phone</a>
+          <a href="#cta">CTA</a>
+          <a href="#templates">Templates</a>
+          <a href="#stories">Stories</a>
+          <a href="#email">Email</a>
+          <a href="#print">Print</a>
+          <a href="#donts">Don'ts</a>
+        </nav>
+      </div>
+    </div>
+  );
+}
+
+function Hero({ accent }) {
+  return (
+    <header className="hero">
+      <div className="hero-eyebrow">
+        <span>Pet Care Society · Issue 01</span>
+      </div>
+      <h1 className="hero-title">
+        How <span className="blue">huddle</span><br/>
+        <em>shows up</em> in<br/>
+        the <span className="coral">wild.</span>
+      </h1>
+      <p style={{
+        marginTop: 40, maxWidth: 720, fontSize: 19, lineHeight: 1.55,
+        color: "var(--fg-2)", fontWeight: 400
+      }}>
+        A working playbook for the social &amp; comms team. Twelve sections, one vocabulary —
+        from the bear&nbsp;mark to the search-bar lockup, every Friday email to every story sticker.
+        The product is calm. The cover is loud. The neighbour&nbsp;underneath is the same person.
+      </p>
+      <dl className="hero-meta">
+        <div><dt>For</dt><dd>Internal social &amp; marketing team</dd></div>
+        <div><dt>Voice</dt><dd>Calm everywhere. Bold on the cover.</dd></div>
+        <div><dt>System</dt><dd>One ink, one pop, one lockup.</dd></div>
+        <div><dt>Not for</dt><dd>In-product UI · see Product DS</dd></div>
+      </dl>
+    </header>
+  );
+}
+
+function Footer() {
+  return (
+    <footer style={{
+      marginTop: 80, paddingTop: 40,
+      borderTop: "1px solid var(--rule)",
+      display: "flex", justifyContent: "space-between", alignItems: "flex-end",
+      flexWrap: "wrap", gap: 24
+    }}>
+      <div>
+        <BMark size={36}/>
+        <div style={{
+          fontFamily: "var(--font-display)", fontWeight: 800,
+          fontSize: 32, marginTop: 8, color: "var(--huddle-blue)",
+          letterSpacing: "-0.02em", textTransform: "uppercase", lineHeight: 0.95
+        }}>
+          End of<br/>guidebook.
+        </div>
+      </div>
+      <div style={{ fontSize: 13, color: "var(--fg-2)", textAlign: "right", lineHeight: 1.7 }}>
+        <div className="upper" style={{ color: "var(--huddle-blue)", marginBottom: 4 }}>* Living document</div>
+        <div>Brand &amp; Comms · Hong Kong</div>
+        <div>Last revised · this week</div>
+        <div>Questions? Reply to the Friday huddle.</div>
+      </div>
+    </footer>
+  );
+}
+
+function App() {
+  const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
+
+  // grain on/off
+  React.useEffect(() => {
+    document.body.classList.toggle("no-grain", !t.grain);
+  }, [t.grain]);
+
+  return (
+    <React.Fragment>
+      <Topbar/>
+      <main className="book">
+        <Hero accent={t.accent}/>
+        <SectionLogo/>
+        <SectionColor/>
+        <SectionType/>
+        <SectionVoice/>
+        <SectionIllustration/>
+        <SectionPhone/>
+        <SectionCTA/>
+        <SectionTemplates/>
+        <SectionStories/>
+        <SectionEmail/>
+        <SectionPrint/>
+        <SectionDonts/>
+        <Footer/>
+      </main>
+
+      <TweaksPanel title="Tweaks">
+        <TweakSection label="Paper grain"/>
+        <TweakToggle label="Background grain texture" value={t.grain}
+          onChange={(v) => setTweak('grain', v)}/>
+        <TweakSection label="Accent"/>
+        <TweakRadio label="Hero pop color"
+          value={t.accent}
+          options={["coral", "lime", "blue"]}
+          onChange={(v) => setTweak('accent', v)}/>
+        <div style={{ fontSize: 11, color: "rgba(41,38,27,.55)", lineHeight: 1.45, marginTop: 4 }}>
+          Accent rotates the pop color highlight on hero copy.
+        </div>
+      </TweaksPanel>
+    </React.Fragment>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>

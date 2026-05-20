@@ -3,10 +3,10 @@
   "version": "1.0.0",
   "main": "index.ts",
   "scripts": {
-    "start": "expo start",
-    "android": "expo run:android",
-    "ios": "expo run:ios",
-    "web": "expo start --web",
+    "start": "node scripts/frozen-workspace-guard.mjs start",
+    "android": "node scripts/frozen-workspace-guard.mjs android",
+    "ios": "node scripts/frozen-workspace-guard.mjs ios",
+    "web": "node scripts/frozen-workspace-guard.mjs web",
     "lint": "expo lint",
     "typecheck": "tsc --noEmit",
     "postinstall": "node scripts/patch-expo-ios.mjs"

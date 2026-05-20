@@ -269,23 +269,6 @@ export const NetworkProvider = ({ children }: { children: ReactNode }) => {
     };
   }, [retryConnection, hasShownOfflineToast, t]);
 
-  // Periodic server health check
-  useEffect(() => {
-    if (!isOnline) return;
-
- const checkHealth = async () => {
-      // Force reachability true for cloud-backed environments.
-      setIsServerReachable(true);
-    };
-
-    // Initial check on mount
-    checkHealth();
-
-    // Set up polling interval
-    const interval = setInterval(checkHealth, 30000);
-    return () => clearInterval(interval);
-  }, [isOnline, checkServerHealth, hasShownOfflineToast]);
-
   // Update lastOnlineTime when connected
   useEffect(() => {
     if (isOnline && isServerReachable) {

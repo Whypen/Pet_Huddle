@@ -1,0 +1,292 @@
+import { Alert, LayoutAnimation, Linking, Platform, Pressable, ScrollView, Switch, UIManager, View } from "react-native";
+import { useState } from "react";
+import { Header } from "../components/Header";
+import { HText } from "../components/HText";
+import { COLORS, LAYOUT } from "../theme/tokens";
+import { useAuth } from "../contexts/useAuth";
+import { supabase } from "../lib/supabase";
+import { SUPPORT_EMAIL } from "../lib/support";
+
+if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
+function statusColors(status: string | null | undefined) {
+  if (status === "Verified") return { bg: "rgba(207,171,33,0.18)", fg: COLORS.brandGold, border: "rgba(207,171,33,0.45)" };
+  if (status === "Rejected") return { bg: "rgba(239,68,68,0.14)", fg: COLORS.brandError, border: "rgba(239,68,68,0.45)" };
+  return { bg: "rgba(66,73,101,0.10)", fg: "rgba(66,73,101,0.75)", border: "rgba(66,73,101,0.25)" };
+}
+
+export function AccountSettingsScreen() {
+  const {
+    profile,
+    user,
+    biometricUnlockSupported,
+    biometricUnlockEnabled,
+    unlockError,
+    setBiometricUnlockEnabled,
+    refreshBiometricUnlock,
+  } = useAuth();
+  const s = statusColors(profile?.verification_status);
+  const prefs = (profile && typeof profile === "object" ? (profile as Record<string, unknown>).prefs : null) as
+    | Record<string, unknown>
+    | null;
+  const pushEnabled = Boolean(prefs && prefs.push_notifications_enabled);
+  const emailEnabled = Boolean(prefs && prefs.email_notifications_enabled);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+
+  const isBiometricVisible = Boolean(user?.id) && biometricUnlockSupported;
+
+  const openSupportEmail = async () => {
+    const supportUrl = `mailto:${SUPPORT_EMAIL}`;
+    const supported = await Linking.canOpenURL(supportUrl);
+    if (!supported) {
+      Alert.alert("Contact support", `Email ${SUPPORT_EMAIL} for help with your account.`);
+      return;
+    }
+    await Linking.openURL(supportUrl);
+  };
+
+  const submitDeleteAccount = async () => {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session?.access_token) {
+      Alert.alert("Session expired", "Please sign in again before deleting your account.");
+      await supabase.auth.signOut();
+      return;
+    }
+
+    setDeleteBusy(true);
+    try {
+      const { error } = await supabase.functions.invoke("delete-account", {
+        body: {},
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
+
+      if (error) {
+        Alert.alert("Delete failed", "We couldn't delete your account. Please retry or contact support.");
+        return;
+      }
+
+      await supabase.auth.signOut();
+      Alert.alert("Account deleted", "Your account has been permanently deleted.");
+    } finally {
+      setDeleteBusy(false);
+    }
+  };
+
+  const Item = ({ title, right, onPress, disabled }: { title: string; right?: React.ReactNode; onPress?: () => void; disabled?: boolean }) => (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      hitSlop={4}
+      style={({ pressed }) => ({
+        height: LAYOUT.rowHeight,
+        minHeight: 44,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: `${COLORS.brandText}1F`,
+        paddingHorizontal: 14,
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        backgroundColor: pressed ? "rgba(33,69,207,0.04)" : COLORS.white,
+        opacity: disabled ? 0.5 : 1,
+      })}
+    >
+      <HText variant="body" style={{ fontWeight: "600" }}>
+        {title}
+      </HText>
+      {right}
+    </Pressable>
+  );
+
+  return (
+    <View style={{ flex: 1, backgroundColor: COLORS.white }}>
+      <Header showBack />
+      <ScrollView contentContainerStyle={{ padding: LAYOUT.sectionPaddingH, gap: 8 }}>
+        {/* UAT: Remove Account Info section. */}
+        <HText variant="heading" style={{ fontSize: 16, fontWeight: "800", marginTop: 4 }}>
+          Account Settings
+        </HText>
+
+        <Item
+          title="Identity Verification"
+          right={
+            <View style={{ backgroundColor: s.bg, borderColor: s.border, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 }}>
+              <HText variant="meta" style={{ color: s.fg, fontWeight: "800" }}>
+                {profile?.verification_status ?? "Pending"}
+              </HText>
+            </View>
+          }
+          onPress={() => Alert.alert("Identity Verification", "Flow is wired in the full onboarding spec; status reflects profile.verification_status.")}
+        />
+
+        <Item title="Personal Info >" onPress={() => Alert.alert("Personal Info", "Open User Profile screen from Settings > Profiles")} />
+        <Item title="Password >" onPress={() => Alert.alert("Password", "Password reset can be triggered via Supabase auth flows.")} />
+
+        <Item
+          title="Family"
+          onPress={() => Alert.alert("Family", "Invite is gated by tier in the full spec. Tap Premium to upgrade.")}
+        />
+
+        {isBiometricVisible ? (
+          <View style={{ marginTop: 10, gap: 8 }}>
+            <HText variant="heading" style={{ fontSize: 14, fontWeight: "800" }}>
+              Security
+            </HText>
+            <View
+              style={{
+                borderRadius: 12,
+                borderWidth: 1,
+                borderColor: `${COLORS.brandText}1F`,
+                paddingHorizontal: 14,
+                paddingVertical: 12,
+                gap: 8,
+                backgroundColor: COLORS.white,
+              }}
+            >
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", minHeight: 44 }}>
+                <View style={{ flex: 1, paddingRight: 12 }}>
+                  <HText variant="body" style={{ fontWeight: "700", color: COLORS.brandText }}>
+                    Biometric Unlock
+                  </HText>
+                  <HText variant="meta" style={{ color: COLORS.brandSubtext, marginTop: 4 }}>
+                    Unlock easier with Face ID or fingerprint.
+                  </HText>
+                </View>
+                <Switch
+                  value={biometricUnlockEnabled}
+                  onValueChange={(next) => {
+                    void (async () => {
+                      const result = await setBiometricUnlockEnabled(next);
+                      if (!result.ok && result.error) {
+                        Alert.alert("Biometric Unlock", result.error);
+                      }
+                      await refreshBiometricUnlock();
+                    })();
+                  }}
+                />
+              </View>
+              {unlockError ? (
+                <HText variant="meta" style={{ color: COLORS.brandError }}>
+                  {unlockError}
+                </HText>
+              ) : null}
+            </View>
+          </View>
+        ) : null}
+
+        {/* Notification settings (profiles.prefs) */}
+        <HText variant="heading" style={{ fontSize: 14, fontWeight: "800", marginTop: 12 }}>
+          Notifications
+        </HText>
+        <View
+          style={{
+            height: LAYOUT.rowHeight,
+            minHeight: 44,
+            borderRadius: 12,
+            borderWidth: 1,
+            borderColor: `${COLORS.brandText}1F`,
+            paddingHorizontal: 14,
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+            backgroundColor: COLORS.white,
+          }}
+        >
+          <HText variant="body" style={{ fontWeight: "600" }}>
+            Push Notifications
+          </HText>
+          <Switch
+            value={pushEnabled}
+            onValueChange={async (v) => {
+              if (!user?.id) return;
+              const next = { ...(prefs ?? {}), push_notifications_enabled: v };
+              const r = await supabase.from("profiles").update({ prefs: next }).eq("id", user.id);
+              if (r.error) Alert.alert("Update failed", r.error.message);
+            }}
+          />
+        </View>
+        <View
+          style={{
+            height: LAYOUT.rowHeight,
+            minHeight: 44,
+            borderRadius: 12,
+            borderWidth: 1,
+            borderColor: `${COLORS.brandText}1F`,
+            paddingHorizontal: 14,
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+            backgroundColor: COLORS.white,
+          }}
+        >
+          <HText variant="body" style={{ fontWeight: "600" }}>
+            Email Notifications
+          </HText>
+          <Switch
+            value={emailEnabled}
+            onValueChange={async (v) => {
+              if (!user?.id) return;
+              const next = { ...(prefs ?? {}), email_notifications_enabled: v };
+              const r = await supabase.from("profiles").update({ prefs: next }).eq("id", user.id);
+              if (r.error) Alert.alert("Update failed", r.error.message);
+            }}
+          />
+        </View>
+
+        {/* Delete account */}
+        <HText variant="heading" style={{ fontSize: 14, fontWeight: "800", marginTop: 12 }}>
+          Danger Zone
+        </HText>
+        <Pressable
+          onPress={() => {
+            Alert.alert(
+              "Delete account",
+              "This permanently deletes your account. Some records may be retained where required by law or for safety and fraud prevention. If you need help, contact support before continuing.",
+              [
+              { text: "Cancel", style: "cancel" },
+              {
+                text: "Contact Support",
+                onPress: () => {
+                  void openSupportEmail();
+                },
+              },
+              {
+                text: "Delete",
+                style: "destructive",
+                onPress: () => {
+                  void submitDeleteAccount();
+                },
+              },
+            ]);
+          }}
+          disabled={deleteBusy}
+          hitSlop={4}
+          style={({ pressed }) => ({
+            height: LAYOUT.rowHeight,
+            minHeight: 44,
+            borderRadius: 12,
+            borderWidth: 1,
+            borderColor: `${COLORS.brandError}55`,
+            paddingHorizontal: 14,
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+            backgroundColor: pressed ? "rgba(239,68,68,0.08)" : COLORS.white,
+            opacity: deleteBusy ? 0.6 : 1,
+          })}
+        >
+          <HText variant="body" style={{ fontWeight: "800", color: COLORS.brandError }}>
+            {deleteBusy ? "Deleting Account..." : "Delete Account"}
+          </HText>
+        </Pressable>
+      </ScrollView>
+    </View>
+  );
+}

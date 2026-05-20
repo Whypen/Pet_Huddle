@@ -125,13 +125,13 @@ export const CreateGroupDialog = ({ isOpen, onClose, onCreateGroup, contacts }: 
           />
 
           {/* Bottom sheet */}
-          <div className="fixed inset-x-0 bottom-0 z-[8600] flex justify-center">
+          <div data-huddle-bottom-sheet="true" className="fixed inset-x-0 bottom-0 z-[8600] flex justify-center">
           <motion.div
             initial={{ y: "100%" }}
             animate={{ y: 0 }}
             exit={{ y: "100%" }}
             transition={{ type: "spring", damping: 30, stiffness: 300 }}
-            className="w-full max-w-[var(--app-max-width,430px)] bg-card rounded-t-3xl shadow-elevated max-h-[92vh] flex flex-col"
+            className="w-full max-w-[var(--app-max-width,430px)] bg-card rounded-t-3xl shadow-elevated max-h-[calc(100svh-env(safe-area-inset-bottom,0px)-8px)] flex flex-col"
           >
             {/* Header */}
             <div className="flex items-center justify-between p-4 border-b border-border">
@@ -256,7 +256,7 @@ export const CreateGroupDialog = ({ isOpen, onClose, onCreateGroup, contacts }: 
             </div>
 
             {/* Footer */}
-            <div className="p-4 border-t border-border pb-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom)+12px)]">
+            <div className="px-4 pt-4 border-t border-border huddle-sheet-bottom-padding">
               <NeuButton
                 onClick={handleCreate}
                 disabled={!groupName.trim() || selectedMembers.length === 0}

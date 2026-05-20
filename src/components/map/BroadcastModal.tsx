@@ -445,12 +445,13 @@ const BroadcastModal = ({
           onClick={onClose}
         >
         <motion.div
+          data-huddle-bottom-sheet="true"
           initial={{ y: "100%" }}
           animate={{ y: 0 }}
           exit={{ y: "100%" }}
           transition={{ type: "spring", damping: 25, stiffness: 300 }}
           onClick={(e) => e.stopPropagation()}
-          className="fixed left-0 right-0 bottom-0 w-full bg-card rounded-t-3xl p-6 pb-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom)+12px)] max-h-[100svh] overflow-auto border-t border-border shadow-elevated"
+          className="fixed left-0 right-0 bottom-0 mx-auto w-full max-w-[var(--app-max-width,430px)] bg-card rounded-t-3xl px-6 pt-6 huddle-sheet-bottom-padding max-h-[calc(100svh-env(safe-area-inset-bottom,0px)-8px)] overflow-auto border-t border-border shadow-elevated"
         >
           <div className="mb-4 flex items-center justify-between gap-3">
             <h2 className="text-lg font-bold text-brandText">Broadcast Alert</h2>

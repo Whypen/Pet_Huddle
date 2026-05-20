@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Community — Social Forum, Discover, Groups, Chats · huddle</title>
+<meta name="description" content="huddle's community is local, identity-verified, and pet-first. Social Forum for advice. Discover for nearby pet people. Groups for trusted circles. Chats and Stars for intentional connection.">
+<link rel="stylesheet" href="huddle.css">
+<style>
+.feat-row { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(48px,7vw,96px); align-items: center; margin-bottom: clamp(80px,10vw,120px); }
+.feat-row.reverse { direction: rtl; }
+.feat-row.reverse > * { direction: ltr; }
+@media (max-width: 900px) { .feat-row, .feat-row.reverse { grid-template-columns: 1fr; direction: ltr; } }
+.feat-media {
+  aspect-ratio: 4/5; border-radius: 28px; overflow: hidden;
+  background: linear-gradient(135deg, var(--blue), var(--blue-deep));
+  position: relative;
+}
+.feat-media .glyph {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  font-size: clamp(120px, 18vw, 220px); color: rgba(255,255,255,0.15);
+}
+.feat-media.coral { background: linear-gradient(135deg, var(--coral), #FF5C2B); }
+.feat-media.gold  { background: linear-gradient(135deg, var(--gold), #B89018); }
+.feat-media.lime  { background: linear-gradient(135deg, var(--lime), #95C800); }
+.feat-media.lime .glyph { color: rgba(14,14,16,0.20); }
+.feat-points { margin-top: 28px; display: flex; flex-direction: column; gap: 14px; }
+.feat-point { display: flex; gap: 14px; align-items: flex-start; font-size: 15.5px; line-height: 1.5; color: var(--fg1); }
+.feat-point .check { width: 26px; height: 26px; border-radius: 50%; background: var(--blue); color: var(--white); display: grid; place-items: center; font-weight: 800; font-size: 13px; flex-shrink: 0; }
+.feat-point.coral .check { background: var(--coral); }
+.feat-point.gold .check { background: var(--gold); }
+.feat-point.lime .check { background: var(--lime); color: var(--ink); }
+</style>
+</head>
+<body data-page="community" data-nav="solid">
+
+<div class="geo-seed" aria-hidden="true">
+  pet community Hong Kong · local pet forum HK · pet owners group Hong Kong · meet pet people nearby ·
+  dog owner community Hong Kong · cat lover community · pet meetup Hong Kong · neighbourhood pet group ·
+  pet advice forum · verified pet social network · huddle Social Forum · huddle Discover · huddle Groups · huddle Chats · huddle Stars
+</div>
+
+<div class="page-hero">
+  <div class="container">
+    <div class="eyebrow">Community</div>
+    <h1>A local pet<br>community, <span class="coral">in<br>one app.</span></h1>
+    <p class="lead">huddle Social Forum, Discover, Groups, and Chats work together — so you can find nearby pet people, build familiarity, and organise meetups without scattering across separate channels.</p>
+  </div>
+</div>
+<div class="hero-wave-out">
+  <svg viewBox="0 0 1440 110" preserveAspectRatio="none" aria-hidden="true">
+    <path d="M0,40 C240,110 480,0 720,40 C960,80 1200,10 1440,50 L1440,0 L0,0 Z" fill="#142E99"/>
+  </svg>
+</div>
+
+<section class="s cream">
+  <div class="container">
+
+    <!-- Social Forum -->
+    <div class="feat-row">
+      <div class="reveal-l">
+        <div class="eyebrow">Social Forum</div>
+        <h2 class="s-title" style="margin-top:14px">Local threads.<br><span class="coral">Real follow-up.</span></h2>
+        <p class="s-lead">huddle Social Forum is local discussion that actually reaches your area. Vet recommendations, lost-pet help, behaviour questions, rescue threads — answered by people who live near you.</p>
+        <div class="feat-points">
+          <div class="feat-point"><span class="check">✓</span> Identity-verified posters only</div>
+          <div class="feat-point coral"><span class="check">✓</span> Threads sorted by proximity, not viral algorithm</div>
+          <div class="feat-point gold"><span class="check">✓</span> No anonymous trolls, no marketing spam</div>
+        </div>
+      </div>
+      <div class="reveal-r">
+        <div class="feat-media"><div class="glyph">💬</div></div>
+      </div>
+    </div>
+
+    <!-- Discover -->
+    <div class="feat-row reverse" id="discover">
+      <div class="reveal-r">
+        <div class="eyebrow">Discover</div>
+        <h2 class="s-title" style="margin-top:14px">Meet nearby<br><span class="coral">pet people.</span></h2>
+        <p class="s-lead">huddle Discover surfaces other pet people in your area — owners, fosters, rescue volunteers, carers. Bumping into a familiar face on the dog walk shouldn't be random. Discover makes it deliberate.</p>
+        <div class="feat-points">
+          <div class="feat-point"><span class="check">✓</span> Filter by species, neighbourhood, interest</div>
+          <div class="feat-point coral"><span class="check">✓</span> See who's active right now, who lives near you</div>
+          <div class="feat-point lime"><span class="check">✓</span> 16+ only — Discover and stranger chat are age-gated</div>
+        </div>
+      </div>
+      <div class="reveal-l">
+        <div class="feat-media coral"><div class="glyph">🐾</div></div>
+      </div>
+    </div>
+
+    <!-- Groups -->
+    <div class="feat-row">
+      <div class="reveal-l">
+        <div class="eyebrow">Groups</div>
+        <h2 class="s-title" style="margin-top:14px">Public for<br>discovery.<br><span class="coral">Private for<br>trust.</span></h2>
+        <p class="s-lead">huddle Groups support two modes. Public Groups for any pet person in your area to find — neighbourhood dog walks, breed-specific circles, rescue volunteer networks. Private Groups for invite-only trusted circles where you share photos, plan meetups, and coordinate care.</p>
+        <div class="feat-points">
+          <div class="feat-point"><span class="check">✓</span> Create your own Group with one tap</div>
+          <div class="feat-point coral"><span class="check">✓</span> All members identity-verified — same trust floor as the rest of huddle</div>
+        </div>
+      </div>
+      <div class="reveal-r">
+        <div class="feat-media gold"><div class="glyph">👥</div></div>
+      </div>
+    </div>
+
+    <!-- Chats & Stars -->
+    <div class="feat-row reverse">
+      <div class="reveal-r">
+        <div class="eyebrow">Chats &amp; Stars</div>
+        <h2 class="s-title" style="margin-top:14px">Deliberate<br><span class="coral">connection.</span></h2>
+        <p class="s-lead">huddle Chats are one-to-one and group conversations between huddle members. huddle Stars are how you reach out to someone you don't know yet — a deliberate, intentional gesture instead of a flood of cold messages.</p>
+        <div class="feat-points">
+          <div class="feat-point"><span class="check">✓</span> Free Stars on every plan — extra Stars on Plus and Gold</div>
+          <div class="feat-point coral"><span class="check">✓</span> Stars protect your inbox from spam outreach</div>
+          <div class="feat-point gold"><span class="check">★</span> Family Link extends select benefits to one trusted relative</div>
+        </div>
+      </div>
+      <div class="reveal-l">
+        <div class="feat-media lime"><div class="glyph">✉️</div></div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<div class="wave-div" style="background:var(--blue)">
+  <svg viewBox="0 0 1440 100" preserveAspectRatio="none" aria-hidden="true">
+    <path d="M0,50 C220,10 520,90 780,50 C1040,10 1240,80 1440,40 L1440,0 L0,0 Z" fill="var(--cream)"/>
+  </svg>
+</div>
+
+<section class="s blue">
+  <div class="container">
+    <div class="reveal" style="max-width:780px">
+      <div class="eyebrow on-blue">For every kind of pet person</div>
+      <h2 class="s-title" style="color:var(--white);margin-top:16px">Many species.<br>Many roles.<br><span style="color:var(--lime)">One app.</span></h2>
+      <p style="color:rgba(255,255,255,0.85);font-size:17px;font-weight:500;line-height:1.55;margin-top:24px">huddle supports dogs, cats, rabbits, hamsters, birds, reptiles and more. And every kind of pet person — owners, fosters, rescue volunteers, shelter staff, vets, groomers, carers.</p>
+    </div>
+  </div>
+</section>
+
+<div class="wave-div" style="background:var(--coral)">
+  <svg viewBox="0 0 1440 100" preserveAspectRatio="none" aria-hidden="true">
+    <path d="M0,40 C240,90 520,0 780,40 C1040,80 1240,10 1440,50 L1440,0 L0,0 Z" fill="var(--blue)"/>
+  </svg>
+</div>
+
+<section class="s coral" style="padding-top:64px">
+  <div class="container">
+    <div class="reveal" style="text-align:center;max-width:600px;margin:0 auto">
+      <h2 class="s-title" style="color:var(--white)">Find your<br>local huddle.</h2>
+      <p style="color:rgba(255,255,255,0.92);font-size:17px;font-weight:500;margin-top:20px;margin-bottom:32px">Download the app and meet the pet people in your neighbourhood.</p>
+      <div style="display:flex;gap:14px;justify-content:center;flex-wrap:wrap">
+        <a href="huddle-v5.html#download" class="btn btn-white">⌘ App Store</a>
+        <a href="huddle-v5.html#download" class="btn btn-white">▸ Google Play</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="wave-div" style="background:var(--cream)">
+  <svg viewBox="0 0 1440 90" preserveAspectRatio="none" aria-hidden="true">
+    <path d="M0,50 C300,10 600,80 900,40 C1140,10 1300,60 1440,30 L1440,0 L0,0 Z" fill="var(--coral)"/>
+  </svg>
+</div>
+
+<script src="huddle-shell.js"></script>
+</body>
+</html>

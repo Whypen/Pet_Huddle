@@ -6,6 +6,7 @@ import type {
   MentionEntry,
   Thread,
 } from "@/components/social/noticeboard/types";
+import { isVerifiedProfile } from "@/lib/verification";
 
 type DeriveAlertType = (notice: Thread) => "Stray" | "Lost" | "Caution" | "Others" | null;
 
@@ -102,78 +103,14 @@ export const fetchFeedPage = async ({
 
 export const fetchFocusedThreadRow = async (threadId: string) => {
   if (!threadId) return null;
-  const { data: focusedThread } = await supabase
-    .from("threads" as "profiles")
-    .select(`
-      id,
-      title,
-      content,
-      tags,
-      hashtags,
-      images,
-      video_provider,
-      provider_video_id,
-      video_playback_url,
-      video_embed_url,
-      video_thumbnail_url,
-      video_preview_url,
-      video_duration_seconds,
-      video_status,
-      map_id,
-      alert_type,
-      likes,
-      created_at,
-      user_id,
-      author:profiles!threads_user_id_fkey(
-        display_name,
-        social_id,
-        avatar_url,
-        verification_status,
-        is_verified,
-        non_social,
-        location_country,
-        last_lat,
-        last_lng
-      )
-    `)
-    .eq("id", threadId)
-    .maybeSingle();
-  if (!focusedThread) return null;
-  const focusedRow = focusedThread as unknown as Record<string, unknown>;
-  const authorObj = Array.isArray(focusedRow.author) ? focusedRow.author[0] : focusedRow.author;
-  return mapFeedRowToThread({
-    id: focusedRow.id,
-    title: focusedRow.title,
-    content: focusedRow.content,
-    tags: focusedRow.tags,
-    hashtags: focusedRow.hashtags,
-    images: focusedRow.images,
-    video_provider: focusedRow.video_provider,
-    provider_video_id: focusedRow.provider_video_id,
-    video_playback_url: focusedRow.video_playback_url,
-    video_embed_url: focusedRow.video_embed_url,
-    video_thumbnail_url: focusedRow.video_thumbnail_url,
-    video_preview_url: focusedRow.video_preview_url,
-    video_duration_seconds: focusedRow.video_duration_seconds,
-    video_status: focusedRow.video_status,
-    like_count: focusedRow.likes,
-    support_count: focusedRow.support_count ?? 0,
-    comment_count: focusedRow.comment_count ?? 0,
-    score: focusedRow.score ?? 0,
-    map_id: focusedRow.map_id,
-    alert_type: focusedRow.alert_type,
-    created_at: focusedRow.created_at,
-    user_id: focusedRow.user_id,
-    author_display_name: typeof authorObj === "object" && authorObj !== null ? (authorObj as Record<string, unknown>).display_name : null,
-    author_social_id: typeof authorObj === "object" && authorObj !== null ? (authorObj as Record<string, unknown>).social_id : null,
-    author_avatar_url: typeof authorObj === "object" && authorObj !== null ? (authorObj as Record<string, unknown>).avatar_url : null,
-    author_verification_status: typeof authorObj === "object" && authorObj !== null ? (authorObj as Record<string, unknown>).verification_status : null,
-    author_is_verified: typeof authorObj === "object" && authorObj !== null ? (authorObj as Record<string, unknown>).is_verified : null,
-    author_location_country: typeof authorObj === "object" && authorObj !== null ? (authorObj as Record<string, unknown>).location_country : null,
-    author_last_lat: typeof authorObj === "object" && authorObj !== null ? (authorObj as Record<string, unknown>).last_lat : null,
-    author_last_lng: typeof authorObj === "object" && authorObj !== null ? (authorObj as Record<string, unknown>).last_lng : null,
-    author_non_social: typeof authorObj === "object" && authorObj !== null ? (authorObj as Record<string, unknown>).non_social : false,
-  });
+  const rpc = supabase.rpc as unknown as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>;
+  const { data, error } = await rpc(
+    "get_native_social_thread_by_id",
+    { p_thread_id: threadId },
+  );
+  if (error) return null;
+  const focusedRow = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | undefined;
+  return focusedRow ? mapFeedRowToThread(focusedRow) : null;
 };
 
 export const hydrateRowsLegacy = async (
@@ -250,11 +187,11 @@ export const hydrateRowsLegacy = async (
   if (userIds.length > 0) {
     const { data: profileRows } = await supabase
       .from("profiles")
-      .select("id, social_id, display_name, avatar_url, is_verified")
+      .select("id, social_id, display_name, avatar_url, is_verified, verification_status")
       .in("id", userIds);
     if (profileRows && profileRows.length > 0) {
       const profileMap = new Map(
-        (profileRows as Array<{ id: string; social_id?: string | null; display_name?: string | null; avatar_url?: string | null; is_verified?: boolean | null }>).map((row) => [
+        (profileRows as Array<{ id: string; social_id?: string | null; display_name?: string | null; avatar_url?: string | null; is_verified?: boolean | null; verification_status?: string | null }>).map((row) => [
           row.id,
           row,
         ]),
@@ -269,7 +206,7 @@ export const hydrateRowsLegacy = async (
             display_name: author.display_name ?? notice.author?.display_name ?? null,
             social_id: author.social_id ?? notice.author?.social_id ?? null,
             avatar_url: author.avatar_url ?? notice.author?.avatar_url ?? null,
-            is_verified: author.is_verified === true,
+            is_verified: isVerifiedProfile(author),
           },
         };
       });
@@ -386,7 +323,7 @@ export const hydrateRows = async (
           typeof hydration.author_avatar_url === "string"
             ? hydration.author_avatar_url
             : notice.author?.avatar_url ?? null,
-        is_verified: hydration.author_is_verified === true,
+        is_verified: String(hydration.author_verification_status || "").toLowerCase() === "verified",
       },
     };
   });

@@ -9,7 +9,7 @@ import { ensureSignupProof, readPresignupTokenRow } from "../_shared/signupProof
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL") ?? "",
-  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+  (Deno.env.get("HUDDLE_SUPABASE_SERVICE_KEY") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")) ?? "",
 );
 
 const CORS = {
@@ -23,6 +23,17 @@ const json = (body: unknown, status = 200) =>
     status,
     headers: { ...CORS, "Content-Type": "application/json" },
   });
+
+const emitVerifySignal = async (signalKey: string | null | undefined) => {
+  const key = String(signalKey || "").trim();
+  if (!key) return;
+  const { error } = await supabase
+    .from("presignup_verify_signals")
+    .upsert({ signal_key: key, verified_at: new Date().toISOString() }, { onConflict: "signal_key" });
+  if (error) {
+    console.error("[confirm-pre-signup-verify] signal emit error", error.message);
+  }
+};
 
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
@@ -46,7 +57,7 @@ serve(async (req: Request) => {
       if (!email) return json({ verified: false, expired: false, signup_proof: null, email: null });
       const { data: fallbackRows, error: fallbackError } = await supabase
         .from("presignup_tokens")
-        .select("token,email,verified,expires_at,signup_proof,signup_proof_issued_at,signup_proof_expires_at,signup_proof_used_at,created_at")
+        .select("token,email,signal_key,verified,expires_at,signup_proof,signup_proof_issued_at,signup_proof_expires_at,signup_proof_used_at,created_at")
         .eq("email", email)
         .order("created_at", { ascending: false })
         .limit(5);
@@ -84,6 +95,7 @@ serve(async (req: Request) => {
         console.error("[confirm-pre-signup-verify] fallback refresh error", refreshedFallback.error.message);
       }
       const fallbackProof = await ensureSignupProof(supabase, finalFallbackRow);
+      await emitVerifySignal(finalFallbackRow.signal_key);
       return json({
         verified: true,
         expired: false,
@@ -91,6 +103,7 @@ serve(async (req: Request) => {
         signup_proof_expires_at: fallbackProof.expires_at,
         email: finalFallbackRow.email,
         token: finalFallbackRow.token,
+        signal_key: finalFallbackRow.signal_key,
       });
     }
 
@@ -98,6 +111,7 @@ serve(async (req: Request) => {
     if (expired) return json({ verified: false, expired: true, signup_proof: null, email: row.email, token: row.token });
     if (row.verified) {
       const proof = await ensureSignupProof(supabase, row);
+      await emitVerifySignal(row.signal_key);
       return json({
         verified: true,
         expired: false,
@@ -105,6 +119,7 @@ serve(async (req: Request) => {
         signup_proof_expires_at: proof.expires_at,
         email: row.email,
         token: row.token,
+        signal_key: row.signal_key,
       });
     }
 
@@ -123,6 +138,7 @@ serve(async (req: Request) => {
       return json({ verified: true, expired: false, signup_proof: null });
     }
     const proof = await ensureSignupProof(supabase, refreshed.data);
+    await emitVerifySignal(refreshed.data.signal_key);
 
     return json({
       verified: true,
@@ -131,6 +147,7 @@ serve(async (req: Request) => {
       signup_proof_expires_at: proof.expires_at,
       email: refreshed.data.email,
       token: refreshed.data.token,
+      signal_key: refreshed.data.signal_key,
     });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);

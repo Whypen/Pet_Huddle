@@ -5,12 +5,14 @@ import { ProfileBadges } from "@/components/ui/ProfileBadges";
 import { HuddleVideoLoader } from "@/components/ui/HuddleVideoLoader";
 import { WaveHandIcon } from "@/components/icons/WaveHandIcon";
 import { cn } from "@/lib/utils";
+import { isVerifiedProfile } from "@/lib/verification";
 
 type DiscoveryDeckProfile = {
   id: string;
   display_name: string | null;
   avatar_url?: string | null;
   is_verified?: boolean | null;
+  verification_status?: string | null;
   has_car?: boolean;
   location_name?: string | null;
   social_album?: string[] | null;
@@ -425,7 +427,7 @@ const DiscoveryDeckInner = ({
         )}
         <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[34%] bg-[linear-gradient(180deg,rgba(9,21,95,0)_0%,rgba(9,21,95,0.82)_100%)]" />
         <div className="absolute inset-x-4 top-4 z-[19] flex items-start justify-between gap-3">
-          <ProfileBadges isVerified={profile.is_verified === true} hasCar={!!profile.has_car} size="lg" />
+          <ProfileBadges isVerified={isVerifiedProfile(profile)} hasCar={!!profile.has_car} size="lg" />
           {isActive && !hideTopChrome ? (
             <div className="pointer-events-auto flex items-start gap-2">
               {footerCtaMode === "promoted" && !isDiscoverDragging ? renderDiscoveryActionButtons("promoted", profile) : null}

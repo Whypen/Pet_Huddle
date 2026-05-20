@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Plans &amp; Pricing — Free, Plus, Gold · huddle</title>
+<meta name="description" content="huddle is free to start. Plus and Gold add wider broadcast reach, more Stars, advanced filters, profile boosts, and family sharing.">
+<link rel="stylesheet" href="huddle.css">
+<style>
+.plan-grid {
+  display: grid; grid-template-columns: repeat(3,1fr); gap: 18px; margin-top: 56px;
+}
+@media (max-width: 900px) { .plan-grid { grid-template-columns: 1fr; max-width: 480px; margin: 56px auto 0; } }
+.plan {
+  background: var(--white); border-radius: 28px; padding: 36px 32px;
+  border: 1px solid rgba(33,69,207,0.10); position: relative;
+  transition: transform 0.4s var(--ease), box-shadow 0.4s;
+}
+.plan:hover { transform: translateY(-6px); box-shadow: 0 30px 60px -25px rgba(20,46,153,0.25); }
+.plan.plus { background: #5BA4F5; color: var(--white); border-color: transparent; }
+.plan.gold { background: var(--coral); color: var(--white); border-color: transparent; }
+.plan .tag {
+  display: inline-block; font-size: 10.5px; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase;
+  padding: 6px 12px; border-radius: 999px;
+  background: rgba(33,69,207,0.10); color: var(--blue); margin-bottom: 20px;
+}
+.plan.plus .tag, .plan.gold .tag { background: rgba(255,255,255,0.20); color: var(--white); }
+.plan h3 { font-size: 32px; font-weight: 800; letter-spacing: -0.025em; line-height: 1; }
+.plan .price { font-size: 44px; font-weight: 800; letter-spacing: -0.04em; line-height: 1; margin: 16px 0 4px; }
+.plan .price small { font-size: 16px; font-weight: 600; opacity: 0.7; }
+.plan .billing { font-size: 13px; font-weight: 600; opacity: 0.7; margin-bottom: 24px; }
+.plan ul { list-style: none; padding: 0; margin: 24px 0; display: flex; flex-direction: column; gap: 12px; }
+.plan li { font-size: 14.5px; font-weight: 500; line-height: 1.4; display: flex; gap: 10px; align-items: flex-start; }
+.plan li::before { content: "✓"; font-weight: 800; flex-shrink: 0; color: var(--blue); }
+.plan.plus li::before, .plan.gold li::before { color: var(--white); }
+.plan .cta-btn {
+  display: block; text-align: center; padding: 14px 22px; border-radius: 999px;
+  font-size: 15px; font-weight: 800; letter-spacing: -0.01em;
+  background: var(--blue); color: var(--white); margin-top: 24px;
+  transition: transform 0.25s var(--ease), background 0.2s;
+}
+.plan .cta-btn:hover { transform: translateY(-2px); background: var(--coral); }
+.plan.plus .cta-btn { background: var(--white); color: var(--blue); }
+.plan.plus .cta-btn:hover { background: var(--coral); color: var(--white); }
+.plan.gold .cta-btn { background: var(--white); color: var(--coral); }
+.plan.gold .cta-btn:hover { background: var(--blue-deep); color: var(--white); }
+.plan .ribbon {
+  position: absolute; top: 18px; right: 18px;
+  background: var(--lime); color: var(--ink);
+  font-size: 10.5px; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase;
+  padding: 5px 10px; border-radius: 999px;
+}
+
+.addon-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; margin-top: 56px; }
+@media (max-width: 720px) { .addon-grid { grid-template-columns: 1fr; } }
+.addon {
+  background: var(--white); border-radius: 22px; padding: 28px 24px;
+  border: 1px solid rgba(33,69,207,0.08);
+  display: flex; flex-direction: column; gap: 10px;
+}
+.addon .ico { font-size: 26px; line-height: 1; margin-bottom: 6px; }
+.addon h4 { font-size: 18px; font-weight: 800; letter-spacing: -0.01em; }
+.addon p { font-size: 14px; font-weight: 500; color: var(--fg1); line-height: 1.5; }
+.addon .price { font-size: 22px; font-weight: 800; letter-spacing: -0.02em; color: var(--coral); margin-top: auto; }
+
+table.compare { width: 100%; border-collapse: collapse; margin-top: 56px; background: var(--white); border-radius: 22px; overflow: hidden; box-shadow: 0 10px 30px -15px rgba(20,46,153,0.15); }
+table.compare th, table.compare td { padding: 16px 20px; text-align: left; border-bottom: 1px solid rgba(33,69,207,0.08); font-size: 14.5px; }
+table.compare th { background: var(--cream); font-size: 12px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: var(--blue); }
+table.compare th:not(:first-child), table.compare td:not(:first-child) { text-align: center; }
+table.compare tr:last-child td { border-bottom: none; }
+table.compare .feat { font-weight: 700; color: var(--ink); }
+@media (max-width: 720px) { table.compare th, table.compare td { padding: 10px 8px; font-size: 12.5px; } }
+</style>
+</head>
+<body data-page="pricing" data-nav="solid">
+
+<div class="geo-seed" aria-hidden="true">
+  huddle pricing · huddle Plus price · huddle Gold price · pet app subscription Hong Kong ·
+  Super Broadcast price · profile booster pet app · family sharing pet app · huddle Stars subscription
+</div>
+
+<div class="page-hero">
+  <div class="container">
+    <div class="eyebrow">Plans</div>
+    <h1>Free to start.<br><span class="coral">Powerful</span><br>when you need more.</h1>
+    <p class="lead">huddle's core safety, community, and pet record features are free forever. Plus and Gold add wider broadcast reach, more Stars, advanced filters, and profile visibility — for the moments when more matters.</p>
+  </div>
+</div>
+<div class="hero-wave-out">
+  <svg viewBox="0 0 1440 110" preserveAspectRatio="none" aria-hidden="true">
+    <path d="M0,40 C240,110 480,0 720,40 C960,80 1200,10 1440,50 L1440,0 L0,0 Z" fill="#142E99"/>
+  </svg>
+</div>
+
+<section class="s cream">
+  <div class="container">
+    <div class="plan-grid">
+      <!-- FREE -->
+      <div class="plan reveal">
+        <span class="tag">Free forever</span>
+        <h3>Free</h3>
+        <div class="price">$0<small>/mo</small></div>
+        <div class="billing">No card required</div>
+        <ul>
+          <li>Live Map with all 4 pin types</li>
+          <li>Broadcast Alerts within 5km</li>
+          <li>Social Forum, Discover, Groups, Chats</li>
+          <li>Care marketplace access (book any provider)</li>
+          <li>Pet Profiles for unlimited pets</li>
+          <li>Verified Identity Badge</li>
+          <li>Free Stars allowance</li>
+        </ul>
+        <a href="huddle-v5.html#download" class="cta-btn">Get huddle free</a>
+      </div>
+
+      <!-- PLUS -->
+      <div class="plan plus reveal">
+        <span class="tag">Plus</span>
+        <h3>Plus</h3>
+        <div class="price">$4.99<small>/mo</small></div>
+        <div class="billing">Or save with annual</div>
+        <ul>
+          <li>Everything in Free</li>
+          <li>Broadcast Alerts within 10km</li>
+          <li>Open Discovery — double the matches</li>
+          <li>Profile Boost in Discover &amp; Care</li>
+          <li>4 Stars per month</li>
+          <li>Advanced filters</li>
+          <li>Family Link — extend benefits to 1 relative</li>
+        </ul>
+        <a href="huddle-v5.html#download" class="cta-btn">Try huddle Plus</a>
+      </div>
+
+      <!-- GOLD -->
+      <div class="plan gold reveal">
+        <span class="ribbon">Most Loved</span>
+        <span class="tag">Gold</span>
+        <h3>Gold</h3>
+        <div class="price">$9.99<small>/mo</small></div>
+        <div class="billing">Or save with annual</div>
+        <ul>
+          <li>Everything in Plus</li>
+          <li>Broadcast Alerts within 20km</li>
+          <li>Max Discovery — no usual limits</li>
+          <li>Top Profile Boost — priority placement</li>
+          <li>10 Stars per month</li>
+          <li>All filters unlocked</li>
+          <li>Video uploads (Gold exclusive)</li>
+          <li>Family Link included</li>
+        </ul>
+        <a href="huddle-v5.html#download" class="cta-btn">Upgrade to Gold</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="wave-div" style="background:var(--white)">
+  <svg viewBox="0 0 1440 90" preserveAspectRatio="none" aria-hidden="true">
+    <path d="M0,30 C320,90 640,0 960,40 C1200,72 1320,20 1440,40 L1440,0 L0,0 Z" fill="var(--cream)"/>
+  </svg>
+</div>
+
+<!-- Add-ons -->
+<section class="s white">
+  <div class="container">
+    <div class="reveal" style="max-width:780px">
+      <div class="eyebrow">Add-ons</div>
+      <h2 class="s-title" style="margin-top:16px">One-time<br><span class="coral">boosts.</span></h2>
+      <p class="s-lead">Stack on top of any plan, including Free. Add-ons are purchased per-use — no recurring commitment unless you choose to.</p>
+    </div>
+    <div class="addon-grid">
+      <div class="addon reveal">
+        <div class="ico">📣</div>
+        <h4>Super Broadcast</h4>
+        <p>One-time alert with 50km reach — the widest huddle offers. Used for high-urgency lost-pet situations.</p>
+        <div class="price">$4.99</div>
+      </div>
+      <div class="addon reveal">
+        <div class="ico">⚡</div>
+        <h4>Profile Booster</h4>
+        <p>Maximum visibility for 24 hours in Discover and Care results. Useful around peak demand windows.</p>
+        <div class="price">$2.99</div>
+      </div>
+      <div class="addon reveal">
+        <div class="ico">👨‍👩‍👧</div>
+        <h4>Family Sharing</h4>
+        <p>Extend your plan benefits to one trusted relative (except Stars). Recurring add-on.</p>
+        <div class="price">$4.99<small style="font-size:14px;opacity:0.7">/mo</small></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="wave-div" style="background:var(--cream)">
+  <svg viewBox="0 0 1440 90" preserveAspectRatio="none" aria-hidden="true">
+    <path d="M0,40 C300,0 600,90 900,40 C1140,5 1300,60 1440,30 L1440,0 L0,0 Z" fill="var(--white)"/>
+  </svg>
+</div>
+
+<!-- Compare table -->
+<section class="s cream">
+  <div class="container">
+    <div class="reveal" style="max-width:780px">
+      <div class="eyebrow">Compare</div>
+      <h2 class="s-title" style="margin-top:16px">Feature-by-<br>feature.</h2>
+    </div>
+    <table class="compare">
+      <thead>
+        <tr><th>Feature</th><th>Free</th><th>Plus</th><th>Gold</th></tr>
+      </thead>
+      <tbody>
+        <tr><td class="feat">Live Map &amp; all pin types</td><td>✓</td><td>✓</td><td>✓</td></tr>
+        <tr><td class="feat">Broadcast Alert reach</td><td>5 km</td><td>10 km</td><td>20 km</td></tr>
+        <tr><td class="feat">Discover swipe limits</td><td>Standard</td><td>Open</td><td>Max</td></tr>
+        <tr><td class="feat">Profile Boost</td><td>—</td><td>Standard</td><td>Top priority</td></tr>
+        <tr><td class="feat">Stars per month</td><td>Allowance</td><td>4</td><td>10</td></tr>
+        <tr><td class="feat">Filters</td><td>Basic</td><td>Advanced</td><td>All filters</td></tr>
+        <tr><td class="feat">Video uploads</td><td>—</td><td>—</td><td>✓</td></tr>
+        <tr><td class="feat">Family Link</td><td>—</td><td>1 relative</td><td>1 relative</td></tr>
+        <tr><td class="feat">Pet Profiles</td><td>Unlimited</td><td>Unlimited</td><td>Unlimited</td></tr>
+        <tr><td class="feat">Care marketplace</td><td>✓</td><td>✓</td><td>✓</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<div class="wave-div" style="background:var(--blue-deep)">
+  <svg viewBox="0 0 1440 100" preserveAspectRatio="none" aria-hidden="true">
+    <path d="M0,50 C220,10 520,90 780,50 C1040,10 1240,80 1440,40 L1440,0 L0,0 Z" fill="var(--cream)"/>
+  </svg>
+</div>
+
+<section class="s deep">
+  <div class="container">
+    <div class="reveal" style="max-width:720px">
+      <div class="eyebrow on-blue">Honest pricing</div>
+      <h2 class="s-title" style="color:var(--white);margin-top:16px">Cancel <span style="color:var(--coral)">anytime.</span></h2>
+      <p style="color:rgba(255,255,255,0.85);font-size:17px;line-height:1.55;margin-top:20px">Plus and Gold renew monthly or annually until cancelled. You can cancel at any time inside the app, in Settings → Subscription. No reactivation fees, no hidden charges. Subscriptions purchased through the App Store or Google Play are managed there per their rules.</p>
+      <p style="color:rgba(255,255,255,0.6);font-size:14px;margin-top:20px">All prices in USD. Local currency conversion via App Store / Google Play.</p>
+    </div>
+  </div>
+</section>
+
+<div class="wave-div" style="background:var(--cream)">
+  <svg viewBox="0 0 1440 100" preserveAspectRatio="none" aria-hidden="true">
+    <path d="M0,40 C240,90 520,0 780,40 C1040,80 1240,10 1440,50 L1440,0 L0,0 Z" fill="var(--blue-deep)"/>
+  </svg>
+</div>
+
+<script src="huddle-shell.js"></script>
+</body>
+</html>

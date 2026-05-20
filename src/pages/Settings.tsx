@@ -19,6 +19,8 @@ import { SettingsProfileSummary } from "@/components/layout/SettingsProfileSumma
 import { useTurnstile } from "@/hooks/useTurnstile";
 import { TurnstileDebugPanel, TurnstileWidget } from "@/components/security/TurnstileWidget";
 import { authChangePassword } from "@/lib/publicAuthApi";
+import { hasNativeShell, requestNativePushRegistration, upsertPushRegistration } from "@/lib/nativeShell";
+import { isVerifiedProfile } from "@/lib/verification";
 
 type NotificationPrefs = {
   push_enabled: boolean;
@@ -76,7 +78,7 @@ const Settings: React.FC = () => {
 
   const p = (profile ?? {}) as Record<string, unknown>;
   const displayName = String(p.display_name || "Profile");
-  const isVerified = p.is_verified === true;
+  const isVerified = isVerifiedProfile(p);
   const dob = (p.dob as string | null) ?? null;
   const isAge16Plus = dob
     ? (() => {
@@ -303,6 +305,16 @@ const Settings: React.FC = () => {
       return;
     }
     await persistPrefs({ ...prefs, push_enabled: next });
+    if (next && user?.id && hasNativeShell()) {
+      try {
+        const registration = await requestNativePushRegistration({ forcePrompt: true });
+        if (registration.token) {
+          await upsertPushRegistration(supabase, user.id, registration);
+        }
+      } catch {
+        toast.error("We couldn't finish push notification setup. Check notification access in device settings.");
+      }
+    }
   };
 
   const handleCategoryToggle = async (key: "pets" | "social" | "chats" | "map" | "services" | "systems", next: boolean) => {
@@ -424,7 +436,7 @@ const Settings: React.FC = () => {
         <SettingsProfileSummary
           displayName={displayName}
           avatarUrl={p.avatar_url ? String(p.avatar_url) : null}
-          isVerified={p.is_verified === true}
+          isVerified={isVerifiedProfile(p)}
           tierValue={String((p.effective_tier as string) || (p.tier as string) || "free")}
           starsLabel={String(starsRemaining)}
           onStarsClick={() => navigate("/premium")}

@@ -1,0 +1,1096 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>huddle — No pet left behind.</title>
+<style>
+@font-face { font-family: "Urbanist"; src: url("fonts/Urbanist-400.ttf") format("truetype"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Urbanist"; src: url("fonts/Urbanist-500.ttf") format("truetype"); font-weight: 500; font-display: swap; }
+@font-face { font-family: "Urbanist"; src: url("fonts/Urbanist-700.ttf") format("truetype"); font-weight: 700; font-display: swap; }
+@font-face { font-family: "Urbanist"; src: url("fonts/Urbanist-800.ttf") format("truetype"); font-weight: 800; font-display: swap; }
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --blue:       #2145CF;
+  --blue-dark:  #1C3ECC;
+  --blue-light: #3A5FE8;
+  --coral:      #FF7F50;
+  --lime:       #BFFF00;
+  --gold:       #CFAB21;
+  --ink:        #0E0E10;
+  --fg1:        #424965;
+  --fg2:        #4A4A4A;
+  --cream:      #F5F3EE;
+  --white:      #FFFFFF;
+  --ease:       cubic-bezier(0.22,1,0.36,1);
+}
+html { scroll-behavior: smooth; }
+body { font-family: "Urbanist", -apple-system, sans-serif; background: var(--white); color: var(--ink); -webkit-font-smoothing: antialiased; overflow-x: hidden; cursor: none; }
+
+/* ── CUSTOM CURSOR ── */
+#cursor {
+  position: fixed; top: 0; left: 0; z-index: 9999;
+  width: 12px; height: 12px; border-radius: 50%;
+  background: var(--blue); pointer-events: none;
+  transform: translate(-50%,-50%);
+  transition: width 0.2s var(--ease), height 0.2s var(--ease), background 0.2s;
+  mix-blend-mode: multiply;
+}
+#cursor.hover { width: 48px; height: 48px; background: var(--coral); }
+#cursor.clicking { width: 32px; height: 32px; }
+
+/* ── NAV ── */
+nav {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 48px; height: 68px;
+  transition: background 0.4s, box-shadow 0.4s;
+}
+nav.scrolled {
+  background: rgba(33,69,207,0.97);
+  backdrop-filter: blur(20px);
+  box-shadow: 0 2px 20px rgba(0,0,0,0.15);
+}
+.nav-logo { height: 28px; display: block; }
+.nav-links { display: flex; gap: 8px; }
+.nav-link {
+  font-size: 15px; font-weight: 500; color: rgba(255,255,255,0.8);
+  text-decoration: none; padding: 8px 16px; border-radius: 999px;
+  position: relative; transition: color 0.2s, background 0.2s;
+}
+.nav-link:hover { color: white; background: rgba(255,255,255,0.12); }
+.nav-cta {
+  background: var(--lime); color: var(--ink);
+  font-size: 14px; font-weight: 800; letter-spacing: -0.01em;
+  padding: 11px 26px; border-radius: 999px;
+  text-decoration: none; transition: transform 0.2s var(--ease), box-shadow 0.2s;
+  box-shadow: 0 4px 16px rgba(191,255,0,0.3);
+}
+.nav-cta:hover { transform: scale(1.05) translateY(-1px); box-shadow: 0 8px 24px rgba(191,255,0,0.4); }
+
+/* ── HERO ── */
+.hero {
+  min-height: 100vh;
+  background: var(--blue);
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: stretch;
+}
+.hero-left {
+  padding: 140px 64px 120px 72px;
+  display: flex; flex-direction: column; justify-content: center;
+  position: relative; z-index: 2;
+}
+.hero-pill {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 999px; padding: 8px 16px;
+  font-size: 12px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--lime); margin-bottom: 36px; width: fit-content;
+  animation: fadeUp 0.8s var(--ease) 0.1s both;
+}
+.hero-pill-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--lime); animation: pulse 2s infinite; }
+@keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.5;transform:scale(1.4)} }
+.hero-headline {
+  font-size: clamp(60px, 7.5vw, 112px);
+  font-weight: 800; line-height: 0.9;
+  letter-spacing: -0.04em; color: var(--white);
+  margin-bottom: 28px;
+  animation: fadeUp 0.9s var(--ease) 0.2s both;
+}
+.hero-headline .coral { color: var(--coral); display: block; }
+.hero-headline .lime  { color: var(--lime); }
+.hero-sub {
+  font-size: 19px; font-weight: 400; line-height: 1.6;
+  color: rgba(255,255,255,0.65); max-width: 420px; margin-bottom: 44px;
+  animation: fadeUp 0.9s var(--ease) 0.35s both;
+}
+.hero-actions {
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  animation: fadeUp 0.9s var(--ease) 0.45s both;
+}
+.btn-hero {
+  display: inline-flex; align-items: center; gap: 10px;
+  background: var(--white); color: var(--blue);
+  font-size: 16px; font-weight: 800; letter-spacing: -0.02em;
+  padding: 16px 32px; border-radius: 999px; text-decoration: none;
+  transition: transform 0.2s var(--ease), box-shadow 0.2s;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.25);
+}
+.btn-hero:hover { transform: translateY(-3px) scale(1.02); box-shadow: 0 16px 40px rgba(0,0,0,0.35); }
+.btn-ghost { font-size: 15px; font-weight: 600; color: rgba(255,255,255,0.75); text-decoration: none; border-bottom: 1.5px solid rgba(255,255,255,0.3); padding-bottom: 2px; transition: color 0.2s, border-color 0.2s; }
+.btn-ghost:hover { color: white; border-color: white; }
+
+/* Pill badges floating */
+.hero-badges {
+  display: flex; flex-direction: column; gap: 12px;
+  margin-top: 48px; animation: fadeUp 0.9s var(--ease) 0.55s both;
+}
+.hero-badge {
+  display: inline-flex; align-items: center; gap: 10px;
+  background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.15);
+  backdrop-filter: blur(12px); border-radius: 999px;
+  padding: 10px 18px; width: fit-content;
+  font-size: 13px; font-weight: 600; color: white;
+}
+.hero-badge-icon { font-size: 16px; }
+
+/* Hero photo side */
+.hero-right {
+  position: relative; overflow: hidden;
+}
+.hero-photo {
+  width: 100%; height: 100%;
+  object-fit: cover; object-position: center top;
+  transform: scale(1.05);
+  transition: transform 6s ease;
+}
+.hero-photo.loaded { transform: scale(1); }
+.hero-photo-overlay {
+  position: absolute; inset: 0;
+  background: linear-gradient(to right, var(--blue) 0%, rgba(33,69,207,0.3) 30%, transparent 60%);
+}
+
+/* Floating cards on hero */
+.hero-float {
+  position: absolute; z-index: 4;
+  background: rgba(255,255,255,0.95); border-radius: 18px;
+  padding: 14px 18px; box-shadow: 0 16px 48px rgba(0,0,0,0.25);
+  backdrop-filter: blur(12px);
+}
+.hf-top { top: 28%; right: 40px; animation: floatY 5s ease-in-out infinite; }
+.hf-bot { bottom: 28%; right: 60px; animation: floatY 5s ease-in-out 2s infinite; }
+@keyframes floatY { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-12px)} }
+.hf-icon { font-size: 22px; margin-bottom: 4px; }
+.hf-title { font-size: 13px; font-weight: 800; color: var(--ink); letter-spacing: -0.01em; }
+.hf-sub { font-size: 11px; font-weight: 500; color: var(--fg2); margin-top: 2px; }
+.hf-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 4px; }
+
+/* WAVE DIVIDER */
+.wave { display: block; margin-bottom: -4px; line-height: 0; }
+.wave svg { display: block; width: 100%; }
+
+/* ── STATS (LIME) ── */
+.stats-section {
+  background: var(--lime);
+  padding: 100px 80px;
+  position: relative;
+}
+.stats-eyebrow {
+  font-size: 11px; font-weight: 800; letter-spacing: 0.22em;
+  text-transform: uppercase; color: rgba(0,0,0,0.4);
+  margin-bottom: 64px; text-align: center;
+}
+.stats-grid {
+  display: grid; grid-template-columns: repeat(3,1fr);
+  gap: 0;
+}
+.stat-item {
+  padding: 0 56px;
+  border-right: 2px solid rgba(0,0,0,0.1);
+  opacity: 0; transform: translateY(30px);
+  transition: opacity 0.7s var(--ease), transform 0.7s var(--ease);
+}
+.stat-item.visible { opacity: 1; transform: translateY(0); }
+.stat-item:nth-child(2) { transition-delay: 0.1s; }
+.stat-item:nth-child(3) { transition-delay: 0.2s; border-right: none; }
+.stat-num {
+  font-size: clamp(80px, 9vw, 128px); font-weight: 800;
+  line-height: 0.85; letter-spacing: -0.05em; color: var(--ink);
+  display: flex; align-items: flex-end; gap: 4px;
+}
+.stat-num .accent { color: var(--blue); }
+.stat-label {
+  font-size: 15px; font-weight: 600; color: rgba(0,0,0,0.55);
+  margin-top: 16px; line-height: 1.4;
+}
+
+/* ── FOUR PILLARS ── */
+.pillars {
+  background: var(--white);
+  padding: 120px 72px;
+}
+.section-header { margin-bottom: 64px; }
+.section-eyebrow {
+  font-size: 11px; font-weight: 800; letter-spacing: 0.22em;
+  text-transform: uppercase; color: var(--blue); margin-bottom: 16px;
+  display: flex; align-items: center; gap: 10px;
+}
+.section-eyebrow::before { content:""; display:block; width:20px; height:2px; background: var(--blue); border-radius: 2px; }
+.section-title {
+  font-size: clamp(44px, 5vw, 72px); font-weight: 800;
+  line-height: 0.95; letter-spacing: -0.035em; color: var(--ink);
+}
+.section-title .coral { color: var(--coral); }
+.section-title .blue { color: var(--blue); }
+.section-title .lime-text { color: #7CA800; }
+.pillars-grid {
+  display: grid; grid-template-columns: repeat(4,1fr); gap: 20px;
+}
+.pillar-card {
+  border-radius: 28px; overflow: hidden; position: relative;
+  aspect-ratio: 3/4; cursor: none;
+  transition: transform 0.4s var(--ease), box-shadow 0.4s;
+  opacity: 0; transform: translateY(40px);
+}
+.pillar-card.visible { opacity: 1; transform: translateY(0); }
+.pillar-card:nth-child(2) { transition-delay: 0.08s; }
+.pillar-card:nth-child(3) { transition-delay: 0.16s; }
+.pillar-card:nth-child(4) { transition-delay: 0.24s; }
+.pillar-card:hover { transform: translateY(-8px) scale(1.02); box-shadow: 0 32px 64px rgba(0,0,0,0.2); }
+.pillar-img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.6s var(--ease); }
+.pillar-card:hover .pillar-img { transform: scale(1.08); }
+.pillar-overlay {
+  position: absolute; inset: 0;
+  background: linear-gradient(to top, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.2) 50%, transparent 100%);
+  display: flex; flex-direction: column; justify-content: flex-end;
+  padding: 28px 24px;
+}
+.pillar-icon {
+  font-size: 32px; margin-bottom: 10px;
+  transform: translateY(0); transition: transform 0.3s var(--ease);
+}
+.pillar-card:hover .pillar-icon { transform: translateY(-4px); }
+.pillar-tag {
+  display: inline-block;
+  font-size: 10px; font-weight: 800; letter-spacing: 0.16em;
+  text-transform: uppercase; padding: 5px 12px; border-radius: 999px;
+  margin-bottom: 10px; width: fit-content;
+}
+.tag-safety   { background: var(--lime);  color: var(--ink); }
+.tag-community{ background: var(--blue);  color: white; }
+.tag-care     { background: var(--coral); color: white; }
+.tag-trust    { background: var(--gold);  color: var(--ink); }
+.pillar-title {
+  font-size: 26px; font-weight: 800; color: white;
+  line-height: 1.1; letter-spacing: -0.02em; margin-bottom: 8px;
+}
+.pillar-body {
+  font-size: 13px; font-weight: 400; color: rgba(255,255,255,0.75);
+  line-height: 1.55;
+  max-height: 0; overflow: hidden;
+  transition: max-height 0.4s var(--ease), opacity 0.3s;
+  opacity: 0;
+}
+.pillar-card:hover .pillar-body { max-height: 80px; opacity: 1; }
+
+/* ── FEATURE SPLIT: COMMUNITY ── */
+.feature-community {
+  background: var(--cream);
+  display: grid; grid-template-columns: 1fr 1fr;
+  min-height: 600px;
+  position: relative;
+}
+.fc-photo {
+  position: relative; overflow: hidden;
+}
+.fc-photo img {
+  width: 100%; height: 100%; object-fit: cover;
+  transition: transform 0.8s var(--ease);
+}
+.feature-community:hover .fc-photo img { transform: scale(1.03); }
+.fc-copy {
+  padding: 100px 80px;
+  display: flex; flex-direction: column; justify-content: center;
+}
+.feature-num {
+  font-size: 120px; font-weight: 800; line-height: 1;
+  letter-spacing: -0.06em; color: rgba(33,69,207,0.07);
+  margin-bottom: -20px; margin-left: -4px;
+}
+.feature-title {
+  font-size: clamp(40px, 4.5vw, 60px); font-weight: 800;
+  line-height: 0.95; letter-spacing: -0.035em; color: var(--ink);
+  margin-bottom: 20px;
+}
+.feature-title .accent { color: var(--blue); }
+.feature-title .coral { color: var(--coral); }
+.feature-body { font-size: 17px; line-height: 1.65; color: var(--fg2); margin-bottom: 36px; max-width: 420px; }
+.feature-link {
+  display: inline-flex; align-items: center; gap: 10px;
+  font-size: 15px; font-weight: 800; color: var(--blue);
+  text-decoration: none; padding: 14px 28px;
+  border: 2px solid var(--blue); border-radius: 999px;
+  transition: background 0.2s, color 0.2s, transform 0.2s var(--ease);
+  width: fit-content;
+}
+.feature-link:hover { background: var(--blue); color: white; transform: translateY(-2px); }
+.feature-link .arr { transition: transform 0.2s; }
+.feature-link:hover .arr { transform: translateX(4px); }
+
+/* ── FEATURE SPLIT: SAFETY (dark) ── */
+.feature-safety {
+  background: var(--ink);
+  display: grid; grid-template-columns: 1fr 1fr;
+  min-height: 600px;
+}
+.fs-copy {
+  padding: 100px 80px;
+  display: flex; flex-direction: column; justify-content: center;
+}
+.fs-copy .feature-num { color: rgba(191,255,0,0.08); }
+.fs-copy .feature-title { color: white; }
+.fs-copy .feature-title .accent { color: var(--lime); }
+.fs-copy .feature-body { color: rgba(255,255,255,0.6); }
+.fs-copy .feature-link { color: var(--lime); border-color: var(--lime); }
+.fs-copy .feature-link:hover { background: var(--lime); color: var(--ink); }
+.fs-phone-wrap {
+  display: flex; align-items: center; justify-content: center;
+  padding: 80px 60px;
+  position: relative;
+}
+.fs-glow {
+  position: absolute; width: 300px; height: 300px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(191,255,0,0.15) 0%, transparent 70%);
+}
+.fs-phone {
+  width: 240px; border-radius: 42px;
+  border: 8px solid #1a1a2e;
+  box-shadow: 0 32px 80px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.05), 0 0 60px rgba(191,255,0,0.15);
+  overflow: hidden; position: relative; z-index: 2;
+  transform: rotate(-2deg);
+}
+.fs-screen {
+  background: linear-gradient(160deg, #0f1729 0%, #070d1a 100%);
+  padding: 32px 16px 20px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.fs-map-area {
+  height: 200px; border-radius: 16px; overflow: hidden; position: relative;
+  background: linear-gradient(135deg, #1a2a60 0%, #0f1a40 100%);
+}
+.fs-map-grid {
+  position: absolute; inset: 0;
+  background-image: linear-gradient(rgba(255,255,255,0.04) 1px, transparent 1px), linear-gradient(90deg,rgba(255,255,255,0.04) 1px,transparent 1px);
+  background-size: 32px 32px;
+}
+.pin {
+  position: absolute; width: 28px; height: 28px;
+  border-radius: 50% 50% 50% 0; transform: rotate(-45deg);
+  border: 3px solid rgba(255,255,255,0.9);
+}
+.pin::after { content:""; position:absolute; inset:5px; background:white; border-radius:50%; }
+.pin-1 { top:25%; left:30%; background:var(--coral); }
+.pin-2 { top:50%; left:60%; background:var(--lime); }
+.pin-3 { top:15%; left:55%; background:var(--blue-light); }
+.fs-alert {
+  background: rgba(191,255,0,0.1); border: 1px solid rgba(191,255,0,0.2);
+  border-radius: 14px; padding: 12px 14px;
+  display: flex; align-items: center; gap: 10px;
+}
+.fs-alert-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--lime); flex-shrink: 0; animation: pulse 2s infinite; }
+.fs-alert-text { font-size: 11px; color: rgba(255,255,255,0.8); font-weight: 500; font-family: "Urbanist", sans-serif; }
+.fs-alert-text strong { color: var(--lime); display: block; font-size: 12px; }
+.fs-card {
+  background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 12px; padding: 10px 12px;
+  display: flex; gap: 8px; align-items: center;
+}
+.fs-card-bar { flex: 1; display: flex; flex-direction: column; gap: 5px; }
+.fs-bar { height: 7px; border-radius: 4px; background: rgba(255,255,255,0.12); }
+.fs-bar.s { width: 60%; }
+
+/* ── CARE SECTION ── */
+.care-section {
+  background: var(--white);
+  padding: 120px 72px;
+}
+.care-grid {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 80px; align-items: center; margin-top: 64px;
+}
+.care-photo-stack { position: relative; height: 520px; }
+.care-photo-main {
+  width: 75%; height: 100%; object-fit: cover;
+  border-radius: 28px;
+  box-shadow: 0 32px 64px rgba(0,0,0,0.15);
+}
+.care-photo-accent {
+  position: absolute; bottom: -32px; right: 0;
+  width: 55%; height: 60%; object-fit: cover;
+  border-radius: 24px; border: 6px solid white;
+  box-shadow: 0 20px 48px rgba(0,0,0,0.2);
+}
+.care-copy {}
+.care-features { margin-top: 36px; display: flex; flex-direction: column; gap: 16px; }
+.care-feat {
+  display: flex; align-items: flex-start; gap: 16px;
+  padding: 20px; border-radius: 20px; border: 1.5px solid transparent;
+  transition: border-color 0.3s, background 0.3s, transform 0.3s var(--ease);
+  cursor: none;
+}
+.care-feat:hover { background: #FFF4F0; border-color: rgba(255,127,80,0.2); transform: translateX(6px); }
+.care-feat-icon {
+  width: 48px; height: 48px; border-radius: 14px;
+  background: var(--coral); display: flex; align-items: center; justify-content: center;
+  font-size: 22px; flex-shrink: 0;
+  transition: transform 0.3s var(--ease);
+}
+.care-feat:hover .care-feat-icon { transform: scale(1.1) rotate(-5deg); }
+.care-feat-icon.blue { background: var(--blue); }
+.care-feat-icon.gold { background: var(--gold); }
+.care-feat-title { font-size: 16px; font-weight: 800; color: var(--ink); margin-bottom: 4px; }
+.care-feat-body { font-size: 14px; color: var(--fg2); line-height: 1.5; }
+
+/* ── TESTIMONIAL / COMMUNITY PHOTO WALL ── */
+.community-wall {
+  background: var(--blue);
+  padding: 120px 72px;
+  position: relative; overflow: hidden;
+}
+.cw-inner { position: relative; z-index: 2; }
+.cw-header { display: grid; grid-template-columns: 1fr 1fr; gap: 60px; align-items: end; margin-bottom: 64px; }
+.cw-title { font-size: clamp(48px, 5.5vw, 80px); font-weight: 800; line-height: 0.92; letter-spacing: -0.04em; color: white; }
+.cw-title .coral { color: var(--coral); font-style: italic; }
+.cw-sub { font-size: 17px; line-height: 1.65; color: rgba(255,255,255,0.65); }
+.cw-photo-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  grid-template-rows: repeat(2, 200px);
+  gap: 16px;
+}
+.cw-photo {
+  border-radius: 20px; overflow: hidden; position: relative;
+  opacity: 0; transform: scale(0.95);
+  transition: opacity 0.6s var(--ease), transform 0.6s var(--ease);
+}
+.cw-photo.visible { opacity: 1; transform: scale(1); }
+.cw-photo:nth-child(2) { transition-delay: 0.06s; }
+.cw-photo:nth-child(3) { transition-delay: 0.12s; }
+.cw-photo:nth-child(4) { transition-delay: 0.18s; }
+.cw-photo:nth-child(5) { transition-delay: 0.24s; }
+.cw-photo:nth-child(6) { transition-delay: 0.30s; }
+.cw-photo:nth-child(7) { transition-delay: 0.36s; }
+.cw-photo:nth-child(8) { transition-delay: 0.42s; }
+.cw-photo img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.5s var(--ease); }
+.cw-photo:hover img { transform: scale(1.08); }
+.cw-photo.span2 { grid-column: span 2; }
+.cw-photo-overlay {
+  position: absolute; inset: 0;
+  background: linear-gradient(to top, rgba(33,69,207,0.6) 0%, transparent 60%);
+  opacity: 0; transition: opacity 0.3s;
+  display: flex; align-items: flex-end; padding: 16px;
+}
+.cw-photo:hover .cw-photo-overlay { opacity: 1; }
+.cw-caption { font-size: 13px; font-weight: 700; color: white; font-family: "Urbanist", sans-serif; }
+
+/* ── DOWNLOAD CTA ── */
+.download-section {
+  background: var(--coral);
+  padding: 120px 80px;
+  display: grid; grid-template-columns: 1fr auto;
+  gap: 80px; align-items: center;
+  position: relative; overflow: hidden;
+}
+.ds-bg-text {
+  position: absolute; font-size: 280px; font-weight: 800;
+  letter-spacing: -0.05em; color: rgba(255,255,255,0.07);
+  top: 50%; left: 0; transform: translateY(-50%);
+  pointer-events: none; white-space: nowrap; user-select: none;
+}
+.ds-copy { position: relative; z-index: 2; }
+.ds-eyebrow { font-size: 12px; font-weight: 800; letter-spacing: 0.2em; text-transform: uppercase; color: rgba(255,255,255,0.7); margin-bottom: 16px; }
+.ds-title { font-size: clamp(72px, 9vw, 128px); font-weight: 800; line-height: 0.88; letter-spacing: -0.05em; color: white; margin-bottom: 48px; }
+.ds-stores { display: flex; gap: 16px; flex-wrap: wrap; }
+.store-pill {
+  display: inline-flex; align-items: center; gap: 14px;
+  background: var(--ink); color: white;
+  padding: 14px 28px; border-radius: 18px; text-decoration: none;
+  transition: transform 0.2s var(--ease), box-shadow 0.2s;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+  font-family: "Urbanist", sans-serif;
+}
+.store-pill:hover { transform: translateY(-3px) scale(1.03); box-shadow: 0 16px 40px rgba(0,0,0,0.4); }
+.store-icon { font-size: 28px; }
+.store-label { display: flex; flex-direction: column; }
+.store-small { font-size: 10px; font-weight: 500; opacity: 0.6; text-transform: uppercase; letter-spacing: 0.08em; }
+.store-big { font-size: 18px; font-weight: 800; letter-spacing: -0.02em; }
+.ds-phone {
+  position: relative; z-index: 2;
+  width: 260px; border-radius: 48px;
+  border: 10px solid rgba(0,0,0,0.2);
+  overflow: hidden; transform: rotate(4deg);
+  box-shadow: 0 48px 96px rgba(0,0,0,0.3);
+  flex-shrink: 0;
+  transition: transform 0.4s var(--ease);
+}
+.ds-phone:hover { transform: rotate(0deg) translateY(-8px); }
+.ds-screen {
+  background: var(--blue);
+  aspect-ratio: 9/19.5;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 20px; padding: 40px 24px;
+}
+.ds-mark { height: 64px; }
+.ds-wm { height: 36px; }
+.ds-tagline { font-size: 13px; color: rgba(255,255,255,0.6); font-weight: 500; text-align: center; font-family: "Urbanist", sans-serif; line-height: 1.5; }
+
+/* ── FOOTER ── */
+footer {
+  background: var(--blue);
+  padding: 0 80px 48px;
+  position: relative; overflow: hidden;
+}
+.footer-wm-giant {
+  font-size: clamp(100px, 14vw, 180px); font-weight: 800;
+  letter-spacing: -0.06em; color: rgba(255,255,255,0.07);
+  line-height: 1; padding-top: 60px; margin-bottom: -20px;
+  user-select: none; pointer-events: none;
+  white-space: nowrap; overflow: hidden;
+}
+.footer-inner {
+  display: grid; grid-template-columns: 2fr 1fr 1fr 1fr;
+  gap: 60px; padding-bottom: 60px;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+  margin-bottom: 40px; position: relative; z-index: 2;
+}
+.footer-brand-col {}
+.footer-logo { height: 32px; margin-bottom: 18px; display: block; }
+.footer-desc { font-size: 15px; line-height: 1.65; color: rgba(255,255,255,0.5); max-width: 280px; margin-bottom: 28px; }
+.footer-store-row { display: flex; gap: 10px; }
+.footer-store {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.15);
+  color: white; padding: 9px 16px; border-radius: 12px; text-decoration: none;
+  font-size: 13px; font-weight: 700; font-family: "Urbanist", sans-serif;
+  transition: background 0.2s, transform 0.2s;
+}
+.footer-store:hover { background: rgba(255,255,255,0.2); transform: translateY(-2px); }
+.footer-col-head { font-size: 10px; font-weight: 800; letter-spacing: 0.2em; text-transform: uppercase; color: rgba(255,255,255,0.3); margin-bottom: 20px; }
+.footer-links { display: flex; flex-direction: column; gap: 12px; }
+.footer-links a { font-size: 15px; font-weight: 500; color: rgba(255,255,255,0.6); text-decoration: none; transition: color 0.2s, transform 0.2s; display: block; }
+.footer-links a:hover { color: white; transform: translateX(4px); }
+.footer-bottom { display: flex; justify-content: space-between; align-items: center; position: relative; z-index: 2; }
+.footer-legal { font-size: 13px; color: rgba(255,255,255,0.3); }
+.footer-social { display: flex; gap: 10px; }
+.footer-social a {
+  width: 38px; height: 38px; border-radius: 50%;
+  background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12);
+  display: flex; align-items: center; justify-content: center; font-size: 16px;
+  text-decoration: none; transition: background 0.2s, transform 0.2s;
+}
+.footer-social a:hover { background: rgba(255,255,255,0.18); transform: translateY(-2px); }
+
+/* ── LIME FOOTER ACCENT BAR ── */
+.footer-lime-bar {
+  background: var(--lime); color: var(--ink);
+  padding: 18px 80px;
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 13px; font-weight: 700;
+}
+.flb-text { letter-spacing: 0.08em; text-transform: uppercase; font-size: 11px; }
+.flb-link { text-decoration: none; color: var(--ink); font-weight: 800; border-bottom: 2px solid var(--ink); }
+
+/* ── ANIMATIONS ── */
+@keyframes fadeUp { from { opacity:0; transform:translateY(32px); } to { opacity:1; transform:translateY(0); } }
+.reveal { opacity:0; transform:translateY(40px); transition: opacity 0.8s var(--ease), transform 0.8s var(--ease); }
+.reveal.visible { opacity:1; transform:translateY(0); }
+.reveal-l { opacity:0; transform:translateX(-40px); transition: opacity 0.8s var(--ease), transform 0.8s var(--ease); }
+.reveal-l.visible { opacity:1; transform:translateX(0); }
+.reveal-r { opacity:0; transform:translateX(40px); transition: opacity 0.8s var(--ease), transform 0.8s var(--ease); }
+.reveal-r.visible { opacity:1; transform:translateX(0); }
+</style>
+</head>
+<body>
+
+<!-- CURSOR -->
+<div id="cursor"></div>
+
+<!-- NAV -->
+<nav id="nav">
+  <img src="huddle-wordmark-bear-white.png" alt="huddle" class="nav-logo">
+  <div class="nav-links">
+    <a href="#" class="nav-link">How it works</a>
+    <a href="#" class="nav-link">Safety</a>
+    <a href="#" class="nav-link">Care</a>
+    <a href="#" class="nav-link">Community</a>
+  </div>
+  <a href="#" class="nav-cta">Get the app ↓</a>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-left">
+    <div class="hero-pill">
+      <span class="hero-pill-dot"></span>
+      Now live in Hong Kong
+    </div>
+    <h1 class="hero-headline">
+      No pet<br>
+      left <span class="coral">behind.</span>
+    </h1>
+    <p class="hero-sub">The social trust network for pet people. Safety alerts, trusted carers, and your neighbourhood — live, in one app.</p>
+    <div class="hero-actions">
+      <a href="#" class="btn-hero">Download free <span>↓</span></a>
+      <a href="#" class="btn-ghost">See how it works →</a>
+    </div>
+    <div class="hero-badges">
+      <div class="hero-badge"><span class="hero-badge-icon">🐾</span> 43K pets reunited with huddle</div>
+      <div class="hero-badge"><span class="hero-badge-icon">⚡</span> Avg. 2h lost pet response time</div>
+    </div>
+  </div>
+  <div class="hero-right">
+    <img src="https://images.unsplash.com/photo-1587300003388-59208cc962cb?w=900&q=85&auto=format&fit=crop" alt="Golden retriever dog" class="hero-photo" onload="this.classList.add('loaded')">
+    <div class="hero-photo-overlay"></div>
+    <div class="hero-float hf-top">
+      <div class="hf-icon">🚨</div>
+      <div class="hf-title">Live alert · Sai Ying Pun</div>
+      <div class="hf-sub"><span class="hf-dot" style="background:var(--coral)"></span>Golden retriever spotted</div>
+    </div>
+    <div class="hero-float hf-bot">
+      <div class="hf-icon">✅</div>
+      <div class="hf-title">Booking confirmed</div>
+      <div class="hf-sub"><span class="hf-dot" style="background:#22C55E"></span>Luna's grooming · 3pm</div>
+    </div>
+  </div>
+</section>
+
+<!-- WAVE: blue → lime -->
+<div class="wave">
+  <svg viewBox="0 0 1440 90" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none" style="height:90px">
+    <path d="M0,0 L0,50 C240,90 480,20 720,50 C960,80 1200,20 1440,50 L1440,0 Z" fill="#2145CF"/>
+    <path d="M0,90 L0,50 C240,90 480,20 720,50 C960,80 1200,20 1440,50 L1440,90 Z" fill="#BFFF00"/>
+  </svg>
+</div>
+
+<!-- STATS ON LIME -->
+<section class="stats-section">
+  <div class="stats-eyebrow">By the numbers</div>
+  <div class="stats-grid">
+    <div class="stat-item">
+      <div class="stat-num" data-target="43" data-suffix="K+">0</div>
+      <div class="stat-label">Pets reunited through<br>community alerts</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-num"><span data-target="2" data-suffix="h">0</span><span class="accent"> avg</span></div>
+      <div class="stat-label">Lost pet response time<br>in active huddles</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-num" data-target="98" data-suffix="%">0</div>
+      <div class="stat-label">Verified carer<br>satisfaction rate</div>
+    </div>
+  </div>
+</section>
+
+<!-- WAVE: lime → white -->
+<div class="wave">
+  <svg viewBox="0 0 1440 90" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none" style="height:90px">
+    <path d="M0,0 C360,60 1080,0 1440,40 L1440,0 Z" fill="#BFFF00"/>
+    <path d="M0,90 L0,40 C360,80 1080,10 1440,50 L1440,90 Z" fill="white"/>
+  </svg>
+</div>
+
+<!-- FOUR PILLARS -->
+<section class="pillars">
+  <div class="section-header reveal">
+    <div class="section-eyebrow">Everything your pet needs</div>
+    <h2 class="section-title">One app.<br><span class="coral">Four superpowers.</span></h2>
+  </div>
+  <div class="pillars-grid">
+    <div class="pillar-card">
+      <img src="https://images.unsplash.com/photo-1548199973-ec657fa7de82?w=600&q=80&auto=format&fit=crop" alt="Safety" class="pillar-img">
+      <div class="pillar-overlay">
+        <div class="pillar-icon">🚨</div>
+        <div class="pillar-tag tag-safety">Safety</div>
+        <div class="pillar-title">Real-time alerts</div>
+        <div class="pillar-body">Live hazard pins, lost pet broadcasts, and emergency mesh alerts — visible to everyone on your block.</div>
+      </div>
+    </div>
+    <div class="pillar-card">
+      <img src="https://images.unsplash.com/photo-1450778869180-41d0601e046e?w=600&q=80&auto=format&fit=crop" alt="Community" class="pillar-img">
+      <div class="pillar-overlay">
+        <div class="pillar-icon">💬</div>
+        <div class="pillar-tag tag-community">Community</div>
+        <div class="pillar-title">Your neighbourhood pack</div>
+        <div class="pillar-body">Connect with pet owners on your street. Share tips, organise walks, and build bonds that actually last.</div>
+      </div>
+    </div>
+    <div class="pillar-card">
+      <img src="https://images.unsplash.com/photo-1601758125946-6ec2ef64daf8?w=600&q=80&auto=format&fit=crop" alt="Care" class="pillar-img">
+      <div class="pillar-overlay">
+        <div class="pillar-icon">🐾</div>
+        <div class="pillar-tag tag-care">Care</div>
+        <div class="pillar-title">Trusted carers</div>
+        <div class="pillar-body">Every walker, sitter, and groomer is identity-verified. Book in two minutes. Trust takes years — we did the work.</div>
+      </div>
+    </div>
+    <div class="pillar-card">
+      <img src="https://images.unsplash.com/photo-1559190394-df5a28aab5c5?w=600&q=80&auto=format&fit=crop" alt="Trust" class="pillar-img">
+      <div class="pillar-overlay">
+        <div class="pillar-icon">🔒</div>
+        <div class="pillar-tag tag-trust">Trust</div>
+        <div class="pillar-title">Verified identity</div>
+        <div class="pillar-body">Every member, every carer, every group — verified. The longer you stay, the more trusted you become.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- WAVE: white → cream -->
+<div class="wave">
+  <svg viewBox="0 0 1440 80" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none" style="height:80px">
+    <path d="M0,0 C480,80 960,0 1440,60 L1440,80 L0,80 Z" fill="white"/>
+    <path d="M0,80 L0,60 C480,80 960,0 1440,60 L1440,80 Z" fill="#F5F3EE"/>
+  </svg>
+</div>
+
+<!-- COMMUNITY FEATURE -->
+<section class="feature-community">
+  <div class="fc-photo">
+    <img src="https://images.unsplash.com/photo-1552053831-71594a27632d?w=900&q=85&auto=format&fit=crop" alt="Person hugging dog">
+  </div>
+  <div class="fc-copy reveal-r">
+    <div class="feature-num">01</div>
+    <div class="section-eyebrow">Community</div>
+    <h2 class="feature-title">Your neighbourhood<br>has a <span class="accent">group chat.</span></h2>
+    <p class="feature-body">Connect with pet owners on your block. Share alerts, organise rescues, and build a local pack with people whose pets already know yours.</p>
+    <a href="#" class="feature-link">Explore community <span class="arr">→</span></a>
+  </div>
+</section>
+
+<!-- WAVE: cream → ink -->
+<div class="wave">
+  <svg viewBox="0 0 1440 80" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none" style="height:80px">
+    <path d="M0,0 C360,80 1080,0 1440,60 L1440,80 L0,80 Z" fill="#F5F3EE"/>
+    <path d="M0,80 L0,60 C360,80 1080,0 1440,60 L1440,80 Z" fill="#0E0E10"/>
+  </svg>
+</div>
+
+<!-- SAFETY FEATURE (dark) -->
+<section class="feature-safety">
+  <div class="fs-copy reveal-l">
+    <div class="feature-num">02</div>
+    <div class="section-eyebrow" style="color:var(--lime)"><span style="width:20px;height:2px;background:var(--lime);display:inline-block;border-radius:2px"></span> Safety</div>
+    <h2 class="feature-title">Know before<br>danger <span class="accent">reaches</span><br>your door.</h2>
+    <p class="feature-body">Real-time hazard alerts, lost pet broadcasts, and verified safety reports. In a dense city, minutes save lives — huddle moves in seconds.</p>
+    <a href="#" class="feature-link">Learn about safety <span class="arr">→</span></a>
+  </div>
+  <div class="fs-phone-wrap reveal-r">
+    <div class="fs-glow"></div>
+    <div class="fs-phone">
+      <div class="fs-screen">
+        <div class="fs-map-area">
+          <div class="fs-map-grid"></div>
+          <div class="pin pin-1"></div>
+          <div class="pin pin-2"></div>
+          <div class="pin pin-3"></div>
+        </div>
+        <div class="fs-alert">
+          <div class="fs-alert-dot"></div>
+          <div class="fs-alert-text">
+            <strong>Alert · Sai Ying Pun</strong>
+            Golden retriever spotted on Queen's Road
+          </div>
+        </div>
+        <div class="fs-card">
+          <div style="font-size:18px">🐾</div>
+          <div class="fs-card-bar">
+            <div class="fs-bar"></div>
+            <div class="fs-bar s"></div>
+          </div>
+        </div>
+        <div class="fs-card">
+          <div style="font-size:18px">📍</div>
+          <div class="fs-card-bar">
+            <div class="fs-bar" style="width:80%"></div>
+            <div class="fs-bar s"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- WAVE: ink → white -->
+<div class="wave">
+  <svg viewBox="0 0 1440 80" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none" style="height:80px">
+    <path d="M0,0 C720,80 1080,20 1440,50 L1440,80 L0,80 Z" fill="#0E0E10"/>
+    <path d="M0,80 L0,50 C720,80 1080,20 1440,50 L1440,80 Z" fill="white"/>
+  </svg>
+</div>
+
+<!-- CARE SECTION -->
+<section class="care-section">
+  <div class="section-header reveal">
+    <div class="section-eyebrow" style="color:var(--coral)"><span style="width:20px;height:2px;background:var(--coral);display:inline-block;border-radius:2px"></span> Care</div>
+    <h2 class="section-title">Every carer,<br><span class="coral">verified.</span></h2>
+  </div>
+  <div class="care-grid">
+    <div class="care-photo-stack reveal-l">
+      <img src="https://images.unsplash.com/photo-1534361960057-19f4434a03af?w=700&q=85&auto=format&fit=crop" alt="Dog walker" class="care-photo-main">
+      <img src="https://images.unsplash.com/photo-1583337130417-3346a1be7dee?w=500&q=85&auto=format&fit=crop" alt="Cute dog" class="care-photo-accent">
+    </div>
+    <div class="care-copy reveal-r">
+      <p style="font-size:18px;line-height:1.65;color:var(--fg2);margin-bottom:8px">Walkers, sitters, groomers, vets — every professional on huddle is identity-verified before their first booking appears.</p>
+      <div class="care-features">
+        <div class="care-feat">
+          <div class="care-feat-icon">🐕</div>
+          <div>
+            <div class="care-feat-title">Dog walking</div>
+            <div class="care-feat-body">GPS-tracked walks from verified locals who already know your block.</div>
+          </div>
+        </div>
+        <div class="care-feat">
+          <div class="care-feat-icon blue">🏠</div>
+          <div>
+            <div class="care-feat-title">Home boarding & sitting</div>
+            <div class="care-feat-body">Carers from your community — not strangers from the internet.</div>
+          </div>
+        </div>
+        <div class="care-feat">
+          <div class="care-feat-icon gold">✂️</div>
+          <div>
+            <div class="care-feat-title">Grooming & vet visits</div>
+            <div class="care-feat-body">Book licensed professionals with ratings from your actual neighbours.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- WAVE: white → blue -->
+<div class="wave">
+  <svg viewBox="0 0 1440 90" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none" style="height:90px">
+    <path d="M0,0 C480,80 960,20 1440,60 L1440,90 L0,90 Z" fill="white"/>
+    <path d="M0,90 L0,60 C480,80 960,20 1440,60 L1440,90 Z" fill="#2145CF"/>
+  </svg>
+</div>
+
+<!-- COMMUNITY PHOTO WALL (blue) -->
+<section class="community-wall">
+  <div class="cw-inner">
+    <div class="cw-header">
+      <h2 class="cw-title">The huddle<br>that brings<br>everyone <span class="coral">home.</span></h2>
+      <p class="cw-sub">Every alert reaches the people closest to you. Every response comes from someone who knows your street. This is what a real community looks like.</p>
+    </div>
+    <div class="cw-photo-grid">
+      <div class="cw-photo span2 cw-photo">
+        <img src="https://images.unsplash.com/photo-1548199973-ec657fa7de82?w=700&q=80&auto=format&fit=crop" alt="">
+        <div class="cw-photo-overlay"><span class="cw-caption">📍 Lost & Found · Sai Ying Pun</span></div>
+      </div>
+      <div class="cw-photo">
+        <img src="https://images.unsplash.com/photo-1543466835-00a7907e9de1?w=400&q=80&auto=format&fit=crop" alt="">
+        <div class="cw-photo-overlay"><span class="cw-caption">🐾 Community walk</span></div>
+      </div>
+      <div class="cw-photo">
+        <img src="https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?w=400&q=80&auto=format&fit=crop" alt="">
+        <div class="cw-photo-overlay"><span class="cw-caption">🏠 Home boarding</span></div>
+      </div>
+      <div class="cw-photo">
+        <img src="https://images.unsplash.com/photo-1477884213360-7e9d7dcc1e48?w=400&q=80&auto=format&fit=crop" alt="">
+        <div class="cw-photo-overlay"><span class="cw-caption">💬 Neighbours</span></div>
+      </div>
+      <div class="cw-photo span2 cw-photo">
+        <img src="https://images.unsplash.com/photo-1560743641-3914f2c45636?w=700&q=80&auto=format&fit=crop" alt="">
+        <div class="cw-photo-overlay"><span class="cw-caption">✅ Verified carer · Central HK</span></div>
+      </div>
+      <div class="cw-photo">
+        <img src="https://images.unsplash.com/photo-1518020382113-a7e8fc38eac9?w=400&q=80&auto=format&fit=crop" alt="">
+        <div class="cw-photo-overlay"><span class="cw-caption">🛡 Safety verified</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- WAVE: blue → coral -->
+<div class="wave">
+  <svg viewBox="0 0 1440 90" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none" style="height:90px">
+    <path d="M0,0 C360,70 1080,10 1440,50 L1440,90 L0,90 Z" fill="#2145CF"/>
+    <path d="M0,90 L0,50 C360,70 1080,10 1440,50 L1440,90 Z" fill="#FF7F50"/>
+  </svg>
+</div>
+
+<!-- DOWNLOAD CTA (CORAL) -->
+<section class="download-section">
+  <div class="ds-bg-text">huddle</div>
+  <div class="ds-copy">
+    <div class="ds-eyebrow">Free to download</div>
+    <div class="ds-title">Get<br>huddle.</div>
+    <div class="ds-stores">
+      <a href="#" class="store-pill">
+        <span class="store-icon">🍎</span>
+        <span class="store-label">
+          <span class="store-small">Download on the</span>
+          <span class="store-big">App Store</span>
+        </span>
+      </a>
+      <a href="#" class="store-pill">
+        <span class="store-icon">▶</span>
+        <span class="store-label">
+          <span class="store-small">Get it on</span>
+          <span class="store-big">Google Play</span>
+        </span>
+      </a>
+    </div>
+  </div>
+  <div class="ds-phone">
+    <div class="ds-screen">
+      <img src="huddle-bear-mark-white.png" alt="huddle" class="ds-mark">
+      <img src="huddle-wordmark-white.png" alt="huddle" class="ds-wm">
+      <div class="ds-tagline">The social trust<br>network for pet people.</div>
+    </div>
+  </div>
+</section>
+
+<!-- WAVE: coral → blue -->
+<div class="wave">
+  <svg viewBox="0 0 1440 80" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none" style="height:80px">
+    <path d="M0,0 C480,80 960,20 1440,50 L1440,80 L0,80 Z" fill="#FF7F50"/>
+    <path d="M0,80 L0,50 C480,80 960,20 1440,50 L1440,80 Z" fill="#2145CF"/>
+  </svg>
+</div>
+
+<!-- FOOTER -->
+<footer>
+  <div class="footer-wm-giant">huddle.</div>
+  <div class="footer-inner">
+    <div class="footer-brand-col">
+      <img src="huddle-wordmark-bear-white.png" alt="huddle" class="footer-logo">
+      <p class="footer-desc">Pet safety, trusted care, and real community — all in one neighbourhood app. Built in Hong Kong.</p>
+      <div class="footer-store-row">
+        <a href="#" class="footer-store">🍎 iOS</a>
+        <a href="#" class="footer-store">▶ Android</a>
+      </div>
+    </div>
+    <div>
+      <div class="footer-col-head">Product</div>
+      <div class="footer-links">
+        <a href="#">How it works</a>
+        <a href="#">Safety</a>
+        <a href="#">Care & Services</a>
+        <a href="#">Community</a>
+        <a href="#">Lost & Found</a>
+      </div>
+    </div>
+    <div>
+      <div class="footer-col-head">Company</div>
+      <div class="footer-links">
+        <a href="#">About</a>
+        <a href="#">Press</a>
+        <a href="#">Careers</a>
+        <a href="#">Contact</a>
+      </div>
+    </div>
+    <div>
+      <div class="footer-col-head">Legal</div>
+      <div class="footer-links">
+        <a href="#">Privacy policy</a>
+        <a href="#">Terms of service</a>
+        <a href="#">Cookies</a>
+        <a href="#">Community guidelines</a>
+      </div>
+    </div>
+  </div>
+  <div class="footer-bottom">
+    <div class="footer-legal">© 2025 huddle. All rights reserved. · huddle.pet</div>
+    <div class="footer-social">
+      <a href="#" title="Instagram">📷</a>
+      <a href="#" title="TikTok">🎵</a>
+      <a href="#" title="X / Twitter">𝕏</a>
+    </div>
+  </div>
+</footer>
+
+<!-- LIME BOTTOM BAR -->
+<div class="footer-lime-bar">
+  <span class="flb-text">huddle · Hong Kong · The social trust network for pet people</span>
+  <a href="#" class="flb-link">Get the app →</a>
+</div>
+
+<script>
+// ── Custom cursor
+const cursor = document.getElementById('cursor');
+document.addEventListener('mousemove', e => {
+  cursor.style.left = e.clientX + 'px';
+  cursor.style.top  = e.clientY + 'px';
+});
+document.addEventListener('mousedown', () => cursor.classList.add('clicking'));
+document.addEventListener('mouseup',   () => cursor.classList.remove('clicking'));
+document.querySelectorAll('a, button, .pillar-card, .care-feat, .cw-photo').forEach(el => {
+  el.addEventListener('mouseenter', () => cursor.classList.add('hover'));
+  el.addEventListener('mouseleave', () => cursor.classList.remove('hover'));
+});
+
+// ── Nav scroll
+const nav = document.getElementById('nav');
+window.addEventListener('scroll', () => {
+  nav.classList.toggle('scrolled', window.scrollY > 40);
+}, { passive: true });
+
+// ── IntersectionObserver for reveal
+const io = new IntersectionObserver((entries) => {
+  entries.forEach(e => {
+    if (e.isIntersecting) { e.target.classList.add('visible'); io.unobserve(e.target); }
+  });
+}, { threshold: 0.15 });
+document.querySelectorAll('.reveal, .reveal-l, .reveal-r, .pillar-card, .stat-item, .cw-photo').forEach(el => io.observe(el));
+
+// ── Animated counters
+function animateCounter(el, target, suffix) {
+  let start = 0;
+  const duration = 1800;
+  const step = timestamp => {
+    if (!step.start) step.start = timestamp;
+    const progress = Math.min((timestamp - step.start) / duration, 1);
+    const ease = 1 - Math.pow(1 - progress, 3);
+    const val = Math.round(ease * target);
+    el.textContent = val + suffix;
+    if (progress < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+const counterIo = new IntersectionObserver((entries) => {
+  entries.forEach(e => {
+    if (!e.isIntersecting) return;
+    const el = e.target;
+    const target = parseInt(el.dataset.target);
+    const suffix = el.dataset.suffix || '';
+    animateCounter(el, target, suffix);
+    counterIo.unobserve(el);
+  });
+}, { threshold: 0.5 });
+document.querySelectorAll('[data-target]').forEach(el => counterIo.observe(el));
+
+// ── Pillar card 3D tilt
+document.querySelectorAll('.pillar-card').forEach(card => {
+  card.addEventListener('mousemove', e => {
+    const r = card.getBoundingClientRect();
+    const x = (e.clientX - r.left) / r.width  - 0.5;
+    const y = (e.clientY - r.top)  / r.height - 0.5;
+    card.style.transform = `translateY(-8px) scale(1.02) perspective(600px) rotateY(${x * 10}deg) rotateX(${-y * 8}deg)`;
+  });
+  card.addEventListener('mouseleave', () => {
+    card.style.transform = '';
+  });
+});
+
+// ── Magnetic CTA buttons
+document.querySelectorAll('.btn-hero, .nav-cta, .store-pill').forEach(btn => {
+  btn.addEventListener('mousemove', e => {
+    const r = btn.getBoundingClientRect();
+    const x = (e.clientX - r.left - r.width  / 2) * 0.22;
+    const y = (e.clientY - r.top  - r.height / 2) * 0.22;
+    btn.style.transform = `translate(${x}px, ${y}px) scale(1.04)`;
+  });
+  btn.addEventListener('mouseleave', () => {
+    btn.style.transform = '';
+    btn.style.transition = 'transform 0.4s cubic-bezier(0.22,1,0.36,1)';
+    setTimeout(() => btn.style.transition = '', 400);
+  });
+});
+
+// ── Hero photo parallax
+const heroPhoto = document.querySelector('.hero-photo');
+window.addEventListener('scroll', () => {
+  const y = window.scrollY;
+  if (heroPhoto && y < window.innerHeight) {
+    heroPhoto.style.transform = `scale(1.05) translateY(${y * 0.15}px)`;
+  }
+}, { passive: true });
+</script>
+</body>
+</html>

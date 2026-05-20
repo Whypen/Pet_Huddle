@@ -6,15 +6,10 @@
           "AN4TY85CTU.pet.huddle"
         ],
         "components": [
-          {
-            "/": "/auth/callback*"
-          },
-          {
-            "/": "/carerprofile/stripe-return*"
-          },
-          {
-            "/": "/carerprofile/stripe-refresh*"
-          }
+          { "/": "/auth/callback*" },
+          { "/": "/service-chat*" },
+          { "/": "/carerprofile/stripe-return*" },
+          { "/": "/carerprofile/stripe-refresh*" }
         ]
       }
     ]

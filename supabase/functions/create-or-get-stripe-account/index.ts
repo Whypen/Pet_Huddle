@@ -25,6 +25,35 @@ const cleanEnv = (v: string | undefined | null): string => {
   return r;
 };
 
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const IP_RATE_LIMIT_MAX = 80;
+const USER_RATE_LIMIT_MAX = 30;
+const MAX_BODY_BYTES = 16_000;
+const REQUEST_RATE_BUCKETS = new Map<string, { count: number; windowStart: number }>();
+
+const getClientIp = (req: Request): string =>
+  req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+  req.headers.get("x-real-ip") ||
+  "unknown";
+
+const isWithinRateLimit = (key: string, max: number): { ok: boolean; resetAt?: number } => {
+  const now = Date.now();
+  const bucket = REQUEST_RATE_BUCKETS.get(key);
+  if (!bucket || now - bucket.windowStart >= RATE_LIMIT_WINDOW_MS) {
+    REQUEST_RATE_BUCKETS.set(key, { count: 1, windowStart: now });
+    return { ok: true };
+  }
+  bucket.count += 1;
+  if (bucket.count <= max) return { ok: true };
+  return { ok: false, resetAt: bucket.windowStart + RATE_LIMIT_WINDOW_MS };
+};
+
+const enforceBodySize = (req: Request): boolean => {
+  const rawLength = Number(req.headers.get("content-length") || 0);
+  if (!Number.isFinite(rawLength) || rawLength <= 0) return true;
+  return rawLength <= MAX_BODY_BYTES;
+};
+
 const isJwt = (value: string): boolean => value.split(".").length === 3;
 
 const decodePayload = (value: string): Record<string, unknown> | null => {
@@ -96,7 +125,21 @@ const resolveMcc = (skills: string[]): string =>
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
-  try {
+    try {
+    const clientIp = getClientIp(req);
+    if (!enforceBodySize(req)) {
+      return Response.json({ error: "Request body too large" }, { status: 413, headers: corsHeaders });
+    }
+    const ipRate = isWithinRateLimit(`create-or-get-stripe-account:ip:${clientIp}`, IP_RATE_LIMIT_MAX);
+    if (!ipRate.ok) {
+      const wait = Math.max(1, Math.ceil(((ipRate.resetAt ?? Date.now()) - Date.now()) / 1000));
+      console.warn("[create-or-get-stripe-account] rate limit blocked by ip", { ip: clientIp });
+      return Response.json(
+        { error: "Too many requests" },
+        { status: 429, headers: { ...corsHeaders, "Retry-After": String(wait) } },
+      );
+    }
+
     const body = await req.json().catch(() => ({} as Record<string, unknown>));
     // ── Auth ──────────────────────────────────────────────────────────────────
     const authHeader = req.headers.get("Authorization") ?? "";
@@ -124,6 +167,19 @@ serve(async (req) => {
     const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
     if (authErr || !user)
       return Response.json({ error: "Unauthorized" }, { status: 401, headers: corsHeaders });
+
+    const userRate = isWithinRateLimit(`create-or-get-stripe-account:user:${user.id}`, USER_RATE_LIMIT_MAX);
+    if (!userRate.ok) {
+      const wait = Math.max(1, Math.ceil(((userRate.resetAt ?? Date.now()) - Date.now()) / 1000));
+      console.warn("[create-or-get-stripe-account] rate limit blocked by user", {
+        userId: user.id,
+        ip: clientIp,
+      });
+      return Response.json(
+        { error: "Too many requests", code: "user_rate_limited" },
+        { status: 429, headers: { ...corsHeaders, "Retry-After": String(wait) } },
+      );
+    }
 
     // ── Check existing account (idempotency) ───────────────────────────────
     const [profileResult, huddleProfileResult] = await Promise.all([

@@ -79,6 +79,7 @@ export function DrawerSheet({
 
       {/* Panel — B.4 */}
       <div
+        data-huddle-bottom-sheet="true"
         className={cn(
           // glass-l2 surface
           "glass-l2",
@@ -88,12 +89,11 @@ export function DrawerSheet({
           "relative z-[1] flex flex-col w-full max-w-[var(--app-max-width,430px)] mx-auto",
           "max-h-[94dvh] overflow-y-auto",
           // Safe area bottom
-          "pb-[env(safe-area-inset-bottom,20px)]",
+          "huddle-sheet-bottom-padding",
           // B.4 entry animation: translateY 350ms ease-spring
           "animate-[v3-sheet-in_350ms_cubic-bezier(0.34,1.20,0.64,1)]",
           className,
         )}
-        style={{ marginBottom: "calc(var(--nav-height,64px) + env(safe-area-inset-bottom,0px))" }}
       >
         {/* Handle — B.4 anatomy */}
         <div

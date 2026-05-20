@@ -24,6 +24,8 @@ import {
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const SIGNUP_VERIFY_RETURN_TO = "/set-profile";
+const SIGNUP_SESSION_RETRY_COUNT = 12;
+const SIGNUP_SESSION_RETRY_DELAY_MS = 250;
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -82,21 +84,31 @@ const SignupVerify = () => {
     snapshotSetProfilePrefill();
   }, [snapshotSetProfilePrefill]);
 
+  const waitForSignupSession = useCallback(async () => {
+    for (let attempt = 0; attempt < SIGNUP_SESSION_RETRY_COUNT; attempt += 1) {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (session?.access_token) return session;
+      await new Promise((resolve) => window.setTimeout(resolve, SIGNUP_SESSION_RETRY_DELAY_MS));
+    }
+    return null;
+  }, []);
+
   // ── Start verification ───────────────────────────────────────────────────────
   // signUp() was called at step 2 (SignupCredentials). The auto_confirm trigger
   // ensures a live session is returned. We verify that here before navigating.
 
   const startVerificationSignup = async () => {
+    if (starting) return;
+    setStarting(true);
     snapshotSetProfilePrefill();
-    setFlowState("signup");
+    setFlowState("verify_identity");
 
-    const { data: { session } } = await supabase.auth.getSession();
+    const session = await waitForSignupSession();
     if (!session?.access_token) {
-      toast.error("Please sign in to continue identity verification.");
-      navigate("/auth", {
-        replace: true,
-        state: { from: "/verify-identity", email: data.email || "" },
-      });
+      toast.error("Still preparing your account session. Please try again in a moment.");
+      setStarting(false);
       return;
     }
 
@@ -106,6 +118,7 @@ const SignupVerify = () => {
         backTo: "/signup/verify",
       },
     });
+    setStarting(false);
   };
 
   const goToSetProfile = () => {

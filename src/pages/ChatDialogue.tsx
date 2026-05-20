@@ -33,6 +33,7 @@ import {
   isTeamHuddleIdentity,
   resolveTeamHuddleAvatar,
 } from "@/lib/teamHuddleIdentity";
+import { isVerifiedProfile } from "@/lib/verification";
 
 type ChatMessage = {
   id: string;
@@ -598,7 +599,7 @@ const ChatDialogue = () => {
         ? resolveTeamHuddleAvatar(null, TEAM_HUDDLE_DISPLAY_NAME, "teamhuddle")
         : resolveTeamHuddleAvatar((profileRow?.avatar_url as string | null) || null, displayName, socialId),
       availability: isOfficialTeamHuddle ? TEAM_HUDDLE_AVAILABILITY : (availability || null),
-      isVerified: isOfficialTeamHuddle ? true : profileRow?.is_verified === true,
+      isVerified: isOfficialTeamHuddle ? true : isVerifiedProfile(profileRow),
       hasCar: Boolean(profileRow?.has_car),
       isTeamHuddle: isOfficialTeamHuddle,
     });
@@ -1161,38 +1162,6 @@ const ChatDialogue = () => {
     setGroupManageDescriptionEditing(false);
     setGroupManageDescriptionDraft(groupDescription || "");
   }, [groupDescription, groupManageOpen]);
-
-  useEffect(() => {
-    if (!groupManageOpen || !roomId) return;
-    let reloadTimer: ReturnType<typeof window.setTimeout> | null = null;
-    const scheduleReload = () => {
-      if (reloadTimer) {
-        window.clearTimeout(reloadTimer);
-      }
-      reloadTimer = window.setTimeout(() => {
-        reloadTimer = null;
-        void loadGroupManageData();
-      }, 120);
-    };
-    const channel = supabase
-      .channel(`chat-dialogue-manage-${roomId}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "chat_room_members", filter: `chat_id=eq.${roomId}` }, () => {
-        scheduleReload();
-      })
-      .on("postgres_changes", { event: "*", schema: "public", table: "group_chat_invites", filter: `chat_id=eq.${roomId}` }, () => {
-        scheduleReload();
-      })
-      .on("postgres_changes", { event: "*", schema: "public", table: "group_join_requests", filter: `chat_id=eq.${roomId}` }, () => {
-        scheduleReload();
-      })
-      .subscribe();
-    return () => {
-      if (reloadTimer) {
-        window.clearTimeout(reloadTimer);
-      }
-      void supabase.removeChannel(channel);
-    };
-  }, [groupManageOpen, loadGroupManageData, roomId]);
 
   const openGroupInfoPanel = useCallback(() => {
     const media: string[] = [];
@@ -1928,7 +1897,7 @@ const ChatDialogue = () => {
                         {m.id !== profile?.id && (
                           <button
                             onClick={async () => {
-                              if (!(profile as unknown as { is_verified?: boolean })?.is_verified) {
+                              if (!isVerifiedProfile(profile)) {
                                 setGroupVerifyGateOpen(true);
                                 return;
                               }
@@ -1987,7 +1956,7 @@ const ChatDialogue = () => {
                             </button>
                             <button
                               onClick={async () => {
-                                if (!(profile as unknown as { is_verified?: boolean })?.is_verified) {
+                                if (!isVerifiedProfile(profile)) {
                                   setGroupVerifyGateOpen(true);
                                   return;
                                 }

@@ -21,7 +21,6 @@ type SignupData = {
   signup_proof: string;
   legal_name: string;
   otp_verified: boolean;
-  email_opt_in: boolean;
 };
 
 type PersistedSignupData = Omit<SignupData, "password">;
@@ -44,7 +43,6 @@ const defaultData: SignupData = {
   signup_proof: "",
   legal_name: "",
   otp_verified: false,
-  email_opt_in: false,
 };
 
 const defaultPersistedData: PersistedSignupData = {
@@ -55,7 +53,6 @@ const defaultPersistedData: PersistedSignupData = {
   phone: "",
   legal_name: "",
   otp_verified: false,
-  email_opt_in: false,
 };
 
 const SignupContext = createContext<SignupContextValue | undefined>(undefined);
@@ -243,7 +240,6 @@ export const SignupProvider = ({ children }: { children: React.ReactNode }) => {
       phone: data.phone,
       legal_name: data.legal_name,
       otp_verified: data.otp_verified,
-      email_opt_in: data.email_opt_in,
     };
     localStorage.setItem(draftKey, JSON.stringify(persisted));
     if (draftKey !== SIGNUP_STORAGE_KEY) {

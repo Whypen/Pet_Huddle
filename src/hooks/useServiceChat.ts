@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { isVerifiedProfile } from "@/lib/verification";
 import type {
   ChatMessageRow,
   ServiceChatRow,
@@ -238,7 +239,7 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
           const { data, error } = await supabase
             .from("service_chats")
             .select(
-              "chat_id,requester_id,provider_id,status,request_card,quote_card,request_sent_at,quote_sent_at,booked_at,in_progress_at,completed_at,disputed_at,requester_mark_finished,provider_mark_finished"
+              "id,chat_id,requester_id,provider_id,status,care_status,request_card,quote_card,request_sent_at,quote_sent_at,booked_at,in_progress_at,completed_at,disputed_at,requester_mark_finished,provider_mark_finished"
             )
             .eq("chat_id", roomId)
             .maybeSingle();
@@ -265,7 +266,7 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
           const { data: reviewRow } = await supabase
             .from("service_reviews")
             .select("id")
-            .eq("service_chat_id", row.chat_id)
+            .eq("service_chat_id", row.id)
             .eq("reviewer_id", userId)
             .maybeSingle();
           setHasReviewed(Boolean(reviewRow?.id));
@@ -361,7 +362,7 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
               .maybeSingle(),
             supabase
               .from("profiles")
-              .select("id,display_name,avatar_url,is_verified")
+              .select("id,display_name,avatar_url,is_verified,verification_status")
               .eq("id", counterpartId)
               .maybeSingle(),
             supabase
@@ -370,12 +371,12 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
               .eq("user_id", counterpartId)
               .maybeSingle(),
           ]);
-          const merged = (publicProfile || profileRow || {}) as Record<string, unknown>;
+          const merged = ({ ...(publicProfile || {}), ...(profileRow || {}) }) as Record<string, unknown>;
           setCounterpart({
             id: counterpartId,
             displayName: String(merged.display_name || "Service chat"),
             avatarUrl: (merged.avatar_url as string | null) || null,
-            isVerified: merged.is_verified === true,
+            isVerified: isVerifiedProfile(merged),
             stripePayoutStatus: String((pcpRow as Record<string, unknown> | null)?.stripe_payout_status || "") || null,
             stripeAccountId: String((pcpRow as Record<string, unknown> | null)?.stripe_account_id || "") || null,
           });
@@ -496,15 +497,6 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
     };
   }, [roomId, userId]);
 
-  useEffect(() => {
-    if (!roomId) return;
-    const tick = window.setInterval(() => {
-      if (!serviceChat) return;
-      void refreshServiceMeta({ allowStatusRefresh: true });
-    }, 8000);
-    return () => window.clearInterval(tick);
-  }, [refreshServiceMeta, roomId, serviceChat]);
-
   const loadOlderMessages = useCallback(async () => {
     if (!roomId || loading || loadingOlderMessages || !hasOlderMessages || messages.length === 0) return;
     const oldestLoadedMessage = messages[0];
@@ -612,30 +604,12 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
   }, [roomId, rpcVoid]);
 
   const startService = useCallback(async () => {
-    if (!roomId) return;
-    setSending(true);
-    try {
-      const { error } = await supabase.rpc("start_service_now", { p_chat_id: roomId });
-      if (error) {
-        const missingStartNow = String(error.message || "").toLowerCase().includes("start_service_now");
-        if (!missingStartNow) throw error;
-        const { error: fallbackErr } = await supabase.rpc("start_service", { p_chat_id: roomId });
-        if (fallbackErr) throw fallbackErr;
-      }
-      await reload(true);
-      toast.success("Service started.");
-    } catch (error) {
-      toast.error(asMessage((error as { message?: string })?.message, "Unable to start service."));
-      throw error;
-    } finally {
-      setSending(false);
-    }
-  }, [reload, roomId]);
+    toast.error("Start care requires the in-app Start PIN check-in.");
+  }, []);
 
   const markFinished = useCallback(async () => {
-    if (!roomId) return;
-    await rpcVoid("mark_service_finished", { p_chat_id: roomId }, "Unable to mark finished.");
-  }, [roomId, rpcVoid]);
+    toast.error("Completion now requires the CARE check-in completion flow.");
+  }, []);
 
   const fileDispute = useCallback(
     async (category: string, description: string, evidenceUrls: string[]) => {

@@ -9,9 +9,10 @@
  * Gold-only locked features should pass tier="gold".
  */
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { StarUpgradeSheet } from "@/components/monetization/StarUpgradeSheet";
 import { quotaConfig, type QuotaBillingCycle } from "@/config/quotaConfig";
+import { openNativeMembershipOverview } from "@/lib/nativeShell";
 import { startStripeCheckout } from "@/lib/stripeCheckout";
 import { toast } from "sonner";
 
@@ -25,8 +26,14 @@ export const PremiumUpsell = ({ isOpen, onClose, tier = "plus" }: PremiumUpsellP
   const [billing, setBilling] = useState<QuotaBillingCycle>("monthly");
   const [loading, setLoading] = useState(false);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    if (openNativeMembershipOverview()) onClose();
+  }, [isOpen, onClose]);
+
   const handleUpgrade = useCallback(async () => {
     if (loading) return;
+    if (openNativeMembershipOverview()) return;
     setLoading(true);
     try {
       const plan = quotaConfig.stripePlans[tier][billing === "annual" ? "annual" : "monthly"];

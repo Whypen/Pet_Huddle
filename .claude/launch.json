@@ -7,6 +7,13 @@
       "runtimeArgs": ["/Users/hyphen/Documents/Whypen/Huddle App/Pet_Huddle/node_modules/.bin/vite", "--port", "8080"],
       "port": 8080,
       "autoPort": false
+    },
+    {
+      "name": "Brand Mockup",
+      "runtimeExecutable": "/usr/bin/python3",
+      "runtimeArgs": ["-m", "http.server", "61559", "--directory", "/Users/hyphen/Documents/Whypen/Huddle App/Pet_Huddle/.superpowers/brainstorm/31226-1779212218/content"],
+      "port": 61559,
+      "autoPort": false
     }
   ]
 }

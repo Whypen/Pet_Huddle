@@ -44,11 +44,7 @@ export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
   }
 
   if (!profile) {
-    if (allowOnboardingRoutes) {
-      return <>{children}</>;
-    }
-    // Auth exists but app profile is missing: route into profile recovery/onboarding.
-    return <Navigate to="/set-profile" replace />;
+    return <Navigate to="/auth" state={{ from: location, profileMissing: true }} replace />;
   }
 
   if (!onboardingComplete && !allowOnboardingRoutes) {

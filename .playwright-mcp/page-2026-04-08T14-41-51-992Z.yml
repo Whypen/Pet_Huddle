@@ -1,0 +1,219 @@
+- generic [ref=e2]:
+  - region "Notifications (F8)":
+    - list
+  - region "Notifications alt+T"
+  - generic [ref=e30]:
+    - generic [ref=e122]:
+      - banner [ref=e123]:
+        - generic [ref=e124]:
+          - button "Notifications" [ref=e125] [cursor=pointer]:
+            - img
+          - button "huddle" [ref=e126] [cursor=pointer]:
+            - img "huddle" [ref=e127]
+          - button "Settings" [ref=e128] [cursor=pointer]:
+            - img
+      - generic [ref=e131]:
+        - generic [ref=e132]:
+          - generic [ref=e133]:
+            - img [ref=e134]
+            - generic [ref=e136]: Pull to refresh
+          - generic [ref=e137]:
+            - generic [ref=e138]:
+              - button "All" [ref=e139] [cursor=pointer]
+              - button "Pets" [ref=e140] [cursor=pointer]
+              - button "Social" [ref=e141] [cursor=pointer]
+              - button "Health" [ref=e142] [cursor=pointer]
+              - button "News" [ref=e143] [cursor=pointer]
+              - button "Marketplace" [ref=e144] [cursor=pointer]
+              - button "Adoption" [ref=e145] [cursor=pointer]
+              - button "Meetup" [ref=e146] [cursor=pointer]
+            - generic [ref=e147]:
+              - generic [ref=e148]:
+                - img [ref=e149]
+                - searchbox [ref=e152]
+              - generic [ref=e153]:
+                - combobox [ref=e154]:
+                  - option "Latest" [selected]
+                  - option "Trending"
+                  - option "Saves"
+                - generic: ⌄
+        - generic [ref=e155]:
+          - generic [ref=e157]:
+            - generic [ref=e158]:
+              - button "Save post" [ref=e159] [cursor=pointer]:
+                - img [ref=e160]
+              - button "Toggle post pin" [ref=e162] [cursor=pointer]:
+                - img [ref=e163]
+            - button [ref=e165] [cursor=pointer]
+            - generic [ref=e167]:
+              - button "Social Manager @manager" [ref=e170] [cursor=pointer]:
+                - generic [ref=e171]:
+                  - generic [ref=e172]: Social Manager
+                  - generic [ref=e173]: "@manager"
+              - paragraph [ref=e174]: UAT Test Post
+              - generic [ref=e176]: This is a test post from Manus UAT.
+              - generic [ref=e177]:
+                - generic [ref=e178]:
+                  - paragraph [ref=e179]: 7 days ago
+                  - generic [ref=e180]: Social
+                - generic [ref=e181]:
+                  - button "2" [ref=e182] [cursor=pointer]:
+                    - img [ref=e183]
+                    - generic [ref=e185]: "2"
+                  - button "Toggle replies" [ref=e186] [cursor=pointer]:
+                    - img [ref=e187]
+                  - button "Share post" [ref=e189] [cursor=pointer]:
+                    - img [ref=e190]
+                  - button [ref=e193] [cursor=pointer]:
+                    - img [ref=e194]
+          - generic [ref=e199]:
+            - generic [ref=e200]:
+              - button "Save post" [ref=e201] [cursor=pointer]:
+                - img [ref=e202]
+              - button "Toggle post pin" [ref=e204] [cursor=pointer]:
+                - img [ref=e205]
+            - button [ref=e207] [cursor=pointer]
+            - generic [ref=e209]:
+              - button "Hyphen Fong @whypen" [ref=e212] [cursor=pointer]:
+                - generic [ref=e213]:
+                  - generic [ref=e214]: Hyphen Fong
+                  - generic [ref=e215]: "@whypen"
+              - paragraph [ref=e216]: hi
+              - generic [ref=e218]: hihihi
+              - generic [ref=e219]:
+                - generic [ref=e220]:
+                  - paragraph [ref=e221]: 8 days ago
+                  - generic [ref=e222]: News
+                - generic [ref=e223]:
+                  - button "Support" [ref=e224] [cursor=pointer]:
+                    - img [ref=e225]
+                  - button "Toggle replies" [ref=e227] [cursor=pointer]:
+                    - img [ref=e228]
+                  - button "Share post" [ref=e230] [cursor=pointer]:
+                    - img [ref=e231]
+                    - generic [ref=e234]: "1"
+                  - button [ref=e235] [cursor=pointer]:
+                    - img [ref=e236]
+          - generic [ref=e241]:
+            - generic [ref=e242]:
+              - button "Save post" [ref=e243] [cursor=pointer]:
+                - img [ref=e244]
+              - button "Toggle post pin" [ref=e246] [cursor=pointer]:
+                - img [ref=e247]
+            - button [ref=e249] [cursor=pointer]
+            - generic [ref=e251]:
+              - button "Hyphen Fong @whypen" [ref=e254] [cursor=pointer]:
+                - generic [ref=e255]:
+                  - generic [ref=e256]: Hyphen Fong
+                  - generic [ref=e257]: "@whypen"
+              - paragraph [ref=e258]: Sharing youtube video
+              - link "youtube.com/watch" [ref=e261] [cursor=pointer]:
+                - /url: https://www.youtube.com/watch?v=k8-nU7wU4M0
+              - link "Own Your AI Brand Presence Now—How MCP Servers Work YouTube Own Your AI Brand Presence Now—How MCP Servers Work" [ref=e262] [cursor=pointer]:
+                - /url: https://www.youtube.com/watch?v=k8-nU7wU4M0
+                - img "Own Your AI Brand Presence Now—How MCP Servers Work" [ref=e263]
+                - generic [ref=e264]:
+                  - paragraph [ref=e265]: YouTube
+                  - paragraph [ref=e266]: Own Your AI Brand Presence Now—How MCP Servers Work
+              - generic [ref=e267]:
+                - generic [ref=e268]:
+                  - paragraph [ref=e269]: 13 days ago
+                  - generic [ref=e270]: Social
+                - generic [ref=e271]:
+                  - button "1" [ref=e272] [cursor=pointer]:
+                    - img [ref=e273]
+                    - generic [ref=e275]: "1"
+                  - button "Toggle replies" [ref=e276] [cursor=pointer]:
+                    - img [ref=e277]
+                  - button "Share post" [ref=e279] [cursor=pointer]:
+                    - img [ref=e280]
+                    - generic [ref=e283]: "3"
+                  - button [ref=e284] [cursor=pointer]:
+                    - img [ref=e285]
+          - generic [ref=e290]:
+            - generic [ref=e291]:
+              - button "Save post" [ref=e292] [cursor=pointer]:
+                - img [ref=e293]
+              - button "Toggle post pin" [ref=e295] [cursor=pointer]:
+                - img [ref=e296]
+            - button [ref=e298] [cursor=pointer]
+            - generic [ref=e300]:
+              - button "Hyphen Fong @whypen" [ref=e303] [cursor=pointer]:
+                - generic [ref=e304]:
+                  - generic [ref=e305]: Hyphen Fong
+                  - generic [ref=e306]: "@whypen"
+              - paragraph [ref=e307]: testing in huddle.pet
+              - generic [ref=e309]: hello there
+              - button "testing in huddle.pet 1" [ref=e313] [cursor=pointer]:
+                - img "testing in huddle.pet 1" [ref=e314]
+              - generic [ref=e315]:
+                - generic [ref=e316]:
+                  - paragraph [ref=e317]: 16 days ago
+                  - generic [ref=e318]: News
+                - generic [ref=e319]:
+                  - button "1" [ref=e320] [cursor=pointer]:
+                    - img [ref=e321]
+                    - generic [ref=e323]: "1"
+                  - button "Toggle replies" [ref=e324] [cursor=pointer]:
+                    - img [ref=e325]
+                    - generic [ref=e327]: "3"
+                  - button "Share post" [ref=e328] [cursor=pointer]:
+                    - img [ref=e329]
+                    - generic [ref=e332]: "63"
+                  - button [ref=e333] [cursor=pointer]:
+                    - img [ref=e334]
+          - generic [ref=e339]:
+            - generic [ref=e340]:
+              - button "Save post" [ref=e341] [cursor=pointer]:
+                - img [ref=e342]
+              - button "Toggle post pin" [ref=e344] [cursor=pointer]:
+                - img [ref=e345]
+            - button [ref=e347] [cursor=pointer]
+            - generic [ref=e349]:
+              - button "Hyphen Fong @whypen" [ref=e352] [cursor=pointer]:
+                - generic [ref=e353]:
+                  - generic [ref=e354]: Hyphen Fong
+                  - generic [ref=e355]: "@whypen"
+              - paragraph [ref=e356]: try another news
+              - link "rollingstone.co.uk/style/ariana-grande-x-..." [ref=e359] [cursor=pointer]:
+                - /url: https://www.rollingstone.co.uk/style/ariana-grande-x-swarovski-collaboration-2026-59708/
+              - link "Ariana Grande gets ethereal for her second Swarovski collection Rolling Stone UK Ariana Grande gets ethereal for her second Swarovski collection" [ref=e360] [cursor=pointer]:
+                - /url: https://www.rollingstone.co.uk/style/ariana-grande-x-swarovski-collaboration-2026-59708/
+                - img "Ariana Grande gets ethereal for her second Swarovski collection" [ref=e361]
+                - generic [ref=e362]:
+                  - paragraph [ref=e363]: Rolling Stone UK
+                  - paragraph [ref=e364]: Ariana Grande gets ethereal for her second Swarovski collection
+              - generic [ref=e365]:
+                - generic [ref=e366]:
+                  - paragraph [ref=e367]: 20 days ago
+                  - generic [ref=e368]: Social
+                - generic [ref=e369]:
+                  - button "Support" [ref=e370] [cursor=pointer]:
+                    - img [ref=e371]
+                  - button "Toggle replies" [ref=e373] [cursor=pointer]:
+                    - img [ref=e374]
+                  - button "Share post" [ref=e376] [cursor=pointer]:
+                    - img [ref=e377]
+                    - generic [ref=e380]: "5"
+                  - button [ref=e381] [cursor=pointer]:
+                    - img [ref=e382]
+      - button "Compose post" [ref=e386] [cursor=pointer]:
+        - img [ref=e387]
+    - navigation [ref=e91]:
+      - generic [ref=e92]:
+        - button "Home" [ref=e93] [cursor=pointer]:
+          - img [ref=e94]
+          - generic [ref=e97]: Home
+        - button "Social" [active] [ref=e98] [cursor=pointer]:
+          - img [ref=e99]
+          - generic [ref=e104]: Social
+        - button "Chats" [ref=e105] [cursor=pointer]:
+          - img [ref=e106]
+          - generic "13 unread" [ref=e108]
+          - generic [ref=e109]: Chats
+        - button "Service" [ref=e110] [cursor=pointer]:
+          - img [ref=e111]
+          - generic [ref=e116]: Service
+        - button "Map" [ref=e117] [cursor=pointer]:
+          - img [ref=e118]
+          - generic [ref=e121]: Map

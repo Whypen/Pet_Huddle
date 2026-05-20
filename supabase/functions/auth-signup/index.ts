@@ -13,6 +13,7 @@ type SignupBody = {
   turnstile_token?: string;
   turnstile_action?: string;
   signup_proof?: string;
+  defer_profile_seed?: boolean;
   device_id?: string;
   install_id?: string;
 };
@@ -52,7 +53,7 @@ const SIGNUP_REVIEW_MESSAGE =
 
 const isAlreadyRegisteredError = (message: string) => {
   const text = message.toLowerCase();
-  return text.includes("already registered") || text.includes("user already exists");
+  return text.includes("already registered") || text.includes("already been registered") || text.includes("user already exists");
 };
 
 const findAuthUserIdByEmail = async (
@@ -106,14 +107,15 @@ const fireBrevoProfileCompleted = async (
   supabaseUrl: string,
   serviceRoleKey: string,
   userId: string | null | undefined,
-) => {
+): Promise<{ ok: boolean; error: string | null }> => {
   const uid = String(userId || "").trim();
-  if (!uid) return;
+  if (!uid) return { ok: false, error: "missing_user_id" };
   try {
     const response = await fetch(`${supabaseUrl}/functions/v1/brevo-sync`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${serviceRoleKey}`,
+        apikey: serviceRoleKey,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
@@ -124,10 +126,112 @@ const fireBrevoProfileCompleted = async (
     if (!response.ok) {
       const text = await response.text().catch(() => "");
       console.warn("[auth-signup] brevo profile_completed sync returned non-ok", response.status, text);
+      return { ok: false, error: `brevo_sync_http_${response.status}:${text.slice(0, 500)}` };
     }
+    return { ok: true, error: null };
   } catch (error) {
     console.warn("[auth-signup] brevo profile_completed sync failed", error);
+    return { ok: false, error: error instanceof Error ? error.message : "brevo_sync_fetch_failed" };
   }
+};
+
+const explainBrevoFailure = (error: string | null) => {
+  const detail = String(error || "Unknown Brevo sync failure").trim();
+  const lower = detail.toLowerCase();
+  if (lower.includes("wrong_list")) {
+    return "The configured Brevo list is not the expected 'huddle users' list.";
+  }
+  if (lower.includes("not_found") || lower.includes("404")) {
+    return "Brevo could not find the configured contact list or contact.";
+  }
+  if (lower.includes("api_key") || lower.includes("401") || lower.includes("403")) {
+    return "Brevo rejected the API credentials.";
+  }
+  if (lower.includes("timeout") || lower.includes("fetch") || lower.includes("socket")) {
+    return "Huddle could not reach Brevo due to a network or timeout issue.";
+  }
+  if (lower.includes("add-to-list") || lower.includes("list")) {
+    return "The user contact was not successfully added to the Brevo list.";
+  }
+  return "The user contact could not be synced to Brevo.";
+};
+
+const markBrevoSyncPending = async (
+  serviceClient: ReturnType<typeof createClient>,
+  userId: string | null | undefined,
+  reason: string,
+) => {
+  const uid = String(userId || "").trim();
+  if (!uid) return;
+  const { error } = await serviceClient
+    .from("profiles")
+    .update({
+      brevo_sync_required: true,
+      brevo_sync_reason: reason,
+    })
+    .eq("id", uid);
+  if (error) {
+    console.warn("[auth-signup] brevo pending flag update failed", uid, error.message);
+  }
+};
+
+const createBrevoSyncSupportTicket = async (
+  serviceClient: ReturnType<typeof createClient>,
+  userId: string | null | undefined,
+  email: string,
+  attempts: number,
+  error: string | null,
+) => {
+  const uid = String(userId || "").trim();
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  const plainReason = explainBrevoFailure(error);
+  const message = [
+    "Automatic Brevo contact sync failed after 3 attempts.",
+    "",
+    `Affected user ID: ${uid || "unknown"}`,
+    `Affected email: ${normalizedEmail || "unknown"}`,
+    `Failure type: ${plainReason}`,
+    `Technical detail: ${String(error || "unknown").slice(0, 1000)}`,
+    "",
+    "Plain English: A new Huddle user may not have been added to the Brevo 'huddle users' mailing list. Please check the Brevo list/API configuration and re-sync this user.",
+  ].join("\n");
+
+  const { error: insertError } = await serviceClient
+    .from("support_tickets")
+    .insert({
+      ticket_number: "",
+      user_id: uid || null,
+      name: "Huddle system",
+      email: "support@huddle.pet",
+      subject: `Brevo sync failed after ${attempts} attempts`,
+      message,
+      wants_reply: false,
+      status: "open",
+    });
+  if (insertError) {
+    console.warn("[auth-signup] brevo support ticket insert failed", insertError.message);
+  }
+};
+
+const syncBrevoProfileCompletedWithRetries = async (
+  serviceClient: ReturnType<typeof createClient>,
+  supabaseUrl: string,
+  serviceRoleKey: string,
+  userId: string | null | undefined,
+  email: string,
+) => {
+  await markBrevoSyncPending(serviceClient, userId, "profile_completed");
+  let lastError: string | null = null;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const result = await fireBrevoProfileCompleted(supabaseUrl, serviceRoleKey, userId);
+    if (result.ok) return;
+    lastError = result.error;
+    await markBrevoSyncPending(serviceClient, userId, `profile_completed_failed:${attempt}:${lastError || "unknown"}`);
+    if (attempt < 3) {
+      await new Promise((resolve) => setTimeout(resolve, attempt * 500));
+    }
+  }
+  await createBrevoSyncSupportTicket(serviceClient, userId, email, 3, lastError);
 };
 
 const repairProfileEmail = async (
@@ -250,6 +354,40 @@ const normalizeOptionalDate = (value: unknown): string | null => {
   return /^\d{4}-\d{2}-\d{2}$/.test(normalized) ? normalized : null;
 };
 
+const createSignupUser = async (
+  authClient: ReturnType<typeof createClient>,
+  serviceClient: ReturnType<typeof createClient>,
+  email: string,
+  password: string,
+  options: SignupBody["options"],
+  signupProof: string,
+) => {
+  if (signupProof) {
+    const created = await serviceClient.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: options?.data ?? {},
+    });
+    return {
+      data: {
+        user: created.data.user ?? null,
+        session: null,
+      },
+      error: created.error,
+    };
+  }
+
+  return authClient.auth.signUp({
+    email,
+    password,
+    options: {
+      emailRedirectTo: options?.emailRedirectTo,
+      data: options?.data,
+    },
+  });
+};
+
 const seedIncompleteProfile = async (
   serviceClient: ReturnType<typeof createClient>,
   userId: string | null | undefined,
@@ -286,13 +424,28 @@ const seedIncompleteProfile = async (
   }
 };
 
+const removeDeferredSignupProfile = async (
+  serviceClient: ReturnType<typeof createClient>,
+  userId: string | null | undefined,
+) => {
+  const uid = String(userId || "").trim();
+  if (!uid) return;
+  const { error } = await serviceClient
+    .from("profiles")
+    .delete()
+    .eq("id", uid);
+  if (error) {
+    console.warn("[auth-signup] deferred profile cleanup failed", uid, error.message);
+  }
+};
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 200, headers: CORS });
   if (req.method !== "POST") return json(405, { error: "method_not_allowed" });
 
   const supabaseUrl = String(Deno.env.get("SUPABASE_URL") || "").trim();
   const anonKey = String(Deno.env.get("SUPABASE_ANON_KEY") || "").trim();
-  const serviceRoleKey = String(Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "").trim();
+  const serviceRoleKey = String(Deno.env.get("HUDDLE_SUPABASE_SERVICE_KEY") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "").trim();
   if (!supabaseUrl || !anonKey || !serviceRoleKey) return json(500, { error: "server_misconfigured" });
 
   let body: SignupBody;
@@ -319,6 +472,7 @@ Deno.serve(async (req: Request) => {
     phone,
     dob: normalizeOptionalDate(body.options?.data?.dob),
   };
+  const deferProfileSeed = body.defer_profile_seed === true;
 
   const { data: blockStatus, error: blockStatusError } = await serviceClient.rpc("lookup_signup_blocks", {
     p_email: email,
@@ -383,14 +537,7 @@ Deno.serve(async (req: Request) => {
   }
 
   const authClient = createClient(supabaseUrl, anonKey, { auth: { persistSession: false } });
-  const signUp = await authClient.auth.signUp({
-    email,
-    password,
-    options: {
-      emailRedirectTo: body.options?.emailRedirectTo,
-      data: body.options?.data,
-    },
-  });
+  const signUp = await createSignupUser(authClient, serviceClient, email, password, body.options, signupProof);
 
   if (signUp.error) {
     const originalError = signUp.error.message || "signup_failed";
@@ -445,14 +592,7 @@ Deno.serve(async (req: Request) => {
       if (profileDeleteError) return json(500, { error: "removed_profile_cleanup_failed" });
     }
 
-    const retrySignUp = await authClient.auth.signUp({
-      email,
-      password,
-      options: {
-        emailRedirectTo: body.options?.emailRedirectTo,
-        data: body.options?.data,
-      },
-    });
+    const retrySignUp = await createSignupUser(authClient, serviceClient, email, password, body.options, signupProof);
     if (retrySignUp.error) {
       return json(400, { error: retrySignUp.error.message || "signup_failed" });
     }
@@ -485,16 +625,30 @@ Deno.serve(async (req: Request) => {
       }
       retrySession = recoveredSession.session;
     }
-    await seedIncompleteProfile(serviceClient, retrySignUp.data.user?.id, signupSeed, { emailVerified: Boolean(signupProof) });
-    const retryCanonicalEmail = await canonicalizeVerifiedSignupEmail(
-      serviceClient,
-      retrySignUp.data.user?.id,
-      email,
-      signupProof,
-    );
-    if (retryCanonicalEmail.error) return json(400, { error: retryCanonicalEmail.error });
+    if (deferProfileSeed) {
+      await removeDeferredSignupProfile(serviceClient, retrySignUp.data.user?.id);
+    } else {
+      await seedIncompleteProfile(serviceClient, retrySignUp.data.user?.id, signupSeed, { emailVerified: Boolean(signupProof) });
+    }
+    if (!deferProfileSeed) {
+      const retryCanonicalEmail = await canonicalizeVerifiedSignupEmail(
+        serviceClient,
+        retrySignUp.data.user?.id,
+        email,
+        signupProof,
+      );
+      if (retryCanonicalEmail.error) return json(400, { error: retryCanonicalEmail.error });
+    }
     if (!signupProof) await repairProfileEmail(serviceClient, retrySignUp.data.user?.id, email);
-    void fireBrevoProfileCompleted(supabaseUrl, serviceRoleKey, retrySignUp.data.user?.id);
+    if (!deferProfileSeed) {
+      await syncBrevoProfileCompletedWithRetries(
+        serviceClient,
+        supabaseUrl,
+        serviceRoleKey,
+        retrySignUp.data.user?.id,
+        email,
+      );
+    }
 
     return json(200, {
       data: {
@@ -532,16 +686,30 @@ Deno.serve(async (req: Request) => {
     }
     session = recoveredSession.session;
   }
-  await seedIncompleteProfile(serviceClient, signUp.data.user?.id, signupSeed, { emailVerified: Boolean(signupProof) });
-  const canonicalEmail = await canonicalizeVerifiedSignupEmail(
-    serviceClient,
-    signUp.data.user?.id,
-    email,
-    signupProof,
-  );
-  if (canonicalEmail.error) return json(400, { error: canonicalEmail.error });
+  if (deferProfileSeed) {
+    await removeDeferredSignupProfile(serviceClient, signUp.data.user?.id);
+  } else {
+    await seedIncompleteProfile(serviceClient, signUp.data.user?.id, signupSeed, { emailVerified: Boolean(signupProof) });
+  }
+  if (!deferProfileSeed) {
+    const canonicalEmail = await canonicalizeVerifiedSignupEmail(
+      serviceClient,
+      signUp.data.user?.id,
+      email,
+      signupProof,
+    );
+    if (canonicalEmail.error) return json(400, { error: canonicalEmail.error });
+  }
   if (!signupProof) await repairProfileEmail(serviceClient, signUp.data.user?.id, email);
-  void fireBrevoProfileCompleted(supabaseUrl, serviceRoleKey, signUp.data.user?.id);
+  if (!deferProfileSeed) {
+    await syncBrevoProfileCompletedWithRetries(
+      serviceClient,
+      supabaseUrl,
+      serviceRoleKey,
+      signUp.data.user?.id,
+      email,
+    );
+  }
 
   return json(200, {
     data: {

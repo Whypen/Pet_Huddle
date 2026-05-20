@@ -7,7 +7,7 @@ import { ensureSignupProof, hasUsableSignupProof, readPresignupTokenRow } from "
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL") ?? "",
-  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+  (Deno.env.get("HUDDLE_SUPABASE_SERVICE_KEY") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")) ?? "",
 );
 
 const CORS = {
@@ -52,6 +52,24 @@ const findAuthUserByEmail = async (
   }
 };
 
+const authConfirmedForEmail = async (email: string): Promise<{ confirmed: boolean; error: string | null }> => {
+  const supabaseUrl = String(Deno.env.get("SUPABASE_URL") || "").trim();
+  const serviceRoleKey = String((Deno.env.get("HUDDLE_SUPABASE_SERVICE_KEY") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")) || "").trim();
+  if (!supabaseUrl || !serviceRoleKey || !email) return { confirmed: false, error: null };
+  const { user, error } = await findAuthUserByEmail(supabaseUrl, serviceRoleKey, email);
+  if (error) return { confirmed: false, error };
+  return {
+    confirmed: Boolean(
+      user &&
+      (
+        String(user.email_confirmed_at || "").trim() ||
+        String(user.confirmed_at || "").trim()
+      ),
+    ),
+    error: null,
+  };
+};
+
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
@@ -74,7 +92,7 @@ serve(async (req: Request) => {
     const { data: emailRows, error: emailRowsError } = email
       ? await supabase
         .from("presignup_tokens")
-        .select("token,email,verified,expires_at,signup_proof,signup_proof_issued_at,signup_proof_expires_at,signup_proof_used_at,created_at")
+        .select("token,email,signal_key,verified,expires_at,signup_proof,signup_proof_issued_at,signup_proof_expires_at,signup_proof_used_at,created_at")
         .eq("email", email)
         .order("created_at", { ascending: false })
       : { data: [], error: null };
@@ -97,25 +115,16 @@ serve(async (req: Request) => {
 
     if (!canonicalRow) {
       if (email) {
-        const supabaseUrl = String(Deno.env.get("SUPABASE_URL") || "").trim();
-        const serviceRoleKey = String(Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "").trim();
-        if (supabaseUrl && serviceRoleKey) {
-          const { user, error: authLookupError } = await findAuthUserByEmail(supabaseUrl, serviceRoleKey, email);
-          if (authLookupError) {
-            console.error("[get-pre-signup-verify-status] auth email lookup error", authLookupError);
-            return json({ error: "server_error" }, 500);
-          }
-          const authConfirmed = Boolean(
-            user &&
-            (
-              String(user.email_confirmed_at || "").trim() ||
-              String(user.confirmed_at || "").trim()
-            ),
-          );
+        const authConfirmed = await authConfirmedForEmail(email);
+        if (authConfirmed.error) {
+          console.error("[get-pre-signup-verify-status] auth email lookup error", authConfirmed.error);
+          return json({ error: "server_error" }, 500);
+        }
+        if (authConfirmed.confirmed) {
           return json({
-            verified: authConfirmed,
-            auth_confirmed: authConfirmed,
-            confirmation_mode: authConfirmed ? "auth" : null,
+            verified: true,
+            auth_confirmed: true,
+            confirmation_mode: "auth",
             expired: false,
             signup_proof: null,
             email,
@@ -136,17 +145,26 @@ serve(async (req: Request) => {
         signup_proof: null,
         email: canonicalRow.email,
         token: canonicalRow.token,
+        signal_key: canonicalRow.signal_key,
       });
     }
 
     const proof = await ensureSignupProof(supabase, canonicalRow);
     if (!proof.proof) {
+      const authConfirmed = await authConfirmedForEmail(String(canonicalRow.email || "").trim().toLowerCase());
+      if (authConfirmed.error) {
+        console.error("[get-pre-signup-verify-status] auth email lookup error", authConfirmed.error);
+        return json({ error: "server_error" }, 500);
+      }
       return json({
         verified: true,
+        auth_confirmed: authConfirmed.confirmed,
+        confirmation_mode: authConfirmed.confirmed ? "auth" : "presignup",
         expired: false,
         signup_proof: hasUsableSignupProof(canonicalRow) ? canonicalRow.signup_proof : null,
         email: canonicalRow.email,
         token: canonicalRow.token,
+        signal_key: canonicalRow.signal_key,
       });
     }
 
@@ -159,6 +177,7 @@ serve(async (req: Request) => {
       signup_proof_expires_at: proof.expires_at,
       email: canonicalRow.email,
       token: canonicalRow.token,
+      signal_key: canonicalRow.signal_key,
     });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);

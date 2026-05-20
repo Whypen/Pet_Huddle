@@ -54,7 +54,6 @@ export const PublicRoute = ({
     activeSignupFlow;
   const isTokenGatedPath =
     location.pathname === "/signup/email-confirmation" ||
-    location.pathname === "/signup/marketing-confirmed" ||
     location.pathname === "/verify";
   if (isTokenGatedPath) {
     // Always allow — token in URL is the auth; user may arrive from inbox days later

@@ -80,6 +80,7 @@ const CORS = {
   "Access-Control-Allow-Headers":
     "authorization, x-huddle-access-token, x-client-info, apikey, content-type",
 };
+const MAX_BODY_BYTES = 16_000;
 
 const ALLOWED_TURNSTILE_ACTIONS = new Set([
   "send_phone_otp",
@@ -108,6 +109,12 @@ function getClientIp(req: Request): string {
     "unknown"
   );
 }
+
+const enforceBodySize = (req: Request): boolean => {
+  const rawLength = Number(req.headers.get("content-length") || 0);
+  if (!Number.isFinite(rawLength) || rawLength <= 0) return true;
+  return rawLength <= MAX_BODY_BYTES;
+};
 
 function classifyOtpSendError(raw: string): OtpSendReasonCode {
   const message = String(raw || "").toLowerCase();
@@ -318,7 +325,7 @@ Deno.serve(async (req: Request) => {
 
   // ── Env ───────────────────────────────────────────────────────────────────
   const supabaseUrl      = Deno.env.get("SUPABASE_URL")!;
-  const serviceRoleKey   = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const serviceRoleKey   = Deno.env.get("HUDDLE_SUPABASE_SERVICE_KEY") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const anonKey          = Deno.env.get("SUPABASE_ANON_KEY")!;
   const twilioAccountSid = String(Deno.env.get("TWILIO_ACCOUNT_SID") || "").trim();
   const twilioAuthToken = String(Deno.env.get("TWILIO_AUTH_TOKEN") || "").trim();
@@ -348,6 +355,11 @@ Deno.serve(async (req: Request) => {
   });
 
   const clientIp = getClientIp(req);
+  if (!enforceBodySize(req)) {
+    return new Response(JSON.stringify({ error: "Request body too large" }), {
+      status: 413, headers: CORS,
+    });
+  }
 
   // ── Parse body ────────────────────────────────────────────────────────────
   let body: RequestBody;

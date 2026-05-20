@@ -1,0 +1,30 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="_frame.css">
+<style>
+  .card-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .c { border-radius: 12px; padding: 14px; background: #fff; border: 1px solid rgba(0,0,0,0.04); box-shadow: 0 1px 2px rgba(66,73,101,0.05), 0 4px 14px rgba(66,73,101,0.06); }
+  .glass { background: rgba(255,255,255,0.72); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); border: 1px solid rgba(255,255,255,0.55); border-radius: 20px; padding: 14px; box-shadow: 0 8px 24px rgba(0,87,255,0.13), 0 2px 6px rgba(0,87,255,0.07), inset 0 1px 0 rgba(255,255,255,0.78); }
+  .pet { border-radius: 18px; aspect-ratio: 4/5; background: linear-gradient(135deg, #2145CF 0%, #3A5FE8 100%); position: relative; overflow: hidden; display: flex; align-items: flex-end; padding: 14px; color: #fff; }
+  .pet::before { content:""; position:absolute; inset:0; background: linear-gradient(to top, rgba(14,14,16,0.6), transparent 55%); }
+  .pet > * { position: relative; }
+  .chip-ph { display:inline-flex; align-items:center; padding: 4px 10px; border-radius:9999px; background: rgba(255,255,255,0.2); backdrop-filter: blur(6px); font-size: 11px; font-weight: 600; }
+</style></head>
+<body><div class="card" style="background: linear-gradient(135deg, #EBF5FF 0%, #F3F4F6 100%);">
+  <div class="card-row">
+    <div class="c">
+      <div style="font-weight: 700; font-size: 15px;">Saturday walk</div>
+      <div style="font-size: 12px; color: var(--fg-2); margin-top: 4px;">3:00 PM &middot; Buddy</div>
+      <span class="label-eyebrow" style="display:block; margin-top:10px;">Content · E1</span>
+    </div>
+    <div class="glass">
+      <div style="font-weight: 700; font-size: 15px;">Nearby alerts</div>
+      <div style="font-size: 12px; color: var(--fg-2); margin-top: 4px;">2 active · 1km radius</div>
+      <span class="label-eyebrow" style="display:block; margin-top:10px;">Glass · E2</span>
+    </div>
+    <div class="pet">
+      <div>
+        <div style="font-weight: 700; font-size: 16px;">Luna</div>
+        <div class="chip-ph" style="margin-top: 6px;">Cat · Calico</div>
+      </div>
+    </div>
+  </div>
+</div></body></html>

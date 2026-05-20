@@ -1,7 +1,104 @@
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.0";
+
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
+type LinkPreviewRateLimit = {
+  is_limited: boolean;
+  reason: "ip" | "user" | null;
+  ip_count: number;
+  user_count: number;
+  ip_reset_at: string | null;
+  user_reset_at: string | null;
+  retry_after_seconds: number;
+};
+
+const supabaseUrl = String(Deno.env.get("SUPABASE_URL") || "").trim();
+const supabaseServiceRoleKey = String(
+  Deno.env.get("HUDDLE_SUPABASE_SERVICE_KEY") ||
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ||
+    "",
+).trim();
+const linkPreviewSupabase = supabaseUrl && supabaseServiceRoleKey
+  ? createClient(supabaseUrl, supabaseServiceRoleKey, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+  })
+  : null;
+
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const IP_RATE_LIMIT_MAX = 60;
+const USER_RATE_LIMIT_MAX = 20;
+const MAX_BODY_BYTES = 16_000;
+const REQUEST_RATE_BUCKETS = new Map<string, { count: number; windowStart: number }>();
+
+const getClientIp = (req: Request): string =>
+  req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+  req.headers.get("x-real-ip") ||
+  "unknown";
+
+const isWithinRateLimit = (key: string, max: number): { ok: boolean; resetAt?: number } => {
+  const now = Date.now();
+  const bucket = REQUEST_RATE_BUCKETS.get(key);
+  if (!bucket || now - bucket.windowStart >= RATE_LIMIT_WINDOW_MS) {
+    REQUEST_RATE_BUCKETS.set(key, { count: 1, windowStart: now });
+    return { ok: true };
+  }
+  bucket.count += 1;
+  if (bucket.count <= max) return { ok: true };
+  return { ok: false, resetAt: bucket.windowStart + RATE_LIMIT_WINDOW_MS };
+};
+
+const enforceBodySize = (req: Request): boolean => {
+  const rawLength = Number(req.headers.get("content-length") || 0);
+  if (!Number.isFinite(rawLength) || rawLength <= 0) return true;
+  return rawLength <= MAX_BODY_BYTES;
+};
+
+const checkDurableRateLimit = async (
+  clientIp: string,
+  userId: string | null,
+): Promise<LinkPreviewRateLimit | null> => {
+  if (!linkPreviewSupabase) return null;
+
+  const { data, error } = await linkPreviewSupabase.rpc("check_link_preview_rate_limit", {
+    p_client_ip: clientIp,
+    p_user_id: userId || null,
+    p_ip_limit: IP_RATE_LIMIT_MAX,
+    p_user_limit: USER_RATE_LIMIT_MAX,
+  });
+  if (error) {
+    console.warn("[link-preview] durable rate limit check failed", {
+      error: String(error.message || error),
+    });
+    return null;
+  }
+
+  const row = Array.isArray(data) ? data[0] : data;
+  return row ? (row as unknown as LinkPreviewRateLimit) : null;
+};
+
+const isJwt = (value: string): boolean => value.split(".").length === 3;
+
+const decodePayload = (value: string): Record<string, unknown> | null => {
+  try {
+    return JSON.parse(atob(value.split(".")[1]));
+  } catch {
+    return null;
+  }
+};
+
+const getJwtUserId = (req: Request): string | null => {
+  const raw = (req.headers.get("Authorization") || req.headers.get("authorization") || "").replace(
+    /^Bearer\s+/i,
+    "",
+  ).trim();
+  if (!isJwt(raw)) return null;
+  const payload = decodePayload(raw);
+  const userId = typeof payload?.sub === "string" ? payload.sub.trim() : "";
+  return userId || null;
 };
 
 const json = (body: Record<string, unknown>, status = 200, extraHeaders: Record<string, string> = {}) =>
@@ -243,6 +340,68 @@ Deno.serve(async (req) => {
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
 
   try {
+    const clientIp = getClientIp(req);
+    const userId = getJwtUserId(req);
+
+    if (!enforceBodySize(req)) {
+      return json({ error: "Request body too large" }, 413);
+    }
+
+    const durableRate = await checkDurableRateLimit(clientIp, userId);
+    if (durableRate?.is_limited) {
+      const wait = Math.max(1, Math.ceil(durableRate.retry_after_seconds || 1));
+      if (durableRate.reason === "user") {
+        console.warn("[link-preview] rate limit blocked by durable user", {
+          userId,
+          ip: clientIp,
+          ipCount: durableRate.ip_count,
+          userCount: durableRate.user_count,
+        });
+      } else {
+        console.warn("[link-preview] rate limit blocked by durable ip", {
+          userId,
+          ip: clientIp,
+          ipCount: durableRate.ip_count,
+          userCount: durableRate.user_count,
+        });
+      }
+      return json(
+        {
+          error: "Too many requests",
+          code: durableRate.reason === "user" ? "user_rate_limited" : "ip_rate_limited",
+        },
+        429,
+        { "Retry-After": String(wait) },
+      );
+    }
+
+    const ipRate = isWithinRateLimit(`link-preview:ip:${clientIp}`, IP_RATE_LIMIT_MAX);
+    if (!ipRate.ok) {
+      const wait = Math.max(1, Math.ceil(((ipRate.resetAt ?? Date.now()) - Date.now()) / 1000));
+      console.warn("[link-preview] rate limit blocked by ip", { ip: clientIp });
+      return json(
+        { error: "Too many requests", code: "ip_rate_limited" },
+        429,
+        { "Retry-After": String(wait) },
+      );
+    }
+
+    if (userId) {
+      const userRate = isWithinRateLimit(`link-preview:user:${userId}`, USER_RATE_LIMIT_MAX);
+      if (!userRate.ok) {
+        const wait = Math.max(
+          1,
+          Math.ceil(((userRate.resetAt ?? Date.now()) - Date.now()) / 1000),
+        );
+        console.warn("[link-preview] rate limit blocked by user", { userId });
+        return json(
+          { error: "Too many requests", code: "user_rate_limited" },
+          429,
+          { "Retry-After": String(wait) },
+        );
+      }
+    }
+
     const { url } = (await req.json()) as { url?: string };
     const normalizedUrl = normalizeUrl(url);
     if (!normalizedUrl) return json({ error: "invalid_url" }, 400);

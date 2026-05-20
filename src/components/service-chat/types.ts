@@ -1,4 +1,5 @@
 export type ServiceStatus = "pending" | "booked" | "in_progress" | "completed" | "disputed";
+export type ServiceCareStatus = "awaiting_handoff" | "pin_shared" | "in_progress" | "handoff_issue_review" | "not_started_refunded" | "under_dispute" | "completed";
 export type ServiceRole = "requester" | "provider";
 
 export type ServiceRequestCard = {
@@ -40,10 +41,12 @@ export type ServiceQuoteCard = {
 };
 
 export type ServiceChatRow = {
+  id: string;
   chat_id: string;
   requester_id: string;
   provider_id: string;
   status: ServiceStatus;
+  care_status?: ServiceCareStatus | null;
   request_card: ServiceRequestCard | null;
   quote_card: ServiceQuoteCard | null;
   request_sent_at: string | null;

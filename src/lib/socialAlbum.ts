@@ -4,8 +4,28 @@ const SOCIAL_ALBUM_BUCKET = "social_album";
 const PROFILE_PHOTOS_BUCKET = "profile_photos";
 const LEGACY_PROFILE_PHOTOS_BUCKET = "Profiles";
 const PROFILE_PHOTO_BUCKETS = new Set([PROFILE_PHOTOS_BUCKET, LEGACY_PROFILE_PHOTOS_BUCKET]);
+const signedUrlCache = new Map<string, { url: string | null; expiresAt: number }>();
+const signedUrlInFlight = new Map<string, Promise<string | null>>();
 
 const isDataOrBlob = (value: string) => value.startsWith("data:") || value.startsWith("blob:");
+
+const getCachedSignedUrl = async (bucket: string, path: string, ttlSeconds: number): Promise<string | null> => {
+  const key = `${bucket}:${path}:${ttlSeconds}`;
+  const now = Date.now();
+  const cached = signedUrlCache.get(key);
+  if (cached && cached.expiresAt > now) return cached.url;
+  const inFlight = signedUrlInFlight.get(key);
+  if (inFlight) return inFlight;
+  const request = supabase.storage.from(bucket).createSignedUrl(path, ttlSeconds).then(({ data }) => {
+    const url = data?.signedUrl ?? null;
+    signedUrlCache.set(key, { url, expiresAt: now + Math.max(5_000, Math.min(ttlSeconds * 1000, 55 * 60 * 1000)) });
+    return url;
+  }).finally(() => {
+    signedUrlInFlight.delete(key);
+  });
+  signedUrlInFlight.set(key, request);
+  return request;
+};
 
 const sanitizePathLike = (value: string) =>
   decodeURIComponent(value.split("#")[0].split("?")[0]).replace(/^\/+/, "");
@@ -80,8 +100,7 @@ const resolveProfilePhotoCandidate = async (candidate: string, ttlSeconds: numbe
     return supabase.storage.from(PROFILE_PHOTOS_BUCKET).getPublicUrl(candidate).data?.publicUrl ?? null;
   }
   if (candidate.startsWith(`${LEGACY_PROFILE_PHOTOS_BUCKET}/`)) {
-    const signed = await supabase.storage.from(LEGACY_PROFILE_PHOTOS_BUCKET).createSignedUrl(candidate, ttlSeconds);
-    return signed.data?.signedUrl ?? null;
+    return getCachedSignedUrl(LEGACY_PROFILE_PHOTOS_BUCKET, candidate, ttlSeconds);
   }
   return null;
 };
@@ -119,8 +138,8 @@ export const resolveSocialAlbumUrlMap = async (
       return resolveProfilePhotoCandidate(profilePhotoCandidate, ttlSeconds);
     }
     for (const candidate of candidateKeys) {
-      const signed = await supabase.storage.from(SOCIAL_ALBUM_BUCKET).createSignedUrl(candidate, ttlSeconds);
-      if (signed.data?.signedUrl) return signed.data.signedUrl;
+      const signed = await getCachedSignedUrl(SOCIAL_ALBUM_BUCKET, candidate, ttlSeconds);
+      if (signed) return signed;
     }
     for (const candidate of candidateKeys) {
       const publicUrl = supabase.storage.from(SOCIAL_ALBUM_BUCKET).getPublicUrl(candidate).data.publicUrl;

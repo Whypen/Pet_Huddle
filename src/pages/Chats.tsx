@@ -61,6 +61,7 @@ import {
   resolveCountryByPrecedence,
   resolveDiscoveryLocationLabel,
 } from "@/lib/locationLabels";
+import { isVerifiedProfile } from "@/lib/verification";
 
 /* ── Discovery Filter Types & Defaults ── */
 const ALL_GENDERS = [...CANONICAL_GENDER_OPTIONS] as const;
@@ -379,7 +380,7 @@ const applyDiscoveryClientFilters = (
       if (Number.isFinite(age) && (age < minAge || age > maxAge)) return false;
     }
 
-    if (options?.enforceVerifiedOnly && filters.verifiedOnly && profile.is_verified !== true) {
+    if (options?.enforceVerifiedOnly && filters.verifiedOnly && !isVerifiedProfile(profile)) {
       return false;
     }
 
@@ -627,6 +628,7 @@ type InboxSummaryRow = {
   peer_name?: string | null;
   peer_avatar_url?: string | null;
   peer_is_verified?: boolean | null;
+  peer_verification_status?: string | null;
   peer_has_car?: boolean | null;
   peer_availability_label?: string | null;
   peer_social_id?: string | null;
@@ -868,7 +870,7 @@ const Chats = () => {
   const discoverySendCueCommitPendingRef = useRef(false);
   const discoverySendCueProgress = useMotionValue(0);
   const [activeMatchedPeerIds, setActiveMatchedPeerIds] = useState<Set<string>>(new Set());
-  const [matchesFeedTick, setMatchesFeedTick] = useState(0);
+  const matchesFeedTick = 0;
   const seenMatchUserIdsRef = useRef<Set<string>>(new Set());
   const serverSeenMatchUserIdsRef = useRef<Set<string>>(new Set());
   const pendingSeenMatchWritesRef = useRef<Set<string>>(new Set());
@@ -881,7 +883,6 @@ const Chats = () => {
   const subscribedInboxRoomIdsRef = useRef<Set<string>>(new Set());
   const conversationsHydratedRef = useRef(false);
   const conversationsRetryTimerRef = useRef<number | null>(null);
-  const matchesFeedDebounceRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
   const chatsPerfRef = useRef({
     routeMountedAt: typeof performance !== "undefined" ? performance.now() : Date.now(),
     firstDiscoverReadyAt: null as number | null,
@@ -948,7 +949,7 @@ const Chats = () => {
     []
   );
 
-  const isVerified = profile?.is_verified === true;
+  const isVerified = isVerifiedProfile(profile);
   const userAge = profile?.dob
     ? Math.floor((Date.now() - new Date(profile.dob).getTime()) / (1000 * 60 * 60 * 24 * 365.25))
     : null;
@@ -2414,39 +2415,6 @@ const Chats = () => {
   }, [groupManageId, profile?.avatar_url, profile?.display_name, profile?.id]);
 
   useEffect(() => {
-    if (!groupManageId || !profile?.id) return;
-    void loadChatsGroupManageData();
-    let reloadTimer: ReturnType<typeof window.setTimeout> | null = null;
-    const scheduleReload = () => {
-      if (reloadTimer) {
-        window.clearTimeout(reloadTimer);
-      }
-      reloadTimer = window.setTimeout(() => {
-        reloadTimer = null;
-        void loadChatsGroupManageData();
-      }, 120);
-    };
-    const channel = supabase
-      .channel(`group-manage-${groupManageId}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "chat_room_members", filter: `chat_id=eq.${groupManageId}` }, () => {
-        scheduleReload();
-      })
-      .on("postgres_changes", { event: "*", schema: "public", table: "group_chat_invites", filter: `chat_id=eq.${groupManageId}` }, () => {
-        scheduleReload();
-      })
-      .on("postgres_changes", { event: "*", schema: "public", table: "group_join_requests", filter: `chat_id=eq.${groupManageId}` }, () => {
-        scheduleReload();
-      })
-      .subscribe();
-    return () => {
-      if (reloadTimer) {
-        window.clearTimeout(reloadTimer);
-      }
-      void supabase.removeChannel(channel);
-    };
-  }, [groupManageId, loadChatsGroupManageData, profile?.id]);
-
-  useEffect(() => {
     if (!profile?.id) {
       setBlockedUserIds(new Set());
       return;
@@ -2574,7 +2542,7 @@ const Chats = () => {
         avatarUrl: counterpartAvatar,
         socialAvailability: normalizeAvailabilityLabel(socialAvailability),
         previewOverride: previewOverride || null,
-        isVerified: isOfficialTeamHuddle || row.peer_is_verified === true,
+        isVerified: isOfficialTeamHuddle || isVerifiedProfile(row, "peer_verification_status", "peer_is_verified"),
         hasCar: Boolean(row.peer_has_car),
         isPremium: false,
         lastMessage: parseChatPreviewText(String(row.last_message_content || "")),
@@ -4237,7 +4205,7 @@ const Chats = () => {
           id: row.id,
           name: row.display_name || "User",
           avatar: row.avatar_url || undefined,
-          verified: row.is_verified === true,
+          verified: isVerifiedProfile(row),
         }));
       if (next.length > 0) {
         setGroupContactPool(next);
@@ -4544,38 +4512,6 @@ const Chats = () => {
     seenMatchesHydrated,
     seenMatchesServerState,
   ]);
-
-  useEffect(() => {
-    if (!profile?.id) return;
-    const onMatchChange = (payload: { new?: Record<string, unknown> | null; old?: Record<string, unknown> | null }) => {
-      const row = (payload.new || payload.old || null) as Record<string, unknown> | null;
-      if (!row) return;
-      const user1 = String(row.user1_id || "");
-      const user2 = String(row.user2_id || "");
-      if (user1 !== profile.id && user2 !== profile.id) return;
-      if (matchesFeedDebounceRef.current !== null) window.clearTimeout(matchesFeedDebounceRef.current);
-      matchesFeedDebounceRef.current = window.setTimeout(() => {
-        matchesFeedDebounceRef.current = null;
-        invalidateMatchesCache();
-        setMatchesFeedTick((prev) => prev + 1);
-        void loadConversations("friends");
-      }, 350);
-    };
-
-    // Collapse 4 listeners (INSERT/UPDATE × user1/user2) into 2 using event: "*". The
-    // JS-side guard above (`user1 !== profile.id && user2 !== profile.id`) already
-    // filters out irrelevant rows that might leak if the filter layer ever misbehaves.
-    const channel = supabase
-      .channel(`matches_feed_${profile.id}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "matches", filter: `user1_id=eq.${profile.id}` }, onMatchChange)
-      .on("postgres_changes", { event: "*", schema: "public", table: "matches", filter: `user2_id=eq.${profile.id}` }, onMatchChange)
-      .subscribe();
-
-    return () => {
-      if (matchesFeedDebounceRef.current !== null) window.clearTimeout(matchesFeedDebounceRef.current);
-      void supabase.removeChannel(channel);
-    };
-  }, [invalidateMatchesCache, loadConversations, profile?.id]);
 
   useEffect(() => {
     if (!profile?.id) return;
@@ -6687,7 +6623,7 @@ const Chats = () => {
                     {m.id !== profile?.id && (
                       <button
                         onClick={async () => {
-                          if (!profile?.is_verified) {
+                          if (!isVerifiedProfile(profile)) {
                             setGroupVerifyGateOpen(true);
                             return;
                           }
@@ -6773,7 +6709,7 @@ const Chats = () => {
                           className="h-7 w-7 p-0 flex items-center justify-center"
                           aria-label="Add member"
                           onClick={async () => {
-                            if (!profile?.is_verified) {
+                            if (!isVerifiedProfile(profile)) {
                               setGroupVerifyGateOpen(true);
                               return;
                             }

@@ -1,23 +1,44 @@
 {
   "expo": {
-    "name": "Huddle App",
-    "slug": "huddle-app",
+    "name": "huddle",
+    "slug": "huddle",
     "version": "0.1.0",
     "scheme": "huddle",
     "orientation": "portrait",
+    "icon": "./assets/app-icon.png",
     "userInterfaceStyle": "light",
-    "newArchEnabled": false,
+    "newArchEnabled": true,
+    "splash": {
+      "backgroundColor": "#ffffff"
+    },
     "plugins": [
       [
         "expo-image-picker",
         {
-          "photosPermission": "Allow Huddle to access your photos.",
-          "cameraPermission": "Allow Huddle to access your camera.",
-          "microphonePermission": "Allow Huddle to access your microphone for video capture."
+          "photosPermission": "Allow huddle to access your photos.",
+          "cameraPermission": "Allow huddle to access your camera.",
+          "microphonePermission": "Allow huddle to access your microphone for video capture."
+        }
+      ],
+      [
+        "react-native-vision-camera",
+        {
+          "cameraPermissionText": "Please enable camera access to continue verification.",
+          "enableMicrophonePermission": false
         }
       ],
       "expo-notifications",
-      "expo-font"
+      "expo-apple-authentication",
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Allow huddle to use Face ID for secure sign in."
+        }
+      ],
+      "expo-font",
+      "@rnmapbox/maps",
+      "expo-secure-store",
+      "expo-video"
     ],
     "ios": {
       "supportsTablet": true,
@@ -25,12 +46,24 @@
         "applinks:huddle.pet"
       ],
       "infoPlist": {
-        "NSUserNotificationUsageDescription": "Allow Huddle to send you updates and alerts."
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSUserNotificationUsageDescription": "Allow huddle to send you updates and alerts.",
+        "NSFaceIDUsageDescription": "Allow huddle to use Face ID for secure sign in.",
+        "NSCameraUsageDescription": "Please enable camera access to continue verification.",
+        "NSLocalNetworkUsageDescription": "Allow huddle to connect to the local development server.",
+        "NSBonjourServices": [
+          "_expo._tcp",
+          "_react-native-metro._tcp"
+        ]
       },
       "bundleIdentifier": "pet.huddle",
       "appleTeamId": "AN4TY85CTU"
     },
     "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/app-icon.png",
+        "backgroundColor": "#ffffff"
+      },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "package": "pet.huddle",
@@ -43,6 +76,21 @@
               "scheme": "https",
               "host": "huddle.pet",
               "pathPrefix": "/auth/callback"
+            },
+            {
+              "scheme": "https",
+              "host": "huddle.pet",
+              "pathPrefix": "/service-chat"
+            },
+            {
+              "scheme": "https",
+              "host": "huddle.pet",
+              "pathPrefix": "/carerprofile/stripe-return"
+            },
+            {
+              "scheme": "https",
+              "host": "huddle.pet",
+              "pathPrefix": "/carerprofile/stripe-refresh"
             }
           ],
           "category": [
@@ -50,7 +98,17 @@
             "DEFAULT"
           ]
         }
+      ],
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.CAMERA"
       ]
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "b09a67d5-b511-4122-b40f-3db564d33df5"
+      }
+    },
+    "owner": "huddle-pet"
   }
 }

@@ -10,7 +10,6 @@ const SignupDob = lazy(() => import("@/pages/signup/SignupDob"));
 const SignupName = lazy(() => import("@/pages/signup/SignupName"));
 const SignupVerify = lazy(() => import("@/pages/signup/SignupVerify"));
 const SignupEmailConfirmation = lazy(() => import("@/pages/signup/SignupEmailConfirmation"));
-const SignupMarketingConfirmed = lazy(() => import("@/pages/signup/SignupMarketingConfirmed"));
 const SignupVerifyEmail = lazy(() => import("@/pages/signup/SignupVerifyEmail"));
 const VerifyCallback = lazy(() => import("@/pages/VerifyCallback"));
 const ResetPassword = lazy(() => import("@/pages/ResetPassword"));
@@ -42,7 +41,6 @@ export const PublicAuthRoutes = () => (
     <Route path="/signup/credentials" element={<PublicRoute renderWhileAuthLoading><SignupCredentials /></PublicRoute>} />
     <Route path="/signup/verify" element={<PublicRoute><RouteSuspense><SignupVerify /></RouteSuspense></PublicRoute>} />
     <Route path="/signup/email-confirmation" element={<PublicRoute><RouteSuspense><SignupEmailConfirmation /></RouteSuspense></PublicRoute>} />
-    <Route path="/signup/marketing-confirmed" element={<PublicRoute><RouteSuspense><SignupMarketingConfirmed /></RouteSuspense></PublicRoute>} />
     <Route path="/signup/verify-email" element={<RouteSuspense><SignupVerifyEmail /></RouteSuspense>} />
     <Route path="/turnstile-health" element={<RouteSuspense><TurnstileHealth /></RouteSuspense>} />
     <Route path="/turnstile-health-resetaction" element={<RouteSuspense><TurnstileHealthResetAction /></RouteSuspense>} />

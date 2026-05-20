@@ -1,0 +1,26 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="_frame.css">
+<style>
+  .field { background: #FFFFFF; border-radius: 14px; padding: 10px 14px; display: flex; flex-direction: column; gap: 2px; border: 1px solid rgba(66,73,101,0.12); box-shadow: inset 2px 2px 5px rgba(163,168,190,0.12), inset -2px -2px 5px rgba(255,255,255,0.9); }
+  .field.readonly { background: #F3F4F6; }
+  .field .lab { font-size: 11px; color: var(--fg-2); font-weight: 500; letter-spacing: 0.02em; }
+  .field .val { font-size: 15px; color: var(--fg-1); font-weight: 500; }
+  .field.focus { border-color: rgba(33,69,207,0.38); box-shadow: inset 2px 2px 5px rgba(163,168,190,0.12), inset -2px -2px 5px rgba(255,255,255,0.9), 0 0 0 2px rgba(33,69,207,0.35); }
+  .field.error { border-color: rgba(239,68,68,0.42); box-shadow: inset 2px 2px 5px rgba(163,168,190,0.12), inset -2px -2px 5px rgba(255,255,255,0.9), 0 0 0 2px rgba(239,68,68,0.5); }
+  .err { color: #B91C1C; font-size: 12px; margin-top: 4px; }
+</style></head>
+<body><div class="card">
+  <div class="grid" style="grid-template-columns: repeat(3, 1fr); gap: 14px; align-items: start;">
+    <div>
+      <div class="field"><span class="lab">Display Name</span><span class="val" style="color: var(--fg-3)">Social Manager</span></div>
+      <div style="margin-top:6px;" class="label-eyebrow">Editable · rest</div>
+    </div>
+    <div>
+      <div class="field focus"><span class="lab">Phone</span><span class="val">+852 5120 8821</span></div>
+      <div style="margin-top:6px;" class="label-eyebrow">Focus · 2px Huddle Blue ring</div>
+    </div>
+    <div>
+      <div class="field readonly"><span class="lab">Legal Name</span><span class="val">Fong Po Man</span></div>
+      <div style="margin-top:6px;" class="label-eyebrow">Read-only · grey</div>
+    </div>
+  </div>
+</div></body></html>

@@ -3,6 +3,7 @@ const SIGNUP_PROOF_TTL_MS = 30 * 60 * 1000;
 export type PresignupTokenRow = {
   token: string;
   email: string;
+  signal_key?: string | null;
   verified: boolean;
   expires_at: string;
   signup_proof: string | null;
@@ -35,7 +36,7 @@ export const readPresignupTokenRow = async (
 ) => {
   const { data, error } = await supabase
     .from("presignup_tokens")
-    .select("token,email,verified,expires_at,signup_proof,signup_proof_issued_at,signup_proof_expires_at,signup_proof_used_at")
+    .select("token,email,signal_key,verified,expires_at,signup_proof,signup_proof_issued_at,signup_proof_expires_at,signup_proof_used_at")
     .eq("token", token)
     .maybeSingle();
 

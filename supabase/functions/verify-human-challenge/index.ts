@@ -1,7 +1,7 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL") as string;
-const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") as string;
+const serviceRoleKey = (Deno.env.get("HUDDLE_SUPABASE_SERVICE_KEY") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")) as string;
 const supabase = createClient(supabaseUrl, serviceRoleKey);
 
 type Action = "get" | "start" | "complete";
@@ -18,7 +18,6 @@ type Payload = {
 
 const CHALLENGE_POOL = [
   { id: "turn_left_right", instruction: "Turn head left then right" },
-  { id: "look_up_down", instruction: "Look up then down slowly" },
 ] as const;
 
 const json = (body: unknown, status = 200) =>
@@ -83,11 +82,18 @@ function isValidHumanPassResult(params: {
   const upTravel = asNumber(params.resultPayload.upTravel) ?? 0;
   const downTravel = asNumber(params.resultPayload.downTravel) ?? 0;
   const requiredDurationMs = asNumber(params.resultPayload.requiredDurationMs) ?? 0;
+  const qualityScore = asNumber(params.resultPayload.qualityScore) ?? 0;
+  const payloadChallengeType = String(params.resultPayload.challengeType || "");
 
-  if (verifier !== "mediapipe_face_landmarker") return false;
+  if (
+    verifier !== "mediapipe_face_landmarker"
+    && verifier !== "native_mlkit_face_detector"
+  ) return false;
+  if (payloadChallengeType && payloadChallengeType !== params.challengeType) return false;
   if (detectedFrames < 6) return false;
   if (requiredDurationMs < 3000) return false;
   if ((params.score ?? 0) < 0.7) return false;
+  if (verifier === "native_mlkit_face_detector" && qualityScore < 0.7) return false;
 
   if (params.challengeType === "turn_left_right") {
     return horizontalShift >= 0.36 && leftTravel >= 0.12 && rightTravel >= 0.12;
@@ -243,6 +249,7 @@ Deno.serve(async (req: Request) => {
         latestAttempt
         && latestAttempt.status === "pending"
         && !isAttemptExpired(latestAttempt.challenge_payload)
+        && String((latestAttempt.challenge_payload as Record<string, unknown> | null)?.challengeType || "") === "turn_left_right"
       ) {
         const statusData = await resolveVerificationStatus(userId);
         return withCors(req, json({

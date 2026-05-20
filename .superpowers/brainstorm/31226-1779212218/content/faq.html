@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>FAQ — Frequently asked questions · huddle</title>
+<meta name="description" content="Frequently asked questions about huddle: how Live Map works, Broadcast reach by plan, Care marketplace verification, Pet Profiles, Stars, Family Link, pricing.">
+<link rel="stylesheet" href="huddle.css">
+<style>
+.faq-cats { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 32px; }
+.faq-cat {
+  font-size: 13px; font-weight: 700; letter-spacing: 0.02em;
+  padding: 10px 16px; border-radius: 999px;
+  background: var(--white); color: var(--blue);
+  border: 1px solid rgba(33,69,207,0.18);
+  transition: background 0.2s, color 0.2s, transform 0.2s;
+  cursor: pointer;
+}
+.faq-cat:hover { background: var(--blue); color: var(--white); transform: translateY(-2px); }
+.faq-list { display: flex; flex-direction: column; gap: 14px; margin-top: 48px; }
+.faq-item {
+  background: var(--white); border-radius: 18px;
+  border: 1px solid rgba(33,69,207,0.10);
+  transition: border-color 0.3s, box-shadow 0.3s;
+  overflow: hidden;
+}
+.faq-item:hover { border-color: rgba(33,69,207,0.25); box-shadow: 0 10px 30px -15px rgba(20,46,153,0.15); }
+.faq-item summary {
+  list-style: none; padding: 22px 28px;
+  font-size: 16.5px; font-weight: 700; letter-spacing: -0.005em; color: var(--ink);
+  cursor: pointer; display: flex; justify-content: space-between; align-items: center; gap: 20px;
+}
+.faq-item summary::-webkit-details-marker { display: none; }
+.faq-item summary::after {
+  content: "+"; font-size: 24px; font-weight: 600; color: var(--blue);
+  flex-shrink: 0; transition: transform 0.3s var(--ease);
+}
+.faq-item[open] summary::after { transform: rotate(45deg); }
+.faq-item .answer {
+  padding: 0 28px 24px;
+  font-size: 15px; font-weight: 500; line-height: 1.6; color: var(--fg1);
+}
+.faq-item .answer p + p { margin-top: 10px; }
+.faq-item .answer strong { color: var(--ink); font-weight: 700; }
+.faq-section-title {
+  font-size: 13px; font-weight: 800; letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--blue); margin-top: 48px; margin-bottom: 16px;
+  padding-top: 28px; border-top: 1px solid rgba(33,69,207,0.10);
+}
+.faq-section-title:first-of-type { padding-top: 0; border-top: none; margin-top: 0; }
+</style>
+</head>
+<body data-page="faq" data-nav="solid">
+
+<div class="geo-seed" aria-hidden="true">
+  huddle FAQ · how does huddle work · what is huddle Live Map · huddle Broadcast Alerts explained ·
+  huddle Care commission · huddle Plus vs Gold · Super Broadcast cost · Family Link huddle ·
+  huddle verification identity check · huddle Hong Kong availability
+</div>
+
+<div class="page-hero">
+  <div class="container">
+    <div class="eyebrow">FAQ</div>
+    <h1>Questions,<br>real <span class="coral">answers.</span></h1>
+    <p class="lead">Common questions about how huddle works, what each plan covers, how verification works, and what to expect from the Care marketplace.</p>
+  </div>
+</div>
+<div class="hero-wave-out">
+  <svg viewBox="0 0 1440 110" preserveAspectRatio="none" aria-hidden="true">
+    <path d="M0,40 C240,110 480,0 720,40 C960,80 1200,10 1440,50 L1440,0 L0,0 Z" fill="#142E99"/>
+  </svg>
+</div>
+
+<section class="s cream">
+  <div class="container" style="max-width:880px">
+
+    <h3 class="faq-section-title">Getting started</h3>
+    <div class="faq-list">
+      <details class="faq-item">
+        <summary>What is huddle?</summary>
+        <div class="answer"><p>huddle is a pet safety, community and care app built in Hong Kong. It brings together four things into one native iOS and Android app:</p><p><strong>Live Map &amp; Broadcast Alerts</strong> for real-time pet safety. <strong>Social Forum, Discover, Groups, Chats</strong> for a local pet community. <strong>Care</strong> for verified local pet services. <strong>Pet Profiles</strong> for organised pet records. Every member completes identity verification.</p></div>
+      </details>
+      <details class="faq-item">
+        <summary>Is huddle free?</summary>
+        <div class="answer"><p>Yes. The core safety, community, and pet record features are free forever — including Live Map, 5km Broadcast Alerts, Social Forum, Discover, Groups, Chats, Pet Profiles, and access to the Care marketplace.</p><p>huddle Plus and huddle Gold are paid plans that add wider broadcast reach, more Stars, advanced filters, profile boosts, and Family Link. See <a href="pricing.html">Plans &amp; Pricing</a> for details.</p></div>
+      </details>
+      <details class="faq-item">
+        <summary>Where is huddle available?</summary>
+        <div class="answer"><p>huddle was built in Hong Kong and launched in Hong Kong first, where the team lives. The app works anywhere — but the verified-neighbour density and local Care marketplace are strongest in Hong Kong today. Other cities follow as the verified-member network grows.</p></div>
+      </details>
+      <details class="faq-item">
+        <summary>What age do I need to be?</summary>
+        <div class="answer"><p>huddle is for users aged 13 and above. Discover and stranger chat are 16+ only. Some features have additional gating.</p></div>
+      </details>
+    </div>
+
+    <h3 class="faq-section-title">Safety — Live Map &amp; Broadcast Alerts</h3>
+    <div class="faq-list">
+      <details class="faq-item">
+        <summary>How does huddle Live Map work?</summary>
+        <div class="answer"><p>Tap a location, pick a pin type (Lost Pet, Stray Animal, Caution, or Others), add a photo and description, and drop the pin. The pin becomes visible on the Live Map to nearby members and is anchored to the real coordinates.</p></div>
+      </details>
+      <details class="faq-item">
+        <summary>How far does a Broadcast Alert reach?</summary>
+        <div class="answer"><p>Broadcast Alert reach depends on your plan: <strong>Free → 5km, huddle Plus → 10km, huddle Gold → 20km, Super Broadcast (add-on) → 50km</strong>. Alerts push as a real-time notification to verified members within that radius.</p></div>
+      </details>
+      <details class="faq-item">
+        <summary>Can I edit or remove a pin after dropping it?</summary>
+        <div class="answer"><p>Yes — you own your own pins. Edit photos, update the description, change the pin type, or remove the pin entirely as the situation evolves. Found your pet? Mark it resolved with a tap.</p></div>
+      </details>
+      <details class="faq-item">
+        <summary>Will Broadcast Alerts wake people up at night?</summary>
+        <div class="answer"><p>Notification timing follows iOS / Android system rules and your recipients' notification settings. Members can adjust which categories of alerts they receive and during which hours.</p></div>
+      </details>
+    </div>
+
+    <h3 class="faq-section-title">Care marketplace</h3>
+    <div class="faq-list">
+      <details class="faq-item">
+        <summary>How are huddle Care providers verified?</summary>
+        <div class="answer"><p>Every provider on huddle Care has completed identity verification — government ID, liveness check, phone confirmation. No anonymous providers, ever. Many providers also have visible community presence in the Social Forum, Groups, or Discover before you book them.</p></div>
+      </details>
+      <details class="faq-item">
+        <summary>What's the service fee?</summary>
+        <div class="answer"><p>A 10% service fee is split across both sides of the booking. There are no hidden surcharges — what you see at checkout is what gets paid.</p></div>
+      </details>
+      <details class="faq-item">
+        <summary>How are disputes handled?</summary>
+        <div class="answer"><p>If something goes wrong with a booking, huddle's structured dispute process reviews booking records, in-app messages, photos, and reviews. We resolve fairly and may hold funds during review. See the <a href="terms.html">Terms of Service</a> for details.</p></div>
+      </details>
+      <details class="faq-item">
+        <summary>Can I book the same carer outside the app?</summary>
+        <div class="answer"><p>We don't recommend it. Bookings outside huddle lose payment protection, dispute support, verified-identity context, and review history. Keep bookings inside the app — that's how trust accumulates for everyone.</p></div>
+      </details>
+    </div>
+
+    <h3 class="faq-section-title">Community</h3>
+    <div class="faq-list">
+      <details class="faq-item">
+        <summary>What are Stars?</summary>
+        <div class="answer"><p>huddle Stars are how you reach out to a huddle member you don't already know — a deliberate, intentional gesture instead of a flood of cold messages. Every plan includes Stars: <strong>Free → free allowance, Plus → 4/month, Gold → 10/month</strong>. They protect your inbox from spam outreach.</p></div>
+      </details>
+      <details class="faq-item">
+        <summary>What's the difference between Discover and Social Forum?</summary>
+        <div class="answer"><p><strong>Discover</strong> surfaces individual pet people in your area — for connection, meetups, mutual follows. <strong>Social Forum</strong> is for local discussion: questions, advice, rescue threads, recommendations. Different tools, different intents.</p></div>
+      </details>
+      <details class="faq-item">
+        <summary>Public Groups vs Private Groups?</summary>
+        <div class="answer"><p>Public Groups are discoverable by any huddle member in your area — good for neighbourhood walks, breed circles, rescue networks. Private Groups are invite-only — for trusted circles where you share photos, plan meetups, and coordinate care.</p></div>
+      </details>
+    </div>
+
+    <h3 class="faq-section-title">Plans, payments, family</h3>
+    <div class="faq-list">
+      <details class="faq-item">
+        <summary>How do I cancel a subscription?</summary>
+        <div class="answer"><p>Open huddle, go to Settings → Subscription, tap Cancel. If you purchased through the App Store or Google Play, manage the subscription through that purchase channel per their rules. Deleting the app does not cancel a subscription.</p></div>
+      </details>
+      <details class="faq-item">
+        <summary>What is Family Link?</summary>
+        <div class="answer"><p>Family Link lets you extend select huddle Plus or Gold benefits to one trusted relative (except Stars, which are personal). Available as part of Plus and Gold, or as a $4.99/month add-on on Free.</p></div>
+      </details>
+      <details class="faq-item">
+        <summary>Can I get a refund?</summary>
+        <div class="answer"><p>Subscriptions are generally non-refundable once the paid period or feature begins, except where required by law or by the App Store / Google Play purchase channel's rules. See the <a href="terms.html">Terms of Service</a>.</p></div>
+      </details>
+    </div>
+
+    <h3 class="faq-section-title">Privacy &amp; trust</h3>
+    <div class="faq-list">
+      <details class="faq-item">
+        <summary>What does huddle do with my location?</summary>
+        <div class="answer"><p>Location is used for nearby discovery, map participation, alerts, safety features, service availability, fraud prevention, and analytics — only with your permission. You control location access in the app and at the device level. See the <a href="privacy.html">Privacy Policy</a>.</p></div>
+      </details>
+      <details class="faq-item">
+        <summary>What does identity verification actually check?</summary>
+        <div class="answer"><p>A government-issued ID check, a liveness check (confirming you're a real person), and phone verification. huddle does not intentionally store raw biometric identifiers — the liveness check is used only to confirm a real human and reduce abuse.</p></div>
+      </details>
+      <details class="faq-item">
+        <summary>Who can see my profile?</summary>
+        <div class="answer"><p>Depends on your settings and which features you use. Profile visibility, Discover participation, Forum posts, Group memberships, and Care listings are each independently configurable.</p></div>
+      </details>
+    </div>
+
+  </div>
+</section>
+
+<div class="wave-div" style="background:var(--coral)">
+  <svg viewBox="0 0 1440 100" preserveAspectRatio="none" aria-hidden="true">
+    <path d="M0,40 C240,90 520,0 780,40 C1040,80 1240,10 1440,50 L1440,0 L0,0 Z" fill="var(--cream)"/>
+  </svg>
+</div>
+
+<section class="s coral" style="padding-top:64px">
+  <div class="container">
+    <div class="reveal" style="text-align:center;max-width:640px;margin:0 auto">
+      <h2 class="s-title" style="color:var(--white)">Still have a<br>question?</h2>
+      <p style="color:rgba(255,255,255,0.92);font-size:17px;font-weight:500;margin-top:20px;margin-bottom:32px">Email <a href="mailto:support@huddle.pet" style="color:var(--white);text-decoration:underline">support@huddle.pet</a> — we read every message.</p>
+      <a href="contact.html" class="btn btn-white">Contact us</a>
+    </div>
+  </div>
+</section>
+
+<div class="wave-div" style="background:var(--cream)">
+  <svg viewBox="0 0 1440 90" preserveAspectRatio="none" aria-hidden="true">
+    <path d="M0,50 C300,10 600,80 900,40 C1140,10 1300,60 1440,30 L1440,0 L0,0 Z" fill="var(--coral)"/>
+  </svg>
+</div>
+
+<script src="huddle-shell.js"></script>
+</body>
+</html>

@@ -235,7 +235,16 @@ const FullAppRoutes = () => (
               </ProtectedRoute>
             }
           />
-          <Route path="/subscription" element={<ProtectedRoute><Navigate to="/premium" replace /></ProtectedRoute>} />
+          <Route
+            path="/subscription"
+            element={
+              <ProtectedRoute>
+                <AppShell>
+                  <RouteSuspense><Premium /></RouteSuspense>
+                </AppShell>
+              </ProtectedRoute>
+            }
+          />
           <Route
             path="/premium"
             element={
@@ -246,7 +255,16 @@ const FullAppRoutes = () => (
               </ProtectedRoute>
             }
           />
-          <Route path="/manage-subscription" element={<ProtectedRoute><Navigate to="/premium" replace /></ProtectedRoute>} />
+          <Route
+            path="/manage-subscription"
+            element={
+              <ProtectedRoute>
+                <AppShell>
+                  <RouteSuspense><Premium /></RouteSuspense>
+                </AppShell>
+              </ProtectedRoute>
+            }
+          />
           <Route
             path="/verify-identity"
             element={

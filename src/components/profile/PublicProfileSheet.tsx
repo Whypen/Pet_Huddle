@@ -18,6 +18,7 @@ import { GlassModal } from "@/components/ui/GlassModal";
 import { GlassSheet } from "@/components/ui/GlassSheet";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { PetDetailsBody, getSterilizedLabel, toTitleCase } from "@/components/pets/PetDetailsBody";
+import { isVerifiedProfile } from "@/lib/verification";
 
 type PublicProfileSheetData = {
   created_at?: string | null;
@@ -389,7 +390,7 @@ export const PublicProfileSheet = ({ isOpen, onClose, loading, fallbackName, dat
             memberNumber={memberNumber}
             membershipTier={resolvedData.effective_tier ?? resolvedData.tier ?? null}
             availabilityStatus={availabilityStatus}
-            isVerified={resolvedData.is_verified === true}
+            isVerified={isVerifiedProfile(resolvedData)}
             hasCar={Boolean(resolvedData.has_car)}
             photoUrl={resolvedData.avatar_url || null}
             dob={resolvedData.dob || ""}

@@ -70,6 +70,46 @@ const resolveMode = (origin: string | null, returnUrl?: string, refreshUrl?: str
   return "live";
 };
 
+const secretMode = (secret: string): "test" | "live" | null => {
+  if (secret.startsWith("sk_test_")) return "test";
+  if (secret.startsWith("sk_live_")) return "live";
+  return null;
+};
+
+const pickAccountStripeClient = async (accountId: string | undefined | null, preferredMode: "test" | "live") => {
+  const candidates: Array<"test" | "live"> = preferredMode === "live" ? ["live", "test"] : ["test", "live"];
+  let lastError: unknown = null;
+  for (const candidate of candidates) {
+    const secret = pickStripeSecret(candidate);
+    if (!secret) continue;
+    const stripe = createStripeClient(secret);
+    if (!accountId) return { mode: secretMode(secret) ?? candidate, stripe };
+    try {
+      const account = await stripe.accounts.retrieve(accountId);
+      return { account, mode: secretMode(secret) ?? candidate, stripe };
+    } catch (error) {
+      lastError = error;
+      const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+      if (!message.includes("no such account") && !message.includes("mode")) throw error;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("stripe_account_mode_unresolved");
+};
+
+const stripeModeCandidates = (preferredMode: "test" | "live"): Array<"test" | "live"> =>
+  preferredMode === "live" ? ["live", "test"] : ["test", "live"];
+
+const isRecoverableStripeModeError = (error: unknown): boolean => {
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  return (
+    message.includes("no such account") ||
+    message.includes("test mode account link") ||
+    message.includes("live mode account link") ||
+    message.includes("created in live mode") ||
+    message.includes("created in test mode")
+  );
+};
+
 const createStripeClient = (secret: string): Stripe =>
   new Stripe(secret, {
     apiVersion: "2023-10-16",
@@ -166,18 +206,61 @@ const syncStripeStatus = async (
   return payoutStatus;
 };
 
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const IP_RATE_LIMIT_MAX = 80;
+const USER_RATE_LIMIT_MAX = 30;
+const MAX_BODY_BYTES = 16_000;
+const RATE_BUCKETS = new Map<string, { count: number; windowStart: number }>();
+
+const getClientIp = (req: Request): string =>
+  req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+  req.headers.get("x-real-ip") ||
+  "unknown";
+
+const isWithinRateLimit = (key: string, max: number): { ok: boolean; resetAt?: number } => {
+  const now = Date.now();
+  const bucket = RATE_BUCKETS.get(key);
+  if (!bucket || now - bucket.windowStart >= RATE_LIMIT_WINDOW_MS) {
+    RATE_BUCKETS.set(key, { count: 1, windowStart: now });
+    return { ok: true };
+  }
+  bucket.count += 1;
+  if (bucket.count <= max) return { ok: true };
+  return { ok: false, resetAt: bucket.windowStart + RATE_LIMIT_WINDOW_MS };
+};
+
+const enforceBodySize = (req: Request): boolean => {
+  const rawLength = Number(req.headers.get("content-length") || 0);
+  if (!Number.isFinite(rawLength) || rawLength <= 0) return true;
+  return rawLength <= MAX_BODY_BYTES;
+};
+
 const supabaseUrl = Deno.env.get("SUPABASE_URL") as string;
-const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") as string;
+const supabaseServiceKey = (Deno.env.get("HUDDLE_SUPABASE_SERVICE_KEY") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")) as string;
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
+    const clientIp = getClientIp(req);
+    if (!enforceBodySize(req)) {
+      return Response.json({ error: "Request body too large" }, { status: 413, headers: corsHeaders });
+    }
+    const ipRate = isWithinRateLimit(`create-stripe-connect-link:ip:${clientIp}`, IP_RATE_LIMIT_MAX);
+    if (!ipRate.ok) {
+      const wait = Math.max(1, Math.ceil(((ipRate.resetAt ?? Date.now()) - Date.now()) / 1000));
+      console.warn("[create-stripe-connect-link] rate limit blocked by ip", { ip: clientIp });
+      return Response.json(
+        { error: "Too many requests", code: "ip_rate_limited" },
+        { status: 429, headers: { ...corsHeaders, "Retry-After": String(wait) } },
+      );
+    }
+
     const authHeader = req.headers.get("Authorization") ?? "";
     const huddleTokenHeader = req.headers.get("x-huddle-access-token") ?? "";
     const bearerToken = authHeader.replace(/^Bearer\s+/i, "").trim();
     const huddleToken = huddleTokenHeader.replace(/^Bearer\s+/i, "").trim();
-    const accessToken = [bearerToken, huddleToken].find((token) => token.split(".").length === 3) || "";
+    const accessToken = [huddleToken, bearerToken].find((token) => token.split(".").length === 3) || "";
     if (!accessToken) {
       return Response.json({ error: "Unauthorized" }, { status: 401, headers: corsHeaders });
     }
@@ -187,6 +270,15 @@ serve(async (req) => {
     );
     if (authError || !user) {
       return Response.json({ error: "Unauthorized" }, { status: 401, headers: corsHeaders });
+    }
+    const userRate = isWithinRateLimit(`create-stripe-connect-link:user:${user.id}`, USER_RATE_LIMIT_MAX);
+    if (!userRate.ok) {
+      const wait = Math.max(1, Math.ceil(((userRate.resetAt ?? Date.now()) - Date.now()) / 1000));
+      console.warn("[create-stripe-connect-link] rate limit blocked by user", { userId: user.id, ip: clientIp });
+      return Response.json(
+        { error: "Too many requests", code: "user_rate_limited" },
+        { status: 429, headers: { ...corsHeaders, "Retry-After": String(wait) } },
+      );
     }
 
     const { data: profileRow } = await supabase
@@ -232,8 +324,6 @@ serve(async (req) => {
         { status: 500, headers: corsHeaders },
       );
     }
-    const stripe = createStripeClient(stripeSecret);
-
     const { data: profile } = await supabase
       .from("pet_care_profiles")
       .select("stripe_account_id,currency")
@@ -281,17 +371,54 @@ serve(async (req) => {
       if (!returnUrl || !refreshUrl) {
         return Response.json({ error: "returnUrl and refreshUrl required" }, { status: 400, headers: corsHeaders });
       }
-      const safeReturnUrl = mode === "live" && !isHttpsUrl(returnUrl)
-        ? buildFallbackConnectUrl("/carerprofile/stripe-return")
-        : returnUrl;
-      const safeRefreshUrl = mode === "live" && !isHttpsUrl(refreshUrl)
-        ? buildFallbackConnectUrl("/carerprofile/stripe-refresh")
-        : refreshUrl;
       const linkKeySuffix = Math.floor(Date.now() / 60000);
 
       let accountId = (profile as { stripe_account_id?: string } | null)?.stripe_account_id;
 
+      const createAccountLink = async (
+        stripe: Stripe,
+        accountMode: "test" | "live",
+        linkAccountId: string,
+      ) => {
+        const safeReturnUrl = accountMode === "live" && !isHttpsUrl(returnUrl)
+          ? buildFallbackConnectUrl("/carerprofile/stripe-return")
+          : returnUrl;
+        const safeRefreshUrl = accountMode === "live" && !isHttpsUrl(refreshUrl)
+          ? buildFallbackConnectUrl("/carerprofile/stripe-refresh")
+          : refreshUrl;
+        return await stripe.accountLinks.create({
+          account: linkAccountId,
+          refresh_url: safeRefreshUrl,
+          return_url: safeReturnUrl,
+          type: "account_onboarding",
+          collection_options: { fields: "currently_due" },
+        }, {
+          idempotencyKey: `huddle_connect_link_${user.id}_${linkAccountId}_${linkKeySuffix}`,
+        });
+      };
+
+      const createStoredAccountLink = async (storedAccountId: string) => {
+        let lastError: unknown = null;
+        for (const candidate of stripeModeCandidates(mode)) {
+          const secret = pickStripeSecret(candidate);
+          if (!secret) continue;
+          const stripe = createStripeClient(secret);
+          const accountMode = secretMode(secret) ?? candidate;
+          try {
+            const refreshedAccount = await stripe.accounts.retrieve(storedAccountId);
+            await syncStripeStatus(supabase, user.id, storedAccountId, refreshedAccount);
+            return await createAccountLink(stripe, accountMode, storedAccountId);
+          } catch (error) {
+            lastError = error;
+            if (isRecoverableStripeModeError(error)) continue;
+            throw error;
+          }
+        }
+        throw lastError instanceof Error ? lastError : new Error("stripe_account_mode_unresolved");
+      };
+
       const createFreshAccountLink = async () => {
+        const { mode: accountMode, stripe } = await pickAccountStripeClient(null, mode);
         // Idempotency key prevents duplicate Connect accounts if the client
         // retries on network failure before the account ID is written to DB.
         const account = await stripe.accounts.create(
@@ -300,37 +427,17 @@ serve(async (req) => {
         );
         accountId = account.id;
         await syncStripeStatus(supabase, user.id, accountId, account);
-        return await stripe.accountLinks.create({
-          account: accountId,
-          refresh_url: safeRefreshUrl,
-          return_url: safeReturnUrl,
-          type: "account_onboarding",
-          collection_options: { fields: "currently_due" },
-        }, {
-          idempotencyKey: `huddle_connect_link_${user.id}_${accountId}_${linkKeySuffix}`,
-        });
+        return await createAccountLink(stripe, accountMode, accountId);
       };
 
       try {
         const link = accountId
-          ? await (async () => {
-              const refreshedAccount = await stripe.accounts.retrieve(accountId as string);
-              await syncStripeStatus(supabase, user.id, accountId as string, refreshedAccount);
-              return await stripe.accountLinks.create({
-                account: accountId as string,
-                refresh_url: safeRefreshUrl,
-                return_url: safeReturnUrl,
-                type: "account_onboarding",
-                collection_options: { fields: "currently_due" },
-              }, {
-                idempotencyKey: `huddle_connect_link_${user.id}_${accountId}_${linkKeySuffix}`,
-              });
-            })()
+          ? await createStoredAccountLink(accountId as string)
           : await createFreshAccountLink();
         return Response.json({ url: link.url, mode }, { headers: corsHeaders });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        if (message.toLowerCase().includes("no such account")) {
+        if (message.toLowerCase().includes("no such account") || isRecoverableStripeModeError(error)) {
           const link = await createFreshAccountLink();
           return Response.json({ url: link.url, mode }, { headers: corsHeaders });
         }

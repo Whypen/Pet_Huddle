@@ -59,12 +59,19 @@ const resetServiceWorkerCachesOnce = async () => {
     if (sessionStorage.getItem(SW_RESET_GUARD) === "1") return;
     sessionStorage.setItem(SW_RESET_GUARD, "1");
     const registrations = await navigator.serviceWorker.getRegistrations();
+    const hadRegistrations = registrations.length > 0;
     await Promise.all(registrations.map((registration) => registration.unregister()));
+    let hadCaches = false;
     if ("caches" in window) {
       const keys = await caches.keys();
+      hadCaches = keys.length > 0;
       await Promise.all(keys.map((key) => caches.delete(key)));
     }
-    window.location.reload();
+    // Only reload if we actually cleared something — avoids a phantom reload on
+    // every fresh session when no service worker is registered.
+    if (hadRegistrations || hadCaches) {
+      window.location.reload();
+    }
   } catch (error) {
     console.warn("Service worker reset failed:", error);
   }

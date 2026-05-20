@@ -20,6 +20,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import huddleLogo from "@/assets/huddle-name-transparent.png";
 import { useAuth } from "@/contexts/AuthContext";
 import { resolveCopy } from "@/lib/copy";
+import { isVerifiedProfile } from "@/lib/verification";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import { Sheet, SheetClose, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
@@ -193,6 +194,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
   const location = useLocation();
   const { user, profile, signOut } = useAuth();
   const t = resolveCopy;
+  const [logoFallback, setLogoFallback] = useState<"asset" | "public" | "text">("asset");
   const [pets, setPets] = useState<Pet[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -216,7 +218,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
   const notifDrawerDebounceRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
   const showUnreadDot = !notifOpen && unreadCount > 0;
 
-  const isVerified = profile?.is_verified === true;
+  const isVerified = isVerifiedProfile(profile);
   const dob = (profile as Record<string, unknown> | null)?.dob as string | null ?? null;
   const isAge18Plus = dob
     ? (() => {
@@ -372,30 +374,13 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
           }, 400);
         }
       )
-      .subscribe((status) => {
-        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
-          void refreshUnread();
-        }
-      });
-
-    const pollId = window.setInterval(() => {
-      if (document.visibilityState !== "visible") return;
-      void refreshUnread();
-    }, 25000);
-
-    const onVisibility = () => {
-      if (document.visibilityState !== "visible") return;
-      void refreshUnread();
-    };
-    document.addEventListener("visibilitychange", onVisibility);
+      .subscribe();
 
     void refreshUnread();
 
     return () => {
       cancelled = true;
       if (notifBadgeDebounceRef.current !== null) window.clearTimeout(notifBadgeDebounceRef.current);
-      window.clearInterval(pollId);
-      document.removeEventListener("visibilitychange", onVisibility);
       supabase.removeChannel(channel);
     };
     // Only user.id is used inside; intentionally avoid re-subscribing on other user property changes
@@ -468,23 +453,13 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
           }, 400);
         }
       )
-      .subscribe((status) => {
-        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
-          void load({ silent: true });
-        }
-      });
-
-    const pollId = window.setInterval(() => {
-      if (document.visibilityState !== "visible") return;
-      void load({ silent: true });
-    }, 25000);
+      .subscribe();
 
     void load();
 
     return () => {
       cancelled = true;
       if (notifDrawerDebounceRef.current !== null) window.clearTimeout(notifDrawerDebounceRef.current);
-      window.clearInterval(pollId);
       supabase.removeChannel(channel);
     };
     // Only user.id is used inside; intentionally avoid re-subscribing on other user property changes
@@ -705,11 +680,18 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
           className="absolute left-1/2 -translate-x-1/2 hover:opacity-80 transition-opacity"
           aria-label={t("huddle")}
         >
-          <img
-            src={huddleLogo}
-            alt={t("huddle")}
-            className="h-7 w-auto max-w-[140px] object-contain"
-          />
+          {logoFallback === "text" ? (
+            <span className="block text-[22px] leading-none font-extrabold text-brandBlue tracking-normal">
+              huddle
+            </span>
+          ) : (
+            <img
+              src={logoFallback === "asset" ? huddleLogo : "/huddle-logo.jpg"}
+              alt={t("huddle")}
+              className="h-7 w-auto max-w-[140px] object-contain"
+              onError={() => setLogoFallback((current) => (current === "asset" ? "public" : "text"))}
+            />
+          )}
         </button>
 
         {/* ── Right: X close OR Settings drawer ── */}

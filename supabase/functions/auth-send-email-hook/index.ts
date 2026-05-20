@@ -210,6 +210,10 @@ const htmlFor = (heading: string, body: string, button: string, link: string) =>
 
 const emailJobsFromPayload = (payload: HookPayload): EmailJob[] => {
   const action = String(payload.email_data?.email_action_type || "").trim().toLowerCase();
+  if (action === "signup" || action === "email") {
+    console.log("[auth-send-email-hook] skipped auth verification email", { action });
+    return [];
+  }
   const currentEmail = String(payload.user?.email || "").trim();
   const newEmail = String(payload.user?.new_email || "").trim();
   const tokenHash = String(payload.email_data?.token_hash || "").trim();
@@ -274,6 +278,9 @@ Deno.serve(async (req) => {
     const jobs = emailJobsFromPayload(payload);
     if (jobs.length === 0) {
       const action = String(payload.email_data?.email_action_type || "").trim().toLowerCase();
+      if (action === "signup" || action === "email") {
+        return json(200, {});
+      }
       console.error("[auth-send-email-hook] missing email or token hash", {
         action,
         email_present: Boolean(payload.user?.email || payload.user?.new_email),

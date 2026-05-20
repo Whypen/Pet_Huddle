@@ -11,6 +11,7 @@ import {
   Text,
   View,
 } from "react-native";
+import type { Session } from "@supabase/supabase-js";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
@@ -22,6 +23,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import type { WebViewMessageEvent, WebViewNavigation } from "react-native-webview";
 import { WebView } from "react-native-webview";
 import { NativePageHeader } from "../components/NativePageHeader";
+import { supabaseWebStorageKey } from "../lib/supabase";
 
 const SHELL_URL = "https://huddle.pet";
 const ALLOWED_HOSTS = new Set(["huddle.pet", "www.huddle.pet"]);
@@ -135,7 +137,6 @@ const BRIDGE_BOOTSTRAP_SCRIPT = `
         window.ReactNativeWebView.postMessage(serialized);
       } catch (error) {}
     };
-    window.setInterval(collectSupportRuntimeDiag, 1500);
     window.addEventListener("huddle:native-message", collectSupportRuntimeDiag);
     window.addEventListener("load", collectSupportRuntimeDiag);
 
@@ -312,6 +313,11 @@ type NativeRouteChrome = {
   nativeBottomNavVisible: boolean;
 };
 
+type WebShellScreenProps = {
+  initialPath?: string | null;
+  session?: Session | null;
+};
+
 function pathnameFromUrl(url: string): string | null {
   try {
     const parsed = new URL(url);
@@ -334,6 +340,28 @@ function approvedNativeChromeForUrl(url: string): NativeRouteChrome {
     nativeHeaderVisible: Boolean(approved),
     nativeBottomNavVisible: false,
   };
+}
+
+function shellUrlForPath(path?: string | null) {
+  const cleanPath = String(path || "").trim();
+  if (!cleanPath || cleanPath === "/") return SHELL_URL;
+  if (/^https?:\/\//i.test(cleanPath)) return cleanPath;
+  return `${SHELL_URL}${cleanPath.startsWith("/") ? cleanPath : `/${cleanPath}`}`;
+}
+
+function createNativeAuthBootstrapScript(session?: Session | null) {
+  if (!session?.access_token || !session.refresh_token) return "";
+  const payload = JSON.stringify({
+    ...session,
+    access_token: session.access_token,
+    refresh_token: session.refresh_token,
+  });
+  const storageKey = JSON.stringify(supabaseWebStorageKey);
+  return `
+    try {
+      window.localStorage.setItem(${storageKey}, ${JSON.stringify(payload)});
+    } catch (error) {}
+  `;
 }
 
 type NativePickedFile = {
@@ -650,7 +678,7 @@ function createInjectedBridgeScript(payload: NativeBridgePayload) {
   `;
 }
 
-export function WebShellScreen() {
+export function WebShellScreen({ initialPath, session }: WebShellScreenProps = {}) {
   const webViewRef = useRef<WebView>(null);
   const pageReadyRef = useRef(false);
   const pendingPayloadsRef = useRef<NativeBridgePayload[]>([]);
@@ -661,7 +689,11 @@ export function WebShellScreen() {
   const [reloadKey, setReloadKey] = useState(0);
   const [routeChrome, setRouteChrome] = useState<NativeRouteChrome>(() => approvedNativeChromeForUrl(SHELL_URL));
 
-  const shellUri = useMemo(() => SHELL_URL, []);
+  const shellUri = useMemo(() => shellUrlForPath(initialPath), [initialPath]);
+  const injectedBootstrapScript = useMemo(
+    () => `${createNativeAuthBootstrapScript(session)}\n${BRIDGE_BOOTSTRAP_SCRIPT}`,
+    [session],
+  );
 
   const injectPayload = useCallback((payload: NativeBridgePayload) => {
     const script = createInjectedBridgeScript(payload);
@@ -952,7 +984,7 @@ export function WebShellScreen() {
           ref={webViewRef}
           source={{ uri: shellUri }}
           originWhitelist={["http://*", "https://*", "about:*", "blob:*"]}
-          injectedJavaScriptBeforeContentLoaded={BRIDGE_BOOTSTRAP_SCRIPT}
+          injectedJavaScriptBeforeContentLoaded={injectedBootstrapScript}
           onMessage={handleMessage}
           onLoadStart={() => {
             pageReadyRef.current = false;

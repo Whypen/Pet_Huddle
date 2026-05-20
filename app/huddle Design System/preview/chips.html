@@ -1,0 +1,26 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="_frame.css">
+<style>
+  .chip { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 14px; border-radius: 9999px; font-size: 13px; font-weight: 600; color: var(--fg-1); background: #F3F4F6; border: 1px solid rgba(66,73,101,0.08); }
+  .chip.neu { box-shadow: inset 2px 2px 5px rgba(163,168,190,0.22), inset -2px -2px 5px rgba(255,255,255,0.9); border:none; }
+  .chip.blue { background: rgba(33,69,207,0.08); color: #2145CF; border-color: rgba(33,69,207,0.15); }
+  .chip.gold { background: rgba(207,171,33,0.12); color: #8B6F00; border-color: rgba(207,171,33,0.3); }
+  .chip.emergency { background: rgba(249,115,22,0.12); color: #B4440D; border-color: rgba(249,115,22,0.3); }
+  .dot { width: 6px; height: 6px; border-radius: 999px; background: currentColor; }
+</style></head>
+<body><div class="card">
+  <div class="row" style="gap: 10px;">
+    <span class="chip">Dog · Labrador</span>
+    <span class="chip neu">4 years</span>
+    <span class="chip blue"><span class="dot"></span>Animal Friend</span>
+    <span class="chip gold">✦ Gold</span>
+    <span class="chip emergency"><span class="dot"></span>72H · 10km</span>
+  </div>
+  <div class="row" style="margin-top: 14px; gap: 10px;">
+    <span class="chip" style="background:#2145CF; color:#fff; border:none;">All</span>
+    <span class="chip">Walking</span>
+    <span class="chip">Sitting</span>
+    <span class="chip">Grooming</span>
+    <span class="chip">Boarding</span>
+  </div>
+  <div style="margin-top: 12px;" class="label-eyebrow">Capsule chips · metadata, filters, tier, emergency radius</div>
+</div></body></html>

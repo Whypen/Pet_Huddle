@@ -57,6 +57,15 @@ type PhoneOtpChallengeRow = {
   provider_ref: string | null;
 };
 
+type VerifyPhoneRateLimitRow = {
+  is_limited: boolean;
+  reason: string | null;
+  phone_cnt: number;
+  user_cnt: number;
+  ip_cnt: number;
+  seconds_until_allow: number;
+};
+
 // ── CORS ──────────────────────────────────────────────────────────────────────
 
 const CORS = {
@@ -66,6 +75,7 @@ const CORS = {
     "authorization, x-huddle-access-token, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-api-version",
   "Access-Control-Max-Age": "86400",
 };
+const MAX_BODY_BYTES = 16_000;
 
 // ── SHA-256 hash helper ───────────────────────────────────────────────────────
 
@@ -114,6 +124,39 @@ function classifyVerifyOtpError(raw: string): VerifyOtpReasonCode {
 function normalizePhoneForCompare(value: string | null | undefined): string {
   return String(value || "").trim().replace(/\D/g, "");
 }
+
+const checkVerifyRateLimit = async (
+  serviceClient: ReturnType<typeof createClient>,
+  opts: {
+    phoneHash: string;
+    userId: string | null;
+    ip: string;
+  },
+): Promise<VerifyPhoneRateLimitRow | null> => {
+  try {
+    const { data, error } = await serviceClient
+      .rpc("check_phone_otp_rate_limit", {
+        p_phone_hash: opts.phoneHash,
+        p_user_id: opts.userId,
+        p_ip: opts.ip,
+      });
+    if (error) {
+      console.error("[verify-phone-otp] rate limit rpc error:", error.message);
+      return null;
+    }
+    if (!Array.isArray(data) || data.length === 0) return null;
+    return data[0] as VerifyPhoneRateLimitRow;
+  } catch (err) {
+    console.error("[verify-phone-otp] rate limit rpc threw:", err);
+    return null;
+  }
+};
+
+const enforceBodySize = (req: Request): boolean => {
+  const rawLength = Number(req.headers.get("content-length") || 0);
+  if (!Number.isFinite(rawLength) || rawLength <= 0) return true;
+  return rawLength <= MAX_BODY_BYTES;
+};
 
 async function checkTwilioVerification(opts: {
   accountSid: string;
@@ -201,7 +244,7 @@ Deno.serve(async (req: Request) => {
 
   // ── Env ───────────────────────────────────────────────────────────────────
   const supabaseUrl    = Deno.env.get("SUPABASE_URL")!;
-  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const serviceRoleKey = Deno.env.get("HUDDLE_SUPABASE_SERVICE_KEY") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const anonKey        = Deno.env.get("SUPABASE_ANON_KEY")!;
   const twilioAccountSid = String(Deno.env.get("TWILIO_ACCOUNT_SID") || "").trim();
   const twilioAuthToken = String(Deno.env.get("TWILIO_AUTH_TOKEN") || "").trim();
@@ -225,6 +268,11 @@ Deno.serve(async (req: Request) => {
   });
   const clientIp = getClientIp(req);
 
+  if (!enforceBodySize(req)) {
+    return new Response(JSON.stringify({ error: "Request body too large" }), {
+      status: 413, headers: CORS,
+    });
+  }
   // ── Parse body ────────────────────────────────────────────────────────────
   let body: RequestBody;
   try { body = await req.json() as RequestBody; }
@@ -306,6 +354,28 @@ Deno.serve(async (req: Request) => {
         reason_code: "session_missing",
       }),
       { status: 401, headers: CORS },
+    );
+  }
+
+  const rateLimit = await checkVerifyRateLimit(serviceClient, {
+    phoneHash,
+    userId,
+    ip: clientIp,
+  });
+  if (rateLimit?.is_limited) {
+    const wait = Math.max(1, Number(rateLimit.seconds_until_allow) || 1);
+    const code = rateLimit.reason === "ip_daily_cap" ? "ip_rate_limited" : "user_rate_limited";
+    console.warn("[verify-phone-otp] rate limit blocked", {
+      userId,
+      ip: clientIp,
+      reason: rateLimit.reason,
+    });
+    return new Response(
+      JSON.stringify({ error: "Too many requests", code }),
+      {
+        status: 429,
+        headers: { ...CORS, "Retry-After": String(wait) },
+      },
     );
   }
 

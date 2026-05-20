@@ -1,0 +1,249 @@
+/* ============================================================
+   huddle Design System — Colors & Type
+   Single source of truth. Canonical tokens + semantic aliases.
+   ============================================================ */
+
+/* ─── Fonts — Urbanist (self-hosted TTF) ──────────────────── */
+@font-face { font-family: "Urbanist"; src: url("./fonts/Urbanist-300.ttf") format("truetype");
+  font-weight: 300; font-style: normal; font-display: swap; }
+@font-face { font-family: "Urbanist"; src: url("./fonts/Urbanist-400.ttf") format("truetype");
+  font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "Urbanist"; src: url("./fonts/Urbanist-400Italic.ttf") format("truetype");
+  font-weight: 400; font-style: italic; font-display: swap; }
+@font-face { font-family: "Urbanist"; src: url("./fonts/Urbanist-500.ttf") format("truetype");
+  font-weight: 500; font-style: normal; font-display: swap; }
+@font-face { font-family: "Urbanist"; src: url("./fonts/Urbanist-600.ttf") format("truetype");
+  font-weight: 600; font-style: normal; font-display: swap; }
+@font-face { font-family: "Urbanist"; src: url("./fonts/Urbanist-600Italic.ttf") format("truetype");
+  font-weight: 600; font-style: italic; font-display: swap; }
+@font-face { font-family: "Urbanist"; src: url("./fonts/Urbanist-700.ttf") format("truetype");
+  font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: "Urbanist"; src: url("./fonts/Urbanist-800.ttf") format("truetype");
+  font-weight: 800; font-style: normal; font-display: swap; }
+
+:root {
+  /* ── CORE BRAND PALETTE ─────────────────────────────────── */
+  --huddle-blue:        #2145CF;   /* Primary CTA, logo, active */
+  --huddle-blue-light:  #3A5FE8;
+  --huddle-blue-dark:   #1C3ECC;
+  --coral-orange:       #FF7F50;   /* Hero typography, warmth, email accents */
+  --lime-green:         #BFFF00;   /* Email header/footer, lifestyle vibrancy */
+  --premium-gold:       #CFAB21;   /* Verified badges, Gold tier ONLY */
+  --premium-gold-light: #E0BC2A;
+
+  /* ── TEXT ───────────────────────────────────────────────── */
+  --fg-1:               #424965;   /* Primary text — headings/body */
+  --fg-2:               #4A4A4A;   /* Subtext — captions, metadata */
+  --fg-3:               rgba(74, 73, 101, 0.55);
+  --fg-on-dark:         #FFFFFF;
+  --fg-on-gold:         #2A2400;
+
+  /* ── SURFACES ───────────────────────────────────────────── */
+  --bg-canvas:          #FFFFFF;
+  --bg-muted:           #F3F4F6;
+  --bg-blue-soft:       #EBF5FF;
+  --bg-yellow-soft:     #FFF9E6;
+  --bg-blue-surface:    rgba(33, 69, 207, 0.08);
+  --bg-gold-surface:    rgba(207, 171, 33, 0.10);
+
+  /* ── SEMANTIC ───────────────────────────────────────────── */
+  --emergency-red:      #F97316;   /* Emergency broadcasts ONLY */
+  --validation-red:     #EF4444;   /* Form errors, destructive */
+  --success-green:      #22C55E;
+  --warning-amber:      #F59E0B;
+  --info-blue:          #2145CF;
+
+  /* ── GLASS ──────────────────────────────────────────────── */
+  --glass-e1-bg:        rgba(255, 255, 255, 0.62);
+  --glass-e1-blur:      18px;
+  --glass-e1-border:    1px solid rgba(255, 255, 255, 0.55);
+  --glass-e1-shadow:    0 2px 10px rgba(0,87,255,0.12), 0 1px 3px rgba(0,87,255,0.06), inset 0 1px 0 rgba(255,255,255,0.70);
+  --glass-e1-radius:    20px;
+
+  --glass-e2-bg:        rgba(255, 255, 255, 0.72);
+  --glass-e2-blur:      24px;
+  --glass-e2-shadow:    0 8px 24px rgba(0,87,255,0.13), 0 2px 6px rgba(0,87,255,0.07), inset 0 1px 0 rgba(255,255,255,0.78);
+  --glass-e2-radius:    24px;
+
+  --glass-e3-bg:        rgba(255, 255, 255, 0.82);
+  --glass-e3-blur:      32px;
+  --glass-e3-shadow:    0 20px 48px rgba(0,87,255,0.17), 0 0 0 1px rgba(255,255,255,0.30), inset 0 1px 0 rgba(255,255,255,0.82);
+  --glass-e3-radius:    28px;
+
+  /* ── NEUMORPHIC (neutral drop family) ───────────────────── */
+  --neu-drop:           rgba(163, 168, 190, 0.28);
+  --neu-lift:           rgba(255, 255, 255, 0.84);
+  --neu-inner:          rgba(255, 255, 255, 0.90);
+  --neu-rest-shadow:    5px 5px 14px rgba(163,168,190,0.28), -4px -4px 10px rgba(255,255,255,0.84), inset 0 1px 0 rgba(255,255,255,0.90);
+  --neu-pressed-shadow: inset 3px 3px 9px rgba(163,168,190,0.28), inset -2px -2px 6px rgba(255,255,255,0.82);
+
+  /* ── RADII ──────────────────────────────────────────────── */
+  --radius-sm:          8px;       /* Buttons, inputs */
+  --radius-md:          12px;      /* Cards */
+  --radius-lg:          16px;      /* Glass cards */
+  --radius-xl:          20px;      /* Glass L1 */
+  --radius-2xl:         24px;      /* Glass L2, sheets */
+  --radius-3xl:         28px;      /* Glass L3, modals */
+  --radius-field:       14px;      /* Form fields */
+  --radius-pill:        9999px;
+
+  /* ── SPACING — 8pt grid ─────────────────────────────────── */
+  --space-0:            0;
+  --space-1:            4px;
+  --space-2:            8px;
+  --space-3:            12px;
+  --space-4:            16px;
+  --space-5:            24px;
+  --space-6:            32px;
+  --space-7:            40px;
+  --space-8:            48px;
+  --space-9:            64px;
+
+  /* ── LAYOUT ─────────────────────────────────────────────── */
+  --app-max-width:      430px;     /* Mobile-first container cap */
+  --header-h:           56px;
+  --nav-h:              64px;
+  --cta-h:              56px;
+  --field-h:            52px;
+  --min-touch:          44px;
+
+  /* ── MOTION ─────────────────────────────────────────────── */
+  --dur-micro:          75ms;
+  --dur-fast:           150ms;
+  --dur-base:           200ms;
+  --dur-slow:           300ms;
+  --dur-enter:          350ms;
+  --ease-out:           cubic-bezier(0.22, 1.00, 0.36, 1.00);
+  --ease-std:           cubic-bezier(0.40, 0.00, 0.20, 1.00);
+  --ease-in:            cubic-bezier(0.55, 0.00, 1.00, 0.45);
+
+  /* ── TYPOGRAPHY TOKENS ──────────────────────────────────── */
+  --font-sans:          "Urbanist", "Microsoft YaHei UI", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-display:       "Urbanist", "Microsoft YaHei UI", -apple-system, sans-serif;
+
+  /* Sizes */
+  --t-hero:             60px;
+  --t-hero-sm:          44px;
+  --t-h1:               32px;
+  --t-h2:               24px;
+  --t-h3:               20px;
+  --t-h4:               18px;
+  --t-body:             16px;
+  --t-body-sm:          15px;
+  --t-label:            14px;
+  --t-helper:           12px;
+  --t-caption:          11px;
+  --t-meta:             10px;
+
+  /* Line heights */
+  --lh-tight:           1.1;
+  --lh-snug:            1.25;
+  --lh-normal:          1.5;
+  --lh-relaxed:         1.65;
+
+  /* Weights */
+  --fw-light:           300;
+  --fw-regular:         400;
+  --fw-medium:          500;
+  --fw-semibold:        600;
+  --fw-bold:            700;
+  --fw-extrabold:       800;
+
+  /* ── ILLUSTRATION — "Friendly Outliner" ─────────────────── */
+  --ink:                #0E0E10;      /* Illustration ink, near-black */
+  --ink-soft:           #2A2A30;
+  --paper:              #F5F3EE;      /* Torn-paper background */
+  --paper-edge:         #E9E6DE;      /* Paper shadow at the tear */
+  --illus-stroke-w:     2.25px;       /* Medium-thick monoline */
+  --illus-offset-x:     3px;          /* Flat-fill misalignment */
+  --illus-offset-y:     -2px;
+
+  /* ── SEMANTIC TYPE STYLES (apply as class or composed vars) */
+}
+
+/* ─── Base body type ─────────────────────────────────────── */
+html, body {
+  font-family: var(--font-sans);
+  color: var(--fg-1);
+  font-size: var(--t-body);
+  line-height: var(--lh-normal);
+  background: var(--bg-canvas);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ─── Semantic type classes ──────────────────────────────── */
+.type-hero {
+  font-family: var(--font-display);
+  font-size: var(--t-hero);
+  line-height: var(--lh-tight);
+  font-weight: var(--fw-semibold);
+  color: var(--coral-orange);
+  letter-spacing: -0.02em;
+}
+.type-hero-sm {
+  font-family: var(--font-display);
+  font-size: var(--t-hero-sm);
+  line-height: var(--lh-tight);
+  font-weight: var(--fw-semibold);
+  letter-spacing: -0.015em;
+}
+h1, .type-h1 {
+  font-family: var(--font-display);
+  font-size: var(--t-h1);
+  line-height: var(--lh-tight);
+  font-weight: var(--fw-bold);
+  letter-spacing: -0.01em;
+  color: var(--fg-1);
+}
+h2, .type-h2 {
+  font-family: var(--font-display);
+  font-size: var(--t-h2);
+  line-height: var(--lh-snug);
+  font-weight: var(--fw-bold);
+  color: var(--fg-1);
+}
+h3, .type-h3 {
+  font-size: var(--t-h3);
+  line-height: var(--lh-snug);
+  font-weight: var(--fw-bold);
+  color: var(--fg-1);
+}
+h4, .type-h4 {
+  font-size: var(--t-h4);
+  line-height: var(--lh-snug);
+  font-weight: var(--fw-semibold);
+  color: var(--fg-1);
+}
+p, .type-body {
+  font-size: var(--t-body);
+  line-height: var(--lh-normal);
+  font-weight: var(--fw-regular);
+  color: var(--fg-1);
+}
+.type-label {
+  font-size: var(--t-label);
+  line-height: var(--lh-snug);
+  font-weight: var(--fw-semibold);
+  color: var(--fg-1);
+}
+.type-helper {
+  font-size: var(--t-helper);
+  line-height: var(--lh-normal);
+  font-weight: var(--fw-regular);
+  color: var(--fg-2);
+}
+.type-caption {
+  font-size: var(--t-caption);
+  line-height: var(--lh-snug);
+  color: var(--fg-3);
+  letter-spacing: 0.02em;
+}
+.type-meta {
+  font-size: var(--t-meta);
+  line-height: var(--lh-snug);
+  font-weight: var(--fw-medium);
+  color: var(--fg-2);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}

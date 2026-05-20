@@ -393,12 +393,13 @@ export const ShareSheet = ({ open, onClose, share, onShareAction }: ShareSheetPr
           onClick={onClose}
         >
           <motion.div
+            data-huddle-bottom-sheet="true"
             initial={{ y: "100%" }}
             animate={{ y: 0 }}
             exit={{ y: "100%" }}
             transition={{ type: "spring", damping: 28, stiffness: 320 }}
             onClick={(event) => event.stopPropagation()}
-            className="fixed inset-x-0 bottom-0 mx-auto w-full max-w-[var(--app-max-width,430px)] rounded-t-[28px] border border-white/45 bg-[rgba(255,255,255,0.92)] px-4 pb-[calc(env(safe-area-inset-bottom)+18px)] pt-3 shadow-[0_-18px_48px_rgba(36,55,120,0.18)] backdrop-blur-[18px]"
+            className="fixed inset-x-0 bottom-0 mx-auto w-full max-w-[var(--app-max-width,430px)] rounded-t-[28px] border border-white/45 bg-[rgba(255,255,255,0.92)] px-4 huddle-sheet-bottom-padding pt-3 shadow-[0_-18px_48px_rgba(36,55,120,0.18)] backdrop-blur-[18px]"
           >
             <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-[rgba(163,168,190,0.5)]" />
             <div className="mb-3 flex items-center justify-between">

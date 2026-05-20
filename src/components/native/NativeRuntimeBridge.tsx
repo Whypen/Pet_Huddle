@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -13,13 +13,10 @@ import {
 } from "@/lib/nativeShell";
 import { supabase } from "@/integrations/supabase/client";
 
-const REFRESH_THROTTLE_MS = 4_000;
-
 export const NativeRuntimeBridge = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, refreshProfile } = useAuth();
-  const lastResumeRefreshRef = useRef(0);
 
   useEffect(() => {
     syncNativeAuthState(Boolean(user?.id), user?.id ?? null);
@@ -30,7 +27,15 @@ export const NativeRuntimeBridge = () => {
     let active = true;
     void (async () => {
       try {
-        const registration = await requestNativePushRegistration();
+        const { data } = await supabase
+          .from("notification_preferences")
+          .select("push_enabled,pause_all")
+          .eq("user_id", user.id)
+          .maybeSingle();
+        const prefs = (data || {}) as { push_enabled?: boolean | null; pause_all?: boolean | null };
+        const shouldRegisterPush = prefs.push_enabled !== false && prefs.pause_all !== true;
+        if (!shouldRegisterPush) return;
+        const registration = await requestNativePushRegistration({ forcePrompt: true });
         if (!active || !registration.token) return;
         await upsertPushRegistration(supabase, user.id, registration);
       } catch {
@@ -80,38 +85,6 @@ export const NativeRuntimeBridge = () => {
     clearPendingExternalFlow();
     void refreshProfile();
   }, [location.hash, location.pathname, location.search, refreshProfile]);
-
-  useEffect(() => {
-    const refreshRuntimeState = () => {
-      const now = Date.now();
-      if (now - lastResumeRefreshRef.current < REFRESH_THROTTLE_MS) return;
-      lastResumeRefreshRef.current = now;
-      if (document.visibilityState === "hidden") return;
-      void refreshProfile();
-    };
-
-    const onVisibility = () => {
-      if (document.visibilityState !== "visible") return;
-      refreshRuntimeState();
-    };
-
-    const onFocus = () => {
-      refreshRuntimeState();
-    };
-
-    const onNativeResume = () => {
-      refreshRuntimeState();
-    };
-
-    document.addEventListener("visibilitychange", onVisibility);
-    window.addEventListener("focus", onFocus);
-    window.addEventListener("huddle:native-resume", onNativeResume as EventListener);
-    return () => {
-      document.removeEventListener("visibilitychange", onVisibility);
-      window.removeEventListener("focus", onFocus);
-      window.removeEventListener("huddle:native-resume", onNativeResume as EventListener);
-    };
-  }, [refreshProfile]);
 
   return null;
 };

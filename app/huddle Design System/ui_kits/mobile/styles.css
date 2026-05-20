@@ -1,0 +1,131 @@
+/* huddle UI kit — shared styles */
+@import url("../../colors_and_type.css");
+
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; font-family: var(--font-sans); color: var(--fg-1); -webkit-font-smoothing: antialiased; }
+body {
+  background: #e7eaf3;
+  background-image:
+    radial-gradient(circle at 10% 10%, rgba(33,69,207,0.07), transparent 50%),
+    radial-gradient(circle at 90% 90%, rgba(255,127,80,0.06), transparent 55%);
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+/* Screen root */
+.hd-screen { height: 100%; background: #ffffff; display: flex; flex-direction: column; }
+
+/* Header */
+.hd-header {
+  height: 56px; flex: 0 0 56px; display: flex; align-items: center; justify-content: center;
+  border-bottom: 1px solid rgba(66,73,101,0.06);
+  background: #fff; position: relative; padding: 0 16px;
+}
+.hd-header img { height: 24px; }
+.hd-header-left, .hd-header-right { position: absolute; top: 0; bottom: 0; display: flex; align-items: center; }
+.hd-header-left { left: 10px; }
+.hd-header-right { right: 10px; }
+.hd-iconbtn {
+  width: 40px; height: 40px; border-radius: 12px; border: none;
+  background: transparent; color: var(--fg-1);
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+}
+.hd-iconbtn svg { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+
+/* Content area */
+.hd-content { flex: 1 1 auto; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 16px; }
+.hd-content::-webkit-scrollbar { display: none; }
+
+/* Bottom Nav */
+.hd-nav {
+  flex: 0 0 72px;
+  height: 72px;
+  padding: 0 12px 10px 12px;
+  background: rgba(255,255,255,0.86);
+  backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
+  border-top: 1px solid rgba(66,73,101,0.06);
+  display: flex; justify-content: space-around; align-items: flex-start; padding-top: 8px;
+}
+.hd-tab {
+  background: none; border: none; cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  color: rgba(66,73,101,0.55); font-size: 10px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+  padding: 4px 6px; min-width: 58px;
+}
+.hd-tab svg { width: 24px; height: 24px; stroke: currentColor; fill: none; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+.hd-tab.active { color: var(--huddle-blue); }
+.hd-tab.active::after { content:""; display:block; width: 18px; height: 3px; border-radius: 2px; background: var(--huddle-blue); margin-top: 2px; }
+
+/* Cards & rows */
+.hd-card {
+  background: #fff; border-radius: 16px; padding: 14px 16px;
+  border: 1px solid rgba(66,73,101,0.06);
+  box-shadow: 0 1px 2px rgba(66,73,101,0.04), 0 6px 18px rgba(66,73,101,0.05);
+}
+.hd-neu {
+  background: #F3F4F6; border-radius: 16px; padding: 14px 16px;
+  box-shadow: 5px 5px 14px rgba(163,168,190,0.24), -4px -4px 10px rgba(255,255,255,0.92), inset 0 1px 0 rgba(255,255,255,0.9);
+}
+.hd-neu-inset {
+  background: #F3F4F6; border-radius: 14px;
+  box-shadow: inset 2px 2px 6px rgba(163,168,190,0.22), inset -2px -2px 6px rgba(255,255,255,0.9);
+}
+
+/* CTA */
+.hd-cta {
+  width: 100%; height: 52px; border: none; border-radius: 14px;
+  background: var(--huddle-blue); color: #fff;
+  font-family: var(--font-sans); font-weight: 700; font-size: 16px;
+  display: flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer;
+  box-shadow: 0 8px 20px rgba(33,69,207,0.28), 0 2px 4px rgba(33,69,207,0.16), inset 0 1px 0 rgba(255,255,255,0.22);
+  transition: transform var(--dur-fast) var(--ease-std);
+}
+.hd-cta:active { transform: scale(0.98); }
+.hd-cta[disabled] { opacity: 0.45; cursor: not-allowed; box-shadow: none; }
+.hd-cta-ghost {
+  width: 100%; height: 48px; border-radius: 14px;
+  background: transparent; color: var(--huddle-blue);
+  border: 1.5px solid rgba(33,69,207,0.35);
+  font-weight: 700; font-size: 15px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.hd-cta-gold {
+  width: 100%; height: 52px; border: none; border-radius: 14px;
+  background: var(--premium-gold); color: #2A2400;
+  font-weight: 700; font-size: 16px;
+  box-shadow: 0 8px 20px rgba(207,171,33,0.32), inset 0 1px 0 rgba(255,255,255,0.4);
+  cursor: pointer;
+}
+
+/* Eyebrow text */
+.hd-eyebrow { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.09em; color: var(--fg-2); }
+
+/* Chip */
+.hd-chip { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 9999px; font-size: 12px; font-weight: 600; background: #F3F4F6; color: var(--fg-1); }
+.hd-chip-blue { background: rgba(33,69,207,0.08); color: var(--huddle-blue); }
+.hd-chip-gold { background: rgba(207,171,33,0.12); color: #8B6F00; }
+.hd-chip-emergency { background: rgba(249,115,22,0.12); color: #B4440D; }
+
+/* Input */
+.hd-input-field { padding: 10px 14px; display: flex; flex-direction: column; gap: 2px; }
+.hd-input-field .lab { font-size: 11px; color: var(--fg-2); font-weight: 500; letter-spacing: 0.02em; }
+.hd-input-field input {
+  border: none; outline: none; background: transparent; width: 100%;
+  font-family: var(--font-sans); font-size: 15px; color: var(--fg-1); font-weight: 500;
+  padding: 2px 0;
+}
+.hd-input-field input::placeholder { color: var(--fg-3); font-style: italic; }
+.hd-input-field.focus { box-shadow: inset 2px 2px 6px rgba(163,168,190,0.22), inset -2px -2px 6px rgba(255,255,255,0.9), 0 0 0 2px rgba(33,69,207,0.35); }
+.hd-input-field.error { box-shadow: inset 2px 2px 6px rgba(163,168,190,0.22), inset -2px -2px 6px rgba(255,255,255,0.9), 0 0 0 2px rgba(239,68,68,0.5); }
+.hd-input-err { color: #B91C1C; font-size: 12px; }
+
+/* Asterisk marker */
+.hd-asterisk { color: var(--huddle-blue); font-weight: 700; }
+
+/* Empty state */
+.hd-empty { text-align: center; color: var(--fg-2); padding: 32px 16px; }
+.hd-empty h3 { font-size: 17px; font-weight: 700; color: var(--fg-1); margin: 12px 0 4px; }
+.hd-empty p { margin: 0; font-size: 13px; line-height: 1.5; }

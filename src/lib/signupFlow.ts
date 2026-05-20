@@ -8,7 +8,6 @@ export const SIGNUP_PUBLIC_PATHS = [
   "/signup/name",
   "/signup/verify",
   "/signup/email-confirmation",
-  "/signup/marketing-confirmed",
 ] as const;
 
 export function isProfileGateComplete(profile: Profile | null): boolean {

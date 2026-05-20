@@ -8,7 +8,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Lock, Mail, Phone } from "lucide-react";
+import { Check, Lock, Mail, Phone } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { credentialsSchema, oauthCredentialsSchema } from "@/lib/authSchemas";
@@ -82,7 +82,6 @@ const SignupCredentials = () => {
     setTimeout(() => navigate(to, state ? { state } : undefined), 180);
   };
 
-  const [emailOptIn, setEmailOptIn] = useState(false);
   const [legalModal, setLegalModal] = useState<"terms" | "privacy" | null>(null);
   const [showSignInModal, setShowSignInModal] = useState(false);
   const [duplicateDetected, setDuplicateDetected] = useState(false);
@@ -96,6 +95,7 @@ const SignupCredentials = () => {
   const [signinLoading, setSigninLoading] = useState(false);
   const [signinError, setSigninError] = useState("");
   const [signinRemember, setSigninRemember] = useState(true);
+  const [updatesChecked, setUpdatesChecked] = useState(true);
   const [dismissedDuplicateKey, setDismissedDuplicateKey] = useState<string | null>(null);
   const [phoneValidator, setPhoneValidator] = useState<((value: string) => boolean) | null>(null);
   const [afterFirstPaint, setAfterFirstPaint] = useState(false);
@@ -406,8 +406,6 @@ const SignupCredentials = () => {
   // schema (oauthCredentialsSchema for OAuth, credentialsSchema for email signup).
   // All field reads inside this handler use `values` — never raw watch() output —
   // so the handler works correctly regardless of which schema was active.
-  // DOI (email_opt_in) is stored in client flow state only; it is NOT committed
-  // to the database here. The final account-creation step commits it.
   const onSubmit = async (values: {
     email: string;
     phone: string;
@@ -420,7 +418,7 @@ const SignupCredentials = () => {
     }
     if (duplicateDetected || (!shouldBypassDuplicateCheck && duplicateCheckError)) return;
     if (shouldBypassDuplicateCheck) {
-      update({ email: values.email, phone: values.phone, email_opt_in: emailOptIn });
+      update({ email: values.email, phone: values.phone });
       setFlowState("signup");
       goTo("/signup/name");
       return;
@@ -434,7 +432,6 @@ const SignupCredentials = () => {
       update({
         email: user?.email || values.email,
         phone: values.phone,
-        email_opt_in: emailOptIn,
       });
       setFlowState("signup");
       goTo("/signup/name");
@@ -483,7 +480,6 @@ const SignupCredentials = () => {
         email: values.email.trim(),
         password: values.password ?? "",
         phone: values.phone.trim(),
-        email_opt_in: emailOptIn,
         signup_proof: preVerifiedProof ?? "",
       });
       setFlowState("signup");
@@ -718,18 +714,27 @@ const SignupCredentials = () => {
           )}
 
           <div className="space-y-3">
-            <label className="flex items-start gap-2 text-[12px] text-[rgba(74,73,101,0.80)] leading-relaxed cursor-pointer">
-              <input
-                type="checkbox"
-                checked={emailOptIn}
-                onChange={(e) => setEmailOptIn(e.target.checked)}
-                className="mt-[2px] h-4 w-4 rounded border-[rgba(74,73,101,0.35)] shrink-0"
-              />
-              <span>
+            <button
+              type="button"
+              aria-pressed={updatesChecked}
+              className="flex min-h-[44px] w-full items-center gap-3 text-left"
+              onClick={() => setUpdatesChecked((checked) => !checked)}
+            >
+              <span
+                className={[
+                  "flex h-7 w-7 shrink-0 items-center justify-center rounded-[9px] border transition-colors",
+                  updatesChecked
+                    ? "border-[#2145CF] bg-[#2145CF]"
+                    : "border-[rgba(163,168,190,0.26)] bg-white",
+                ].join(" ")}
+                aria-hidden
+              >
+                {updatesChecked ? <Check size={18} strokeWidth={2.4} className="text-white" /> : null}
+              </span>
+              <span className="text-[12px] font-medium leading-[18px] text-[rgba(74,73,101,0.80)]">
                 I agree to receive emails from Huddle for pet care, community news, and product updates.
               </span>
-            </label>
-
+            </button>
             <p className="text-[12px] text-[rgba(74,73,101,0.60)] leading-relaxed">
               By tapping Continue, you agree to our{" "}
               <button

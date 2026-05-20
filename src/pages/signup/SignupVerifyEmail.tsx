@@ -77,6 +77,7 @@ const SignupVerifyEmail = () => {
 
   const sendInFlight = useRef(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollAttemptsRef = useRef(0);
   const autoSendStarted = useRef(false);
   const credentialEntryHandled = useRef(false);
   const statusInFlight = useRef(false);
@@ -395,7 +396,14 @@ const SignupVerifyEmail = () => {
   useEffect(() => {
     if (!draftEmail || verified) return;
 
+    pollAttemptsRef.current = 0;
     const poll = async () => {
+      pollAttemptsRef.current += 1;
+      if (pollAttemptsRef.current > 20) {
+        if (pollRef.current) clearInterval(pollRef.current);
+        pollRef.current = null;
+        return;
+      }
       const outcome = await lookupStatus(draftEmail);
       if (outcome === "expired") {
         autoSendStarted.current = false;

@@ -26,7 +26,7 @@ const extractToken = (req: Request, body?: ChangePasswordBody | null) => {
   const bearerToken = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
   const bodyToken = String(body?.access_token || "").replace(/^Bearer\s+/i, "").trim();
   const anonKey = String(Deno.env.get("SUPABASE_ANON_KEY") || "").trim();
-  const serviceRole = String(Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "").trim();
+  const serviceRole = String((Deno.env.get("HUDDLE_SUPABASE_SERVICE_KEY") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")) || "").trim();
   const isUserJwt = (token: string) =>
     token.split(".").length === 3 &&
     token !== anonKey &&
@@ -40,7 +40,7 @@ Deno.serve(async (req: Request) => {
 
   const supabaseUrl = String(Deno.env.get("SUPABASE_URL") || "").trim();
   const anonKey = String(Deno.env.get("SUPABASE_ANON_KEY") || "").trim();
-  const serviceRole = String(Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "").trim();
+  const serviceRole = String((Deno.env.get("HUDDLE_SUPABASE_SERVICE_KEY") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")) || "").trim();
   if (!supabaseUrl || !anonKey || !serviceRole) return json(500, { error: "server_misconfigured" });
 
   let body: ChangePasswordBody;

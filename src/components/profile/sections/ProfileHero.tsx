@@ -67,7 +67,7 @@ export function ProfileHero({ src, name, roleLabels, membershipTier, caption, is
               className={cn(
                 "inline-flex min-h-10 max-w-[44%] shrink-0 items-center gap-2 whitespace-nowrap px-4 py-2 text-sm font-semibold shadow-sm",
                 isGold && "border border-[rgba(207,171,33,0.30)] bg-[var(--bg-yellow-soft)] text-[#8B6F00]",
-                isPlus && "border border-[rgba(255,127,80,0.30)] bg-[color-mix(in_srgb,var(--coral-orange)_12%,white)] text-[var(--coral-orange)]",
+                isPlus && "border border-[var(--coral-orange)] bg-[var(--coral-orange)] text-white",
                 !isGold && !isPlus && "border border-white/35 bg-white/18 text-white",
               )}
               style={pillRadiusStyle}

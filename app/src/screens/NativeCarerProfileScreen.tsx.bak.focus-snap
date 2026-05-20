@@ -1,0 +1,1662 @@
+import { Feather } from "@expo/vector-icons";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ActivityIndicator,
+  Alert,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { NativeCarerProfileContent } from "../components/service/NativeCarerProfileContent";
+import { NativeStripeConnectOnboarding } from "../components/wallet/NativeStripeConnectOnboarding";
+import {
+  AppModalActionRow,
+  AppModalButton,
+  AppModalCard,
+  AppModalCloseButton,
+  AppModalField,
+  AppModalScroll,
+} from "../components/nativeModalPrimitives";
+import { huddleModalTokens, nativeModalStyles } from "../components/nativeModalPrimitives.styles";
+import { createNativeFunctionHeaders } from "../lib/nativeFunctionClient";
+import {
+  ALL_SKILLS,
+  CURRENCIES,
+  DAYS,
+  deriveWalletState,
+  DOG_SIZES,
+  EMPTY_CARER_PROFILE,
+  isAge18PlusFromDob,
+  LOCATION_STYLES,
+  makeCarerViewData,
+  mapCarerRowToForm,
+  MAX_SKILLS,
+  PET_TYPES,
+  PROOF_CONFIG,
+  RATE_OPTIONS,
+  resolveSocialAlbumUrlList,
+  SERVICES_OFFERED,
+  SKILLS_GROUP_B,
+  toggleStringItem,
+  buildCarerUpsertPayload,
+  computeCarerCompleted,
+  type NativeCarerProfileData,
+  type NativeCertifiedSkill,
+  type NativeRateRow,
+} from "../lib/nativeCarerProfile";
+import {
+  fetchNativeProfileSummary,
+  readCachedNativeProfileSummary,
+  subscribeNativeProfileSummary,
+  type NativeProfileSummary,
+} from "../lib/nativeProfileSummary";
+import { haptic } from "../lib/nativeHaptics";
+import { supabase, supabaseUrl } from "../lib/supabase";
+import {
+  huddleButtons,
+  huddleColors,
+  huddleFieldStates,
+  huddleFormControls,
+  huddleLayout,
+  huddleRadii,
+  huddleShadows,
+  huddleSpacing,
+  huddleType,
+} from "../theme/huddleDesignTokens";
+
+type NativeCarerProfileScreenProps = {
+  userId: string | null;
+  onNavigate: (path: string) => void;
+  onGoBack?: () => void;
+};
+
+type DropdownKey =
+  | "skills"
+  | "petTypes"
+  | "dogSizes"
+  | "days"
+  | "locationStyles"
+  | "currency"
+  | "rate"
+  | "rateServices"
+  | "timeFrom"
+  | "timeTo"
+  | "minNoticeUnit";
+
+type FocusField =
+  | "story"
+  | "servicesOther"
+  | "price"
+  | "petTypesOther"
+  | "minNotice"
+  | "areaName";
+
+type FieldErrors = Partial<Record<FocusField | "time" | "rate" | "wallet", string>>;
+
+type ProofState = {
+  skill: NativeCertifiedSkill;
+  values: Record<string, string>;
+} | null;
+
+type NativeCarerProfileCacheEntry = {
+  row: Record<string, unknown> | null;
+  cachedAt: number;
+};
+
+const CARER_PROFILE_CACHE_TTL_MS = 30_000;
+const carerProfileCache = new Map<string, NativeCarerProfileCacheEntry>();
+const carerProfileInFlight = new Map<string, Promise<Record<string, unknown> | null>>();
+
+const readNativeCarerProfileCache = (userId: string): Record<string, unknown> | null | undefined => {
+  const cached = carerProfileCache.get(userId);
+  if (!cached) return undefined;
+  if (Date.now() - cached.cachedAt > CARER_PROFILE_CACHE_TTL_MS) {
+    carerProfileCache.delete(userId);
+    return undefined;
+  }
+  return cached.row;
+};
+
+const writeNativeCarerProfileCache = (userId: string, row: Record<string, unknown> | null) => {
+  carerProfileCache.set(userId, { row, cachedAt: Date.now() });
+  return row;
+};
+
+async function fetchNativeCarerProfileRow(userId: string): Promise<Record<string, unknown> | null> {
+  const cached = readNativeCarerProfileCache(userId);
+  if (cached !== undefined) return cached;
+
+  const existing = carerProfileInFlight.get(userId);
+  if (existing) return existing;
+
+  const request = (async () => {
+    const { data, error } = await supabase
+      .from("pet_care_profiles")
+      .select(providerColumns)
+      .limit(20)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (error) throw error;
+    return writeNativeCarerProfileCache(userId, data ? (data as unknown as Record<string, unknown>) : null);
+  })();
+
+  carerProfileInFlight.set(userId, request);
+  try {
+    return await request;
+  } finally {
+    carerProfileInFlight.delete(userId);
+  }
+}
+
+const providerColumns = [
+  "user_id",
+  "story",
+  "skills",
+  "proof_metadata",
+  "vet_license_found",
+  "days",
+  "time_blocks",
+  "other_time_from",
+  "other_time_to",
+  "emergency_readiness",
+  "min_notice_value",
+  "min_notice_unit",
+  "location_styles",
+  "area_name",
+  "services_offered",
+  "services_other",
+  "pet_types",
+  "pet_types_other",
+  "dog_sizes",
+  "currency",
+  "starting_price",
+  "rates",
+  "agreement_accepted",
+  "agreement_accepted_at",
+  "listed",
+  "stripe_account_id",
+  "stripe_details_submitted",
+  "stripe_payouts_enabled",
+  "stripe_payout_status",
+  "stripe_requirements_currently_due",
+].join(",");
+
+const TIME_OPTIONS = Array.from({ length: 48 }, (_, index) => {
+  const hours = Math.floor(index / 2);
+  const minutes = index % 2 === 0 ? "00" : "30";
+  return `${String(hours).padStart(2, "0")}:${minutes}`;
+});
+
+const cloneEmpty = (): NativeCarerProfileData => ({
+  ...EMPTY_CARER_PROFILE,
+  skills: [],
+  proofMetadata: {},
+  days: [],
+  timeBlocks: [],
+  locationStyles: [],
+  servicesOffered: [],
+  petTypes: [],
+  dogSizes: [],
+  stripeRequirementsCurrentlyDue: [],
+  rateRows: [{ price: "", rate: "", services: [] }],
+});
+
+const noticeExceedsEmergencyLimit = (value: string, unit: NativeCarerProfileData["minNoticeUnit"]) => {
+  const parsed = Number.parseInt(value, 10);
+  if (Number.isNaN(parsed)) return false;
+  if (unit === "days") return parsed > 0;
+  return parsed > 2;
+};
+
+const parseFunctionResponse = async (response: Response) => {
+  const body = (await response.json().catch(() => null)) as { error?: string; detail?: string; message?: string } | null;
+  if (!response.ok) {
+    throw new Error(body?.error || body?.detail || body?.message || `Request failed with HTTP ${response.status}.`);
+  }
+  return body;
+};
+
+function SelectList({
+  options,
+  selected,
+  onToggle,
+  disabledOptions,
+  closeOnSelect = false,
+}: {
+  options: readonly string[];
+  selected: string[];
+  onToggle: (value: string) => void;
+  disabledOptions?: Set<string>;
+  closeOnSelect?: boolean;
+}) {
+  return (
+    <ScrollView
+      keyboardShouldPersistTaps="handled"
+      nestedScrollEnabled
+      showsVerticalScrollIndicator
+      style={styles.dropdownMenu}
+      contentContainerStyle={styles.dropdownContent}
+    >
+      {options.map((option) => {
+        const disabled = disabledOptions?.has(option) ?? false;
+        const active = selected.includes(option);
+        return (
+          <Pressable
+            disabled={disabled}
+            key={option}
+            onPress={() => {
+              onToggle(option);
+              if (closeOnSelect) return;
+            }}
+            style={({ pressed }) => [
+              styles.dropdownOption,
+              active ? styles.dropdownOptionActive : null,
+              pressed && !disabled ? styles.pressed : null,
+              disabled ? styles.disabled : null,
+            ]}
+          >
+            <Text style={styles.dropdownText}>{option}</Text>
+            {active ? <Feather color={huddleColors.blue} name="check" size={huddleFormControls.select.checkSlot} /> : <View style={styles.checkSlot} />}
+          </Pressable>
+        );
+      })}
+    </ScrollView>
+  );
+}
+
+function NeuToggle({ value, onChange }: { value: boolean; onChange: (value: boolean) => void }) {
+  return (
+    <Pressable
+      accessibilityRole="switch"
+      accessibilityState={{ checked: value }}
+      onPress={() => onChange(!value)}
+      style={({ pressed }) => [styles.switchTrack, value ? styles.switchTrackActive : null, pressed ? styles.pressed : null]}
+    >
+      <View style={[styles.switchThumb, value ? styles.switchThumbActive : null]} />
+    </Pressable>
+  );
+}
+
+export function NativeCarerProfileScreen({ userId, onNavigate, onGoBack }: NativeCarerProfileScreenProps) {
+  const insets = useSafeAreaInsets();
+  const [profile, setProfile] = useState<NativeProfileSummary | null>(null);
+  const [formData, setFormData] = useState<NativeCarerProfileData>(cloneEmpty);
+  const [mode, setMode] = useState<"edit" | "view">("view");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState("");
+  const [openDrop, setOpenDrop] = useState<DropdownKey | null>(null);
+  const [rateEditIndex, setRateEditIndex] = useState<number | null>(null);
+  const [rateDraft, setRateDraft] = useState<NativeRateRow>({ price: "", rate: "", services: [] });
+  const [proofState, setProofState] = useState<ProofState>(null);
+  const [listingAttempted, setListingAttempted] = useState(false);
+  const [socialAlbumUrls, setSocialAlbumUrls] = useState<string[]>([]);
+  const [walletOnboardingVisible, setWalletOnboardingVisible] = useState(false);
+  const [walletStarting, setWalletStarting] = useState(false);
+  const [focusedField, setFocusedField] = useState<FocusField | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const initialSkillsRef = useRef<string[] | null>(null);
+  const silentConnectFiredRef = useRef(false);
+
+  const isAge18Plus = isAge18PlusFromDob(profile?.dob);
+  const isVerified = profile?.is_verified === true;
+  const providerEligible = isAge18Plus && isVerified;
+  const walletState = deriveWalletState(formData);
+
+  const loadData = useCallback(async () => {
+    if (!userId) {
+      setLoadError("Profile is unavailable.");
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setLoadError("");
+    try {
+      const cached = await readCachedNativeProfileSummary(userId);
+      if (cached?.profile) setProfile(cached.profile);
+
+      const [profileSnapshot, carerRow] = await Promise.all([
+        fetchNativeProfileSummary(userId, { force: false }),
+        fetchNativeCarerProfileRow(userId),
+      ]);
+      const nextProfile = profileSnapshot.profile;
+      setProfile(nextProfile);
+
+      const nextForm = carerRow ? mapCarerRowToForm(carerRow) : cloneEmpty();
+      setFormData(nextForm);
+      setMode(carerRow ? "view" : "edit");
+      initialSkillsRef.current = nextForm.skills;
+      silentConnectFiredRef.current = Boolean(nextForm.hasStripeAccount);
+
+      const albumRaw = Array.isArray(nextProfile?.social_album) ? (nextProfile?.social_album as string[]) : [];
+      const albumUrls = await resolveSocialAlbumUrlList(albumRaw);
+      setSocialAlbumUrls(albumUrls);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "Unable to load service profile.");
+    } finally {
+      setLoading(false);
+    }
+  }, [userId]);
+
+  useEffect(() => {
+    void loadData();
+  }, [loadData]);
+
+  useEffect(() => {
+    if (!userId) return;
+    return subscribeNativeProfileSummary(userId, ({ profile: nextProfile }) => {
+      setProfile(nextProfile);
+      const albumRaw = Array.isArray(nextProfile?.social_album) ? (nextProfile?.social_album as string[]) : [];
+      void resolveSocialAlbumUrlList(albumRaw).then(setSocialAlbumUrls);
+    });
+  }, [userId]);
+
+  useEffect(() => {
+    if (!userId) return;
+    const channel = supabase
+      .channel(`native_pet_care_profiles_wallet:${userId}`)
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "pet_care_profiles", filter: `user_id=eq.${userId}` },
+        (payload) => {
+          const row = payload.new as Record<string, unknown>;
+          writeNativeCarerProfileCache(userId, row);
+          setFormData((prev) => ({
+            ...prev,
+            stripePayoutStatus: row.stripe_payout_status === "pending" || row.stripe_payout_status === "needs_action" || row.stripe_payout_status === "complete" ? row.stripe_payout_status : prev.stripePayoutStatus,
+            stripeAccountId: String(row.stripe_account_id ?? prev.stripeAccountId),
+            stripeDetailsSubmitted: row.stripe_details_submitted === true,
+            stripePayoutsEnabled: row.stripe_payouts_enabled === true,
+            stripeRequirementsCurrentlyDue: Array.isArray(row.stripe_requirements_currently_due) ? (row.stripe_requirements_currently_due as string[]) : prev.stripeRequirementsCurrentlyDue,
+            hasStripeAccount: Boolean(row.stripe_account_id ?? prev.stripeAccountId),
+            listed: row.listed === true,
+          }));
+        },
+      )
+      .subscribe();
+    console.log("SUPABASE_REALTIME_SUBSCRIBE", { channel: `native_pet_care_profiles_wallet:${userId}`, screen: "NativeCarerProfileScreen" });
+    return () => {
+      console.log("SUPABASE_REALTIME_UNSUBSCRIBE", { channel: `native_pet_care_profiles_wallet:${userId}`, screen: "NativeCarerProfileScreen" });
+      void supabase.removeChannel(channel);
+    };
+  }, [userId]);
+
+  useEffect(() => {
+    if (loading || !userId || formData.hasStripeAccount || silentConnectFiredRef.current) return;
+    if (initialSkillsRef.current === null) {
+      initialSkillsRef.current = formData.skills;
+      return;
+    }
+    const hasNewSkill = formData.skills.some((skill) => !initialSkillsRef.current?.includes(skill));
+    if (!hasNewSkill || formData.skills.length === 0) return;
+    const timer = setTimeout(() => {
+      silentConnectFiredRef.current = true;
+      void supabase.functions.invoke("create-or-get-stripe-account", { body: {} }).catch(() => {
+        silentConnectFiredRef.current = false;
+      });
+    }, 2000);
+    return () => clearTimeout(timer);
+  }, [formData.hasStripeAccount, formData.skills, loading, userId]);
+
+  const viewData = useMemo(
+    () => makeCarerViewData(userId || "", formData, profile as Record<string, unknown> | null, socialAlbumUrls),
+    [formData, profile, socialAlbumUrls, userId],
+  );
+
+  const updateEmergencyReadiness = (emergencyReadiness: boolean) => {
+    setFormData((prev) => {
+      if (emergencyReadiness) {
+        return { ...prev, emergencyReadiness, minNoticeUnit: "hours", minNoticeValue: "2" };
+      }
+      if (!noticeExceedsEmergencyLimit(prev.minNoticeValue, prev.minNoticeUnit)) {
+        return { ...prev, emergencyReadiness };
+      }
+      return { ...prev, emergencyReadiness, minNoticeUnit: "hours", minNoticeValue: "" };
+    });
+    if (emergencyReadiness) setFieldErrors((prev) => ({ ...prev, minNotice: undefined }));
+  };
+
+  const updateAnytime = (anytime: boolean) => {
+    setFormData((prev) => ({
+      ...prev,
+      timeBlocks: [anytime ? "Anytime" : "Specify"],
+      ...(anytime ? { otherTimeFrom: "", otherTimeTo: "" } : {}),
+    }));
+    setFieldErrors((prev) => ({ ...prev, time: undefined }));
+  };
+
+  const updateMinNoticeValue = (minNoticeValue: string) => {
+    setFormData((prev) => {
+      if (prev.emergencyReadiness === true && noticeExceedsEmergencyLimit(minNoticeValue, prev.minNoticeUnit)) {
+        return { ...prev, minNoticeUnit: "hours", minNoticeValue: "2" };
+      }
+      return { ...prev, minNoticeValue };
+    });
+    setFieldErrors((prev) => ({ ...prev, minNotice: undefined }));
+  };
+
+  const updateMinNoticeUnit = (minNoticeUnit: NativeCarerProfileData["minNoticeUnit"]) => {
+    setFormData((prev) => {
+      if (prev.emergencyReadiness === true && minNoticeUnit === "days") {
+        return { ...prev, minNoticeUnit: "hours", minNoticeValue: "2" };
+      }
+      return { ...prev, minNoticeUnit, minNoticeValue: "" };
+    });
+    setFieldErrors((prev) => ({ ...prev, minNotice: undefined }));
+  };
+
+  const saveProfile = useCallback(async (silent = false) => {
+    if (!userId) return;
+    const notice = Number.parseInt(formData.minNoticeValue, 10);
+    const nextErrors: FieldErrors = {};
+    if (!silent) {
+      if (formData.timeBlocks.includes("Specify") && (!formData.otherTimeFrom || !formData.otherTimeTo)) {
+        nextErrors.time = "Please set both From and To times.";
+        setFieldErrors(nextErrors);
+        haptic.error();
+        Alert.alert("Check availability", "Please set both From and To times.");
+        return;
+      }
+      if (formData.minNoticeValue.trim() !== "" && (Number.isNaN(notice) || notice < 0)) {
+        nextErrors.minNotice = "Minimum notice must be a positive number.";
+        setFieldErrors(nextErrors);
+        haptic.error();
+        Alert.alert("Check notice", "Minimum notice must be a positive number.");
+        return;
+      }
+      if (!Number.isNaN(notice) && formData.minNoticeUnit === "hours" && notice > 24) {
+        nextErrors.minNotice = "Hours cannot exceed 24.";
+        setFieldErrors(nextErrors);
+        haptic.error();
+        Alert.alert("Check notice", "Hours cannot exceed 24.");
+        return;
+      }
+      if (!Number.isNaN(notice) && formData.minNoticeUnit === "days" && notice > 99) {
+        nextErrors.minNotice = "Days cannot exceed 99.";
+        setFieldErrors(nextErrors);
+        haptic.error();
+        Alert.alert("Check notice", "Days cannot exceed 99.");
+        return;
+      }
+      if (formData.emergencyReadiness === true && noticeExceedsEmergencyLimit(formData.minNoticeValue, formData.minNoticeUnit)) {
+        nextErrors.minNotice = "Emergency notice cannot be longer than 2 hours.";
+        setFieldErrors(nextErrors);
+        haptic.error();
+        Alert.alert("Check notice", "Emergency notice cannot be longer than 2 hours.");
+        return;
+      }
+    }
+    if (!silent) setFieldErrors({});
+
+    setSaving(!silent);
+    try {
+      const payload = buildCarerUpsertPayload(userId, formData, providerEligible);
+      const { error } = await supabase.from("pet_care_profiles").upsert(payload, { onConflict: "user_id" });
+      if (error) throw error;
+      writeNativeCarerProfileCache(userId, payload as Record<string, unknown>);
+      if (!silent) {
+        setMode("view");
+        haptic.success();
+        Alert.alert("Saved", "Pet Carer Profile saved.");
+        void supabase.functions.invoke("brevo-sync", {
+          body: { event: "service_profile_completed", user_id: userId },
+        }).catch(() => {});
+      }
+    } catch (error) {
+      if (silent) {
+        console.warn("[NativeCarerProfile.silentSave]", error);
+      } else {
+        haptic.error();
+        Alert.alert("Save failed", "Couldn't save profile. Please retry.");
+      }
+    } finally {
+      setSaving(false);
+    }
+  }, [formData, providerEligible, userId]);
+
+  const textFieldStyle = (field: FocusField) => [
+    styles.field,
+    focusedField === field ? styles.fieldFocused : null,
+    fieldErrors[field] ? styles.fieldError : null,
+  ];
+
+  const toggleSkill = (skill: string) => {
+    const alreadySelected = formData.skills.includes(skill);
+    if (alreadySelected) {
+      setFormData((prev) => ({ ...prev, skills: prev.skills.filter((entry) => entry !== skill) }));
+      return;
+    }
+    if (formData.skills.length >= MAX_SKILLS) {
+      Alert.alert("Skills", "Maximum 6 skills selected.");
+      return;
+    }
+    if ((SKILLS_GROUP_B as readonly string[]).includes(skill)) {
+      setOpenDrop(null);
+      setProofState({ skill: skill as NativeCertifiedSkill, values: {} });
+      return;
+    }
+    setFormData((prev) => ({ ...prev, skills: [...prev.skills, skill] }));
+    setOpenDrop(null);
+  };
+
+  const submitProof = () => {
+    if (!proofState) return;
+    const config = PROOF_CONFIG[proofState.skill];
+    const allFilled = config.fields.every((field) => String(proofState.values[field.key] || "").trim());
+    if (!allFilled) {
+      Alert.alert("Credential", "Please fill all required fields.");
+      return;
+    }
+    if (proofState.skill === "Licensed veterinarian") {
+      Alert.alert("Credential", config.errorCopy);
+      setProofState(null);
+      return;
+    }
+    setFormData((prev) => ({
+      ...prev,
+      skills: prev.skills.includes(proofState.skill) ? prev.skills : [...prev.skills, proofState.skill].slice(0, MAX_SKILLS),
+      proofMetadata: { ...prev.proofMetadata, [proofState.skill]: proofState.values },
+    }));
+    setProofState(null);
+  };
+
+  const addRateRow = () => {
+    setFormData((prev) => ({ ...prev, rateRows: [...prev.rateRows, { price: "", rate: "", services: [] }] }));
+    setRateEditIndex(formData.rateRows.length);
+    setRateDraft({ price: "", rate: "", services: [] });
+    setOpenDrop(null);
+  };
+
+  const editRate = (index: number) => {
+    const row = formData.rateRows[index] ?? { price: "", rate: "", services: [] };
+    setRateEditIndex(index);
+    setRateDraft({ ...row, services: [...row.services] });
+    setOpenDrop(null);
+  };
+
+  const saveRate = () => {
+    if (rateEditIndex === null) return;
+    setFormData((prev) => {
+      const rows = [...prev.rateRows];
+      rows[rateEditIndex] = { ...rateDraft, services: [...rateDraft.services] };
+      return {
+        ...prev,
+        rateRows: rows,
+        servicesOffered: [...new Set(rows.flatMap((row) => row.services))],
+      };
+    });
+    setRateEditIndex(null);
+    setOpenDrop(null);
+  };
+
+  const startWallet = useCallback(async () => {
+    if (!userId) return;
+    setWalletOnboardingVisible(true);
+  }, [userId]);
+
+  const refreshWallet = useCallback(async () => {
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token ?? null;
+      const response = await fetch(`${supabaseUrl}/functions/v1/refresh-stripe-account-status`, {
+        method: "POST",
+        headers: createNativeFunctionHeaders(accessToken),
+        body: JSON.stringify({}),
+      });
+      await parseFunctionResponse(response);
+      await loadData();
+    } catch (error) {
+      Alert.alert("Wallet", error instanceof Error ? error.message : "Unable to refresh wallet status.");
+    }
+  }, [loadData]);
+
+  const openAgreement = () => onNavigate("/service-provider-agreement");
+  const goBack = () => {
+    if (onGoBack) onGoBack();
+    else onNavigate("/settings");
+  };
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <View style={styles.centered}>
+          <ActivityIndicator color={huddleColors.blue} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (!isAge18Plus) {
+    return (
+      <SafeAreaView edges={["left", "right"]} style={styles.safe}>
+        <View style={[styles.header, { marginTop: 0, paddingTop: huddleLayout.headerHeight + huddleSpacing.x3 }]}>
+          <Pressable accessibilityLabel="Back" onPress={goBack} style={styles.headerIcon}>
+            <Feather color={huddleColors.text} name="arrow-left" size={24} />
+          </Pressable>
+          <View style={styles.headerTitleWrap}>
+            <Text style={styles.headerTitle}>Pet Carer Profile</Text>
+            <Text style={styles.headerSubtitle}>Service Providers must be at least 18.</Text>
+          </View>
+          <View style={styles.headerIcon} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  return (
+    <SafeAreaView edges={["left", "right"]} style={styles.safe}>
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.flex}>
+        <View style={[styles.header, { marginTop: 0, paddingTop: huddleLayout.headerHeight + huddleSpacing.x3 }]}>
+          <Pressable accessibilityLabel="Back" onPress={goBack} style={({ pressed }) => [styles.headerIcon, pressed ? styles.pressed : null]}>
+            <Feather color={huddleColors.text} name="arrow-left" size={24} />
+          </Pressable>
+          <View style={styles.headerTitleWrap}>
+            <Text style={styles.headerTitle}>Pet Carer Profile</Text>
+            <Text style={styles.headerSubtitle}>Customize how you offer trusted support</Text>
+          </View>
+          {mode === "edit" ? (
+            <Pressable accessibilityLabel="Save" disabled={saving} onPress={() => void saveProfile(false)} style={({ pressed }) => [styles.headerIcon, pressed && !saving ? styles.pressed : null, saving ? styles.disabled : null]}>
+              {saving ? <ActivityIndicator color={huddleColors.text} /> : <Feather color={huddleColors.text} name="save" size={22} />}
+            </Pressable>
+          ) : (
+            <View style={styles.headerIcon} />
+          )}
+        </View>
+
+        <View style={styles.tabs}>
+          <Pressable onPress={() => setMode("edit")} style={[styles.tab, mode === "edit" ? styles.tabActive : null]}>
+            <Text style={[styles.tabText, mode === "edit" ? styles.tabTextActive : null]}>Edit</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => {
+              void saveProfile(true);
+              setMode("view");
+            }}
+            style={[styles.tab, mode === "view" ? styles.tabActive : null]}
+          >
+            <Text style={[styles.tabText, mode === "view" ? styles.tabTextActive : null]}>View</Text>
+          </Pressable>
+        </View>
+
+        {loadError ? (
+          <View style={styles.centered}>
+            <Text style={styles.errorText}>{loadError}</Text>
+            <Pressable onPress={() => void loadData()} style={styles.primaryButton}>
+              <Text style={styles.primaryButtonText}>Retry</Text>
+            </Pressable>
+          </View>
+        ) : (
+          <ScrollView
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + huddleSpacing.x8 }]}
+            showsVerticalScrollIndicator={false}
+            style={styles.contentScroller}
+          >
+            {mode === "view" ? (
+              <NativeCarerProfileContent provider={viewData} />
+            ) : (
+              <View style={styles.form}>
+                <View style={styles.section}>
+                  <Text style={styles.sectionTitle}>Pet-Carer Story</Text>
+                  <TextInput
+                    multiline
+                    onBlur={() => setFocusedField(null)}
+                    onChangeText={(story) => setFormData((prev) => ({ ...prev, story }))}
+                    onFocus={() => setFocusedField("story")}
+                    placeholder="Introduce yourself and how you care for pets"
+                    placeholderTextColor={huddleColors.mutedText}
+                    style={[...textFieldStyle("story"), styles.textArea]}
+                    textAlignVertical="top"
+                    value={formData.story}
+                  />
+                </View>
+
+                <View style={styles.section}>
+                  <View style={styles.sectionHeaderRow}>
+                    <Text style={styles.sectionTitle}>Skills</Text>
+                    <Text style={styles.sectionCount}>{formData.skills.length}/{MAX_SKILLS}</Text>
+                  </View>
+                  {formData.skills.length > 0 ? (
+                    <View style={styles.chipWrap}>
+                      {formData.skills.map((skill) => (
+                        <Pressable key={skill} onPress={() => toggleSkill(skill)} style={styles.chip}>
+                          <Text style={styles.chipText}>{skill}</Text>
+                          <Feather color={huddleColors.iconMuted} name="x" size={12} />
+                        </Pressable>
+                      ))}
+                    </View>
+                  ) : null}
+                  {formData.skills.length < MAX_SKILLS ? (
+                    <>
+                      <Pressable onPress={() => setOpenDrop(openDrop === "skills" ? null : "skills")} style={[styles.selectButton, openDrop === "skills" ? styles.fieldFocused : null]}>
+                        <Text style={styles.selectButtonText}>{formData.skills.length === 0 ? "Select skills" : "Add another skill"}</Text>
+                        <Feather color={huddleColors.iconMuted} name={openDrop === "skills" ? "chevron-up" : "chevron-down"} size={16} />
+                      </Pressable>
+                      {openDrop === "skills" ? (
+                        <SelectList
+                          options={ALL_SKILLS.filter((skill) => !formData.skills.includes(skill))}
+                          selected={[]}
+                          onToggle={toggleSkill}
+                        />
+                      ) : null}
+                    </>
+                  ) : null}
+                </View>
+
+                <View style={styles.section}>
+                  <View style={styles.sectionHeaderRow}>
+                    <Text style={styles.sectionTitle}>Services & Rates</Text>
+                    {rateEditIndex === null ? (
+                      <Pressable onPress={addRateRow} style={styles.iconCircle}>
+                        <Feather color={huddleColors.blue} name="plus" size={18} />
+                      </Pressable>
+                    ) : null}
+                  </View>
+                  {formData.rateRows.map((row, index) => {
+                    const isEditing = rateEditIndex === index;
+                    if (!isEditing) {
+                      return (
+                        <View key={index} style={styles.rateSummary}>
+                          <View style={styles.flex}>
+                            <Text style={styles.rateTitle}>{row.services.length ? row.services.join(", ") : "No service selected"}</Text>
+                            <Text style={styles.rateMeta}>{row.price && row.rate ? `${formData.currency} ${row.price} / ${row.rate.toLowerCase()}` : "No rate set"}</Text>
+                          </View>
+                          <Pressable onPress={() => editRate(index)} style={styles.iconCircle}>
+                            <Feather color={huddleColors.iconMuted} name="edit-2" size={15} />
+                          </Pressable>
+                          {formData.rateRows.length > 1 ? (
+                            <Pressable
+                              onPress={() => setFormData((prev) => {
+                                const rows = prev.rateRows.filter((_, rowIndex) => rowIndex !== index);
+                                return { ...prev, rateRows: rows, servicesOffered: [...new Set(rows.flatMap((entry) => entry.services))] };
+                              })}
+                              style={styles.iconCircle}
+                            >
+                              <Feather color={huddleColors.iconMuted} name="x" size={15} />
+                            </Pressable>
+                          ) : null}
+                        </View>
+                      );
+                    }
+                    const vetBlocked = new Set(
+                      SERVICES_OFFERED.filter((service) => service === "Vet / Licensed Care" && !formData.skills.some((skill) => (SKILLS_GROUP_B as readonly string[]).includes(skill))),
+                    );
+                    return (
+                      <View key={index} style={styles.rateEditor}>
+                        <Text style={styles.fieldLabel}>Services</Text>
+                        <Pressable onPress={() => setOpenDrop(openDrop === "rateServices" ? null : "rateServices")} style={[styles.selectButton, openDrop === "rateServices" ? styles.fieldFocused : null]}>
+                          <Text style={styles.selectButtonText}>{rateDraft.services.length ? rateDraft.services.join(", ") : "Select services"}</Text>
+                          <Feather color={huddleColors.iconMuted} name={openDrop === "rateServices" ? "chevron-up" : "chevron-down"} size={16} />
+                        </Pressable>
+                        {openDrop === "rateServices" ? (
+                          <SelectList
+                            disabledOptions={vetBlocked}
+                            options={SERVICES_OFFERED}
+                            selected={rateDraft.services}
+                            onToggle={(service) => {
+                              setRateDraft((prev) => ({ ...prev, services: toggleStringItem(prev.services, service) }));
+                            }}
+                          />
+                        ) : null}
+                        {rateDraft.services.includes("Others") ? (
+                          <TextInput
+                            onBlur={() => setFocusedField(null)}
+                            onChangeText={(servicesOther) => setFormData((prev) => ({ ...prev, servicesOther }))}
+                            onFocus={() => setFocusedField("servicesOther")}
+                            placeholder="Describe your other service"
+                            placeholderTextColor={huddleColors.mutedText}
+                            style={textFieldStyle("servicesOther")}
+                            value={formData.servicesOther}
+                          />
+                        ) : null}
+                        <Text style={styles.fieldLabel}>Rate</Text>
+                        <View style={styles.rateInputRow}>
+                          <Pressable onPress={() => setOpenDrop(openDrop === "currency" ? null : "currency")} style={[styles.rateSelect, openDrop === "currency" ? styles.fieldFocused : null]}>
+                            <Text style={styles.rateSelectText}>{formData.currency || "-"}</Text>
+                          </Pressable>
+                          <TextInput
+                            keyboardType="decimal-pad"
+                            onBlur={() => setFocusedField(null)}
+                            onChangeText={(price) => setRateDraft((prev) => ({ ...prev, price }))}
+                            onFocus={() => setFocusedField("price")}
+                            placeholder="0"
+                            placeholderTextColor={huddleColors.mutedText}
+                            style={[...textFieldStyle("price"), styles.ratePriceInput]}
+                            value={rateDraft.price}
+                          />
+                          <Pressable onPress={() => setOpenDrop(openDrop === "rate" ? null : "rate")} style={[styles.rateSelectWide, openDrop === "rate" ? styles.fieldFocused : null]}>
+                            <Text style={styles.rateSelectText}>{rateDraft.rate || "Rate"}</Text>
+                          </Pressable>
+                        </View>
+                        {openDrop === "currency" ? (
+                          <SelectList closeOnSelect options={CURRENCIES} selected={formData.currency ? [formData.currency] : []} onToggle={(currency) => { setFormData((prev) => ({ ...prev, currency })); setOpenDrop(null); }} />
+                        ) : null}
+                        {openDrop === "rate" ? (
+                          <SelectList closeOnSelect options={RATE_OPTIONS} selected={rateDraft.rate ? [rateDraft.rate] : []} onToggle={(rate) => { setRateDraft((prev) => ({ ...prev, rate })); setOpenDrop(null); }} />
+                        ) : null}
+                        <View style={styles.actionRow}>
+                          <Pressable onPress={saveRate} style={styles.smallPrimaryButton}>
+                            <Text style={styles.smallPrimaryText}>Save</Text>
+                          </Pressable>
+                          <Pressable onPress={() => { setRateEditIndex(null); setOpenDrop(null); }} style={styles.smallSecondaryButton}>
+                            <Text style={styles.smallSecondaryText}>Cancel</Text>
+                          </Pressable>
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+
+                <MultiSelectSection
+                  dropKey="petTypes"
+                  openDrop={openDrop}
+                  options={PET_TYPES}
+                  selected={formData.petTypes}
+                  setOpenDrop={setOpenDrop}
+                  title="Pet Types I Care For"
+                  onToggle={(petType) => setFormData((prev) => ({
+                    ...prev,
+                    petTypes: toggleStringItem(prev.petTypes, petType),
+                    ...(petType === "Dogs" && prev.petTypes.includes("Dogs") ? { dogSizes: [] } : {}),
+                  }))}
+                />
+                {formData.petTypes.includes("Others") ? (
+                  <TextInput
+                    onBlur={() => setFocusedField(null)}
+                    onChangeText={(petTypesOther) => setFormData((prev) => ({ ...prev, petTypesOther }))}
+                    onFocus={() => setFocusedField("petTypesOther")}
+                    placeholder="Describe other pet type"
+                    placeholderTextColor={huddleColors.mutedText}
+                    style={textFieldStyle("petTypesOther")}
+                    value={formData.petTypesOther}
+                  />
+                ) : null}
+                {formData.petTypes.includes("Dogs") ? (
+                  <MultiSelectSection
+                    dropKey="dogSizes"
+                    openDrop={openDrop}
+                    options={DOG_SIZES}
+                    selected={formData.dogSizes}
+                    setOpenDrop={setOpenDrop}
+                    title="Dog sizes"
+                    onToggle={(size) => setFormData((prev) => ({ ...prev, dogSizes: toggleStringItem(prev.dogSizes, size) }))}
+                  />
+                ) : null}
+
+                <View style={styles.section}>
+                  <Text style={styles.sectionTitle}>Availability</Text>
+                  <MultiSelectControl
+                    dropKey="days"
+                    label="Days"
+                    openDrop={openDrop}
+                    options={DAYS}
+                    selected={formData.days}
+                    setOpenDrop={setOpenDrop}
+                    onToggle={(day) => setFormData((prev) => ({ ...prev, days: toggleStringItem(prev.days, day) }))}
+                  />
+                  <View style={styles.availabilityColumns}>
+                    <View style={[styles.availabilityColumn, styles.availabilityColumnCompact]}>
+                      <View style={styles.switchSettingRow}>
+                      <Text adjustsFontSizeToFit minimumFontScale={0.82} numberOfLines={1} style={styles.fieldLabel}>Anytime</Text>
+                      <NeuToggle value={formData.timeBlocks.includes("Anytime")} onChange={updateAnytime} />
+                      </View>
+                      {formData.timeBlocks.includes("Specify") ? (
+                        <View style={styles.compactFieldStack}>
+                          <Pressable onPress={() => setOpenDrop(openDrop === "timeFrom" ? null : "timeFrom")} style={[styles.selectButton, styles.compactSelectButton, openDrop === "timeFrom" ? styles.fieldFocused : null, fieldErrors.time ? styles.fieldError : null]}>
+                            <Text style={styles.selectButtonText}>{formData.otherTimeFrom || "From"}</Text>
+                            <Feather color={huddleColors.iconMuted} name={openDrop === "timeFrom" ? "chevron-up" : "chevron-down"} size={16} />
+                          </Pressable>
+                          {openDrop === "timeFrom" ? (
+                            <SelectList closeOnSelect options={TIME_OPTIONS} selected={formData.otherTimeFrom ? [formData.otherTimeFrom] : []} onToggle={(otherTimeFrom) => { setFormData((prev) => ({ ...prev, otherTimeFrom })); setFieldErrors((prev) => ({ ...prev, time: undefined })); setOpenDrop(null); }} />
+                          ) : null}
+                          <Pressable onPress={() => setOpenDrop(openDrop === "timeTo" ? null : "timeTo")} style={[styles.selectButton, styles.compactSelectButton, openDrop === "timeTo" ? styles.fieldFocused : null, fieldErrors.time ? styles.fieldError : null]}>
+                            <Text style={styles.selectButtonText}>{formData.otherTimeTo || "To"}</Text>
+                            <Feather color={huddleColors.iconMuted} name={openDrop === "timeTo" ? "chevron-up" : "chevron-down"} size={16} />
+                          </Pressable>
+                          {openDrop === "timeTo" ? (
+                            <SelectList closeOnSelect options={TIME_OPTIONS} selected={formData.otherTimeTo ? [formData.otherTimeTo] : []} onToggle={(otherTimeTo) => { setFormData((prev) => ({ ...prev, otherTimeTo })); setFieldErrors((prev) => ({ ...prev, time: undefined })); setOpenDrop(null); }} />
+                          ) : null}
+                          {fieldErrors.time ? <Text style={styles.errorText}>{fieldErrors.time}</Text> : null}
+                        </View>
+                      ) : null}
+                    </View>
+                    <View style={[styles.availabilityColumn, styles.availabilityColumnWide]}>
+                      <View style={styles.switchSettingRow}>
+                        <Text adjustsFontSizeToFit minimumFontScale={0.78} numberOfLines={1} style={styles.fieldLabel}>Available in 2 Hours</Text>
+                        <NeuToggle value={formData.emergencyReadiness === true} onChange={updateEmergencyReadiness} />
+                      </View>
+                      {formData.emergencyReadiness !== true ? (
+                        <View style={styles.noticeCompactRow}>
+                          <TextInput
+                            keyboardType="number-pad"
+                            onBlur={() => setFocusedField(null)}
+                            onChangeText={updateMinNoticeValue}
+                            onFocus={() => setFocusedField("minNotice")}
+                            placeholder="Notice Period"
+                            placeholderTextColor={huddleColors.mutedText}
+                            style={[...textFieldStyle("minNotice"), styles.noticeCompactInput]}
+                            value={formData.minNoticeValue}
+                          />
+                          <View style={styles.noticeUnitSelectWrap}>
+                            <Pressable onPress={() => setOpenDrop(openDrop === "minNoticeUnit" ? null : "minNoticeUnit")} style={[styles.noticeUnitSelect, openDrop === "minNoticeUnit" ? styles.fieldFocused : null]}>
+                              <Text style={styles.rateSelectText}>{formData.minNoticeUnit === "hours" ? "Hour" : "Day"}</Text>
+                              <Feather color={huddleColors.iconMuted} name={openDrop === "minNoticeUnit" ? "chevron-up" : "chevron-down"} size={15} />
+                            </Pressable>
+                            {openDrop === "minNoticeUnit" ? (
+                              <SelectList
+                                closeOnSelect
+                                options={["hours", "days"]}
+                                selected={[formData.minNoticeUnit]}
+                                onToggle={(unit) => {
+                                  updateMinNoticeUnit(unit as NativeCarerProfileData["minNoticeUnit"]);
+                                  setOpenDrop(null);
+                                }}
+                              />
+                            ) : null}
+                          </View>
+                        </View>
+                      ) : null}
+                      {fieldErrors.minNotice ? <Text style={styles.errorText}>{fieldErrors.minNotice}</Text> : null}
+                    </View>
+                  </View>
+                </View>
+
+                <View style={styles.section}>
+                  <Text style={styles.sectionTitle}>Service Location</Text>
+                  <MultiSelectControl
+                    dropKey="locationStyles"
+                    label={null}
+                    openDrop={openDrop}
+                    options={LOCATION_STYLES}
+                    selected={formData.locationStyles}
+                    setOpenDrop={setOpenDrop}
+                    onToggle={(locationStyle) => setFormData((prev) => ({ ...prev, locationStyles: toggleStringItem(prev.locationStyles, locationStyle) }))}
+                  />
+                  <TextInput
+                    onBlur={() => setFocusedField(null)}
+                    onChangeText={(areaName) => setFormData((prev) => ({ ...prev, areaName }))}
+                    onFocus={() => setFocusedField("areaName")}
+                    placeholder="e.g. Downtown, Brooklyn"
+                    placeholderTextColor={huddleColors.mutedText}
+                    style={textFieldStyle("areaName")}
+                    value={formData.areaName}
+                  />
+                </View>
+
+                <View style={styles.section}>
+                  <Text style={styles.sectionTitle}>Neighborly Wallet</Text>
+                  {walletState === "connected" ? (
+                    <View style={styles.walletRow}>
+                      <Feather color={huddleColors.success} name="check" size={18} />
+                      <Text style={styles.walletText}>Wallet connected</Text>
+                      <Pressable onPress={() => void refreshWallet()} style={styles.walletButton}>
+                        <Text style={styles.walletButtonText}>Refresh</Text>
+                      </Pressable>
+                    </View>
+                  ) : walletState === "review" ? (
+                    <View style={styles.walletRow}>
+                      <ActivityIndicator color={huddleColors.iconMuted} />
+                      <Text style={styles.walletText}>Wallet under review</Text>
+                      <Pressable onPress={() => void refreshWallet()} style={styles.walletButton}>
+                        <Text style={styles.walletButtonText}>Refresh</Text>
+                      </Pressable>
+                    </View>
+                  ) : (
+                    <>
+                      <Pressable onPress={() => void startWallet()} style={styles.primaryButton}>
+                        <Text style={styles.primaryButtonText}>{walletStarting ? "Preparing..." : walletState === "incomplete" ? "Manage wallet" : "Set Wallet"}</Text>
+                      </Pressable>
+                      <Text style={styles.helperText}>Secure Stripe onboarding opens inside the native app.</Text>
+                    </>
+                  )}
+                </View>
+
+                <View style={styles.section}>
+                  <Pressable onPress={() => setFormData((prev) => ({ ...prev, agreementAccepted: !prev.agreementAccepted, agreementAcceptedAt: !prev.agreementAccepted ? (prev.agreementAcceptedAt ?? new Date().toISOString()) : null }))} style={styles.agreementRow}>
+                    <View style={[styles.checkbox, formData.agreementAccepted ? styles.checkboxActive : null]}>
+                      {formData.agreementAccepted ? <Feather color={huddleColors.onPrimary} name="check" size={14} /> : null}
+                    </View>
+                    <Text style={styles.agreementText}>I agree to the <Text onPress={openAgreement} style={styles.linkText}>Service Provider Agreement</Text></Text>
+                  </Pressable>
+                </View>
+
+                <View style={styles.section}>
+                  {listingAttempted && (!isVerified || !formData.stripePayoutsEnabled || !formData.agreementAccepted) ? (
+                    <Text style={styles.errorText}>
+                      {[
+                        !isVerified ? "Complete identity verification first." : "",
+                        !formData.stripePayoutsEnabled ? "Set up wallet before providing service." : "",
+                        !formData.agreementAccepted ? "Accept the Service Provider Agreement." : "",
+                      ].filter(Boolean).join(" ")}
+                    </Text>
+                  ) : null}
+                  <View style={styles.listingRow}>
+                    <Text style={styles.listingText}>List on Service</Text>
+                    <NeuToggle
+                      value={formData.listed && providerEligible && formData.stripePayoutsEnabled && formData.agreementAccepted}
+                      onChange={(value) => {
+                        const blocked = !providerEligible || !formData.stripePayoutsEnabled || !formData.agreementAccepted;
+                        if (value && blocked) {
+                          setListingAttempted(true);
+                          return;
+                        }
+                        if (!blocked) setFormData((prev) => ({ ...prev, listed: value }));
+                      }}
+                    />
+                  </View>
+                  {!computeCarerCompleted(formData) ? <Text style={styles.helperText}>Complete your profile fields before listing.</Text> : null}
+                </View>
+              </View>
+            )}
+          </ScrollView>
+        )}
+
+        <Modal animationType="fade" transparent visible={proofState !== null} onRequestClose={() => setProofState(null)}>
+          <View style={nativeModalStyles.appModalBackdrop}>
+            <SafeAreaView style={nativeModalStyles.appModalSafeArea}>
+              <AppModalCard>
+                <AppModalCloseButton onPress={() => setProofState(null)} />
+                <AppModalScroll>
+                  {proofState ? (
+                    <View style={styles.modalInner}>
+                      <Text style={styles.modalTitle}>{proofState.skill}</Text>
+                      <Text style={styles.modalCopy}>Please provide the following to verify your credential.</Text>
+                      {PROOF_CONFIG[proofState.skill].fields.map((field) => (
+                        <View key={field.key} style={styles.modalFieldGroup}>
+                          <Text style={styles.fieldLabel}>{field.label}</Text>
+                          <AppModalField
+                            onChangeText={(value) => setProofState((prev) => prev ? { ...prev, values: { ...prev.values, [field.key]: value } } : prev)}
+                            placeholder={field.placeholder}
+                            value={proofState.values[field.key] ?? ""}
+                          />
+                        </View>
+                      ))}
+                      <AppModalActionRow>
+                        <AppModalButton onPress={() => setProofState(null)} variant="secondary">
+                          <Text style={styles.modalSecondaryText}>Cancel</Text>
+                        </AppModalButton>
+                        <AppModalButton onPress={submitProof}>
+                          <Text style={styles.modalPrimaryText}>Submit</Text>
+                        </AppModalButton>
+                      </AppModalActionRow>
+                    </View>
+                  ) : null}
+                </AppModalScroll>
+              </AppModalCard>
+            </SafeAreaView>
+          </View>
+        </Modal>
+        <NativeStripeConnectOnboarding
+          visible={walletOnboardingVisible}
+          onReadyStateChange={setWalletStarting}
+          onExit={() => {
+            setWalletOnboardingVisible(false);
+            void refreshWallet();
+          }}
+        />
+      </KeyboardAvoidingView>
+    </SafeAreaView>
+  );
+}
+
+function MultiSelectControl({
+  dropKey,
+  label,
+  openDrop,
+  options,
+  selected,
+  setOpenDrop,
+  onToggle,
+}: {
+  dropKey: DropdownKey;
+  label: string | null;
+  openDrop: DropdownKey | null;
+  options: readonly string[];
+  selected: string[];
+  setOpenDrop: (key: DropdownKey | null) => void;
+  onToggle: (value: string) => void;
+}) {
+  return (
+    <View style={styles.controlGroup}>
+      {label ? <Text style={styles.fieldLabel}>{label}</Text> : null}
+      <Pressable onPress={() => setOpenDrop(openDrop === dropKey ? null : dropKey)} style={[styles.selectButton, openDrop === dropKey ? styles.fieldFocused : null]}>
+        <Text numberOfLines={1} style={styles.selectButtonText}>{selected.length ? selected.join(", ") : "Select"}</Text>
+        <Feather color={huddleColors.iconMuted} name={openDrop === dropKey ? "chevron-up" : "chevron-down"} size={16} />
+      </Pressable>
+      {openDrop === dropKey ? <SelectList options={options} selected={selected} onToggle={onToggle} /> : null}
+    </View>
+  );
+}
+
+function MultiSelectSection(props: Omit<Parameters<typeof MultiSelectControl>[0], "label"> & { title: string }) {
+  return (
+    <View style={styles.section}>
+      <Text style={styles.sectionTitle}>{props.title}</Text>
+      <MultiSelectControl {...props} label={null} />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  safe: {
+    flex: 1,
+    backgroundColor: huddleColors.glassChrome,
+  },
+  flex: {
+    flex: 1,
+  },
+  centered: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: huddleSpacing.x4,
+    padding: huddleSpacing.x5,
+  },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: huddleSpacing.x3,
+    paddingHorizontal: huddleSpacing.x4,
+    paddingTop: huddleSpacing.x3,
+    paddingBottom: huddleSpacing.x3,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: huddleColors.divider,
+    backgroundColor: huddleColors.glassChrome,
+    ...huddleShadows.glassHeader,
+  },
+  headerIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: huddleRadii.pill,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  headerTitleWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
+  headerTitle: {
+    fontFamily: "Urbanist-700",
+    fontSize: huddleType.nativeHeaderTitle,
+    lineHeight: huddleType.nativeHeaderTitleLine,
+    color: huddleColors.text,
+  },
+  headerSubtitle: {
+    fontFamily: "Urbanist-500",
+    fontSize: huddleType.label,
+    lineHeight: huddleType.labelLine,
+    color: huddleColors.mutedText,
+  },
+  tabs: {
+    flexDirection: "row",
+    borderBottomWidth: 1,
+    borderBottomColor: huddleColors.divider,
+    paddingHorizontal: huddleSpacing.x4,
+  },
+  tab: {
+    flex: 1,
+    height: 44,
+    alignItems: "center",
+    justifyContent: "center",
+    borderBottomWidth: 2,
+    borderBottomColor: "transparent",
+  },
+  tabActive: {
+    borderBottomColor: huddleColors.tabActive,
+  },
+  tabText: {
+    fontFamily: "Urbanist-600",
+    fontSize: huddleType.body,
+    color: huddleColors.mutedText,
+  },
+  tabTextActive: {
+    color: huddleColors.text,
+  },
+  scrollContent: {
+    padding: huddleSpacing.x4,
+    maxWidth: 480,
+    width: "100%",
+    alignSelf: "center",
+  },
+  contentScroller: {
+    backgroundColor: huddleColors.canvas,
+  },
+  form: {
+    gap: huddleSpacing.x6,
+  },
+  section: {
+    gap: huddleSpacing.x4,
+  },
+  sectionHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  sectionTitle: {
+    fontFamily: "Urbanist-700",
+    fontSize: huddleType.label,
+    lineHeight: huddleType.labelLine,
+    color: huddleColors.mutedText,
+    textTransform: "uppercase",
+    letterSpacing: 1,
+  },
+  sectionCount: {
+    fontFamily: "Urbanist-500",
+    fontSize: huddleType.label,
+    color: huddleColors.mutedText,
+  },
+  fieldLabel: {
+    flexShrink: 1,
+    fontFamily: "Urbanist-600",
+    fontSize: huddleType.label,
+    lineHeight: huddleType.labelLine,
+    color: huddleColors.text,
+  },
+  field: {
+    height: huddleLayout.fieldHeight,
+    borderWidth: 1,
+    borderColor: huddleColors.fieldBorder,
+    borderRadius: huddleRadii.field,
+    paddingHorizontal: huddleSpacing.x4,
+    fontFamily: "Urbanist-500",
+    fontSize: huddleType.body,
+    lineHeight: huddleType.body + 6,
+    color: huddleColors.text,
+    backgroundColor: huddleColors.canvas,
+    ...huddleShadows.glassElevation1,
+  },
+  fieldFocused: {
+    ...huddleFieldStates.focused,
+  },
+  fieldError: {
+    ...huddleFieldStates.error,
+  },
+  textArea: {
+    height: undefined,
+    minHeight: 108,
+    paddingTop: huddleSpacing.x3,
+    paddingBottom: huddleSpacing.x3,
+  },
+  chipWrap: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: huddleSpacing.x2,
+  },
+  chip: {
+    minHeight: huddleFormControls.select.optionMinHeight,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: huddleSpacing.x1,
+    paddingHorizontal: huddleSpacing.x3,
+    borderRadius: huddleRadii.pill,
+    borderWidth: 1,
+    borderColor: huddleColors.fieldBorderSoft,
+    backgroundColor: huddleColors.mutedCanvas,
+  },
+  chipText: {
+    fontFamily: "Urbanist-600",
+    fontSize: huddleType.label,
+    color: huddleColors.text,
+  },
+  selectButton: {
+    minHeight: huddleLayout.fieldHeight,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: huddleSpacing.x3,
+    paddingHorizontal: huddleSpacing.x4,
+    borderWidth: 1,
+    borderColor: huddleColors.fieldBorder,
+    borderRadius: huddleRadii.field,
+    backgroundColor: huddleColors.canvas,
+  },
+  selectButtonText: {
+    flex: 1,
+    fontFamily: "Urbanist-500",
+    fontSize: huddleType.body,
+    lineHeight: huddleType.body + 6,
+    color: huddleColors.mutedText,
+  },
+  dropdownMenu: {
+    maxHeight: huddleFormControls.select.menuMaxHeight,
+    borderRadius: huddleFormControls.select.menuRadius,
+    borderWidth: 1,
+    borderColor: huddleColors.fieldBorderSoft,
+    backgroundColor: huddleColors.canvas,
+    ...huddleShadows.glassElevation1,
+  },
+  dropdownContent: {
+    padding: huddleFormControls.select.menuPadding,
+  },
+  dropdownOption: {
+    minHeight: huddleFormControls.select.optionMinHeight,
+    borderRadius: huddleFormControls.select.optionRadius,
+    paddingHorizontal: huddleFormControls.select.optionPaddingHorizontal,
+    paddingVertical: huddleFormControls.select.optionPaddingVertical,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: huddleSpacing.x2,
+  },
+  dropdownOptionActive: {
+    backgroundColor: huddleColors.primarySoftFill,
+  },
+  dropdownText: {
+    flex: 1,
+    fontFamily: "Urbanist-600",
+    fontSize: huddleType.body,
+    lineHeight: huddleType.body + 6,
+    color: huddleColors.text,
+  },
+  checkSlot: {
+    width: huddleFormControls.select.checkSlot,
+  },
+  iconCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: huddleRadii.pill,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  rateSummary: {
+    minHeight: 56,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: huddleSpacing.x2,
+    padding: huddleSpacing.x3,
+    borderRadius: huddleRadii.field,
+    borderWidth: 1,
+    borderColor: huddleColors.fieldBorderSoft,
+    backgroundColor: huddleColors.canvas,
+  },
+  rateTitle: {
+    fontFamily: "Urbanist-700",
+    fontSize: huddleType.label,
+    color: huddleColors.text,
+  },
+  rateMeta: {
+    marginTop: huddleSpacing.x1,
+    fontFamily: "Urbanist-500",
+    fontSize: huddleType.label,
+    color: huddleColors.mutedText,
+  },
+  rateEditor: {
+    gap: huddleSpacing.x3,
+    padding: huddleSpacing.x4,
+    borderRadius: huddleRadii.card,
+    borderWidth: 1,
+    borderColor: huddleColors.fieldBorderSoft,
+    backgroundColor: huddleColors.mutedCanvas,
+  },
+  rateInputRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: huddleSpacing.x2,
+  },
+  rateSelect: {
+    minHeight: huddleLayout.fieldHeight,
+    minWidth: 58,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: huddleRadii.field,
+    borderWidth: 1,
+    borderColor: huddleColors.fieldBorder,
+    backgroundColor: huddleColors.canvas,
+  },
+  rateSelectWide: {
+    minHeight: huddleLayout.fieldHeight,
+    minWidth: 92,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: huddleRadii.field,
+    borderWidth: 1,
+    borderColor: huddleColors.fieldBorder,
+    backgroundColor: huddleColors.canvas,
+  },
+  rateSelectText: {
+    fontFamily: "Urbanist-600",
+    fontSize: huddleType.label,
+    color: huddleColors.mutedText,
+  },
+  ratePriceInput: {
+    flex: 1,
+    minWidth: 0,
+    ...huddleShadows.glassElevation1,
+  },
+  actionRow: {
+    flexDirection: "row",
+    gap: huddleSpacing.x2,
+  },
+  smallPrimaryButton: {
+    flex: 1,
+    ...huddleButtons.base,
+    ...huddleButtons.primary,
+  },
+  smallPrimaryText: {
+    ...huddleButtons.label,
+    color: huddleColors.onPrimary,
+  },
+  smallSecondaryButton: {
+    flex: 1,
+    ...huddleButtons.base,
+    ...huddleButtons.secondary,
+  },
+  smallSecondaryText: {
+    ...huddleButtons.label,
+    color: huddleColors.text,
+  },
+  controlGroup: {
+    gap: huddleSpacing.x2,
+  },
+  toggleRow: {
+    minHeight: huddleLayout.fieldHeight,
+    flexDirection: "row",
+    gap: huddleSpacing.x2,
+  },
+  switchSettingRow: {
+    minHeight: huddleLayout.fieldHeight,
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: huddleSpacing.x2,
+    paddingHorizontal: huddleSpacing.x3,
+    borderRadius: huddleRadii.field,
+    backgroundColor: huddleColors.mutedCanvas,
+  },
+  availabilityColumns: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: huddleSpacing.x2,
+  },
+  availabilityColumn: {
+    flex: 1,
+    minWidth: 0,
+    gap: huddleSpacing.x2,
+  },
+  availabilityColumnCompact: {
+    flex: 0.9,
+  },
+  availabilityColumnWide: {
+    flex: 1.1,
+  },
+  compactFieldStack: {
+    gap: huddleSpacing.x2,
+  },
+  compactSelectButton: {
+    minHeight: 48,
+  },
+  noticeCompactRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: huddleSpacing.x2,
+  },
+  noticeCompactInput: {
+    flex: 0.68,
+    minWidth: 0,
+    height: 48,
+    paddingHorizontal: huddleSpacing.x3,
+  },
+  noticeUnitSelectWrap: {
+    flex: 1,
+    minWidth: 104,
+  },
+  noticeUnitSelect: {
+    minHeight: 48,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: huddleSpacing.x1,
+    paddingHorizontal: huddleSpacing.x2,
+    borderRadius: huddleRadii.field,
+    borderWidth: 1,
+    borderColor: huddleColors.fieldBorder,
+    backgroundColor: huddleColors.canvas,
+  },
+  walletRow: {
+    minHeight: 48,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: huddleSpacing.x2,
+  },
+  walletText: {
+    flex: 1,
+    fontFamily: "Urbanist-600",
+    fontSize: huddleType.label,
+    color: huddleColors.text,
+  },
+  walletButton: {
+    ...huddleButtons.base,
+    ...huddleButtons.ghost,
+  },
+  walletButtonText: {
+    ...huddleButtons.label,
+    color: huddleColors.blue,
+  },
+  primaryButton: {
+    ...huddleButtons.base,
+    ...huddleButtons.primary,
+  },
+  primaryButtonText: {
+    ...huddleButtons.label,
+    color: huddleColors.onPrimary,
+  },
+  helperText: {
+    fontFamily: "Urbanist-500",
+    fontSize: huddleType.label,
+    lineHeight: huddleType.labelLine,
+    color: huddleColors.mutedText,
+    textAlign: "center",
+  },
+  agreementRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: huddleSpacing.x3,
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 5,
+    borderWidth: 1,
+    borderColor: huddleColors.fieldBorderStrong,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 1,
+  },
+  checkboxActive: {
+    backgroundColor: huddleColors.blue,
+    borderColor: huddleColors.blue,
+  },
+  agreementText: {
+    flex: 1,
+    fontFamily: "Urbanist-500",
+    fontSize: huddleType.label,
+    lineHeight: huddleType.labelLine,
+    color: huddleColors.text,
+  },
+  linkText: {
+    color: huddleColors.blue,
+    textDecorationLine: "underline",
+  },
+  listingRow: {
+    minHeight: 56,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderRadius: huddleRadii.field,
+    paddingHorizontal: huddleSpacing.x4,
+    backgroundColor: huddleColors.mutedCanvas,
+  },
+  listingText: {
+    fontFamily: "Urbanist-700",
+    fontSize: huddleType.label,
+    color: huddleColors.text,
+  },
+  switchTrack: {
+    width: 50,
+    height: 28,
+    flexShrink: 0,
+    borderRadius: huddleRadii.pill,
+    backgroundColor: huddleColors.fieldBorderStrong,
+    justifyContent: "center",
+    paddingHorizontal: 3,
+  },
+  switchTrackActive: {
+    backgroundColor: huddleColors.blue,
+  },
+  switchThumb: {
+    width: 22,
+    height: 22,
+    borderRadius: huddleRadii.pill,
+    backgroundColor: huddleColors.canvas,
+  },
+  switchThumbActive: {
+    transform: [{ translateX: 22 }],
+  },
+  errorText: {
+    fontFamily: "Urbanist-600",
+    fontSize: huddleType.label,
+    lineHeight: huddleType.labelLine,
+    color: huddleColors.validationRed,
+  },
+  modalInner: {
+    gap: huddleSpacing.x4,
+    paddingTop: huddleSpacing.x3,
+  },
+  modalTitle: {
+    fontFamily: huddleModalTokens.type.titleFamily,
+    fontSize: huddleModalTokens.type.titleSize,
+    lineHeight: huddleModalTokens.type.titleLine,
+    color: huddleModalTokens.color.text,
+  },
+  modalCopy: {
+    fontFamily: huddleModalTokens.type.bodyFamily,
+    fontSize: huddleType.label,
+    lineHeight: huddleType.labelLine,
+    color: huddleModalTokens.color.mutedText,
+  },
+  modalFieldGroup: {
+    gap: huddleSpacing.x2,
+  },
+  modalPrimaryText: {
+    fontFamily: huddleModalTokens.type.buttonFamily,
+    color: huddleModalTokens.color.onPrimary,
+  },
+  modalSecondaryText: {
+    fontFamily: huddleModalTokens.type.buttonFamily,
+    color: huddleModalTokens.color.blue,
+  },
+  pressed: {
+    opacity: 0.78,
+  },
+  disabled: {
+    opacity: 0.55,
+  },
+});

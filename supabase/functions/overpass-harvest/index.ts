@@ -31,7 +31,7 @@ Deno.serve(async (req: Request) => {
 
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const supabaseKey = (Deno.env.get("HUDDLE_SUPABASE_SERVICE_KEY") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"))!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
     // Overpass QL query: fetch veterinary clinics, pet shops, pet grooming within Hong Kong bbox

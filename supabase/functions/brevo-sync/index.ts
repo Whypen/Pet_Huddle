@@ -21,7 +21,10 @@ const BREVO_API_KEY = Deno.env.get("BREVO_API_KEY") ?? "";
 const BREVO_DEFAULT_LIST_ID_RAW = Deno.env.get("BREVO_DEFAULT_LIST_ID") ?? "";
 const BREVO_SERVICE_PROVIDER_LIST_ID_RAW = Deno.env.get("BREVO_SERVICE_PROVIDER_LIST_ID") ?? "";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
-const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+const SUPABASE_SERVICE_ROLE_KEY =
+  Deno.env.get("HUDDLE_SUPABASE_SERVICE_KEY") ??
+  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
+  "";
 const BREVO_API_BASE = "https://api.brevo.com/v3";
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -32,6 +35,35 @@ const CORS_HEADERS = {
 
 // Activity throttle: max 24h between syncs unless bucket changes
 const ACTIVITY_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const IP_RATE_LIMIT_MAX = 80;
+const USER_RATE_LIMIT_MAX = 40;
+const EMAIL_RATE_LIMIT_MAX = 80;
+const MAX_BODY_BYTES = 16_000;
+const REQUEST_RATE_BUCKETS = new Map<string, { count: number; windowStart: number }>();
+
+const getClientIp = (req: Request): string =>
+  req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+  req.headers.get("x-real-ip") ||
+  "unknown";
+
+const isWithinRateLimit = (key: string, max: number): { ok: boolean; resetAt?: number } => {
+  const now = Date.now();
+  const bucket = REQUEST_RATE_BUCKETS.get(key);
+  if (!bucket || now - bucket.windowStart >= RATE_LIMIT_WINDOW_MS) {
+    REQUEST_RATE_BUCKETS.set(key, { count: 1, windowStart: now });
+    return { ok: true };
+  }
+  bucket.count += 1;
+  if (bucket.count <= max) return { ok: true };
+  return { ok: false, resetAt: bucket.windowStart + RATE_LIMIT_WINDOW_MS };
+};
+
+const enforceBodySize = (req: Request): boolean => {
+  const rawLength = Number(req.headers.get("content-length") || 0);
+  if (!Number.isFinite(rawLength) || rawLength <= 0) return true;
+  return rawLength <= MAX_BODY_BYTES;
+};
 
 // Valid ACTIVITY_BUCKET values
 type ActivityBucket = "active" | "inactive_7d" | "inactive_30d";
@@ -68,13 +100,6 @@ const BREVO_ATTRIBUTES: Array<{ name: string; type: "text" | "date" | "boolean" 
   { name: "LAST_BOOKING_AT",      type: "text" },
   { name: "LAST_BROADCAST_AT",    type: "text" },
   { name: "LAST_CHAT_AT",         type: "text" },
-  { name: "MARKETING_CONSENT",         type: "text" },
-  { name: "MARKETING_CONSENT_AT",      type: "date" },
-  { name: "MARKETING_OPT_IN",          type: "text" },  // stage-1: form checkbox
-  { name: "MARKETING_OPT_IN_AT",       type: "date" },
-  { name: "MARKETING_DOI_CONFIRMED",   type: "text" },  // stage-2: email click
-  { name: "MARKETING_DOI_CONFIRMED_AT",type: "date" },
-  { name: "EMAIL_ENABLED",             type: "boolean" },
   { name: "USER_CREATED_AT",           type: "text" },
 ];
 
@@ -85,6 +110,22 @@ const json = (body: unknown, status = 200) =>
     status,
     headers: { "Content-Type": "application/json", ...CORS_HEADERS },
   });
+
+function isServiceRoleToken(token: string): boolean {
+  if (Boolean(SUPABASE_SERVICE_ROLE_KEY) && token === SUPABASE_SERVICE_ROLE_KEY) return true;
+  const parts = token.split(".");
+  if (parts.length !== 3) return false;
+  try {
+    const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/"))) as { role?: string };
+    return payload.role === "service_role";
+  } catch {
+    return false;
+  }
+}
+
+function normalizeEmail(value: unknown): string {
+  return String(value || "").trim().toLowerCase();
+}
 
 async function brevoFetch(
   path: string,
@@ -155,14 +196,26 @@ function parseConfiguredListId(raw: string, envName: string): number {
   return parsed;
 }
 
-async function validateBrevoListId(listId: number, envName: string): Promise<number> {
+function normalizeBrevoListName(value: unknown): string {
+  return String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+async function validateBrevoListId(
+  listId: number,
+  envName: string,
+  expectedName?: string,
+): Promise<number> {
   const result = await brevoFetch(`/contacts/lists/${listId}`, "GET");
   if (!result.ok) {
     throw new Error(`${envName}_not_found:${listId}`);
   }
-  const resolvedId = Number((result.data as { id?: number } | null)?.id || listId);
+  const list = result.data as { id?: number; name?: string } | null;
+  const resolvedId = Number(list?.id || listId);
   if (!Number.isFinite(resolvedId) || resolvedId <= 0) {
     throw new Error(`${envName}_not_found:${listId}`);
+  }
+  if (expectedName && normalizeBrevoListName(list?.name) !== normalizeBrevoListName(expectedName)) {
+    throw new Error(`${envName}_wrong_list:${listId}:${String(list?.name || "unnamed")}`);
   }
   return resolvedId;
 }
@@ -170,7 +223,7 @@ async function validateBrevoListId(listId: number, envName: string): Promise<num
 async function getDefaultListId(): Promise<number> {
   if (defaultListIdCache) return defaultListIdCache;
   const configuredId = parseConfiguredListId(BREVO_DEFAULT_LIST_ID_RAW, "BREVO_DEFAULT_LIST_ID");
-  defaultListIdCache = await validateBrevoListId(configuredId, "BREVO_DEFAULT_LIST_ID");
+  defaultListIdCache = await validateBrevoListId(configuredId, "BREVO_DEFAULT_LIST_ID", "huddle users");
   return defaultListIdCache;
 }
 
@@ -189,6 +242,86 @@ async function provision(): Promise<void> {
   await getDefaultListId();
   await getOptionalServiceProviderListId();
   provisionDone = true;
+}
+
+async function getDefaultListDiagnostics(): Promise<Record<string, unknown>> {
+  const defaultListId = await getDefaultListId();
+  const list = await brevoFetch(`/contacts/lists/${defaultListId}`, "GET");
+  const contacts = await brevoFetch(`/contacts/lists/${defaultListId}/contacts?limit=1&offset=0`, "GET");
+  return {
+    list_id: defaultListId,
+    list: list.data,
+    contacts_probe: contacts.data,
+  };
+}
+
+async function getContactDiagnostics(email: string): Promise<Record<string, unknown>> {
+  const defaultListId = await getDefaultListId();
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  if (!normalizedEmail) return { list_id: defaultListId, email: normalizedEmail, found: false };
+  const contact = await brevoFetch(`/contacts/${encodeURIComponent(normalizedEmail)}`, "GET");
+  if (!contact.ok) {
+    return {
+      list_id: defaultListId,
+      email: normalizedEmail,
+      found: false,
+      status: contact.status,
+      data: contact.data,
+    };
+  }
+  const listIds = ((contact.data as { listIds?: unknown[] } | null)?.listIds || []).map(Number);
+  return {
+    list_id: defaultListId,
+    email: normalizedEmail,
+    found: true,
+    in_default_list: listIds.includes(defaultListId),
+    contact: contact.data,
+  };
+}
+
+async function createSignupTestProof(email: string): Promise<Record<string, unknown>> {
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  if (!normalizedEmail) throw new Error("email_required");
+  const token = crypto.randomUUID();
+  const proof = crypto.randomUUID();
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + 30 * 60 * 1000).toISOString();
+  const { error } = await supabase
+    .from("presignup_tokens")
+    .insert({
+      token,
+      email: normalizedEmail,
+      verified: true,
+      expires_at: expiresAt,
+      signup_proof: proof,
+      signup_proof_issued_at: now.toISOString(),
+      signup_proof_expires_at: expiresAt,
+      signup_proof_used_at: null,
+    });
+  if (error) throw new Error(error.message || "signup_test_proof_create_failed");
+  return { email: normalizedEmail, token, signup_proof: proof, expires_at: expiresAt };
+}
+
+async function getSignupSyncDiagnostics(email: string): Promise<Record<string, unknown>> {
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  const { data: profile, error: profileError } = await supabase
+    .from("profiles")
+    .select("id,email,created_at,brevo_sync_required,brevo_sync_reason,display_name,social_id,phone")
+    .eq("email", normalizedEmail)
+    .maybeSingle();
+  const { data: tickets, error: ticketsError } = await supabase
+    .from("support_tickets")
+    .select("ticket_number,subject,message,status,created_at")
+    .ilike("message", `%${normalizedEmail}%`)
+    .order("created_at", { ascending: false })
+    .limit(3);
+  return {
+    email: normalizedEmail,
+    profile_error: profileError?.message || null,
+    profile,
+    tickets_error: ticketsError?.message || null,
+    tickets: tickets || [],
+  };
 }
 
 // ─── Trust score calculation ──────────────────────────────────────────────────
@@ -257,6 +390,10 @@ async function addContactToList(email: string, listId: number): Promise<boolean>
     emails: [email],
   });
   if (!res.ok && res.status !== 204) {
+    const details = JSON.stringify(res.data || {}).toLowerCase();
+    if (res.status === 400 && details.includes("already") && details.includes("list")) {
+      return true;
+    }
     console.error("[brevo-sync] add-to-list failed", email, listId, res.status, res.data);
     return false;
   }
@@ -286,7 +423,8 @@ async function syncBrevoContactToDefaultList(
   if (!ok) return false;
 
   for (const listId of requestedListIds) {
-    await addContactToList(email, listId);
+    const added = await addContactToList(email, listId);
+    if (!added) return false;
   }
   return true;
 }
@@ -320,9 +458,6 @@ interface CrmContactsViewRow {
   TRUST_SCORE: number | null;
   TRUST_TIER: string | null;
   USER_CREATED_AT: string | null;
-  MARKETING_CONSENT: string | null;
-  MARKETING_OPT_IN: string | null;
-  MARKETING_DOI_CONFIRMED: string | null;
 }
 
 function crmAttrsFromView(viewRow: CrmContactsViewRow | null): Record<string, unknown> {
@@ -351,9 +486,6 @@ function crmAttrsFromView(viewRow: CrmContactsViewRow | null): Record<string, un
     TRUST_SCORE: viewRow.TRUST_SCORE ?? null,
     TRUST_TIER: viewRow.TRUST_TIER ?? null,
     USER_CREATED_AT: viewRow.USER_CREATED_AT ?? null,
-    MARKETING_CONSENT: viewRow.MARKETING_CONSENT ?? "No",
-    MARKETING_OPT_IN: viewRow.MARKETING_OPT_IN ?? "No",
-    MARKETING_DOI_CONFIRMED: viewRow.MARKETING_DOI_CONFIRMED ?? "No",
   };
 }
 
@@ -364,7 +496,7 @@ async function loadCrmViewRowByEmail(email: string): Promise<CrmContactsViewRow 
       "EMAIL, DISPLAY_NAME, SOCIAL_ID, PHONE, COUNTRY, DISTRICT, TIER, SERVICE_PROVIDER, " +
       "VERIFICATION_STATUS, SUBSCRIPTION_STATUS, HAS_PET, PET_COUNT, PET_TYPES, HAS_DOG, HAS_CAT, HAS_OTHERS, " +
       "LAST_ACTIVE_AT, ACTIVITY_BUCKET, LAST_CHAT_AT, LAST_BROADCAST_AT, LAST_BOOKING_AT, TRUST_SCORE, TRUST_TIER, " +
-      "USER_CREATED_AT, MARKETING_CONSENT, MARKETING_OPT_IN, MARKETING_DOI_CONFIRMED",
+      "USER_CREATED_AT",
     )
     .eq("EMAIL", email)
     .maybeSingle();
@@ -382,16 +514,14 @@ async function handleProfileCompleted(userId: string): Promise<void> {
     .from("profiles")
     .select(
       "id, email, display_name, social_id, phone, location_country, location_district, " +
-      "tier, verification_status, marketing_consent, marketing_consent_at, " +
-      "marketing_opt_in_checked, marketing_opt_in_checked_at, " +
-      "marketing_doi_confirmed, marketing_doi_confirmed_at, last_active_at, created_at",
+      "tier, verification_status, last_active_at, created_at",
     )
     .eq("id", userId)
     .single();
 
   if (error || !profile) {
     console.error("[brevo-sync] profile_completed: profile not found", userId, error);
-    return;
+    throw new Error("profile_completed_profile_not_found");
   }
 
   // Derive email from auth if not on profile
@@ -412,7 +542,7 @@ async function handleProfileCompleted(userId: string): Promise<void> {
   }
   if (!email) {
     console.warn("[brevo-sync] profile_completed: no email for user", userId);
-    return;
+    throw new Error("profile_completed_email_missing");
   }
   const crmView = await loadCrmViewRowByEmail(email);
 
@@ -430,13 +560,6 @@ async function handleProfileCompleted(userId: string): Promise<void> {
       DISTRICT:             profile.location_district ?? "",
       TIER:                 profile.tier ?? "free",
       VERIFICATION_STATUS:  profile.verification_status ?? "unverified",
-      MARKETING_CONSENT:          Boolean(profile.marketing_consent),
-      MARKETING_CONSENT_AT:       profile.marketing_consent_at ?? null,
-      MARKETING_OPT_IN:           Boolean(profile.marketing_opt_in_checked),
-      MARKETING_OPT_IN_AT:        profile.marketing_opt_in_checked_at ?? null,
-      MARKETING_DOI_CONFIRMED:    Boolean(profile.marketing_doi_confirmed),
-      MARKETING_DOI_CONFIRMED_AT: profile.marketing_doi_confirmed_at ?? null,
-      EMAIL_ENABLED:              Boolean(profile.marketing_consent),
       USER_CREATED_AT:      profile.created_at ?? null,
       LAST_ACTIVE_AT:       profile.last_active_at ?? now,
       ACTIVITY_BUCKET:      "active" satisfies ActivityBucket,
@@ -451,7 +574,9 @@ async function handleProfileCompleted(userId: string): Promise<void> {
       .update({ brevo_sync_required: false, brevo_sync_reason: null })
       .eq("id", userId);
     console.log("[brevo-sync] profile_completed synced", userId);
+    return;
   }
+  throw new Error("profile_completed_brevo_upsert_or_list_add_failed");
 }
 
 async function handlePetProfileCompleted(userId: string): Promise<void> {
@@ -559,33 +684,6 @@ async function handleSubscriptionChanged(
   console.log("[brevo-sync] subscription_changed synced", userId, { tier, subscriptionStatus });
 }
 
-async function handleMarketingDoiConfirmed(userId: string): Promise<void> {
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select(
-      "email, marketing_consent, marketing_consent_at, " +
-      "marketing_opt_in_checked, marketing_opt_in_checked_at, " +
-      "marketing_doi_confirmed, marketing_doi_confirmed_at",
-    )
-    .eq("id", userId)
-    .single();
-
-  if (!profile?.email) return;
-  const crmView = await loadCrmViewRowByEmail(profile.email);
-
-  await syncBrevoContactToDefaultList(profile.email, userId, {
-    MARKETING_CONSENT:          Boolean(profile.marketing_consent),
-    MARKETING_CONSENT_AT:       profile.marketing_consent_at ?? null,
-    MARKETING_OPT_IN:           Boolean(profile.marketing_opt_in_checked),
-    MARKETING_OPT_IN_AT:        profile.marketing_opt_in_checked_at ?? null,
-    MARKETING_DOI_CONFIRMED:    Boolean(profile.marketing_doi_confirmed),
-    MARKETING_DOI_CONFIRMED_AT: profile.marketing_doi_confirmed_at ?? null,
-    EMAIL_ENABLED:              Boolean(profile.marketing_consent),
-    ...crmAttrsFromView(crmView),
-  });
-  console.log("[brevo-sync] marketing_doi_confirmed synced", userId);
-}
-
 async function handleImportantUserActivity(userId: string): Promise<void> {
   // Guardrail: throttled. Never sync on every app open.
   const { data: profile } = await supabase
@@ -638,50 +736,66 @@ type BackfillResult = {
   synced: number;
   failed: number;
   skipped: number;
+  from: number;
+  next_from: number | null;
+  done: boolean;
 };
 
-async function handleBackfillDefaultList(): Promise<BackfillResult> {
-  const result: BackfillResult = { scanned: 0, synced: 0, failed: 0, skipped: 0 };
-  const perPage = 500;
+async function handleBackfillDefaultList(options: { from?: number; limit?: number } = {}): Promise<BackfillResult> {
+  const startFrom = Math.max(0, Math.floor(Number(options.from ?? 0)));
+  const perPage = Math.min(100, Math.max(1, Math.floor(Number(options.limit ?? 50))));
+  const result: BackfillResult = {
+    scanned: 0,
+    synced: 0,
+    failed: 0,
+    skipped: 0,
+    from: startFrom,
+    next_from: null,
+    done: false,
+  };
 
-  for (let from = 0; from < 100_000; from += perPage) {
-    const { data: profilesPage, error } = await supabase
-      .from("profiles")
-      .select("id,email,created_at")
-      .not("email", "is", null)
-      .order("created_at", { ascending: true })
-      .range(from, from + perPage - 1);
-    if (error) {
-      throw new Error(error.message || "profile_backfill_failed");
-    }
-    const rows = profilesPage || [];
-    for (const profileRow of rows) {
-      const userId = String(profileRow.id || "").trim();
-      const email = String(profileRow.email || "").trim().toLowerCase();
-      if (!userId || !email) {
-        result.skipped += 1;
-        continue;
-      }
-      result.scanned += 1;
-      try {
-        const crmView = await loadCrmViewRowByEmail(email);
-        const ok = await syncBrevoContactToDefaultList(email, userId, {
-          APP_USER_ID: userId,
-          USER_CREATED_AT: profileRow.created_at ?? null,
-          ...crmAttrsFromView(crmView),
-        });
-        if (ok) {
-          result.synced += 1;
-        } else {
-          result.failed += 1;
-        }
-      } catch (error) {
-        result.failed += 1;
-        console.error("[brevo-sync] backfill failed", userId, email, error);
-      }
-    }
-    if (rows.length < perPage) break;
+  const { data: profilesPage, error } = await supabase
+    .from("profiles")
+    .select("id,email,created_at")
+    .not("email", "is", null)
+    .order("created_at", { ascending: true })
+    .range(startFrom, startFrom + perPage - 1);
+  if (error) {
+    throw new Error(error.message || "profile_backfill_failed");
   }
+
+  const rows = profilesPage || [];
+  for (const profileRow of rows) {
+    const userId = String(profileRow.id || "").trim();
+    const email = String(profileRow.email || "").trim().toLowerCase();
+    if (!userId || !email) {
+      result.skipped += 1;
+      continue;
+    }
+    result.scanned += 1;
+    try {
+      const crmView = await loadCrmViewRowByEmail(email);
+      const ok = await syncBrevoContactToDefaultList(email, userId, {
+        APP_USER_ID: userId,
+        USER_CREATED_AT: profileRow.created_at ?? null,
+        ...crmAttrsFromView(crmView),
+      });
+      if (ok) {
+        await supabase
+          .from("profiles")
+          .update({ brevo_sync_required: false, brevo_sync_reason: null })
+          .eq("id", userId);
+        result.synced += 1;
+      } else {
+        result.failed += 1;
+      }
+    } catch (error) {
+      result.failed += 1;
+      console.error("[brevo-sync] backfill failed", userId, email, error);
+    }
+  }
+  result.done = rows.length < perPage;
+  result.next_from = result.done ? null : startFrom + rows.length;
 
   console.log("[brevo-sync] backfill_default_list complete", result);
   return result;
@@ -694,6 +808,27 @@ serve(async (req: Request) => {
     return new Response("ok", { headers: CORS_HEADERS });
   }
   if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
+
+  const clientIp = getClientIp(req);
+  if (!enforceBodySize(req)) {
+    return json({ ok: false, error: "Request body too large" }, 413);
+  }
+  const ipRate = isWithinRateLimit(`brevo-sync:ip:${clientIp}`, IP_RATE_LIMIT_MAX);
+  if (!ipRate.ok) {
+    const wait = Math.max(1, Math.ceil(((ipRate.resetAt ?? Date.now()) - Date.now()) / 1000));
+    console.warn("[brevo-sync] rate limit blocked by ip", { ip: clientIp });
+    return json(
+      { ok: false, error: "Too many requests", code: "ip_rate_limited" },
+      429,
+      { "Retry-After": String(wait) },
+    );
+  }
+
+  const bearerToken = String(req.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "").trim();
+  const isServiceRoleRequest = isServiceRoleToken(bearerToken);
+  if (!isServiceRoleRequest) {
+    return json({ ok: false, error: "service_role_required" }, 403);
+  }
 
   if (!BREVO_API_KEY) {
     console.error("[brevo-sync] BREVO_API_KEY not set");
@@ -709,7 +844,45 @@ serve(async (req: Request) => {
 
   const { event, user_id } = body;
   if (!event) return json({ error: "event required" }, 400);
-  if (event !== "backfill_default_list" && !user_id) {
+  const normalizedUserId = String(user_id || "").trim();
+  const normalizedEmail = normalizeEmail((body as { email?: unknown }).email);
+
+  if (normalizedUserId) {
+    const userRate = isWithinRateLimit(`brevo-sync:user:${normalizedUserId}`, USER_RATE_LIMIT_MAX);
+    if (!userRate.ok) {
+      const wait = Math.max(1, Math.ceil(((userRate.resetAt ?? Date.now()) - Date.now()) / 1000));
+      console.warn("[brevo-sync] rate limit blocked by user", { userId: normalizedUserId, ip: clientIp });
+      return json(
+        { ok: false, error: "Too many requests", code: "user_rate_limited" },
+        429,
+        { "Retry-After": String(wait) },
+      );
+    }
+  } else if (normalizedEmail) {
+    const emailRate = isWithinRateLimit(`brevo-sync:email:${normalizedEmail}`, EMAIL_RATE_LIMIT_MAX);
+    if (!emailRate.ok) {
+      const wait = Math.max(1, Math.ceil(((emailRate.resetAt ?? Date.now()) - Date.now()) / 1000));
+      console.warn("[brevo-sync] rate limit blocked by email", {
+        email: normalizedEmail,
+        ip: clientIp,
+      });
+      return json(
+        { ok: false, error: "Too many requests", code: "email_rate_limited" },
+        429,
+        { "Retry-After": String(wait) },
+      );
+    }
+  }
+
+  const adminEvents = new Set([
+    "backfill_default_list",
+    "default_list_diagnostics",
+    "contact_diagnostics",
+    "create_signup_test_proof",
+    "signup_sync_diagnostics",
+  ]);
+  const userlessEvents = adminEvents;
+  if (!userlessEvents.has(event) && !user_id) {
     return json({ error: "event and user_id required" }, 400);
   }
 
@@ -747,12 +920,28 @@ serve(async (req: Request) => {
       case "important_user_activity":
         await handleImportantUserActivity(String(user_id));
         return json({ ok: true, event });
-      case "marketing_doi_confirmed":
-        await handleMarketingDoiConfirmed(String(user_id));
-        return json({ ok: true, event });
       case "backfill_default_list": {
-        const summary = await handleBackfillDefaultList();
+        const summary = await handleBackfillDefaultList({
+          from: Number(body.from ?? 0),
+          limit: Number(body.limit ?? 50),
+        });
         return json({ ok: true, event, summary });
+      }
+      case "default_list_diagnostics": {
+        const diagnostics = await getDefaultListDiagnostics();
+        return json({ ok: true, event, diagnostics });
+      }
+      case "contact_diagnostics": {
+        const diagnostics = await getContactDiagnostics(String(body.email ?? ""));
+        return json({ ok: true, event, diagnostics });
+      }
+      case "create_signup_test_proof": {
+        const proof = await createSignupTestProof(String(body.email ?? ""));
+        return json({ ok: true, event, proof });
+      }
+      case "signup_sync_diagnostics": {
+        const diagnostics = await getSignupSyncDiagnostics(String(body.email ?? ""));
+        return json({ ok: true, event, diagnostics });
       }
       default:
         console.warn("[brevo-sync] unknown event", event);

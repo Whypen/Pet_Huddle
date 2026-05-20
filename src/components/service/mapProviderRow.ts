@@ -3,6 +3,7 @@
 // (individual fetch). Keep in sync with mapRowToForm in CarerProfile.tsx.
 
 import type { ProviderSummary, RateRow } from "./types";
+import { isVerifiedProfile } from "@/lib/verification";
 
 const ALLOWED_CURRENCY_CODES = new Set(["HKD", "USD", "EUR", "GBP", "AUD", "CAD", "SGD", "JPY", "CNY"]);
 const INVALID_PRICE = Number.POSITIVE_INFINITY;
@@ -87,7 +88,7 @@ export function mapProviderRow(
   const verificationStatus =
     typeof profile.verification_status === "string" && profile.verification_status.trim().length > 0
       ? profile.verification_status.trim()
-      : profile.is_verified === true
+      : isVerifiedProfile(profile)
         ? "verified"
         : null;
   const dbRates     = (row.rates as string[]) ?? [];

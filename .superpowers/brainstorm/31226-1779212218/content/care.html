@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Care — Verified pet sitting, walking, grooming, boarding · huddle</title>
+<meta name="description" content="huddle Care is the verified local pet marketplace. Book sitters, walkers, groomers, boarders, and transport — every provider is identity-verified.">
+<meta property="og:title" content="huddle Care — Trusted local pet services">
+<meta property="og:description" content="Sitting, walking, boarding, grooming, transport, training. Verified providers, in-app payments, dispute support.">
+<link rel="stylesheet" href="huddle.css">
+<style>
+.svc-row { display: grid; grid-template-columns: repeat(4,1fr); gap: 16px; margin-top: 56px; }
+@media (max-width: 900px) { .svc-row { grid-template-columns: repeat(2,1fr); } }
+@media (max-width: 540px) { .svc-row { grid-template-columns: 1fr; } }
+.svc-card {
+  background: var(--white); border-radius: 22px; padding: 32px 24px;
+  border: 1px solid rgba(33,69,207,0.08);
+  transition: transform 0.4s var(--ease), box-shadow 0.4s;
+  position: relative; overflow: hidden;
+}
+.svc-card:hover { transform: translateY(-6px); box-shadow: 0 24px 48px -20px rgba(20,46,153,0.18); }
+.svc-card .emoji { font-size: 34px; line-height: 1; margin-bottom: 16px; }
+.svc-card h3 { font-size: 19px; font-weight: 800; letter-spacing: -0.01em; margin-bottom: 8px; }
+.svc-card p { font-size: 14px; font-weight: 500; color: var(--fg1); line-height: 1.5; }
+.svc-card .price { font-size: 13px; font-weight: 700; color: var(--coral); margin-top: 12px; letter-spacing: 0.02em; }
+.trust-row { display: grid; grid-template-columns: repeat(3,1fr); gap: 24px; margin-top: 56px; }
+@media (max-width: 720px) { .trust-row { grid-template-columns: 1fr; } }
+.trust-step {
+  background: var(--white); border-radius: 22px; padding: 36px 28px;
+  border: 1px solid rgba(33,69,207,0.10); position: relative;
+}
+.trust-step .num {
+  position: absolute; top: -16px; left: 28px;
+  width: 40px; height: 40px; border-radius: 50%;
+  background: var(--blue); color: var(--white);
+  display: grid; place-items: center; font-weight: 800; font-size: 16px;
+  box-shadow: 0 8px 20px -6px rgba(20,46,153,0.4);
+}
+.trust-step.coral .num { background: var(--coral); box-shadow: 0 8px 20px -6px rgba(255,127,80,0.5); }
+.trust-step.gold .num { background: var(--gold); box-shadow: 0 8px 20px -6px rgba(207,171,33,0.5); }
+.trust-step h3 { font-size: 19px; font-weight: 800; margin: 12px 0 8px; letter-spacing: -0.01em; }
+.trust-step p { font-size: 14.5px; font-weight: 500; color: var(--fg1); line-height: 1.55; }
+.profile-mock {
+  background: var(--white); border-radius: 22px; padding: 24px;
+  box-shadow: 0 30px 60px -25px rgba(20,46,153,0.3);
+  max-width: 360px; margin: 0 auto;
+}
+.profile-mock .avatar {
+  width: 80px; height: 80px; border-radius: 50%;
+  background: linear-gradient(135deg, var(--coral), var(--coral-soft));
+  display: grid; place-items: center;
+  color: var(--white); font-weight: 800; font-size: 32px;
+  margin-bottom: 16px;
+}
+.profile-mock .name { font-size: 22px; font-weight: 800; letter-spacing: -0.01em; }
+.profile-mock .meta { font-size: 13px; color: var(--fg2); margin-top: 4px; }
+.profile-mock .badges { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+.profile-mock .badge {
+  background: rgba(33,69,207,0.08); color: var(--blue);
+  font-size: 11px; font-weight: 800; letter-spacing: 0.04em;
+  padding: 5px 10px; border-radius: 999px;
+}
+.profile-mock .badge.verified { background: var(--blue); color: var(--white); }
+.profile-mock .badge.gold { background: var(--gold); color: var(--white); }
+.profile-mock .stat-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 18px; padding-top: 18px; border-top: 1px solid rgba(33,69,207,0.08); }
+.profile-mock .stat { text-align: center; }
+.profile-mock .stat-num { font-size: 18px; font-weight: 800; color: var(--ink); }
+.profile-mock .stat-lbl { font-size: 11px; font-weight: 600; color: var(--fg2); margin-top: 2px; }
+</style>
+</head>
+<body data-page="care" data-nav="solid">
+
+<div class="geo-seed" aria-hidden="true">
+  pet sitter Hong Kong · dog walker Hong Kong · pet boarding Hong Kong · pet grooming HK ·
+  cat sitter Hong Kong · pet transport Hong Kong · dog training Hong Kong · drop-in pet visits ·
+  verified pet carer · trusted local pet services · huddle Care marketplace
+</div>
+
+<div class="page-hero">
+  <div class="container">
+    <div class="eyebrow">Care</div>
+    <h1>Trusted carers,<br><span class="coral">verified</span><br>first.</h1>
+    <p class="lead">huddle Care is the local pet-services marketplace inside huddle. Every provider completes identity verification. Many will already be familiar from the Social Forum, Discover, Groups or Chats — not a complete stranger.</p>
+  </div>
+</div>
+<div class="hero-wave-out">
+  <svg viewBox="0 0 1440 110" preserveAspectRatio="none" aria-hidden="true">
+    <path d="M0,40 C240,110 480,0 720,40 C960,80 1200,10 1440,50 L1440,0 L0,0 Z" fill="#142E99"/>
+  </svg>
+</div>
+
+<!-- Services grid -->
+<section class="s cream">
+  <div class="container">
+    <div class="reveal" style="max-width:780px">
+      <div class="eyebrow">What you can book</div>
+      <h2 class="s-title" style="margin-top:16px">Every kind of<br><span class="coral">pet care.</span></h2>
+      <p class="s-lead">huddle Care covers the full spectrum of local pet services — booked directly inside the app with verified providers.</p>
+    </div>
+    <div class="svc-row">
+      <div class="svc-card reveal"><div class="emoji">🏠</div><h3>Sitting</h3><p>In-home or carer-home pet sitting for short or extended stays.</p><div class="price">Hourly &amp; nightly rates</div></div>
+      <div class="svc-card reveal"><div class="emoji">🚶</div><h3>Walking</h3><p>Solo or group dog walks, scheduled or one-off, with route summaries.</p><div class="price">Per-walk pricing</div></div>
+      <div class="svc-card reveal"><div class="emoji">🏨</div><h3>Boarding</h3><p>Multi-day stays at vetted carer homes — alternative to traditional kennels.</p><div class="price">Per-night rates</div></div>
+      <div class="svc-card reveal"><div class="emoji">👋</div><h3>Drop-in visits</h3><p>Short check-ins for feeding, medication, or companionship while you're away.</p><div class="price">Per-visit pricing</div></div>
+      <div class="svc-card reveal"><div class="emoji">✂️</div><h3>Grooming</h3><p>Mobile or salon grooming — bathing, clipping, nail trims, ear care.</p><div class="price">Service-based</div></div>
+      <div class="svc-card reveal"><div class="emoji">🚗</div><h3>Transport</h3><p>Vet visits, airport runs, relocation. Pet-safe vehicles and drivers.</p><div class="price">Distance-based</div></div>
+      <div class="svc-card reveal"><div class="emoji">🎓</div><h3>Training</h3><p>Behaviour, obedience, puppy basics, leash work — from local certified trainers.</p><div class="price">Session-based</div></div>
+      <div class="svc-card reveal"><div class="emoji">⭐</div><h3>Specialty</h3><p>Custom care for exotic pets, post-surgery recovery, geriatric care, and more.</p><div class="price">Request a quote</div></div>
+    </div>
+  </div>
+</section>
+
+<div class="wave-div" style="background:var(--white)">
+  <svg viewBox="0 0 1440 90" preserveAspectRatio="none" aria-hidden="true">
+    <path d="M0,30 C320,90 640,0 960,40 C1200,72 1320,20 1440,40 L1440,0 L0,0 Z" fill="var(--cream)"/>
+  </svg>
+</div>
+
+<!-- How trust works -->
+<section class="s white">
+  <div class="container">
+    <div class="reveal" style="max-width:780px">
+      <div class="eyebrow">How trust works</div>
+      <h2 class="s-title" style="margin-top:16px">Verification, then<br>familiarity, <span class="coral">then booking.</span></h2>
+      <p class="s-lead">huddle is the only pet marketplace where most of your carers won't be strangers. Identity verification is the floor — community presence is what makes the difference.</p>
+    </div>
+    <div class="trust-row">
+      <div class="trust-step reveal coral">
+        <div class="num">1</div>
+        <h3>Identity verified</h3>
+        <p>Every carer on huddle has completed identity verification — government ID, liveness check, phone confirmation. No anonymous providers. Ever.</p>
+      </div>
+      <div class="trust-step reveal">
+        <div class="num">2</div>
+        <h3>Community presence</h3>
+        <p>You can see a carer's activity in the Social Forum, the Groups they're in, and posts they've made — before you book. Familiarity comes before payment.</p>
+      </div>
+      <div class="trust-step reveal gold">
+        <div class="num">3</div>
+        <h3>Reviews &amp; ratings</h3>
+        <p>Real reviews from other huddle members who have actually booked. Every review is tied to a completed transaction — no anonymous trash, no fake five-stars.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="wave-div" style="background:var(--blue-deep)">
+  <svg viewBox="0 0 1440 100" preserveAspectRatio="none" aria-hidden="true">
+    <path d="M0,50 C220,10 520,90 780,50 C1040,10 1240,80 1440,40 L1440,0 L0,0 Z" fill="var(--white)"/>
+  </svg>
+</div>
+
+<!-- Provider example -->
+<section class="s deep">
+  <div class="container">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:clamp(48px,7vw,96px);align-items:center">
+      <div class="reveal-l">
+        <div class="eyebrow on-blue">Carer profile</div>
+        <h2 class="s-title" style="margin-top:16px;color:var(--white)">Know who's<br>caring for your pet<br><span style="color:var(--coral)">before you book.</span></h2>
+        <p style="font-size:17px;line-height:1.55;color:rgba(255,255,255,0.85);margin-top:24px">Every huddle Care profile shows verified identity, community activity, real reviews from completed bookings, and response time. Tap through to see the carer's posts in the Social Forum or Groups they belong to.</p>
+        <p style="font-size:14px;color:rgba(255,255,255,0.6);margin-top:20px;letter-spacing:0.02em">Example profile — anonymised for preview.</p>
+      </div>
+      <div class="reveal-r">
+        <div class="profile-mock">
+          <div class="avatar">M</div>
+          <div class="name">Marco</div>
+          <div class="meta">Sai Ying Pun · Sitter, walker, boarder</div>
+          <div class="badges">
+            <span class="badge verified">✓ Verified</span>
+            <span class="badge">Phone confirmed</span>
+            <span class="badge gold">huddle Gold</span>
+          </div>
+          <div class="stat-row">
+            <div class="stat"><div class="stat-num">4.9★</div><div class="stat-lbl">126 reviews</div></div>
+            <div class="stat"><div class="stat-num">~12m</div><div class="stat-lbl">Replies in</div></div>
+            <div class="stat"><div class="stat-num">3yr</div><div class="stat-lbl">On huddle</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="wave-div" style="background:var(--cream)">
+  <svg viewBox="0 0 1440 100" preserveAspectRatio="none" aria-hidden="true">
+    <path d="M0,40 C240,90 520,0 780,40 C1040,80 1240,10 1440,50 L1440,0 L0,0 Z" fill="var(--blue-deep)"/>
+  </svg>
+</div>
+
+<!-- Payment / dispute -->
+<section class="s cream">
+  <div class="container">
+    <div class="reveal" style="max-width:780px">
+      <div class="eyebrow">Payments &amp; protection</div>
+      <h2 class="s-title" style="margin-top:16px">Booking and<br>paying inside<br><span class="coral">huddle.</span></h2>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-top:48px">
+      <div class="card reveal">
+        <div class="emoji">💳</div>
+        <h3>In-app payments</h3>
+        <p>Pay directly inside the app. Cards, Apple Pay, Google Pay supported. Funds held until the service is complete.</p>
+      </div>
+      <div class="card coral reveal">
+        <div class="emoji">🛡️</div>
+        <h3>Dispute support</h3>
+        <p>If something goes wrong, huddle's structured dispute process reviews booking records, messages, photos, and reviews — and resolves it fairly.</p>
+      </div>
+      <div class="card gold reveal">
+        <div class="emoji">🧾</div>
+        <h3>Transparent fees</h3>
+        <p>10% service fee is split across both sides — no hidden surcharges. What you see is what gets paid.</p>
+      </div>
+    </div>
+    @media (max-width: 720px) { [style*="grid-template-columns:repeat(3,1fr)"] { grid-template-columns: 1fr !important; } }
+  </div>
+</section>
+
+<div class="wave-div" style="background:var(--coral)">
+  <svg viewBox="0 0 1440 100" preserveAspectRatio="none" aria-hidden="true">
+    <path d="M0,40 C240,90 520,0 780,40 C1040,80 1240,10 1440,50 L1440,0 L0,0 Z" fill="var(--cream)"/>
+  </svg>
+</div>
+
+<!-- CTA -->
+<section class="s coral" style="padding-top:64px">
+  <div class="container">
+    <div class="reveal" style="text-align:center;max-width:600px;margin:0 auto">
+      <h2 class="s-title" style="color:var(--white)">Find your<br>next carer.</h2>
+      <p style="color:rgba(255,255,255,0.92);font-size:17px;font-weight:500;margin-top:20px;margin-bottom:32px">Open huddle, browse verified providers near you, and book in minutes.</p>
+      <div style="display:flex;gap:14px;justify-content:center;flex-wrap:wrap">
+        <a href="huddle-v5.html#download" class="btn btn-white">⌘ Download for iOS</a>
+        <a href="huddle-v5.html#download" class="btn btn-white">▸ Get it on Android</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="wave-div" style="background:var(--cream)">
+  <svg viewBox="0 0 1440 90" preserveAspectRatio="none" aria-hidden="true">
+    <path d="M0,50 C300,10 600,80 900,40 C1140,10 1300,60 1440,30 L1440,0 L0,0 Z" fill="var(--coral)"/>
+  </svg>
+</div>
+
+<script src="huddle-shell.js"></script>
+</body>
+</html>

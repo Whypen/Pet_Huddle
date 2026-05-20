@@ -121,13 +121,15 @@ const Admin = () => {
 
   const review = async (id: string, status: "verified" | "unverified", uploadId?: string) => {
     const target = rows.find((row) => row.id === id);
-    await supabase
-      .from("profiles")
-      .update({
-        verification_status: status,
-        verification_comment: comment[id] || null,
-      })
-      .eq("id", id);
+    const { error: reviewError } = await supabase.rpc("admin_set_verification_status", {
+      p_user_id: id,
+      p_decision: status,
+      p_comment: comment[id] || null,
+    });
+    if (reviewError) {
+      console.warn("[Admin] Failed to review verification:", reviewError.message);
+      return;
+    }
     if (uploadId) {
       const uploadStatus = status === "verified" ? "verified" : "unverified";
       await supabase
