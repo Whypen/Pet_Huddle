@@ -1,6 +1,6 @@
 import { nativeExactTokenRpc } from "./nativeExactTokenRequest";
 
-export type NativeStorageCleanupBucket = "notices" | "social_album" | "alerts" | "chat_attachments" | "profile_photos" | "pets" | "avatars";
+export type NativeStorageCleanupBucket = "notices" | "social_album" | "alerts" | "chat_attachments" | "service_care_evidence" | "profile_photos" | "pets" | "avatars";
 export type NativeProtectedActionStage = "upload" | "register" | "domain_save" | "cleanup" | "delete" | "unknown";
 export type NativeProtectedActionCleanupResult = "queued" | "not_needed" | "failed";
 

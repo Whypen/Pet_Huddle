@@ -43,9 +43,12 @@ type ChatMessage = {
 };
 
 type Attachment = {
-  url: string;
+  url?: string | null;
+  bucket?: string | null;
+  path?: string | null;
   mime: string;
   name: string;
+  size?: number | null;
 };
 
 type ParsedMessage = {
@@ -131,6 +134,7 @@ const ChatDialogue = () => {
   const [reportOpen, setReportOpen] = useState(false);
   const [composerUploads, setComposerUploads] = useState<File[]>([]);
   const [uploadingComposer, setUploadingComposer] = useState(false);
+  const [signedAttachmentUrls, setSignedAttachmentUrls] = useState<Record<string, string | null>>({});
   const [linkPreviewByUrl, setLinkPreviewByUrl] = useState<Record<string, ExternalLinkPreview>>({});
   const [dismissedPreviewUrls, setDismissedPreviewUrls] = useState<Set<string>>(new Set());
   const [lockedPreviewUrl, setLockedPreviewUrl] = useState<string | null>(null);
@@ -232,11 +236,19 @@ const ChatDialogue = () => {
             text: String(parsed.text || ""),
             linkPreviewUrl: typeof parsed.linkPreviewUrl === "string" ? parsed.linkPreviewUrl : null,
             attachments: (parsed.attachments || [])
-              .filter((item) => item && typeof item.url === "string" && item.url)
+              .filter((item) => {
+                if (!item || typeof item !== "object") return false;
+                const hasLegacyUrl = typeof item.url === "string" && item.url.trim().length > 0;
+                const hasPrivateRef = item.bucket === "chat_attachments" && typeof item.path === "string" && item.path.trim().length > 0;
+                return hasLegacyUrl || hasPrivateRef;
+              })
               .map((item) => ({
-                url: String(item.url),
+                url: typeof item.url === "string" ? item.url : null,
+                bucket: typeof item.bucket === "string" ? item.bucket : null,
+                path: typeof item.path === "string" ? item.path : null,
                 mime: String(item.mime || ""),
                 name: String(item.name || "media"),
+                size: typeof item.size === "number" ? item.size : null,
               })),
             share: null,
           };
@@ -625,15 +637,24 @@ const ChatDialogue = () => {
     }
   }, [profile?.id]);
 
-  const uploadFilesToNotices = useCallback(async (files: File[], folder: string): Promise<Attachment[]> => {
+  const attachmentStorageKey = useCallback((attachment: Attachment) => (
+    attachment.bucket === "chat_attachments" && attachment.path ? `${attachment.bucket}:${attachment.path}` : null
+  ), []);
+
+  const resolveAttachmentUrl = useCallback((attachment: Attachment) => {
+    const storageKey = attachmentStorageKey(attachment);
+    if (storageKey) return signedAttachmentUrls[storageKey] || "";
+    return attachment.url || "";
+  }, [attachmentStorageKey, signedAttachmentUrls]);
+
+  const uploadFilesToPrivateChatAttachments = useCallback(async (files: File[]): Promise<Attachment[]> => {
     if (!profile?.id || !roomId || files.length === 0) return [];
     const uploaded: Attachment[] = [];
     for (let i = 0; i < files.length; i += 1) {
       const file = files[i];
-      const ext = file.name.includes(".") ? file.name.split(".").pop() : "bin";
-      // notices bucket policy expects first segment to be auth uid
-      const path = `${profile.id}/${folder}/${roomId}/${Date.now()}-${i}.${ext}`;
-      const { error: uploadError } = await supabase.storage.from("notices").upload(path, file, {
+      const ext = (file.name.includes(".") ? file.name.split(".").pop() : file.type.split("/").pop() || "bin")?.replace(/[^a-z0-9]/gi, "") || "bin";
+      const path = `${profile.id}/chat-media/${roomId}/${Date.now()}-${i}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+      const { error: uploadError } = await supabase.storage.from("chat_attachments").upload(path, file, {
         cacheControl: "3600",
         contentType: file.type || undefined,
         upsert: false,
@@ -642,11 +663,13 @@ const ChatDialogue = () => {
         console.error("[chat.upload.failed]", { path, message: uploadError.message });
         throw uploadError;
       }
-      const { data: publicData } = supabase.storage.from("notices").getPublicUrl(path);
       uploaded.push({
-        url: publicData.publicUrl,
+        bucket: "chat_attachments",
+        path,
+        url: null,
         mime: file.type || "",
         name: file.name || `file-${i + 1}`,
+        size: file.size,
       });
     }
     return uploaded;
@@ -948,7 +971,7 @@ const ChatDialogue = () => {
     const prevText = chatInput;
     const prevUploads = [...composerUploads];
     try {
-      const attachments = await uploadFilesToNotices(prevUploads, "chat-media");
+      const attachments = await uploadFilesToPrivateChatAttachments(prevUploads);
       const payload = JSON.stringify({
         text,
         attachments,
@@ -973,7 +996,7 @@ const ChatDialogue = () => {
       setSending(false);
       setUploadingComposer(false);
     }
-  }, [activeComposerPreviewUrl, blockState, chatDisabledBySafety, chatInput, composerUploads, isUnmatched, loadRoomMessages, profile?.id, roomId, scheduleReadReceiptRefresh, sending, uploadFilesToNotices]);
+  }, [activeComposerPreviewUrl, blockState, chatDisabledBySafety, chatInput, composerUploads, isUnmatched, loadRoomMessages, profile?.id, roomId, scheduleReadReceiptRefresh, sending, uploadFilesToPrivateChatAttachments]);
 
   const attachComposerMedia = useCallback(() => {
     const cannotAttach =
@@ -1167,9 +1190,14 @@ const ChatDialogue = () => {
     const media: string[] = [];
     for (const msg of messages) {
       try {
-        const parsed = JSON.parse(msg.content) as { attachments?: { url: string; mime: string }[] };
+        const parsed = JSON.parse(msg.content) as { attachments?: Attachment[] };
         if (Array.isArray(parsed.attachments)) {
-          parsed.attachments.filter((item) => !item.mime.startsWith("video/")).forEach((item) => media.push(item.url));
+          parsed.attachments
+            .filter((item) => !String(item.mime || "").startsWith("video/"))
+            .forEach((item) => {
+              const url = resolveAttachmentUrl(item);
+              if (url) media.push(url);
+            });
         }
       } catch {
         // plain text rows
@@ -1177,7 +1205,37 @@ const ChatDialogue = () => {
     }
     setGroupMediaUrls(media);
     setGroupInfoOpen(true);
-  }, [messages]);
+  }, [messages, resolveAttachmentUrl]);
+
+  useEffect(() => {
+    const paths = new Map<string, string>();
+    messages.forEach((message) => {
+      const parsed = parseMessageContent(message.content);
+      parsed.attachments.forEach((attachment) => {
+        const key = attachmentStorageKey(attachment);
+        if (key && attachment.path) paths.set(key, attachment.path);
+      });
+    });
+    const missing = Array.from(paths.entries()).filter(([key]) => !(key in signedAttachmentUrls));
+    if (missing.length === 0) return;
+    let cancelled = false;
+    void Promise.all(missing.map(async ([key, path]) => {
+      const { data, error } = await supabase.storage.from("chat_attachments").createSignedUrl(path, 60 * 60 * 24 * 30);
+      return [key, error ? null : data?.signedUrl || null] as const;
+    })).then((rows) => {
+      if (cancelled) return;
+      setSignedAttachmentUrls((current) => {
+        const next = { ...current };
+        rows.forEach(([key, url]) => {
+          next[key] = url;
+        });
+        return next;
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [attachmentStorageKey, messages, parseMessageContent, signedAttachmentUrls]);
 
   if (loading) {
     return (
@@ -1420,13 +1478,25 @@ const ChatDialogue = () => {
                       {attachments.length > 0 && (
                         <div className={cn("mb-2 grid grid-cols-2 gap-2", attachments.length === 1 && "grid-cols-1")}>
                           {attachments.map((attachment, idx) => (
-                            <a key={`${message.id}-att-${idx}`} href={attachment.url} target="_blank" rel="noreferrer">
-                              {attachment.mime.startsWith("video/") ? (
-                                <video src={attachment.url} controls className="h-36 w-full rounded-lg border border-white/30 object-cover" />
-                              ) : (
-                                <img src={attachment.url} alt={attachment.name} className="h-36 w-full rounded-lg border border-white/30 object-cover" />
-                              )}
-                            </a>
+                            (() => {
+                              const attachmentUrl = resolveAttachmentUrl(attachment);
+                              if (!attachmentUrl) {
+                                return (
+                                  <div key={`${message.id}-att-${idx}`} className="flex h-36 items-center justify-center rounded-lg border border-white/30 bg-black/10 px-3 text-center text-xs opacity-80">
+                                    Attachment unavailable
+                                  </div>
+                                );
+                              }
+                              return (
+                                <a key={`${message.id}-att-${idx}`} href={attachmentUrl} target="_blank" rel="noreferrer">
+                                  {attachment.mime.startsWith("video/") ? (
+                                    <video src={attachmentUrl} controls className="h-36 w-full rounded-lg border border-white/30 object-cover" />
+                                  ) : (
+                                    <img src={attachmentUrl} alt={attachment.name} className="h-36 w-full rounded-lg border border-white/30 object-cover" />
+                                  )}
+                                </a>
+                              );
+                            })()
                           ))}
                         </div>
                       )}

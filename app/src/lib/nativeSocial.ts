@@ -248,6 +248,9 @@ const buildPublicStorageUrl = (bucket: string, path: string) => {
   return `${supabaseUrl}/storage/v1/object/public/${encodeURIComponent(bucket)}/${encodedPath}`;
 };
 
+const encodeStorageObjectPath = (bucket: string, path: string) =>
+  `${encodeURIComponent(bucket)}/${path.split("/").map((part) => encodeURIComponent(part)).join("/")}`;
+
 export const nativeSocialPinsStorageKey = (userId: string | null | undefined) => `${SOCIAL_PINS_STORAGE_PREFIX}:${userId || "anon"}`;
 export const nativeSocialSavesStorageKey = (userId: string | null | undefined) => `${SOCIAL_SAVES_STORAGE_PREFIX}:${userId || "anon"}`;
 
@@ -698,6 +701,71 @@ export async function uploadNativeSocialImage(userId: string, media: NativeSocia
     console.log("STORAGE_URL_GET_PUBLIC", { bucket: "notices", path });
   }
   return buildPublicStorageUrl("notices", path);
+}
+
+export async function uploadNativeServiceCareEvidenceImage(options: {
+  accessToken?: string | null;
+  media: NativeSocialComposerMedia;
+  scope: "checkin" | "issue" | "review";
+  serviceChatId: string;
+  userId: string;
+}): Promise<string> {
+  const token = requireNativeSocialAccessToken(options.accessToken);
+  const userId = String(options.userId || "").trim();
+  const serviceChatId = String(options.serviceChatId || "").trim();
+  if (!userId || !serviceChatId) throw new Error("missing_service_care_evidence_context");
+  const info = await FileSystem.getInfoAsync(options.media.uri);
+  if (!info.exists) throw new Error("Selected image is unavailable.");
+  const ext = (options.media.name?.split(".").pop() || options.media.mimeType?.split("/").pop() || "jpg").replace(/[^a-z0-9]/gi, "") || "jpg";
+  const path = `${userId}/service-care/${serviceChatId}/${options.scope}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  const base64 = await FileSystem.readAsStringAsync(options.media.uri, { encoding: FileSystem.EncodingType.Base64 });
+  const body = base64ToUint8Array(base64);
+  if (body.byteLength === 0) throw new Error("Selected image is empty.");
+  const response = await fetch(`${supabaseUrl}/storage/v1/object/${encodeStorageObjectPath("service_care_evidence", path)}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      apikey: supabaseAnonKey,
+      "cache-control": "3600",
+      "content-type": options.media.mimeType || "image/jpeg",
+      "x-upsert": "false",
+    },
+    body,
+  });
+  if (!response.ok) {
+    throw createNativeProtectedActionError({
+      ok: false,
+      stage: "upload",
+      originalError: new Error(`Care evidence upload failed (${response.status}).`),
+      cleanupAttempted: false,
+      cleanupResult: "not_needed",
+    });
+  }
+  try {
+    await registerNativeMediaAsset({
+      accessToken: token,
+      bucket: "service_care_evidence",
+      contentId: serviceChatId,
+      contentType: `service_care_${options.scope}`,
+      objectPath: path,
+    });
+  } catch (error) {
+    const cleanupResult = await requestNativeStorageCleanupResult("service_care_evidence", path, "register_service_care_evidence_failed", token);
+    throw createNativeProtectedActionError({
+      ok: false,
+      stage: "register",
+      originalError: error,
+      cleanupAttempted: true,
+      cleanupResult,
+    });
+  }
+  return JSON.stringify({
+    bucket: "service_care_evidence",
+    mime: options.media.mimeType || "image/jpeg",
+    name: options.media.name || `${options.scope}-evidence.${ext}`,
+    path,
+    size: options.media.size ?? null,
+  });
 }
 
 type NoticeStorageRef = {

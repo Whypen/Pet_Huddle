@@ -64,7 +64,7 @@ import { ALL_SKILLS } from "../lib/nativeCarerProfile";
 import { nativeExactTokenRpc } from "../lib/nativeExactTokenRequest";
 import { haptic } from "../lib/nativeHaptics";
 import { fetchNativeLocationSuggestions, type NativeLocationSuggestion } from "../lib/nativeLocation";
-import { uploadNativeSocialImage, type NativeSocialComposerMedia } from "../lib/nativeSocial";
+import { uploadNativeServiceCareEvidenceImage, uploadNativeSocialImage, type NativeSocialComposerMedia } from "../lib/nativeSocial";
 import { useShakeAnimation } from "../lib/nativeAnimations";
 import { resolveNativeAvatarUrl } from "../lib/nativeStorageUrlCache";
 import { supabase } from "../lib/supabase";
@@ -3391,6 +3391,7 @@ export function NativeServiceChatScreen({
           onNavigate("/support");
         }}
         onSubmit={submitCheckin}
+        serviceChatId={serviceChat?.id || null}
         sending={sending}
       />
       <CompletionSheet
@@ -3415,9 +3416,10 @@ export function NativeServiceChatScreen({
         onError={(body) => setCarePopup({ title: "Huddle Care", body })}
         onSubmit={submitIssueReport}
         open={activeSheet === "issue"}
+        serviceChatId={serviceChat?.id || null}
         sending={sending}
       />
-      <ReviewSheet accessToken={accessToken} currentUserId={userId} hasReportedServiceDispute={hasReportedServiceDispute} isRequester={isRequester} open={activeSheet === "review"} onClose={() => setActiveSheet(null)} onSubmit={submitReview} />
+      <ReviewSheet accessToken={accessToken} currentUserId={userId} hasReportedServiceDispute={hasReportedServiceDispute} isRequester={isRequester} open={activeSheet === "review"} onClose={() => setActiveSheet(null)} onSubmit={submitReview} serviceChatId={serviceChat?.id || null} />
       <CareHistorySheet
         currentUserId={userId}
         loading={careHistoryLoading}
@@ -4900,6 +4902,7 @@ function StartCareSheet({
   onError,
   onOpenSupport,
   onSubmit,
+  serviceChatId,
   sending,
 }: {
   accessToken?: string | null;
@@ -4910,6 +4913,7 @@ function StartCareSheet({
   onError: (message: string) => void;
   onOpenSupport: () => void;
   onSubmit: (startPin: string, photoUrl: string) => Promise<void>;
+  serviceChatId: string | null;
   sending: boolean;
 }) {
   const [media, setMedia] = useState<NativeSocialComposerMedia | null>(null);
@@ -4965,21 +4969,21 @@ function StartCareSheet({
   }, []);
   const submit = useCallback(async () => {
     setAttempted(true);
-    if (!currentUserId || !media || !/^[0-9]{4}$/.test(pin) || !confirmed) {
+    if (!currentUserId || !serviceChatId || !media || !/^[0-9]{4}$/.test(pin) || !confirmed) {
       haptic.error();
       setSlideResetKey((value) => value + 1);
       return;
     }
     setUploading(true);
     try {
-      const photoUrl = await uploadNativeSocialImage(currentUserId, media, "review", accessToken);
+      const photoUrl = await uploadNativeServiceCareEvidenceImage({ accessToken, media, scope: "checkin", serviceChatId, userId: currentUserId });
       await onSubmit(pin, photoUrl);
     } catch {
       onError("Unable to upload check-in photo.");
     } finally {
       setUploading(false);
     }
-  }, [accessToken, confirmed, currentUserId, media, onError, onSubmit, pin]);
+  }, [accessToken, confirmed, currentUserId, media, onError, onSubmit, pin, serviceChatId]);
   return (
     <Modal animationType="slide" transparent visible={open} onRequestClose={onClose}>
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={0} style={[nativeModalStyles.appModalBackdrop, nativeModalStyles.appModalBottomSafeArea]}>
@@ -5102,6 +5106,7 @@ function IssueReportSheet({
   onClose,
   onError,
   onSubmit,
+  serviceChatId,
   sending,
 }: {
   accessToken?: string | null;
@@ -5111,6 +5116,7 @@ function IssueReportSheet({
   onClose: () => void;
   onError: (message: string) => void;
   onSubmit: (reason: string, note: string, evidenceUrls: string[]) => Promise<void>;
+  serviceChatId: string | null;
   sending: boolean;
 }) {
   const issueReasons = isRequester ? OWNER_SERVICE_ISSUE_REASONS : CARER_SERVICE_ISSUE_REASONS;
@@ -5157,14 +5163,16 @@ function IssueReportSheet({
     }
     setUploading(true);
     try {
-      const evidenceUrls = media && currentUserId ? [await uploadNativeSocialImage(currentUserId, media, "review", accessToken)] : [];
+      const evidenceUrls = media && currentUserId && serviceChatId
+        ? [await uploadNativeServiceCareEvidenceImage({ accessToken, media, scope: "issue", serviceChatId, userId: currentUserId })]
+        : [];
       await onSubmit(reason, note.trim(), evidenceUrls);
     } catch {
       onError("Unable to submit issue report.");
     } finally {
       setUploading(false);
     }
-  }, [accessToken, acknowledged, currentUserId, media, note, onError, onSubmit, reason]);
+  }, [accessToken, acknowledged, currentUserId, media, note, onError, onSubmit, reason, serviceChatId]);
   const focusReportNote = useCallback(() => {
     setNoteFocused(true);
     const scroll = () => {
@@ -5222,6 +5230,7 @@ function ReviewSheet({
   open,
   onClose,
   onSubmit,
+  serviceChatId,
 }: {
   accessToken?: string | null;
   currentUserId: string | null;
@@ -5230,6 +5239,7 @@ function ReviewSheet({
   open: boolean;
   onClose: () => void;
   onSubmit: (rating: number, tags: string[], text: string, mediaUrls: string[], safetyIncidentReported: boolean) => Promise<void>;
+  serviceChatId: string | null;
 }) {
   const [rating, setRating] = useState(0);
   const [text, setText] = useState("");
@@ -5376,7 +5386,8 @@ function ReviewSheet({
     const uploadOne = async (item: ReviewUploadMedia) => {
       setMedia((current) => current.map((entry) => entry.uri === item.uri ? { ...entry, error: null, status: "uploading" } : entry));
       try {
-        const uploadedUrl = await uploadNativeSocialImage(currentUserId, item, "review", accessToken);
+        if (!serviceChatId) throw new Error("missing_service_care_evidence_context");
+        const uploadedUrl = await uploadNativeServiceCareEvidenceImage({ accessToken, media: item, scope: "review", serviceChatId, userId: currentUserId });
         setMedia((current) => current.map((entry) => entry.uri === item.uri ? { ...entry, error: null, status: "uploaded", uploadedUrl } : entry));
       } catch (error) {
         const message = error instanceof Error ? error.message : "Image upload failed";
@@ -5392,7 +5403,7 @@ function ReviewSheet({
         }
       }));
     });
-  }, [accessToken, currentUserId, media.length]);
+  }, [accessToken, currentUserId, media.length, serviceChatId]);
 
   const submit = async () => {
     const nextErrors = {
