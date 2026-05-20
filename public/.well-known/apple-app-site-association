@@ -7,6 +7,7 @@
         ],
         "components": [
           { "/": "/auth/callback*" },
+          { "/": "/verify*" },
           { "/": "/service-chat*" },
           { "/": "/carerprofile/stripe-return*" },
           { "/": "/carerprofile/stripe-refresh*" }
