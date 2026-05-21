@@ -68,7 +68,6 @@
       ["/careers", "Careers"],
       ["/faq", "FAQ"],
       ["/contact", "Contact"],
-      ["/press", "Press"],
     ]},
     { title: "Legal", items: [
       ["/legal/privacy", "Privacy policy"],
