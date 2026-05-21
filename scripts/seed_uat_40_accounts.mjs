@@ -514,9 +514,14 @@ const getCurrentUatGroupIds = async () => {
 
   console.log("5) Cleaning prior UAT app data");
   await client.from("social_feed_events").delete().like("metadata", "%\"thread_id%"); // placeholder-safe cleanup for prior runs
-  await client.from("thread_supports").delete().in("thread_id", (await client.from("threads").select("id").like("title", "[UAT]%").then((r) => (r.data || []).map((x) => x.id)));
-  await client.from("thread_comments").delete().in("thread_id", (await client.from("threads").select("id").like("title", "[UAT]%").then((r) => (r.data || []).map((x) => x.id)));
-  await client.from("social_feed_events").delete().in("thread_id", (await client.from("threads").select("id").like("title", "[UAT]%").then((r) => (r.data || []).map((x) => x.id)));
+  const uatThreadIds = await client
+    .from("threads")
+    .select("id")
+    .like("title", "[UAT]%")
+    .then((r) => (r.data || []).map((x) => x.id));
+  await client.from("thread_supports").delete().in("thread_id", uatThreadIds);
+  await client.from("thread_comments").delete().in("thread_id", uatThreadIds);
+  await client.from("social_feed_events").delete().in("thread_id", uatThreadIds);
   await client.from("threads").delete().like("title", "[UAT] %");
   await client.from("broadcast_alerts").delete().like("title", "[UAT] %");
   await client.from("map_alerts").delete().like("title", "[UAT] %");

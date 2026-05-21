@@ -5,6 +5,8 @@
   const body = document.body;
   const page = body.getAttribute("data-page") || "";
   const forceSolid = body.getAttribute("data-nav") === "solid";
+  const isFile = window.location.protocol === "file:";
+  const asset = name => (isFile ? name : "/brandweb/" + name);
 
   function h(tag, attrs, children) {
     const el = document.createElement(tag);
@@ -28,8 +30,8 @@
 
   // NAV ───────────────────────────────────────────────────────
   const brand = h("a", { href: "/", "aria-label": "huddle home", class: "nav-brand" }, [
-    h("img", { src: "/brandweb/wm-white.png", alt: "huddle", class: "nav-logo on-dark" }),
-    h("img", { src: "/brandweb/wm-blue.png",  alt: "huddle", class: "nav-logo on-light" }),
+    h("img", { src: asset("wm-white.png"), alt: "huddle", class: "nav-logo on-dark" }),
+    h("img", { src: asset("wm-blue.png"),  alt: "huddle", class: "nav-logo on-light" }),
   ]);
   const links = h("div", { class: "nav-links" }, NAV.map(n => {
     const a = h("a", { href: n.href, class: "nav-link", text: n.label });
@@ -65,7 +67,6 @@
       ["/about", "About huddle"],
       ["/careers", "Careers"],
       ["/faq", "FAQ"],
-      ["/knowledge-base", "Knowledge Base"],
       ["/contact", "Contact"],
       ["/press", "Press"],
     ]},
@@ -86,7 +87,7 @@
   const drawerTagline = h("p", { class: "drawer-tagline", text: "Every pet deserves more. We leave no pet behind." });
   const drawerGroups = h("div", { class: "drawer-groups" }, DRAWER_GROUPS.map(g =>
     h("div", { class: "drawer-group" }, [
-      h("h4", { text: g.title }),
+      h("button", { type: "button", class: "drawer-group-toggle", "aria-expanded": "false", text: g.title }),
       h("ul", {}, g.items.map(([href, label]) => h("li", {}, [h("a", { href: href, text: label })]))),
     ])
   ));
@@ -119,6 +120,13 @@
   drawerClose.addEventListener("click", closeDrawer);
   drawerOverlay.addEventListener("click", closeDrawer);
   document.addEventListener("keydown", e => { if (e.key === "Escape" && drawer.classList.contains("open")) closeDrawer(); });
+  drawerGroups.querySelectorAll(".drawer-group-toggle").forEach(button => {
+    button.addEventListener("click", () => {
+      const group = button.closest(".drawer-group");
+      const isOpen = group.classList.toggle("open");
+      button.setAttribute("aria-expanded", isOpen ? "true" : "false");
+    });
+  });
   // Home page has its own inline nav with id="nav" — wire its menu button too
   const inlineMenuBtn = document.querySelector('#nav .nav-menu-btn');
   if (inlineMenuBtn) {
@@ -134,7 +142,7 @@
     ]);
   }
   const brandCol = h("div", { class: "footer-brand" }, [
-    h("img", { src: "/brandweb/wm-coral-shadow.png", alt: "huddle", class: "footer-logo" }),
+    h("img", { src: asset("wm-coral-shadow.png"), alt: "huddle", class: "footer-logo" }),
     h("p", { text: "An app for every pet — even the ones on the streets. Every pet deserves more. We leave no pet behind." }),
     h("div", { class: "footer-stores" }, [
       h("a", { href: "/#download", class: "btn-store-sm", text: "⌘ iOS" }),
@@ -155,7 +163,6 @@
       ["/about", "About huddle"],
       ["/careers", "Careers"],
       ["/faq", "FAQ"],
-      ["/knowledge-base", "Knowledge Base"],
       ["/contact", "Contact"],
     ]),
     col("Legal", [
@@ -172,7 +179,7 @@
     h("span", { text: "© 2026 huddle. No pet left behind." }),
     h("span", {}, [h("a", { href: "mailto:support@huddle.pet", style: "color:inherit", text: "support@huddle.pet" })]),
   ]);
-  const watermark = h("img", { src: "/brandweb/wm-blue.png", alt: "", class: "watermark" });
+  const watermark = h("img", { src: asset("wm-blue.png"), alt: "", class: "watermark" });
   const inner = h("div", { class: "container footer-inner" }, [top, bottom]);
   const strip = h("div", { class: "coral-strip" });
   // Skip footer if page already has an inline footer (e.g. home page)

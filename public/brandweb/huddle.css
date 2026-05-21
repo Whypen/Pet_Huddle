@@ -143,12 +143,50 @@ nav#nav.scrolled .nav-menu-btn:hover { background: rgba(33,69,207,0.08); }
   padding-right: 20px;
 }
 
-.drawer-groups { display: flex; flex-direction: column; gap: 28px; flex: 1; }
-.drawer-group h4 {
+.drawer-groups { display: flex; flex-direction: column; gap: 14px; flex: 1; }
+.drawer-group-toggle {
+  width: 100%;
+  background: transparent;
+  border: 0;
+  padding: 10px 0;
+  text-align: left;
   font-size: 11px; font-weight: 800; letter-spacing: 0.16em; text-transform: uppercase;
-  color: var(--blue); margin-bottom: 10px;
+  color: var(--blue);
+  cursor: pointer;
+  position: relative;
 }
-.drawer-group ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.drawer-group-toggle::after {
+  content: "+";
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--coral);
+  font-size: 16px;
+  line-height: 1;
+}
+.drawer-group.open .drawer-group-toggle::after,
+.drawer-group:hover .drawer-group-toggle::after {
+  content: "-";
+}
+.drawer-group ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition: max-height 0.28s var(--ease), opacity 0.2s var(--ease);
+}
+.drawer-group.open ul,
+.drawer-group:hover ul,
+.drawer-group:focus-within ul {
+  max-height: 360px;
+  opacity: 1;
+}
 .drawer-group li a {
   display: block; padding: 9px 0;
   font-size: 19px; font-weight: 700; letter-spacing: -0.01em;
