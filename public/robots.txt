@@ -1,16 +1,74 @@
-User-agent: Googlebot
+# huddle.pet — robots.txt
+# Crawl-friendly for traditional search engines + AI engines (ChatGPT, Claude, Perplexity, Gemini, Copilot).
+
+User-agent: *
+Allow: /
+
+# Keep the React app's auth + internal admin out of search results
+Disallow: /auth
+Disallow: /auth/
+Disallow: /auth/callback
+Disallow: /admin
+Disallow: /admin/
+Disallow: /reset-password
+Disallow: /reset-password-direct
+Disallow: /reset-password-inline
+Disallow: /reset-password-inline-healthaction
+Disallow: /update-password
+Disallow: /signup/
+Disallow: /verify
+Disallow: /join/
+Disallow: /turnstile-health
+Disallow: /turnstile-health-resetaction
+Disallow: /api/
+
+# Don't index Vite build artefacts or asset caches
+Disallow: /assets/
+
+# Major AI training & answer engines — allowed explicitly so they can cite huddle
+User-agent: GPTBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: Claude-Web
+Allow: /
+
+User-agent: anthropic-ai
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: Perplexity-User
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: GoogleOther
+Allow: /
+
+User-agent: Applebot
+Allow: /
+
+User-agent: Applebot-Extended
 Allow: /
 
 User-agent: Bingbot
 Allow: /
 
-User-agent: Twitterbot
+User-agent: DuckDuckBot
 Allow: /
 
-User-agent: facebookexternalhit
-Allow: /
-
-User-agent: *
+User-agent: CCBot
 Allow: /
 
 Sitemap: https://huddle.pet/sitemap.xml

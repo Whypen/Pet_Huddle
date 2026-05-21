@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>huddle — Brand site preview index</title>
+<link rel="stylesheet" href="huddle.css">
+<style>
+body { padding: 80px 0; }
+.idx-hero { text-align: center; margin-bottom: 56px; }
+.idx-hero img { margin: 0 auto 24px; height: 96px; }
+.idx-hero h1 { font-size: 48px; font-weight: 800; letter-spacing: -0.03em; margin-bottom: 12px; }
+.idx-hero p { font-size: 16px; color: var(--fg1); }
+.idx-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; max-width: 960px; margin: 0 auto; }
+@media (max-width: 720px) { .idx-grid { grid-template-columns: repeat(2,1fr); } }
+@media (max-width: 480px) { .idx-grid { grid-template-columns: 1fr; } }
+.idx-link {
+  background: var(--white); border-radius: 18px; padding: 22px 24px;
+  border: 1px solid rgba(33,69,207,0.10); display: block;
+  transition: transform 0.3s var(--ease), box-shadow 0.3s, border-color 0.2s;
+}
+.idx-link:hover { transform: translateY(-3px); box-shadow: 0 16px 32px -16px rgba(20,46,153,0.18); border-color: var(--blue); }
+.idx-link .tag { font-size: 10.5px; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase; color: var(--coral); margin-bottom: 8px; display: block; }
+.idx-link h3 { font-size: 18px; font-weight: 800; letter-spacing: -0.01em; color: var(--ink); }
+.idx-link p { font-size: 13px; color: var(--fg2); margin-top: 4px; }
+.idx-section h2 {
+  font-size: 14px; font-weight: 800; letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--blue); text-align: center; margin: 56px 0 24px;
+}
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="idx-hero">
+    <img src="wm-coral-shadow.png" alt="huddle">
+    <h1>Brand site preview</h1>
+    <p>All pages of the huddle public website mockup.</p>
+  </div>
+
+  <div class="idx-section">
+    <h2>Core pages</h2>
+    <div class="idx-grid">
+      <a class="idx-link" href="/"><span class="tag">Home</span><h3>huddle.pet</h3><p>The landing page</p></a>
+      <a class="idx-link" href="/about"><span class="tag">About</span><h3>Mission &amp; Vision</h3><p>Why huddle exists</p></a>
+      <a class="idx-link" href="/pricing"><span class="tag">Plans</span><h3>Free / Plus / Gold</h3><p>Pricing &amp; add-ons</p></a>
+    </div>
+  </div>
+
+  <div class="idx-section">
+    <h2>Product</h2>
+    <div class="idx-grid">
+      <a class="idx-link" href="/live-map"><span class="tag">Safety</span><h3>Live Map &amp; Broadcast</h3><p>Pin types, reach tiers</p></a>
+      <a class="idx-link" href="/community"><span class="tag">Community</span><h3>Forum, Discover, Groups</h3><p>Local pet people</p></a>
+      <a class="idx-link" href="/care"><span class="tag">Care</span><h3>Care marketplace</h3><p>Verified providers</p></a>
+      <a class="idx-link" href="/pet-profiles"><span class="tag">Records</span><h3>Pet Profiles</h3><p>Vaccinations &amp; care notes</p></a>
+    </div>
+  </div>
+
+  <div class="idx-section">
+    <h2>Company</h2>
+    <div class="idx-grid">
+      <a class="idx-link" href="/careers"><span class="tag">Hiring</span><h3>Careers</h3><p>5 open roles</p></a>
+      <a class="idx-link" href="/faq"><span class="tag">Help</span><h3>FAQ</h3><p>Curated 27 Q&amp;As</p></a>
+      <a class="idx-link" href="/knowledge-base"><span class="tag">SEO/GEO</span><h3>Knowledge Base</h3><p>Full 75 Q&amp;As (long-tail)</p></a>
+      <a class="idx-link" href="/contact"><span class="tag">Talk</span><h3>Contact</h3><p>Support, partners, press</p></a>
+    </div>
+  </div>
+
+  <div class="idx-section">
+    <h2>Legal</h2>
+    <div class="idx-grid">
+      <a class="idx-link" href="/legal/privacy"><span class="tag">Legal</span><h3>Privacy Policy</h3><p>Real text from app</p></a>
+      <a class="idx-link" href="/legal/terms"><span class="tag">Legal</span><h3>Terms of Service</h3><p>Real text from app</p></a>
+      <a class="idx-link" href="/legal/cookies"><span class="tag">Legal</span><h3>Cookies Notice</h3><p>Real text from app</p></a>
+      <a class="idx-link" href="/legal/community-guidelines"><span class="tag">Legal</span><h3>Community Guidelines</h3><p>Real text from app</p></a>
+    </div>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Plans &amp; Pricing — Free, Plus, Gold · huddle</title>
+<meta name="description" content="huddle is free to start. Plus and Gold add wider broadcast reach, more Stars, advanced filters, profile boosts, and family sharing.">
+<meta property="og:title" content="huddle Plans &amp; Pricing — Free, Plus, Gold">
+<meta property="og:description" content="Free forever core. huddle+ from US$5.99/mo. huddle Gold from US$11.99/mo. Annual options available.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://huddle.pet/pricing">
+<meta property="og:image" content="https://huddle.pet/wm-blue.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="keywords" content="huddle pricing, huddle plus price, huddle Gold price, pet app subscription, Super Broadcast price, Family Sharing pet app">
+<link rel="canonical" href="https://huddle.pet/pricing">
+
+<!-- Product / Offer schema for the three plans -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Product",
+  "name": "huddle subscription plans",
+  "description": "Free, huddle+, and huddle Gold — pet safety, community and care plans for huddle.",
+  "brand": {"@type":"Brand","name":"huddle"},
+  "url": "https://huddle.pet/pricing",
+  "offers": [
+    {
+      "@type": "Offer",
+      "name": "Free",
+      "price": "0",
+      "priceCurrency": "USD",
+      "description": "Live Map, 5km · 12h Broadcasts, Social Forum, Discover, Groups, Chats, Pet Profiles, huddle Care access.",
+      "availability": "https://schema.org/InStock"
+    },
+    {
+      "@type": "Offer",
+      "name": "huddle+ (monthly)",
+      "price": "5.99",
+      "priceCurrency": "USD",
+      "description": "10km · 24h Broadcasts, Open Discovery, Profile Boost, 4 Stars/mo, advanced filters, Family Sharing.",
+      "availability": "https://schema.org/InStock"
+    },
+    {
+      "@type": "Offer",
+      "name": "huddle+ (annual)",
+      "price": "59.99",
+      "priceCurrency": "USD",
+      "description": "Annual huddle+ — save 17% vs monthly.",
+      "availability": "https://schema.org/InStock"
+    },
+    {
+      "@type": "Offer",
+      "name": "huddle Gold (monthly)",
+      "price": "11.99",
+      "priceCurrency": "USD",
+      "description": "20km · 48h Broadcasts, Max Discovery, Top Profile Boost, 10 Stars/mo, all filters, video uploads, Family Sharing.",
+      "availability": "https://schema.org/InStock"
+    },
+    {
+      "@type": "Offer",
+      "name": "huddle Gold (annual)",
+      "price": "109.99",
+      "priceCurrency": "USD",
+      "description": "Annual huddle Gold — save 24% vs monthly.",
+      "availability": "https://schema.org/InStock"
+    },
+    {
+      "@type": "Offer",
+      "name": "Super Broadcast (add-on)",
+      "price": "4.99",
+      "priceCurrency": "USD",
+      "description": "50km · 72h Broadcast Alert, stackable on any plan."
+    },
+    {
+      "@type": "Offer",
+      "name": "Family Sharing (add-on)",
+      "price": "4.99",
+      "priceCurrency": "USD",
+      "description": "Extend plan benefits to one linked account (except Stars). Recurring add-on."
+    }
+  ]
+}
+</script>
+
+<!-- Organization schema -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Organization",
+  "name": "Huddle",
+  "alternateName": ["huddle","huddle.pet"],
+  "url": "https://huddle.pet",
+  "logo": "https://huddle.pet/wm-blue.png",
+  "foundingLocation": {"@type":"Place","name":"Hong Kong"}
+}
+</script>
+
+<!-- WebSite schema -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "WebSite",
+  "name": "huddle",
+  "url": "https://huddle.pet",
+  "potentialAction": {"@type":"SearchAction","target":"https://huddle.pet/?q={search_term_string}","query-input":"required name=search_term_string"}
+}
+</script>
+
+<!-- BreadcrumbList -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {"@type":"ListItem","position":1,"name":"huddle","item":"https://huddle.pet/"},
+    {"@type":"ListItem","position":2,"name":"Pricing","item":"https://huddle.pet/pricing"}
+  ]
+}
+</script>
+
+<link rel="stylesheet" href="huddle.css">
+<style>
+.plan-grid {
+  display: grid; grid-template-columns: repeat(3,1fr); gap: 18px; margin-top: 56px;
+}
+@media (max-width: 900px) { .plan-grid { grid-template-columns: 1fr; max-width: 480px; margin: 56px auto 0; } }
+.plan {
+  background: var(--white); border-radius: 28px; padding: 36px 32px;
+  border: 1px solid rgba(33,69,207,0.10); position: relative;
+  transition: transform 0.4s var(--ease), box-shadow 0.4s;
+}
+.plan:hover { transform: translateY(-6px); box-shadow: 0 30px 60px -25px rgba(20,46,153,0.25); }
+.plan.plus { background: #5BA4F5; color: var(--white); border-color: transparent; }
+.plan.gold { background: var(--coral); color: var(--white); border-color: transparent; }
+
+/* ── 3D flip cards (Plus & Gold) ─────────────────────────────── */
+.plan-flip { perspective: 1200px; }
+.plan-flip .plan {
+  transform-style: preserve-3d;
+  transition: transform 0.65s cubic-bezier(0.45, 0, 0.15, 1);
+  cursor: pointer;
+}
+/* hover on desktop flips; .flipped class pins it (for tap on mobile) */
+.plan-flip:hover .plan,
+.plan-flip .plan.flipped { transform: rotateY(180deg); }
+/* suppress the plain translateY hover for flip cards */
+.plan-flip .plan:not(.flipped):hover { transform: rotateY(180deg); box-shadow: none; }
+.plan-face { backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+.plan-back {
+  position: absolute; inset: 0;
+  transform: rotateY(180deg);
+  border-radius: 28px; padding: 36px 32px; overflow: hidden;
+  display: flex; flex-direction: column;
+}
+.plan.plus .plan-back { background: #5BA4F5; color: var(--white); }
+.plan.gold .plan-back { background: var(--coral); color: var(--white); }
+.plan-back .save-pill {
+  display: inline-block;
+  background: var(--lime); color: var(--ink);
+  font-size: 11px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase;
+  padding: 5px 13px; border-radius: 999px; margin: 10px 0 20px; align-self: flex-start;
+}
+.flip-hint {
+  font-size: 11px; font-weight: 600; opacity: 0.5;
+  text-align: center; margin-top: auto; padding-top: 14px; letter-spacing: 0.03em;
+}
+.plan .tag {
+  display: inline-block; font-size: 10.5px; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase;
+  padding: 6px 12px; border-radius: 999px;
+  background: rgba(33,69,207,0.10); color: var(--blue); margin-bottom: 20px;
+}
+.plan.plus .tag, .plan.gold .tag { background: rgba(255,255,255,0.20); color: var(--white); }
+.plan h3 { font-size: 32px; font-weight: 800; letter-spacing: -0.025em; line-height: 1; }
+.plan .price { font-size: 44px; font-weight: 800; letter-spacing: -0.04em; line-height: 1; margin: 16px 0 4px; }
+.plan .price small { font-size: 16px; font-weight: 600; opacity: 0.7; }
+.plan .billing { font-size: 13px; font-weight: 600; opacity: 0.7; margin-bottom: 24px; }
+.plan ul { list-style: none; padding: 0; margin: 24px 0; display: flex; flex-direction: column; gap: 12px; }
+.plan li { font-size: 14.5px; font-weight: 500; line-height: 1.4; display: flex; gap: 10px; align-items: flex-start; }
+.plan li::before { content: "✓"; font-weight: 800; flex-shrink: 0; color: var(--blue); }
+.plan.plus li::before, .plan.gold li::before { color: var(--white); }
+.plan .cta-btn {
+  display: block; text-align: center; padding: 14px 22px; border-radius: 999px;
+  font-size: 15px; font-weight: 800; letter-spacing: -0.01em;
+  background: var(--blue); color: var(--white); margin-top: 24px;
+  transition: transform 0.25s var(--ease), background 0.2s;
+}
+.plan .cta-btn:hover { transform: translateY(-2px); background: var(--coral); }
+.plan.plus .cta-btn { background: var(--white); color: var(--blue); }
+.plan.plus .cta-btn:hover { background: var(--coral); color: var(--white); }
+.plan.gold .cta-btn { background: var(--white); color: var(--coral); }
+.plan.gold .cta-btn:hover { background: var(--blue-deep); color: var(--white); }
+.plan .ribbon {
+  position: absolute; top: 18px; right: 18px;
+  background: var(--lime); color: var(--ink);
+  font-size: 10.5px; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase;
+  padding: 5px 10px; border-radius: 999px;
+}
+
+
+.addon-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; margin-top: 56px; }
+@media (max-width: 720px) { .addon-grid { grid-template-columns: 1fr; } }
+.addon {
+  background: var(--white); border-radius: 22px; padding: 28px 24px;
+  border: 1px solid rgba(33,69,207,0.08);
+  display: flex; flex-direction: column; gap: 10px;
+}
+.addon .ico { font-size: 26px; line-height: 1; margin-bottom: 6px; }
+.addon h4 { font-size: 18px; font-weight: 800; letter-spacing: -0.01em; }
+.addon p { font-size: 14px; font-weight: 500; color: var(--fg1); line-height: 1.5; }
+.addon .price { font-size: 22px; font-weight: 800; letter-spacing: -0.02em; color: var(--coral); margin-top: auto; }
+
+table.compare { width: 100%; border-collapse: collapse; margin-top: 56px; background: var(--white); border-radius: 22px; overflow: hidden; box-shadow: 0 10px 30px -15px rgba(20,46,153,0.15); }
+table.compare th, table.compare td { padding: 16px 20px; text-align: left; border-bottom: 1px solid rgba(33,69,207,0.08); font-size: 14.5px; }
+table.compare th { background: var(--cream); font-size: 12px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: var(--blue); }
+table.compare th:not(:first-child), table.compare td:not(:first-child) { text-align: center; }
+table.compare tr:last-child td { border-bottom: none; }
+table.compare .feat { font-weight: 700; color: var(--ink); }
+@media (max-width: 720px) { table.compare th, table.compare td { padding: 10px 8px; font-size: 12.5px; } }
+
+/* ── Interactive compare table row hover ── */
+table.compare tbody tr { transition: background 0.2s var(--ease), transform 0.2s var(--ease); }
+table.compare tbody tr:hover { background: rgba(33,69,207,0.05); }
+table.compare tbody tr:hover .feat { color: var(--blue); }
+
+/* ── Flip cue ── */
+.flip-cue {
+  text-align: center; margin-top: 48px;
+  font-size: 13px; font-weight: 700; letter-spacing: 0.04em;
+  color: var(--blue); opacity: 0.7;
+  display: inline-flex; gap: 8px; justify-content: center; width: 100%;
+  animation: flipCueBob 2.4s ease-in-out infinite;
+}
+@keyframes flipCueBob {
+  0%, 100% { transform: translateY(0); opacity: 0.55; }
+  50%      { transform: translateY(-3px); opacity: 0.9; }
+}
+
+/* ── Editorial p.s. asides on this page ── */
+.editorial-aside-p {
+  text-align: center; max-width: 540px; margin: 18px auto 36px;
+  font-family: "Urbanist", sans-serif; font-style: italic;
+  font-size: 15px; font-weight: 500; color: var(--fg1);
+  opacity: 0.78; padding: 10px 24px; position: relative;
+}
+.editorial-aside-p::before {
+  content: "♥"; color: var(--coral); margin-right: 10px;
+  font-style: normal; font-weight: 700;
+}
+
+/* ── Tilt-lite (subtle 3D lift for plan + addon cards) ── */
+[data-tilt-lite] { transition: transform 0.22s cubic-bezier(0.25, 1, 0.5, 1); will-change: transform; }
+@media (hover: none) { [data-tilt-lite] { transform: none !important; } }
+
+/* ── Magnetic CTAs ── */
+[data-magnet] { will-change: transform; transition: transform 0.2s cubic-bezier(0.25, 1, 0.5, 1); }
+@media (hover: none) { [data-magnet] { transform: none !important; } }
+
+/* ── Reveal animations (match home page) ── */
+.reveal { opacity: 0; transform: translateY(36px); transition: opacity 0.9s var(--ease), transform 0.9s var(--ease); }
+.reveal.visible { opacity: 1; transform: translateY(0); }
+
+/* ── Gold ribbon micro-pulse (the Most Loved badge) ── */
+.plan.gold .ribbon { animation: ribbonPulse 2.6s ease-in-out infinite; }
+@keyframes ribbonPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(191,255,0,0.55); }
+  50%      { box-shadow: 0 0 0 12px rgba(191,255,0,0); }
+}
+
+/* ── Pricing marquee strip ── */
+.pricing-marquee {
+  background: var(--ink); color: var(--lime);
+  border-top: 3px solid var(--ink); border-bottom: 3px solid var(--ink);
+  padding: 18px 0; overflow: hidden;
+  font-family: "Urbanist", sans-serif;
+  font-weight: 800; font-size: clamp(18px, 2.4vw, 28px);
+  letter-spacing: -0.005em; text-transform: uppercase;
+}
+.pricing-marquee .track { display: flex; gap: 56px; white-space: nowrap; animation: pmRun 28s linear infinite; }
+.pricing-marquee .track:hover { animation-play-state: paused; }
+.pricing-marquee .m-i { display: inline-flex; align-items: center; gap: 56px; }
+.pricing-marquee .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--coral); }
+.pricing-marquee .pop { color: var(--coral); }
+@keyframes pmRun {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+</style>
+</head>
+<body data-page="pricing" data-nav="solid">
+
+<div class="geo-seed" aria-hidden="true">
+  huddle pricing · huddle+ price · huddle Gold price · pet app subscription Hong Kong ·
+  Super Broadcast price · profile booster pet app · family sharing pet app · huddle Stars subscription
+</div>
+
+<div class="page-hero">
+  <div class="container">
+    <div class="eyebrow">Plans · honest pricing</div>
+    <h1>Free, for real.<br><span class="coral">More reach</span><br>when you need it.</h1>
+    <p class="lead">The Map, the Forum, the Carers, the records — all yours, free at the core. Plus and Gold add reach for the days that actually need it. No tricks. No expiring trials.</p>
+  </div>
+</div>
+<div class="hero-wave-out">
+  <svg viewBox="0 0 1440 110" preserveAspectRatio="none" aria-hidden="true">
+    <path d="M0,40 C240,110 480,0 720,40 C960,80 1200,10 1440,50 L1440,0 L0,0 Z" fill="#142E99"/>
+  </svg>
+</div>
+
+<!-- High-energy marquee strip · sets the tone before plans -->
+<div class="pricing-marquee" aria-hidden="true">
+  <div class="track">
+    <div class="m-i"><span>Free, for real.</span> <span class="dot"></span> <span class="pop">♥</span> <span>No card to start.</span> <span class="dot"></span> <span>Cancel anytime.</span> <span class="dot"></span> <span class="pop">♥</span> <span>No ads, ever.</span> <span class="dot"></span> <span>Pay only for what you need.</span> <span class="dot"></span></div>
+    <div class="m-i" aria-hidden="true"><span>Free, for real.</span> <span class="dot"></span> <span class="pop">♥</span> <span>No card to start.</span> <span class="dot"></span> <span>Cancel anytime.</span> <span class="dot"></span> <span class="pop">♥</span> <span>No ads, ever.</span> <span class="dot"></span> <span>Pay only for what you need.</span> <span class="dot"></span></div>
+  </div>
+</div>
+
+<section class="s cream">
+  <div class="container">
+    <p class="flip-cue">↻ Hover or tap Plus / Gold to see the annual deal</p>
+    <div class="plan-grid">
+      <!-- FREE -->
+      <div class="plan reveal" data-tilt-lite>
+        <span class="tag">Free, forever</span>
+        <h3>Free</h3>
+        <div class="price">US$0<small>/mo</small></div>
+        <div class="billing">No card. No catch.</div>
+        <ul>
+          <li>All 4 pin types on the Live Map</li>
+          <li>Broadcasts · 5 km · 12 h</li>
+          <li>Social Forum, Discover, Groups, Chats</li>
+          <li>Book any verified Pet Carer</li>
+          <li>Unlimited Pet Profiles</li>
+          <li>Earn your Verified Badge</li>
+          <li>Free Stars to start</li>
+        </ul>
+        <a href="/#download" class="cta-btn" data-magnet>Start free →</a>
+      </div>
+
+      <!-- HUDDLE+ (flip card) -->
+      <div class="plan-flip reveal">
+        <div class="plan plus" onclick="toggleFlip(this)">
+          <!-- FRONT: monthly price -->
+          <div class="plan-face plan-front">
+            <span class="tag">huddle+</span>
+            <h3>huddle+</h3>
+            <div class="price">US$5.99<small>/mo</small></div>
+            <div class="billing">Billed monthly</div>
+            <ul>
+              <li>Everything in Free</li>
+              <li>Broadcasts · 10km · 24h</li>
+              <li>Open Discovery — double the matches</li>
+              <li>Profile Boost in Discover &amp; Care</li>
+              <li>4 Stars / month</li>
+              <li>Advanced filters</li>
+              <li>Family Sharing — one other account</li>
+            </ul>
+            <a href="/#download" class="cta-btn" onclick="event.stopPropagation()" data-magnet>Try huddle+ →</a>
+            <p class="flip-hint">Hover or tap to see annual ↻</p>
+          </div>
+          <!-- BACK: annual price -->
+          <div class="plan-face plan-back">
+            <span class="tag">Annual plan</span>
+            <h3>huddle+</h3>
+            <div class="price">US$4.99<small>/mo</small></div>
+            <div class="billing">US$59.99 billed annually</div>
+            <div class="save-pill">Save 17%</div>
+            <ul>
+              <li>All huddle+ features included</li>
+              <li>Broadcasts · 10km · 24h</li>
+              <li>4 Stars / month</li>
+              <li>Family Sharing included</li>
+            </ul>
+            <a href="/#download" class="cta-btn" onclick="event.stopPropagation()">Get annual plan</a>
+            <p class="flip-hint">Hover or tap to go back ↻</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- HUDDLE GOLD (flip card) -->
+      <div class="plan-flip reveal">
+        <div class="plan gold" onclick="toggleFlip(this)">
+          <!-- FRONT: monthly price -->
+          <div class="plan-face plan-front">
+            <span class="ribbon">Most Loved</span>
+            <span class="tag">huddle Gold</span>
+            <h3>huddle Gold</h3>
+            <div class="price">US$11.99<small>/mo</small></div>
+            <div class="billing">Billed monthly</div>
+            <ul>
+              <li>Everything in huddle+</li>
+              <li>Broadcasts · 20km · 48h</li>
+              <li>Max Discovery — no usual limits</li>
+              <li>Top Profile Boost — priority placement</li>
+              <li>10 Stars / month</li>
+              <li>All filters unlocked</li>
+              <li>Video uploads (Gold exclusive)</li>
+              <li>Family Sharing included</li>
+            </ul>
+            <a href="/#download" class="cta-btn" onclick="event.stopPropagation()" data-magnet>Go Gold →</a>
+            <p class="flip-hint">Hover or tap to see annual ↻</p>
+          </div>
+          <!-- BACK: annual price -->
+          <div class="plan-face plan-back">
+            <span class="ribbon">Most Loved</span>
+            <span class="tag">Annual plan</span>
+            <h3>huddle Gold</h3>
+            <div class="price">US$9.16<small>/mo</small></div>
+            <div class="billing">US$109.99 billed annually</div>
+            <div class="save-pill">Save 24%</div>
+            <ul>
+              <li>All huddle Gold features included</li>
+              <li>Broadcasts · 20km · 48h</li>
+              <li>10 Stars / month</li>
+              <li>Video uploads + Family Sharing</li>
+            </ul>
+            <a href="/#download" class="cta-btn" onclick="event.stopPropagation()">Get annual Gold</a>
+            <p class="flip-hint">Hover or tap to go back ↻</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="wave-div" style="background:var(--white)">
+  <svg viewBox="0 0 1440 90" preserveAspectRatio="none" aria-hidden="true">
+    <path d="M0,30 C320,90 640,0 960,40 C1200,72 1320,20 1440,40 L1440,0 L0,0 Z" fill="var(--cream)"/>
+  </svg>
+</div>
+
+<!-- Add-ons -->
+<section class="s white">
+  <div class="container">
+    <div class="reveal" style="max-width:780px">
+      <div class="eyebrow">Add-ons</div>
+      <h2 class="s-title" style="margin-top:16px">One-time<br><span class="coral">boosts.</span></h2>
+      <p class="s-lead">Stack on any plan, even Free. Pay only when you actually need the lift.</p>
+    </div>
+    <p class="editorial-aside-p">No recurring sneak-ins. Most of these are pay-as-you-go.</p>
+    <div class="addon-grid">
+      <div class="addon reveal" data-tilt-lite>
+        <div class="ico">📣</div>
+        <h4>Super Broadcast</h4>
+        <p>The widest broadcast huddle does. 50 km · 72 h. For the moments that need the whole city.</p>
+        <div class="price">US$4.99</div>
+      </div>
+      <div class="addon reveal" data-tilt-lite>
+        <div class="ico">⚡</div>
+        <h4>Profile Booster</h4>
+        <p>24 hours up top in Discover and Care. For the days you actually want to be found.</p>
+        <div class="price">US$2.99</div>
+      </div>
+      <div class="addon reveal" data-tilt-lite>
+        <div class="ico">👨‍👩‍👧</div>
+        <h4>Family Sharing</h4>
+        <p>Bring one extra account onto your plan. Two-person households, this one's for you.</p>
+        <div class="price">US$4.99<small style="font-size:14px;opacity:0.7">/mo</small></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="wave-div" style="background:var(--cream)">
+  <svg viewBox="0 0 1440 90" preserveAspectRatio="none" aria-hidden="true">
+    <path d="M0,40 C300,0 600,90 900,40 C1140,5 1300,60 1440,30 L1440,0 L0,0 Z" fill="var(--white)"/>
+  </svg>
+</div>
+
+<!-- Compare table -->
+<section class="s cream">
+  <div class="container">
+    <div class="reveal" style="max-width:780px">
+      <div class="eyebrow">Compare · the honest grid</div>
+      <h2 class="s-title" style="margin-top:16px">Side by<br><span class="coral">side.</span></h2>
+    </div>
+    <table class="compare">
+      <thead>
+        <tr><th>Feature</th><th>Free</th><th>huddle+</th><th>huddle Gold</th></tr>
+      </thead>
+      <tbody>
+        <tr><td class="feat">Live Map &amp; all pin types</td><td>✓</td><td>✓</td><td>✓</td></tr>
+        <tr><td class="feat">Broadcast reach &amp; duration</td><td>5 km · 12 h</td><td>10 km · 24 h</td><td>20 km · 48 h</td></tr>
+        <tr><td class="feat">Discover swipe limits</td><td>Standard</td><td>Open</td><td>Max</td></tr>
+        <tr><td class="feat">Profile Boost</td><td>—</td><td>Standard</td><td>Top priority</td></tr>
+        <tr><td class="feat">Stars per month</td><td>Allowance</td><td>4</td><td>10</td></tr>
+        <tr><td class="feat">Filters</td><td>Basic</td><td>Advanced</td><td>All filters</td></tr>
+        <tr><td class="feat">Video uploads</td><td>—</td><td>—</td><td>✓</td></tr>
+        <tr><td class="feat">Family Sharing</td><td>—</td><td>1 account</td><td>1 account</td></tr>
+        <tr><td class="feat">Pet Profiles</td><td>Unlimited</td><td>Unlimited</td><td>Unlimited</td></tr>
+        <tr><td class="feat">Care marketplace</td><td>✓</td><td>✓</td><td>✓</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<div class="wave-div" style="background:var(--blue-deep)">
+  <svg viewBox="0 0 1440 100" preserveAspectRatio="none" aria-hidden="true">
+    <path d="M0,50 C220,10 520,90 780,50 C1040,10 1240,80 1440,40 L1440,0 L0,0 Z" fill="var(--cream)"/>
+  </svg>
+</div>
+
+<section class="s deep">
+  <div class="container">
+    <div class="reveal" style="max-width:720px">
+      <div class="eyebrow on-blue">No tricks. No traps.</div>
+      <h2 class="s-title" style="color:var(--white);margin-top:16px">Cancel <span style="color:var(--coral)">anytime.</span> Really.</h2>
+      <p style="color:rgba(255,255,255,0.85);font-size:17px;line-height:1.55;margin-top:20px">Plus and Gold renew until you say stop. Settings → Subscription → Cancel. No reactivation fees, no hidden charges, no breakup hotline. Subscriptions via the App Store or Google Play are managed there, their rules.</p>
+      <p style="color:rgba(255,255,255,0.6);font-size:14px;margin-top:20px">Prices in USD. Local currency at checkout via the App Store or Google Play.</p>
+    </div>
+  </div>
+</section>
+
+<div class="wave-div" style="background:var(--cream)">
+  <svg viewBox="0 0 1440 100" preserveAspectRatio="none" aria-hidden="true">
+    <path d="M0,40 C240,90 520,0 780,40 C1040,80 1240,10 1440,50 L1440,0 L0,0 Z" fill="var(--blue-deep)"/>
+  </svg>
+</div>
+
+<script>
+/* Mobile tap toggles the flipped state; hover handles desktop */
+function toggleFlip(el) { el.classList.toggle('flipped'); }
+
+/* Interaction layer: tilt-lite + magnetic CTAs + reveal */
+(() => {
+  // Reveal on scroll
+  const io = new IntersectionObserver(entries => {
+    entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('visible'); io.unobserve(e.target); } });
+  }, { threshold: 0.12 });
+  document.querySelectorAll('.reveal').forEach(el => io.observe(el));
+
+  if (!window.matchMedia('(hover: hover)').matches) return;
+
+  // Subtle tilt for add-on + free plan cards
+  document.querySelectorAll('[data-tilt-lite]').forEach(el => {
+    el.addEventListener('mousemove', e => {
+      const r = el.getBoundingClientRect();
+      const x = (e.clientX - r.left) / r.width - 0.5;
+      const y = (e.clientY - r.top) / r.height - 0.5;
+      el.style.transform = `perspective(900px) rotateX(${-y * 4}deg) rotateY(${x * 5}deg) translateY(-4px)`;
+    });
+    el.addEventListener('mouseleave', () => { el.style.transform = ''; });
+  });
+
+  // Magnetic CTAs
+  document.querySelectorAll('[data-magnet]').forEach(el => {
+    const radius = 120;
+    el.addEventListener('mousemove', e => {
+      const r = el.getBoundingClientRect();
+      const cx = r.left + r.width / 2;
+      const cy = r.top + r.height / 2;
+      const dx = e.clientX - cx;
+      const dy = e.clientY - cy;
+      const dist = Math.hypot(dx, dy);
+      if (dist < radius) {
+        const pull = (1 - dist / radius) * 0.35;
+        el.style.transform = `translate(${dx * pull}px, ${dy * pull}px)`;
+      }
+    });
+    el.addEventListener('mouseleave', () => { el.style.transform = ''; });
+  });
+})();
+</script>
+<script src="huddle-shell.js"></script>
+</body>
+</html>

@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Pet Profiles — Vaccinations, microchip, care notes · huddle</title>
+<meta name="description" content="huddle Pet Profiles keep your pet's vaccinations, medications, microchip details, and care notes organised in one place. Share securely with carers, vets, and family.">
+<link rel="stylesheet" href="huddle.css">
+<style>
+.profile-row { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(48px,7vw,96px); align-items: center; }
+@media (max-width: 900px) { .profile-row { grid-template-columns: 1fr; } }
+.record-card {
+  background: var(--white); border-radius: 22px; padding: 28px 24px;
+  border: 1px solid rgba(33,69,207,0.08);
+  transition: transform 0.4s var(--ease), box-shadow 0.4s;
+}
+.record-card:hover { transform: translateY(-6px); box-shadow: 0 24px 48px -20px rgba(20,46,153,0.18); }
+.rec-photo { width: calc(100% + 48px); height: 110px; margin: -28px -24px 16px; background-size: cover; background-position: center; border-radius: 22px 22px 0 0; } .record-card .emoji { font-size: 30px; line-height: 1; margin-bottom: 16px; }
+.record-card h3 { font-size: 19px; font-weight: 800; letter-spacing: -0.01em; margin-bottom: 8px; }
+.record-card p { font-size: 14px; font-weight: 500; color: var(--fg1); line-height: 1.55; }
+.pet-mock {
+  background: var(--white); border-radius: 24px; padding: 28px;
+  box-shadow: 0 30px 60px -25px rgba(20,46,153,0.3);
+  max-width: 400px; margin: 0 auto;
+}
+.pet-mock .pet-photo {
+  width: 100%; aspect-ratio: 4/3; border-radius: 16px;
+  background: linear-gradient(135deg, var(--coral), var(--coral-soft));
+  display: grid; place-items: center; font-size: 80px; color: var(--white);
+  margin-bottom: 18px;
+}
+.pet-mock .pet-name { font-size: 26px; font-weight: 800; letter-spacing: -0.02em; }
+.pet-mock .pet-meta { font-size: 13px; color: var(--fg2); margin-top: 4px; }
+.pet-mock .rec { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid rgba(33,69,207,0.08); }
+.pet-mock .rec:nth-child(3) { border-top: 1px solid rgba(33,69,207,0.08); margin-top: 18px; padding-top: 14px; }
+.pet-mock .rec-ico { width: 34px; height: 34px; border-radius: 10px; background: rgba(33,69,207,0.10); display: grid; place-items: center; font-size: 16px; flex-shrink: 0; }
+.pet-mock .rec-ico.coral { background: rgba(255,127,80,0.18); }
+.pet-mock .rec-lbl { font-size: 14px; font-weight: 700; color: var(--ink); }
+.pet-mock .rec-sub { font-size: 12px; color: var(--fg2); margin-top: 2px; }
+.pet-mock .rec-status { margin-left: auto; font-size: 11px; font-weight: 800; letter-spacing: 0.06em; padding: 4px 8px; border-radius: 6px; background: var(--lime); color: var(--ink); }
+.pet-mock .rec-status.warn { background: var(--coral); color: var(--white); }
+</style>
+</head>
+<body data-page="pet-profiles" data-nav="solid">
+
+<div class="geo-seed" aria-hidden="true">
+  pet records app · vaccination tracker pet · microchip database Hong Kong · pet medical history app ·
+  pet profile app · vet record sharing · pet care notes · family pet sharing · pet ID card digital ·
+  huddle Pet Profiles · Family Sharing huddle
+</div>
+
+<div class="page-hero">
+  <div class="container">
+    <div class="eyebrow">Pet Profiles</div>
+    <h1>Every detail.<br>Every pet.<br><span class="coral">One place.</span></h1>
+    <p class="lead">huddle Pet Profiles keep vaccinations, medications, microchip details, vet contacts, and care notes organised. Share securely with carers, vets, and family — no more digging through old emails.</p>
+  </div>
+</div>
+<div class="hero-wave-out">
+  <svg viewBox="0 0 1440 110" preserveAspectRatio="none" aria-hidden="true">
+    <path d="M0,40 C240,110 480,0 720,40 C960,80 1200,10 1440,50 L1440,0 L0,0 Z" fill="#142E99"/>
+  </svg>
+</div>
+
+<section class="s cream">
+  <div class="container">
+    <div class="profile-row">
+      <div class="reveal-l">
+        <div class="eyebrow">What's tracked</div>
+        <h2 class="s-title" style="margin-top:14px">A complete<br>digital home for<br><span class="coral">your pet.</span></h2>
+        <p class="s-lead">huddle Pet Profiles hold everything you'd otherwise scatter across paper vet booklets, phone photos, fridge magnets and family group chats — in one secure place that travels with you.</p>
+      </div>
+      <div class="reveal-r">
+        <div class="pet-mock">
+          <div class="pet-photo">🐕</div>
+          <div class="pet-name">Buddy</div>
+          <div class="pet-meta">Golden Retriever · 3yr · Sai Ying Pun</div>
+          <div class="rec">
+            <div class="rec-ico">💉</div>
+            <div>
+              <div class="rec-lbl">Rabies vaccination</div>
+              <div class="rec-sub">Last: 14 Jan 2026 · Due: 14 Jan 2027</div>
+            </div>
+            <span class="rec-status">Up to date</span>
+          </div>
+          <div class="rec">
+            <div class="rec-ico coral">📍</div>
+            <div>
+              <div class="rec-lbl">Microchip</div>
+              <div class="rec-sub">985121054872349</div>
+            </div>
+            <span class="rec-status">Verified</span>
+          </div>
+          <div class="rec">
+            <div class="rec-ico coral">⚠️</div>
+            <div>
+              <div class="rec-lbl">Heartworm prevention</div>
+              <div class="rec-sub">Last dose: 28 Feb · Next: 28 Mar</div>
+            </div>
+            <span class="rec-status warn">Due soon</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="wave-div" style="background:var(--white)">
+  <svg viewBox="0 0 1440 90" preserveAspectRatio="none" aria-hidden="true">
+    <path d="M0,30 C320,90 640,0 960,40 C1200,72 1320,20 1440,40 L1440,0 L0,0 Z" fill="var(--cream)"/>
+  </svg>
+</div>
+
+<section class="s white">
+  <div class="container">
+    <div class="reveal" style="max-width:780px">
+      <div class="eyebrow">What's inside a profile</div>
+      <h2 class="s-title" style="margin-top:16px">Built for<br>real <span class="coral">pet life.</span></h2>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-top:56px">
+      <div class="record-card reveal"><div class="rec-photo" style="background-image:url('https://images.unsplash.com/photo-1583337130417-3346a1be7dee?w=700&q=80&auto=format&fit=crop')"></div><h3>Vaccinations</h3><p>Track every shot with dates, expiry, and reminders. Never miss a booster.</p></div>
+      <div class="record-card reveal"><div class="rec-photo" style="background-image:url('https://images.unsplash.com/photo-1576091160550-2173dba999ef?w=700&q=80&auto=format&fit=crop')"></div><h3>Medications</h3><p>Active prescriptions, dosing schedules, and history — useful for vets and carers.</p></div>
+      <div class="record-card reveal"><div class="rec-photo" style="background-image:url('https://images.unsplash.com/photo-1559190394-df5a28aab5c5?w=700&q=80&auto=format&fit=crop')"></div><h3>Microchip</h3><p>Microchip ID, registry details, and recovery contacts in one tap.</p></div>
+      <div class="record-card reveal"><div class="rec-photo" style="background-image:url('https://images.unsplash.com/photo-1581888227599-779811939961?w=700&q=80&auto=format&fit=crop')"></div><h3>Vet contacts</h3><p>Primary vet, emergency clinic, specialists — with one-tap call links.</p></div>
+      <div class="record-card reveal"><div class="rec-photo" style="background-image:url('https://images.unsplash.com/photo-1452857297128-d9c29adba80b?w=700&q=80&auto=format&fit=crop')"></div><h3>Care notes</h3><p>Diet, allergies, behavioural quirks, fears, preferences. Shareable with sitters.</p></div>
+      <div class="record-card reveal"><div class="rec-photo" style="background-image:url('https://images.unsplash.com/photo-1546238232-20216dec9f72?w=700&q=80&auto=format&fit=crop')"></div><h3>Photo gallery</h3><p>Every photo you've added, plus a current ID photo that auto-attaches to any Lost Pet pin.</p></div>
+    </div>
+  </div>
+</section>
+
+<div class="wave-div" style="background:var(--blue-deep)">
+  <svg viewBox="0 0 1440 100" preserveAspectRatio="none" aria-hidden="true">
+    <path d="M0,50 C220,10 520,90 780,50 C1040,10 1240,80 1440,40 L1440,0 L0,0 Z" fill="var(--white)"/>
+  </svg>
+</div>
+
+<section class="s deep">
+  <div class="container">
+    <div class="reveal" style="max-width:780px">
+      <div class="eyebrow on-blue">Sharing</div>
+      <h2 class="s-title" style="margin-top:16px;color:var(--white)">Share with<br>the people who<br><span style="color:var(--coral)">need to know.</span></h2>
+      <p style="color:rgba(255,255,255,0.85);font-size:17px;line-height:1.55;margin-top:20px;max-width:60ch">Tap to share a specific profile with a carer for an upcoming booking. Use Family Sharing to give one trusted relative ongoing access to your pets' records. Generate a temporary vet-share link for emergency clinic visits.</p>
+    </div>
+  </div>
+</section>
+
+<div class="wave-div" style="background:var(--coral)">
+  <svg viewBox="0 0 1440 100" preserveAspectRatio="none" aria-hidden="true">
+    <path d="M0,40 C240,90 520,0 780,40 C1040,80 1240,10 1440,50 L1440,0 L0,0 Z" fill="var(--blue-deep)"/>
+  </svg>
+</div>
+
+<section class="s coral" style="padding-top:64px">
+  <div class="container">
+    <div class="reveal" style="text-align:center;max-width:600px;margin:0 auto">
+      <h2 class="s-title" style="color:var(--white)">Set up your<br>first profile.</h2>
+      <p style="color:rgba(255,255,255,0.92);font-size:17px;font-weight:500;margin-top:20px;margin-bottom:32px">Free with huddle. Takes two minutes.</p>
+      <div style="display:flex;gap:14px;justify-content:center;flex-wrap:wrap">
+        <a href="/#download" class="btn btn-white">⌘ App Store</a>
+        <a href="/#download" class="btn btn-white">▸ Google Play</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="wave-div" style="background:var(--cream)">
+  <svg viewBox="0 0 1440 90" preserveAspectRatio="none" aria-hidden="true">
+    <path d="M0,50 C300,10 600,80 900,40 C1140,10 1300,60 1440,30 L1440,0 L0,0 Z" fill="var(--coral)"/>
+  </svg>
+</div>
+
+<script src="huddle-shell.js"></script>
+</body>
+</html>

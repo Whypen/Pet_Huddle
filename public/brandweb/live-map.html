@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Live Map &amp; Broadcast Alerts — Real-time pet safety · huddle</title>
+<meta name="description" content="huddle Live Map drops location-based pins for lost pets, strays, hazards and more. Broadcast Alerts reach nearby members instantly — from 5km up to 50km on Super Broadcast.">
+<meta property="og:title" content="huddle Live Map — Real-time pet safety">
+<meta property="og:description" content="Lost Pet, Stray Animal, Caution and Others pins. Broadcast alerts to verified neighbours.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://huddle.pet/live-map">
+<meta property="og:image" content="https://huddle.pet/wm-blue.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="keywords" content="lost pet app, lost pet alert, stray animal report, pet hazard warning, broadcast alert pet, huddle Live Map, pet safety map">
+<link rel="canonical" href="https://huddle.pet/live-map">
+
+<!-- WebPage schema with feature emphasis -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "WebPage",
+  "name": "huddle Live Map & Broadcast Alerts",
+  "url": "https://huddle.pet/live-map",
+  "description": "Real-time pet safety on the huddle Live Map. Drop Lost Pet, Stray Animal, Caution, and Others pins. Send Broadcast Alerts that reach verified members nearby — 5km Free, 10km huddle+, 20km huddle Gold, 50km Super Broadcast.",
+  "isPartOf": {"@type":"WebSite","name":"huddle","url":"https://huddle.pet"},
+  "about": [
+    {"@type":"Thing","name":"huddle Live Map"},
+    {"@type":"Thing","name":"huddle Broadcast Alerts"},
+    {"@type":"Thing","name":"Lost Pet pin"},
+    {"@type":"Thing","name":"Stray Animal pin"},
+    {"@type":"Thing","name":"Caution pin"},
+    {"@type":"Thing","name":"Super Broadcast"}
+  ]
+}
+</script>
+
+<!-- Organization schema -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Organization",
+  "name": "Huddle",
+  "alternateName": ["huddle","huddle.pet"],
+  "url": "https://huddle.pet",
+  "logo": "https://huddle.pet/wm-blue.png",
+  "foundingLocation": {"@type":"Place","name":"Hong Kong"}
+}
+</script>
+
+<!-- WebSite schema -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "WebSite",
+  "name": "huddle",
+  "url": "https://huddle.pet",
+  "potentialAction": {"@type":"SearchAction","target":"https://huddle.pet/?q={search_term_string}","query-input":"required name=search_term_string"}
+}
+</script>
+
+<!-- BreadcrumbList -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {"@type":"ListItem","position":1,"name":"huddle","item":"https://huddle.pet/"},
+    {"@type":"ListItem","position":2,"name":"Live Map","item":"https://huddle.pet/live-map"}
+  ]
+}
+</script>
+
+<link rel="stylesheet" href="huddle.css">
+<style>
+.pin-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 20px; margin-top: 56px; }
+@media (max-width: 900px) { .pin-grid { grid-template-columns: repeat(2,1fr); } }
+@media (max-width: 540px) { .pin-grid { grid-template-columns: 1fr; } }
+.pin-card {
+  background: var(--white); border-radius: 22px; padding: 28px 24px;
+  border: 1px solid rgba(33,69,207,0.08); position: relative; overflow: hidden;
+  transition: transform 0.4s var(--ease), box-shadow 0.4s;
+}
+.pin-card:hover { transform: translateY(-6px); box-shadow: 0 24px 48px -20px rgba(20,46,153,0.18); }
+.pin-card .pin-dot {
+  width: 24px; height: 24px; border-radius: 50%; border: 4px solid var(--white);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15); margin-bottom: 18px;
+}
+.pin-card.lost .pin-dot   { background: var(--coral); }
+.pin-card.stray .pin-dot  { background: var(--blue); }
+.pin-card.caution .pin-dot{ background: var(--gold); }
+.pin-card.other .pin-dot  { background: var(--lime); border-color: var(--cream); }
+.pin-card h3 { font-size: 19px; font-weight: 800; letter-spacing: -0.01em; margin-bottom: 8px; }
+.pin-card p { font-size: 14px; font-weight: 500; color: var(--fg1); line-height: 1.55; }
+
+.reach-tiers { display: grid; grid-template-columns: repeat(4,1fr); gap: 16px; margin-top: 56px; }
+@media (max-width: 900px) { .reach-tiers { grid-template-columns: repeat(2,1fr); } }
+@media (max-width: 540px) { .reach-tiers { grid-template-columns: 1fr; } }
+.tier {
+  background: var(--white); border-radius: 22px; padding: 32px 24px;
+  border: 1px solid rgba(33,69,207,0.10); position: relative;
+}
+.tier.gold { background: var(--blue-deep); color: var(--white); border-color: transparent; }
+.tier.gold h3, .tier.gold .km { color: var(--white); }
+.tier .pill {
+  display: inline-block; font-size: 10.5px; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase;
+  padding: 5px 10px; border-radius: 999px;
+  background: rgba(33,69,207,0.10); color: var(--blue); margin-bottom: 16px;
+}
+.tier.gold .pill { background: var(--coral); color: var(--white); }
+.tier.lime .pill { background: var(--lime); color: var(--ink); }
+.tier h3 { font-size: 22px; font-weight: 800; letter-spacing: -0.01em; margin-bottom: 8px; }
+.tier .km { font-size: 44px; font-weight: 800; letter-spacing: -0.04em; line-height: 1; color: var(--coral); }
+.tier.gold .km { color: var(--lime); }
+.tier p { font-size: 13.5px; font-weight: 500; color: var(--fg1); line-height: 1.5; margin-top: 12px; }
+.tier.gold p { color: rgba(255,255,255,0.78); }
+
+/* ── Phone mockup ── */
+.map-showcase { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(48px,7vw,96px); align-items: center; }
+@media (max-width: 860px) { .map-showcase { grid-template-columns: 1fr; } }
+.lm-phone {
+  width: min(300px,100%); aspect-ratio: 9/19; margin: 0 auto;
+  background: var(--white); border-radius: 40px;
+  border: 9px solid #142E99;
+  box-shadow: 0 40px 80px -30px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.05);
+  overflow: hidden; position: relative;
+}
+.lm-screen {
+  position: absolute; inset: 0;
+  background: #F0E9DC;
+  display: flex; flex-direction: column; gap: 10px; padding: 14px 14px 14px;
+}
+.lm-map { flex: 1; border-radius: 14px; overflow: hidden; position: relative; background: #EAE2D4; }
+/* roads */
+.lm-road { position: absolute; background: rgba(255,255,255,0.92); }
+.lm-road.h { width: 100%; }
+.lm-road.v { height: 100%; }
+/* park */
+.lm-park { position: absolute; background: rgba(110,185,65,0.30); border-radius: 5px; }
+/* top bar */
+.lm-bar {
+  position: absolute; top: 7px; left: 7px; right: 7px; z-index: 10;
+  background: rgba(255,255,255,0.96); border-radius: 9px;
+  padding: 5px 9px; display: flex; align-items: center; justify-content: space-between;
+  font-size: 10px; font-weight: 800; color: var(--ink);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.10);
+}
+.lm-bar .lm-count {
+  background: var(--coral); color: var(--white);
+  font-size: 9px; font-weight: 800; padding: 2px 7px; border-radius: 999px;
+}
+/* pins */
+.lm-pin { position: absolute; transform: translate(-50%,-100%); display: flex; flex-direction: column; align-items: center; z-index: 5; }
+.lm-pin-body {
+  width: 24px; height: 24px;
+  border-radius: 50% 50% 50% 0; transform: rotate(-45deg);
+  border: 2px solid rgba(255,255,255,0.9);
+  box-shadow: 0 3px 10px rgba(0,0,0,0.22);
+  display: grid; place-items: center;
+}
+.lm-pin-icon { transform: rotate(45deg); font-size: 10px; line-height: 1; }
+.lm-pin.lost    .lm-pin-body { background: var(--coral); }
+.lm-pin.stray   .lm-pin-body { background: var(--blue); }
+.lm-pin.caution .lm-pin-body { background: var(--gold); }
+.lm-pin.other   .lm-pin-body { background: var(--lime); }
+.lm-pulse { position: absolute; top: 50%; left: 50%; border-radius: 50%; transform: translate(-50%,-50%) scale(0.5); opacity: 0; animation: lmpulse 2.4s ease-out infinite; width: 44px; height: 44px; }
+.lm-pin.lost  .lm-pulse { background: rgba(255,127,80,0.28); }
+.lm-pin.stray .lm-pulse { background: rgba(33,69,207,0.22); }
+@keyframes lmpulse { 0% { transform: translate(-50%,-50%) scale(0.5); opacity: 0.85; } 100% { transform: translate(-50%,-50%) scale(2.1); opacity: 0; } }
+/* alert cards */
+.lm-card {
+  background: var(--white); border-radius: 11px; padding: 9px 11px;
+  display: flex; align-items: center; gap: 8px;
+  box-shadow: 0 4px 14px -6px rgba(0,0,0,0.12);
+}
+.lm-card .lm-ico { width: 26px; height: 26px; border-radius: 7px; background: rgba(255,127,80,0.18); display: grid; place-items: center; flex-shrink: 0; font-size: 12px; }
+.lm-card .lm-lbl { font-size: 10.5px; font-weight: 800; color: var(--ink); }
+.lm-card .lm-sub { font-size: 9.5px; font-weight: 500; color: var(--fg2); margin-top: 1px; }
+</style>
+</head>
+<body data-page="live-map" data-nav="solid">
+
+<div class="geo-seed" aria-hidden="true">
+  lost pet alert Hong Kong · find lost dog Hong Kong · lost cat Hong Kong · stray animal report ·
+  pet emergency app · neighbourhood pet alert · real-time pet safety map · broadcast lost pet ·
+  Super Broadcast 50km Hong Kong · huddle Live Map pin types · pet hazard alert Hong Kong
+</div>
+
+<div class="page-hero">
+  <div class="container">
+    <div class="eyebrow">A voice for the voiceless</div>
+    <h1>See it.<br>Pin it.<br><span class="coral">Help the pack.</span></h1>
+    <p class="lead">You walked past a stray. You lost your dog. You saw the bait on the path. You felt angry, then helpless. huddle gives that feeling somewhere to go — a pin on the map, a Broadcast to the block, a neighbourhood that's already looking.</p>
+  </div>
+</div>
+<div class="hero-wave-out">
+  <svg viewBox="0 0 1440 110" preserveAspectRatio="none" aria-hidden="true">
+    <path d="M0,40 C240,110 480,0 720,40 C960,80 1200,10 1440,50 L1440,0 L0,0 Z" fill="#142E99"/>
+  </svg>
+</div>
+
+<!-- Pin types -->
+<section class="s cream">
+  <div class="container">
+    <div class="reveal" style="max-width:780px">
+      <div class="eyebrow">Four pins · four real moments</div>
+      <h2 class="s-title" style="margin-top:16px">Pick the one<br>that <span class="coral">fits the moment.</span></h2>
+      <p class="s-lead">Each pin is tuned for a different situation. Add a photo, a description, the exact spot. Your block sees it on the Map within seconds.</p>
+    </div>
+    <div class="pin-grid">
+      <div class="pin-card lost reveal">
+        <div class="pin-dot"></div>
+        <h3>Lost</h3>
+        <p>Your pet is missing. Drop a pin where they were last seen — verified neighbours within your chosen reach are alerted immediately.</p>
+      </div>
+      <div class="pin-card stray reveal">
+        <div class="pin-dot"></div>
+        <h3>Stray</h3>
+        <p>You've spotted an unfamiliar pet that may be lost or in need. Report the location so the right people can respond.</p>
+      </div>
+      <div class="pin-card caution reveal">
+        <div class="pin-dot"></div>
+        <h3>Caution</h3>
+        <p>Hazards that pet people should know about — aggressive animal, unsafe location, suspicious behaviour, environmental risk.</p>
+      </div>
+      <div class="pin-card other reveal">
+        <div class="pin-dot"></div>
+        <h3>Others</h3>
+        <p>Anything urgent that doesn't fit the categories above. Useful for unusual situations that still need local visibility.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="wave-div" style="background:var(--blue-deep)">
+  <svg viewBox="0 0 1440 90" preserveAspectRatio="none" aria-hidden="true">
+    <path d="M0,30 C320,90 640,0 960,40 C1200,72 1320,20 1440,40 L1440,0 L0,0 Z" fill="var(--cream)"/>
+  </svg>
+</div>
+
+<!-- Phone mockup showcase -->
+<section class="s deep" style="padding-top:72px">
+  <div class="container">
+    <div class="map-showcase">
+      <div class="reveal-l">
+        <div class="eyebrow on-blue">Live Map in the app</div>
+        <h2 class="s-title" style="margin-top:16px;color:var(--white)">Real streets.<br>Real pins.<br><span style="color:var(--coral)">Right now.</span></h2>
+        <p style="color:rgba(255,255,255,0.85);font-size:17px;line-height:1.55;margin-top:20px">Open huddle and see what's happening nearby. Every pin is placed by a verified local member and anchored to a precise location. Tap any pin to view the full report, add a comment, or follow the situation.</p>
+        <div style="display:flex;flex-direction:column;gap:14px;margin-top:28px">
+          <div style="display:flex;align-items:center;gap:12px;color:rgba(255,255,255,0.85);font-size:15px;font-weight:600">
+            <span style="width:10px;height:10px;border-radius:50%;background:var(--coral);display:inline-block;flex-shrink:0;box-shadow:0 0 0 3px rgba(255,127,80,0.3)"></span> Lost — your pet is missing
+          </div>
+          <div style="display:flex;align-items:center;gap:12px;color:rgba(255,255,255,0.85);font-size:15px;font-weight:600">
+            <span style="width:10px;height:10px;border-radius:50%;background:var(--blue-light);display:inline-block;flex-shrink:0;box-shadow:0 0 0 3px rgba(90,130,240,0.3)"></span> Stray — someone spotted a loose animal
+          </div>
+          <div style="display:flex;align-items:center;gap:12px;color:rgba(255,255,255,0.85);font-size:15px;font-weight:600">
+            <span style="width:10px;height:10px;border-radius:50%;background:var(--gold);display:inline-block;flex-shrink:0;box-shadow:0 0 0 3px rgba(207,171,33,0.3)"></span> Caution — hazard pet owners should know about
+          </div>
+          <div style="display:flex;align-items:center;gap:12px;color:rgba(255,255,255,0.85);font-size:15px;font-weight:600">
+            <span style="width:10px;height:10px;border-radius:50%;background:var(--lime);display:inline-block;flex-shrink:0;box-shadow:0 0 0 3px rgba(191,255,0,0.2)"></span> Others — anything urgent that needs local eyes
+          </div>
+        </div>
+      </div>
+      <div class="reveal-r">
+        <div class="lm-phone">
+          <div class="lm-screen">
+            <div class="lm-map">
+              <!-- Roads -->
+              <div class="lm-road h" style="top:27%; height:8px;"></div>
+              <div class="lm-road h" style="top:56%; height:5px; opacity:0.75;"></div>
+              <div class="lm-road v" style="left:36%; width:7px;"></div>
+              <div class="lm-road v" style="left:65%; width:9px;"></div>
+              <!-- Park -->
+              <div class="lm-park" style="top:30%; left:41%; width:22%; height:24%;"></div>
+              <!-- Top bar -->
+              <div class="lm-bar">
+                <span>Live Map</span>
+                <span class="lm-count">4 pins nearby</span>
+              </div>
+              <!-- Pins -->
+              <div class="lm-pin lost" style="top:44%; left:26%;">
+                <span class="lm-pulse"></span>
+                <span class="lm-pin-body"><span class="lm-pin-icon">🐕</span></span>
+              </div>
+              <div class="lm-pin stray" style="top:62%; left:57%;">
+                <span class="lm-pulse"></span>
+                <span class="lm-pin-body"><span class="lm-pin-icon">🐈</span></span>
+              </div>
+              <div class="lm-pin caution" style="top:72%; left:41%;">
+                <span class="lm-pin-body"><span class="lm-pin-icon">⚠️</span></span>
+              </div>
+              <div class="lm-pin other" style="top:48%; left:71%;">
+                <span class="lm-pin-body"><span class="lm-pin-icon">📍</span></span>
+              </div>
+            </div>
+            <div class="lm-card">
+              <div class="lm-ico">🐕</div>
+              <div>
+                <div class="lm-lbl">Lost · Buddy missing</div>
+                <div class="lm-sub">Caine Rd · 6 min ago · 3 responses</div>
+              </div>
+            </div>
+            <div class="lm-card">
+              <div class="lm-ico" style="background:rgba(33,69,207,0.15);">📣</div>
+              <div>
+                <div class="lm-lbl">Broadcast Alert sent · 5 km</div>
+                <div class="lm-sub">84 verified neighbours notified</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="wave-div" style="background:var(--white)">
+  <svg viewBox="0 0 1440 90" preserveAspectRatio="none" aria-hidden="true">
+    <path d="M0,30 C320,90 640,0 960,40 C1200,72 1320,20 1440,40 L1440,0 L0,0 Z" fill="var(--blue-deep)"/>
+  </svg>
+</div>
+
+<!-- Broadcast Alerts deep dive -->
+<section class="s white" id="broadcast">
+  <div class="container">
+    <div class="reveal" style="max-width:780px">
+      <div class="eyebrow">Broadcast Alerts</div>
+      <h2 class="s-title" style="margin-top:16px">Reach as far<br>as <span class="coral">the moment<br>needs.</span></h2>
+      <p class="s-lead">Pins sit on the Map. A Broadcast pushes a notification to every verified member in range — instantly. Bigger plan, wider reach, longer life on the map.</p>
+    </div>
+    <div class="reach-tiers">
+      <div class="tier reveal">
+        <span class="pill">Free</span>
+        <h3>Free plan</h3>
+        <div class="km">5 km</div>
+        <p>Standard broadcast reach, broadcast stays active for <strong>12 hours</strong>. Covers a typical local neighbourhood — fits most incidents that resolve close to home.</p>
+      </div>
+      <div class="tier reveal">
+        <span class="pill">huddle+</span>
+        <h3>huddle+</h3>
+        <div class="km">10 km</div>
+        <p>Doubled reach, broadcast stays active for <strong>24 hours</strong>. For situations that may have travelled further — off-leash incidents, transit-area sightings, runaway cats with outdoor history.</p>
+      </div>
+      <div class="tier lime reveal">
+        <span class="pill">huddle Gold</span>
+        <h3>huddle Gold</h3>
+        <div class="km">20 km</div>
+        <p>Quadruple base reach, broadcast stays active for <strong>48 hours</strong>. Crosses major urban districts — for high-mobility pets and prolonged search windows.</p>
+      </div>
+      <div class="tier gold reveal">
+        <span class="pill">Add-on</span>
+        <h3>Super Broadcast</h3>
+        <div class="km">50 km</div>
+        <p>One-time purchase, broadcast stays active for <strong>72 hours</strong>. The widest reach huddle offers — for high-urgency situations or when initial reach didn't produce sightings. Stackable on any plan.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="wave-div" style="background:var(--blue-deep)">
+  <svg viewBox="0 0 1440 100" preserveAspectRatio="none" aria-hidden="true">
+    <path d="M0,50 C220,10 520,90 780,50 C1040,10 1240,80 1440,40 L1440,0 L0,0 Z" fill="var(--white)"/>
+  </svg>
+</div>
+
+<!-- Why it works -->
+<section class="s deep">
+  <div class="container">
+    <div class="reveal" style="max-width:780px">
+      <div class="eyebrow on-blue">Why this works</div>
+      <h2 class="s-title" style="margin-top:16px;color:var(--white)">Verified neighbours.<br><span style="color:var(--coral)">Not the whole<br>internet.</span></h2>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-top:56px">
+      <div class="card reveal" style="background:rgba(255,255,255,0.05);border-color:rgba(255,255,255,0.12);color:rgba(255,255,255,0.85)">
+        <div class="emoji">📍</div>
+        <h3 style="color:var(--white)">Location-true</h3>
+        <p style="color:rgba(255,255,255,0.78)">Every alert is anchored to a real location. Not a city. Not a district. The actual coordinates where help is needed.</p>
+      </div>
+      <div class="card reveal" style="background:rgba(255,255,255,0.05);border-color:rgba(255,255,255,0.12)">
+        <div class="emoji">✅</div>
+        <h3 style="color:var(--white)">Identity-verified recipients</h3>
+        <p style="color:rgba(255,255,255,0.78)">Alerts go to identity-verified huddle members. No bot accounts, no fake profiles diluting the signal.</p>
+      </div>
+      <div class="card reveal" style="background:rgba(255,255,255,0.05);border-color:rgba(255,255,255,0.12)">
+        <div class="emoji">⚡</div>
+        <h3 style="color:var(--white)">Real-time</h3>
+        <p style="color:rgba(255,255,255,0.78)">Push notification on iOS and Android. Most members see it within seconds. Pin stays live on the map for ongoing follow-up.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="wave-div" style="background:var(--coral)">
+  <svg viewBox="0 0 1440 100" preserveAspectRatio="none" aria-hidden="true">
+    <path d="M0,40 C240,90 520,0 780,40 C1040,80 1240,10 1440,50 L1440,0 L0,0 Z" fill="var(--blue-deep)"/>
+  </svg>
+</div>
+
+<section class="s coral" style="padding-top:64px">
+  <div class="container">
+    <div class="reveal" style="text-align:center;max-width:600px;margin:0 auto">
+      <h2 class="s-title" style="color:var(--white)">No pet left<br>behind.</h2>
+      <p style="color:rgba(255,255,255,0.92);font-size:17px;font-weight:500;margin-top:20px;margin-bottom:32px">Download huddle and join the verified neighbours who show up when it counts.</p>
+      <div style="display:flex;gap:14px;justify-content:center;flex-wrap:wrap">
+        <a href="/#download" class="btn btn-white">⌘ App Store</a>
+        <a href="/#download" class="btn btn-white">▸ Google Play</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="wave-div" style="background:var(--cream)">
+  <svg viewBox="0 0 1440 90" preserveAspectRatio="none" aria-hidden="true">
+    <path d="M0,50 C300,10 600,80 900,40 C1140,10 1300,60 1440,30 L1440,0 L0,0 Z" fill="var(--coral)"/>
+  </svg>
+</div>
+
+<script src="huddle-shell.js"></script>
+</body>
+</html>

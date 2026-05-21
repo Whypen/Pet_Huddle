@@ -1,15 +1,6 @@
 {
   "headers": [
     {
-      "source": "/(.*)",
-      "headers": [
-        {
-          "key": "Cache-Control",
-          "value": "no-cache, no-store, must-revalidate"
-        }
-      ]
-    },
-    {
       "source": "/assets/(.*)",
       "headers": [
         {
@@ -56,55 +47,157 @@
           "value": "public, max-age=300, must-revalidate"
         }
       ]
+    },
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache, no-store, must-revalidate"
+        }
+      ]
     }
   ],
-  "routes": [
+  "rewrites": [
     {
-      "src": "^/share/([^/]+)$",
-      "dest": "/api/share?id=$1"
+      "source": "/share/:id",
+      "destination": "/api/share?id=:id"
     },
     {
-      "src": "^/turnstile-native\\.html$",
-      "headers": {
-        "Access-Control-Allow-Origin": "*",
-        "Cache-Control": "public, max-age=86400, stale-while-revalidate=604800"
-      },
-      "continue": true
+      "source": "/",
+      "destination": "/brandweb/huddle-v5.html"
     },
     {
-      "src": "^/\\.well-known/apple-app-site-association$",
-      "headers": {
-        "Content-Type": "application/json",
-        "Cache-Control": "public, max-age=300, must-revalidate"
-      },
-      "continue": true
+      "source": "/care",
+      "destination": "/brandweb/care.html"
     },
     {
-      "src": "^/\\.well-known/assetlinks\\.json$",
-      "headers": {
-        "Content-Type": "application/json",
-        "Cache-Control": "public, max-age=300, must-revalidate"
-      },
-      "continue": true
+      "source": "/community",
+      "destination": "/brandweb/community.html"
     },
     {
-      "handle": "filesystem"
+      "source": "/pricing",
+      "destination": "/brandweb/pricing.html"
     },
     {
-      "src": "^/assets/.*$",
-      "status": 404
+      "source": "/live-map",
+      "destination": "/brandweb/live-map.html"
     },
     {
-      "src": "^/fonts/.*$",
-      "status": 404
+      "source": "/pet-profiles",
+      "destination": "/brandweb/pet-profiles.html"
     },
     {
-      "src": "^/.*\\..*$",
-      "status": 404
+      "source": "/about",
+      "destination": "/brandweb/about.html"
     },
     {
-      "src": "/(.*)",
-      "dest": "/"
+      "source": "/press",
+      "destination": "/brandweb/press.html"
+    },
+    {
+      "source": "/careers",
+      "destination": "/brandweb/careers.html"
+    },
+    {
+      "source": "/contact",
+      "destination": "/brandweb/contact.html"
+    },
+    {
+      "source": "/faq",
+      "destination": "/brandweb/faq.html"
+    },
+    {
+      "source": "/knowledge-base",
+      "destination": "/brandweb/knowledge-base.html"
+    },
+    {
+      "source": "/legal/terms",
+      "destination": "/brandweb/terms.html"
+    },
+    {
+      "source": "/legal/privacy",
+      "destination": "/brandweb/privacy.html"
+    },
+    {
+      "source": "/legal/cookies",
+      "destination": "/brandweb/cookies.html"
+    },
+    {
+      "source": "/legal/community-guidelines",
+      "destination": "/brandweb/community-guidelines.html"
+    },
+    {
+      "source": "/legal/booking-terms",
+      "destination": "/brandweb/booking-terms.html"
+    },
+    {
+      "source": "/legal/service-provider-agreement",
+      "destination": "/brandweb/service-provider-agreement.html"
+    },
+    {
+      "source": "/legal/privacy-choices",
+      "destination": "/brandweb/privacy-choices.html"
+    },
+    {
+      "source": "/auth",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/auth/callback",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/reset-password",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/reset-password-direct",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/reset-password-inline",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/reset-password-inline-healthaction",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/update-password",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/support",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/verify",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/turnstile-health",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/turnstile-health-resetaction",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/signup/:path*",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/join/:code",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/admin/:path*",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/admin",
+      "destination": "/index.html"
     }
   ]
 }
