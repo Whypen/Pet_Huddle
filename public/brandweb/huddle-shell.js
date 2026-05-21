@@ -152,8 +152,7 @@
     brandCol,
     col("Product", [
       ["/live-map", "Live Map"],
-      ["/community#social", "Social Forum"],
-      ["/community#discover", "Discover & Community"],
+      ["/community", "Community"],
       ["/care", "Care"],
       ["/pet-profiles", "Pet Profiles"],
       ["/pricing", "Plans & Pricing"],
