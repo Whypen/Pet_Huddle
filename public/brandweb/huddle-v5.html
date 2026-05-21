@@ -13,6 +13,8 @@
 <meta property="og:image" content="https://huddle.pet/brandweb/wm-blue.png">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="canonical" href="https://huddle.pet/">
+<link rel="stylesheet" href="/brandweb/huddle.css">
+<link rel="stylesheet" href="huddle.css">
 <style>
 @font-face { font-family: "Urbanist"; src: url("/brandweb/fonts/Urbanist-400.ttf") format("truetype"); font-weight: 400; font-display: swap; }
 @font-face { font-family: "Urbanist"; src: url("/brandweb/fonts/Urbanist-500.ttf") format("truetype"); font-weight: 500; font-display: swap; }
@@ -51,6 +53,7 @@ body {
   text-rendering: optimizeLegibility;
 }
 img { max-width: 100%; height: auto; display: block; }
+img[data-file-src] { visibility: visible; }
 .container {
   width: 100%;
   max-width: var(--container);
@@ -71,7 +74,7 @@ img { max-width: 100%; height: auto; display: block; }
 /* ── NAV ── */
 nav {
   position: fixed; inset: 0 0 auto 0; z-index: 100;
-  display: flex; align-items: center; justify-content: space-between;
+  display: flex; align-items: center; justify-content: flex-start; gap: 12px;
   padding: 14px max(24px, 4vw);
   transition: background 0.35s var(--ease), backdrop-filter 0.35s, box-shadow 0.35s;
 }
@@ -89,6 +92,7 @@ nav.scrolled .nav-link:hover { color: var(--blue); background: rgba(33,69,207,0.
   display: inline-flex; align-items: center;
   transition: transform 0.25s var(--ease);
   position: relative;
+  margin-right: auto;
 }
 .nav-brand:hover { transform: translateY(-1px); }
 .nav-logo { height: 26px; width: auto; display: block; }
@@ -111,6 +115,7 @@ nav.scrolled .nav-logo.on-light { display: block; }
   padding: 11px 22px; border-radius: 999px;
   text-decoration: none;
   display: inline-flex; align-items: center; gap: 6px;
+  line-height: 1; white-space: nowrap;
   transition: transform 0.25s var(--ease), box-shadow 0.25s, background 0.2s, color 0.2s;
   box-shadow: 0 6px 20px -6px rgba(0,0,0,0.25);
 }
@@ -566,7 +571,13 @@ section.s {
   transition: transform 0.5s var(--ease);
 }
 .wall-grid > div:hover { transform: scale(1.04); z-index: 2; }
-.wall-grid > div img { width: 100%; height: 100%; object-fit: cover; }
+.wall-grid > div img { width: 100%; height: 100%; object-fit: cover; object-position: center center; }
+.wall-grid .w1 img { object-position: center 46%; }
+.wall-grid .w2 img { object-position: center 52%; }
+.wall-grid .w3 img { object-position: center 48%; }
+.wall-grid .w4 img { object-position: center 50%; }
+.wall-grid .w5 img { object-position: center 50%; }
+.wall-grid .w6 img { object-position: center 46%; }
 .w1 { grid-column: span 2; grid-row: span 2; }
 .w2 { grid-column: span 2; }
 .w3 { grid-column: span 2; grid-row: span 2; }
@@ -664,21 +675,27 @@ section.s {
   border-top: 1px solid rgba(33,69,207,0.10);
 }
 .footer-watermark {
-  position: absolute; left: 50%; bottom: -10%;
+  position: absolute; left: 50%; bottom: -132px;
   transform: translateX(-50%);
-  width: clamp(720px, 90vw, 1400px); height: auto;
+  width: 1400px; max-width: none; height: auto;
   opacity: 0.06;
   pointer-events: none;
+}
+@media (max-width: 760px) {
+  .footer-watermark {
+    width: 1080px;
+    bottom: -120px;
+  }
 }
 .footer-inner { position: relative; z-index: 1; padding-top: 88px; padding-bottom: 56px; }
 .footer-top {
   display: grid;
-  grid-template-columns: 1.4fr 1fr 1fr 1fr;
-  gap: 40px;
+  grid-template-columns: minmax(260px, 1.4fr) minmax(140px, 1fr) minmax(130px, 1fr) minmax(150px, 1fr);
+  gap: clamp(22px, 3vw, 40px);
   padding-bottom: 56px;
   border-bottom: 1px solid rgba(33,69,207,0.10);
 }
-@media (max-width: 900px) { .footer-top { grid-template-columns: 1fr 1fr; gap: 40px 32px; } }
+@media (max-width: 760px) { .footer-top { grid-template-columns: 1fr 1fr; gap: 40px 32px; } }
 @media (max-width: 480px) { .footer-top { grid-template-columns: 1fr; } }
 .footer-brand { max-width: 400px; }
 .footer-logo {
@@ -874,7 +891,7 @@ section.s {
 }
 </script>
 </head>
-<body>
+<body data-page="home">
 
 <div id="cursor-ring"></div>
 <div id="cursor"></div>
@@ -882,8 +899,8 @@ section.s {
 <!-- NAV -->
 <nav id="nav">
   <a href="/" aria-label="huddle home" class="nav-brand">
-    <img src="/brandweb/wm-white.png" alt="huddle" class="nav-logo on-dark">
-    <img src="/brandweb/wm-blue.png" alt="huddle" class="nav-logo on-light">
+    <img src="/brandweb/wm-white.png" data-file-src="wm-white.png" alt="huddle" class="nav-logo on-dark">
+    <img src="/brandweb/wm-blue.png" data-file-src="wm-blue.png" alt="huddle" class="nav-logo on-light">
   </a>
   <div class="nav-links">
     <a href="#how" class="nav-link">How it works</a>
@@ -1268,12 +1285,12 @@ section.s {
     <p class="editorial-aside on-blue">If they breathe, swim, hop, or fly — they count.</p>
 
     <div class="wall-grid">
-      <div class="w1 reveal"><img src="https://images.unsplash.com/photo-1552053831-71594a27632d?w=900&q=85&auto=format&fit=crop" alt=""></div>
+      <div class="w1 reveal"><img src="https://images.unsplash.com/photo-1552053831-71594a27632d?w=900&q=85&auto=format&fit=crop" alt="Golden retriever"></div>
       <div class="w2 reveal"><img src="https://images.unsplash.com/photo-1535241749838-299277b6305f?w=700&q=85&auto=format&fit=crop" alt="Rabbit"></div>
-      <div class="w3 reveal"><img src="https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?w=900&q=85&auto=format&fit=crop" alt=""></div>
+      <div class="w3 reveal"><img src="https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?w=900&q=85&auto=format&fit=crop" alt="Cat"></div>
       <div class="w4 reveal"><img src="https://images.unsplash.com/photo-1591382386627-349b692688ff?w=700&q=85&auto=format&fit=crop" alt="Parrot"></div>
-      <div class="w5 reveal"><img src="https://images.unsplash.com/photo-1542740348-39501cd6e2b4?w=700&q=85&auto=format&fit=crop" alt="Hedgehog"></div>
-      <div class="w6 reveal"><img src="https://images.unsplash.com/photo-1518020382113-a7e8fc38eac9?w=700&q=85&auto=format&fit=crop" alt=""></div>
+      <div class="w5 reveal"><img src="https://images.unsplash.com/photo-1444464666168-49d633b86797?w=700&q=85&auto=format&fit=crop" alt="Bird"></div>
+      <div class="w6 reveal"><img src="https://images.unsplash.com/photo-1518020382113-a7e8fc38eac9?w=700&q=85&auto=format&fit=crop" alt="Pug"></div>
     </div>
   </div>
 </section>
@@ -1319,11 +1336,11 @@ section.s {
 
 <!-- FOOTER · cream so blue wordmark with eyes is visible -->
 <footer class="footer-wrap">
-  <img src="/brandweb/wm-blue.png" alt="" class="footer-watermark">
+  <img src="/brandweb/wm-blue.png" data-file-src="wm-blue.png" alt="" class="footer-watermark">
   <div class="container footer-inner">
     <div class="footer-top">
       <div class="footer-brand">
-        <img src="/brandweb/wm-coral-shadow.png" alt="huddle" class="footer-logo">
+        <img src="/brandweb/wm-coral-shadow.png" data-file-src="wm-coral-shadow.png" alt="huddle" class="footer-logo">
         <p>An app for every pet — even the ones on the streets. Every pet deserves more. We leave no pet behind.</p>
         <div class="footer-stores">
           <a href="#download" class="btn-store-sm" data-store-placeholder="true">⌘ iOS</a>
@@ -1363,6 +1380,12 @@ section.s {
 </footer>
 
 <script>
+if (window.location.protocol === 'file:') {
+  document.querySelectorAll('img[data-file-src]').forEach(img => {
+    img.src = img.getAttribute('data-file-src');
+  });
+}
+
 /* ─── Custom cursor (desktop only) ─── */
 (function(){
   if (matchMedia('(hover: none), (max-width: 1024px)').matches) return;
@@ -1466,6 +1489,12 @@ document.querySelectorAll('.reveal, .reveal-l, .reveal-r').forEach(el => io.obse
   }
 })();
 </script>
-<script src="/brandweb/huddle-shell.js"></script>
+<script>
+(() => {
+  const shell = document.createElement('script');
+  shell.src = window.location.protocol === 'file:' ? 'huddle-shell.js' : '/brandweb/huddle-shell.js';
+  document.body.appendChild(shell);
+})();
+</script>
 </body>
 </html>
