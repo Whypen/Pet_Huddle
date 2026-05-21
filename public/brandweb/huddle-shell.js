@@ -21,6 +21,7 @@
 
   const NAV = [
     { href: "/", id: "home", label: "Home" },
+    { href: "/#how", id: "how", label: "How it works" },
     { href: "/live-map", id: "live-map", label: "Live Map" },
     { href: "/care", id: "care", label: "Care" },
     { href: "/community", id: "community", label: "Community" },
