@@ -73,6 +73,106 @@ nav.huddle-nav.solid .nav-cta, nav.huddle-nav.scrolled .nav-cta { background: va
 nav.huddle-nav.solid .nav-cta:hover, nav.huddle-nav.scrolled .nav-cta:hover { background: var(--coral); }
 @media (max-width: 800px) { nav.huddle-nav .nav-links { display: none; } }
 
+/* ── HAMBURGER MENU BUTTON ── */
+.nav-menu-btn, nav#nav .nav-menu-btn {
+  background: transparent; border: 0; cursor: pointer;
+  width: 44px; height: 44px; border-radius: 999px;
+  display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
+  margin-left: 6px; padding: 0;
+  transition: background 0.2s var(--ease), transform 0.2s var(--ease);
+}
+.nav-menu-btn span {
+  display: block; width: 22px; height: 2px; border-radius: 2px;
+  background: var(--white); transition: transform 0.3s var(--ease), background 0.2s, opacity 0.2s;
+}
+nav.huddle-nav.solid .nav-menu-btn span,
+nav.huddle-nav.scrolled .nav-menu-btn span,
+nav#nav.solid .nav-menu-btn span,
+nav#nav.scrolled .nav-menu-btn span { background: var(--ink); }
+.nav-menu-btn:hover { background: rgba(255,255,255,0.14); }
+nav.huddle-nav.solid .nav-menu-btn:hover,
+nav.huddle-nav.scrolled .nav-menu-btn:hover,
+nav#nav.solid .nav-menu-btn:hover,
+nav#nav.scrolled .nav-menu-btn:hover { background: rgba(33,69,207,0.08); }
+.nav-menu-btn[aria-expanded="true"] span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+.nav-menu-btn[aria-expanded="true"] span:nth-child(2) { opacity: 0; }
+.nav-menu-btn[aria-expanded="true"] span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+
+/* ── SIDE DRAWER ── */
+.drawer-overlay {
+  position: fixed; inset: 0; background: rgba(14,14,16,0.55);
+  backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+  opacity: 0; pointer-events: none; z-index: 998;
+  transition: opacity 0.32s var(--ease);
+}
+.drawer-overlay.show { opacity: 1; pointer-events: auto; }
+
+.huddle-drawer {
+  position: fixed; top: 0; right: 0; bottom: 0;
+  width: min(420px, 92vw); z-index: 999;
+  background: var(--cream); color: var(--ink);
+  box-shadow: -30px 0 80px -20px rgba(0,0,0,0.35);
+  transform: translateX(100%);
+  transition: transform 0.42s cubic-bezier(0.6, 0, 0.2, 1);
+  display: flex; flex-direction: column;
+  padding: 28px 32px 32px;
+  overflow-y: auto;
+}
+.huddle-drawer.open { transform: translateX(0); }
+
+.drawer-close {
+  background: transparent; border: 0; cursor: pointer;
+  width: 44px; height: 44px; border-radius: 999px;
+  align-self: flex-end; display: inline-flex; align-items: center; justify-content: center;
+  position: relative; padding: 0;
+  transition: background 0.2s var(--ease);
+}
+.drawer-close:hover { background: rgba(33,69,207,0.08); }
+.drawer-close span {
+  position: absolute; width: 20px; height: 2px; border-radius: 2px; background: var(--ink);
+}
+.drawer-close span:first-child { transform: rotate(45deg); }
+.drawer-close span:last-child { transform: rotate(-45deg); }
+
+.drawer-tagline {
+  font-family: "Urbanist", sans-serif;
+  font-size: clamp(20px, 2.4vw, 26px); font-weight: 800;
+  letter-spacing: -0.02em; line-height: 1.15;
+  color: var(--blue-deep);
+  margin: 4px 0 28px;
+  padding-right: 20px;
+}
+
+.drawer-groups { display: flex; flex-direction: column; gap: 28px; flex: 1; }
+.drawer-group h4 {
+  font-size: 11px; font-weight: 800; letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--blue); margin-bottom: 10px;
+}
+.drawer-group ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.drawer-group li a {
+  display: block; padding: 9px 0;
+  font-size: 19px; font-weight: 700; letter-spacing: -0.01em;
+  color: var(--ink); position: relative;
+  transition: color 0.2s var(--ease), padding-left 0.25s var(--ease);
+}
+.drawer-group li a::after {
+  content: "→"; position: absolute; right: 0; top: 50%; transform: translateY(-50%) translateX(-6px);
+  opacity: 0; color: var(--coral); transition: opacity 0.2s var(--ease), transform 0.2s var(--ease);
+}
+.drawer-group li a:hover {
+  color: var(--coral); padding-left: 10px;
+}
+.drawer-group li a:hover::after { opacity: 1; transform: translateY(-50%) translateX(0); }
+
+.drawer-cta {
+  margin-top: 24px;
+  background: var(--blue); color: var(--white);
+  text-align: center; padding: 16px 22px; border-radius: 999px;
+  font-size: 15px; font-weight: 800; letter-spacing: -0.01em;
+  transition: transform 0.25s var(--ease), background 0.2s;
+}
+.drawer-cta:hover { transform: translateY(-2px); background: var(--coral); }
+
 /* ── INNER PAGE HERO ── */
 .page-hero {
   position: relative; padding: 180px 0 clamp(80px, 10vw, 140px);

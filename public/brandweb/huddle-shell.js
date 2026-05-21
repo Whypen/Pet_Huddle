@@ -28,8 +28,8 @@
 
   // NAV ───────────────────────────────────────────────────────
   const brand = h("a", { href: "/", "aria-label": "huddle home", class: "nav-brand" }, [
-    h("img", { src: "wm-white.png", alt: "huddle", class: "nav-logo on-dark" }),
-    h("img", { src: "wm-blue.png",  alt: "huddle", class: "nav-logo on-light" }),
+    h("img", { src: "/brandweb/wm-white.png", alt: "huddle", class: "nav-logo on-dark" }),
+    h("img", { src: "/brandweb/wm-blue.png",  alt: "huddle", class: "nav-logo on-light" }),
   ]);
   const links = h("div", { class: "nav-links" }, NAV.map(n => {
     const a = h("a", { href: n.href, class: "nav-link", text: n.label });
@@ -37,11 +37,93 @@
     return a;
   }));
   const cta = h("a", { href: "/#download", class: "nav-cta", text: "Get the app ↓" });
-  const nav = h("nav", { class: "huddle-nav" + (forceSolid ? " solid" : ""), id: "huddle-nav" }, [brand, links, cta]);
-  body.insertBefore(nav, body.firstChild);
+  const menuBtn = h("button", { type: "button", class: "nav-menu-btn", id: "nav-menu-btn", "aria-label": "Open menu", "aria-controls": "huddle-drawer", "aria-expanded": "false" }, [
+    h("span"), h("span"), h("span"),
+  ]);
+  // Skip injecting the shared nav if the page already has its own inline nav (e.g. home page)
+  const hasInlineNav = !!document.querySelector('nav#nav');
+  let nav = null;
+  if (!hasInlineNav) {
+    nav = h("nav", { class: "huddle-nav" + (forceSolid ? " solid" : ""), id: "huddle-nav" }, [brand, links, cta, menuBtn]);
+    body.insertBefore(nav, body.firstChild);
+    if (!forceSolid) {
+      addEventListener("scroll", () => nav.classList.toggle("scrolled", scrollY > 60), { passive: true });
+    }
+  }
 
-  if (!forceSolid) {
-    addEventListener("scroll", () => nav.classList.toggle("scrolled", scrollY > 60), { passive: true });
+  // SIDE DRAWER ───────────────────────────────────────────────
+  const DRAWER_GROUPS = [
+    { title: "Product", items: [
+      ["/", "Home"],
+      ["/live-map", "Live Map"],
+      ["/community", "Community"],
+      ["/care", "Care"],
+      ["/pet-profiles", "Pet Profiles"],
+      ["/pricing", "Plans & Pricing"],
+    ]},
+    { title: "Company", items: [
+      ["/about", "About huddle"],
+      ["/careers", "Careers"],
+      ["/faq", "FAQ"],
+      ["/knowledge-base", "Knowledge Base"],
+      ["/contact", "Contact"],
+      ["/press", "Press"],
+    ]},
+    { title: "Legal", items: [
+      ["/legal/privacy", "Privacy policy"],
+      ["/legal/terms", "Terms of service"],
+      ["/legal/cookies", "Cookies notice"],
+      ["/legal/community-guidelines", "Community guidelines"],
+      ["/legal/privacy-choices", "Privacy choices"],
+      ["/legal/service-provider-agreement", "Care Service Provider Agreement"],
+      ["/legal/booking-terms", "Care Service Booking Terms"],
+    ]},
+  ];
+  const drawerOverlay = h("div", { class: "drawer-overlay", id: "drawer-overlay" });
+  const drawerClose = h("button", { type: "button", class: "drawer-close", id: "drawer-close", "aria-label": "Close menu" }, [
+    h("span"), h("span"),
+  ]);
+  const drawerTagline = h("p", { class: "drawer-tagline", text: "Every pet deserves more. We leave no pet behind." });
+  const drawerGroups = h("div", { class: "drawer-groups" }, DRAWER_GROUPS.map(g =>
+    h("div", { class: "drawer-group" }, [
+      h("h4", { text: g.title }),
+      h("ul", {}, g.items.map(([href, label]) => h("li", {}, [h("a", { href: href, text: label })]))),
+    ])
+  ));
+  const drawerCTA = h("a", { href: "/#download", class: "drawer-cta", text: "Get the app — free ↓" });
+  const drawer = h("aside", { class: "huddle-drawer", id: "huddle-drawer", role: "dialog", "aria-modal": "true", "aria-label": "Site menu", "aria-hidden": "true" }, [
+    drawerClose, drawerTagline, drawerGroups, drawerCTA,
+  ]);
+  body.appendChild(drawerOverlay);
+  body.appendChild(drawer);
+
+  function openDrawer() {
+    drawer.classList.add("open");
+    drawerOverlay.classList.add("show");
+    document.documentElement.style.overflow = "hidden";
+    if (nav) menuBtn.setAttribute("aria-expanded", "true");
+    drawer.setAttribute("aria-hidden", "false");
+    const inline = document.getElementById("nav-menu-btn-inline");
+    if (inline) inline.setAttribute("aria-expanded", "true");
+  }
+  function closeDrawer() {
+    drawer.classList.remove("open");
+    drawerOverlay.classList.remove("show");
+    document.documentElement.style.overflow = "";
+    if (nav) menuBtn.setAttribute("aria-expanded", "false");
+    drawer.setAttribute("aria-hidden", "true");
+    const inline = document.getElementById("nav-menu-btn-inline");
+    if (inline) inline.setAttribute("aria-expanded", "false");
+  }
+  if (nav) menuBtn.addEventListener("click", openDrawer);
+  drawerClose.addEventListener("click", closeDrawer);
+  drawerOverlay.addEventListener("click", closeDrawer);
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && drawer.classList.contains("open")) closeDrawer(); });
+  // Home page has its own inline nav with id="nav" — wire its menu button too
+  const inlineMenuBtn = document.querySelector('#nav .nav-menu-btn');
+  if (inlineMenuBtn) {
+    inlineMenuBtn.id = "nav-menu-btn-inline";
+    inlineMenuBtn.addEventListener("click", openDrawer);
   }
 
   // FOOTER ────────────────────────────────────────────────────
@@ -52,8 +134,8 @@
     ]);
   }
   const brandCol = h("div", { class: "footer-brand" }, [
-    h("img", { src: "wm-coral-shadow.png", alt: "huddle", class: "footer-logo" }),
-    h("p", { text: "Pet safety, local pet community, trusted pet care, and pet records — all in one app. Built in Hong Kong for pet people." }),
+    h("img", { src: "/brandweb/wm-coral-shadow.png", alt: "huddle", class: "footer-logo" }),
+    h("p", { text: "An app for every pet — even the ones on the streets. Every pet deserves more. We leave no pet behind." }),
     h("div", { class: "footer-stores" }, [
       h("a", { href: "/#download", class: "btn-store-sm", text: "⌘ iOS" }),
       h("a", { href: "/#download", class: "btn-store-sm", text: "▸ Android" }),
@@ -63,8 +145,7 @@
     brandCol,
     col("Product", [
       ["/live-map", "Live Map"],
-      ["/live-map#broadcast", "Broadcast Alerts"],
-      ["/community", "Social Forum"],
+      ["/community#social", "Social Forum"],
       ["/community#discover", "Discover & Community"],
       ["/care", "Care"],
       ["/pet-profiles", "Pet Profiles"],
@@ -88,14 +169,18 @@
     ]),
   ]);
   const bottom = h("div", { class: "footer-bottom" }, [
-    h("span", { text: "© 2026 huddle. Built in Hong Kong for pet people." }),
+    h("span", { text: "© 2026 huddle. No pet left behind." }),
     h("span", {}, [h("a", { href: "mailto:support@huddle.pet", style: "color:inherit", text: "support@huddle.pet" })]),
   ]);
-  const watermark = h("img", { src: "wm-blue.png", alt: "", class: "watermark" });
+  const watermark = h("img", { src: "/brandweb/wm-blue.png", alt: "", class: "watermark" });
   const inner = h("div", { class: "container footer-inner" }, [top, bottom]);
   const strip = h("div", { class: "coral-strip" });
-  const footer = h("footer", { class: "huddle-footer" }, [watermark, inner, strip]);
-  body.appendChild(footer);
+  // Skip footer if page already has an inline footer (e.g. home page)
+  const hasInlineFooter = !!document.querySelector('footer.footer-wrap');
+  if (!hasInlineFooter) {
+    const footer = h("footer", { class: "huddle-footer" }, [watermark, inner, strip]);
+    body.appendChild(footer);
+  }
 
   // SCROLL REVEAL ─────────────────────────────────────────────
   const io = new IntersectionObserver(entries => {
