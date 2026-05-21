@@ -142,7 +142,7 @@
     ]);
   }
   const brandCol = h("div", { class: "footer-brand" }, [
-    h("img", { src: asset("wm-coral-shadow.png"), alt: "huddle", class: "footer-logo" }),
+    h("img", { src: asset("wm-coral-shadow-alt.png"), alt: "huddle", class: "footer-logo" }),
     h("p", { text: "An app for every pet — even the ones on the streets. Every pet deserves more. We leave no pet behind." }),
     h("div", { class: "footer-stores" }, [
       h("a", { href: "/#download", class: "btn-store-sm", text: "⌘ iOS" }),
