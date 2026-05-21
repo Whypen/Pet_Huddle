@@ -58,146 +58,37 @@
       ]
     }
   ],
-  "rewrites": [
+  "routes": [
+    { "src": "^/$", "dest": "/brandweb/huddle-v5.html" },
+    { "src": "^/care/?$", "dest": "/brandweb/care.html" },
+    { "src": "^/community/?$", "dest": "/brandweb/community.html" },
+    { "src": "^/pricing/?$", "dest": "/brandweb/pricing.html" },
+    { "src": "^/live-map/?$", "dest": "/brandweb/live-map.html" },
+    { "src": "^/pet-profiles/?$", "dest": "/brandweb/pet-profiles.html" },
+    { "src": "^/about/?$", "dest": "/brandweb/about.html" },
+    { "src": "^/press/?$", "dest": "/brandweb/press.html" },
+    { "src": "^/careers/?$", "dest": "/brandweb/careers.html" },
+    { "src": "^/contact/?$", "dest": "/brandweb/contact.html" },
+    { "src": "^/faq/?$", "dest": "/brandweb/faq.html" },
+    { "src": "^/knowledge-base/?$", "dest": "/brandweb/knowledge-base.html" },
+    { "src": "^/legal/terms/?$", "dest": "/brandweb/terms.html" },
+    { "src": "^/legal/privacy/?$", "dest": "/brandweb/privacy.html" },
+    { "src": "^/legal/cookies/?$", "dest": "/brandweb/cookies.html" },
+    { "src": "^/legal/community-guidelines/?$", "dest": "/brandweb/community-guidelines.html" },
+    { "src": "^/legal/booking-terms/?$", "dest": "/brandweb/booking-terms.html" },
+    { "src": "^/legal/service-provider-agreement/?$", "dest": "/brandweb/service-provider-agreement.html" },
+    { "src": "^/legal/privacy-choices/?$", "dest": "/brandweb/privacy-choices.html" },
+    { "src": "^/share/([^/]+)$", "dest": "/api/share?id=$1" },
+    { "handle": "filesystem" },
     {
-      "source": "/share/:id",
-      "destination": "/api/share?id=:id"
+      "src": "^/(auth|auth/callback|reset-password|reset-password-direct|reset-password-inline|reset-password-inline-healthaction|update-password|support|verify|turnstile-health|turnstile-health-resetaction)(?:/)?$",
+      "dest": "/index.html"
     },
-    {
-      "source": "/",
-      "destination": "/brandweb/huddle-v5.html"
-    },
-    {
-      "source": "/care",
-      "destination": "/brandweb/care.html"
-    },
-    {
-      "source": "/community",
-      "destination": "/brandweb/community.html"
-    },
-    {
-      "source": "/pricing",
-      "destination": "/brandweb/pricing.html"
-    },
-    {
-      "source": "/live-map",
-      "destination": "/brandweb/live-map.html"
-    },
-    {
-      "source": "/pet-profiles",
-      "destination": "/brandweb/pet-profiles.html"
-    },
-    {
-      "source": "/about",
-      "destination": "/brandweb/about.html"
-    },
-    {
-      "source": "/press",
-      "destination": "/brandweb/press.html"
-    },
-    {
-      "source": "/careers",
-      "destination": "/brandweb/careers.html"
-    },
-    {
-      "source": "/contact",
-      "destination": "/brandweb/contact.html"
-    },
-    {
-      "source": "/faq",
-      "destination": "/brandweb/faq.html"
-    },
-    {
-      "source": "/knowledge-base",
-      "destination": "/brandweb/knowledge-base.html"
-    },
-    {
-      "source": "/legal/terms",
-      "destination": "/brandweb/terms.html"
-    },
-    {
-      "source": "/legal/privacy",
-      "destination": "/brandweb/privacy.html"
-    },
-    {
-      "source": "/legal/cookies",
-      "destination": "/brandweb/cookies.html"
-    },
-    {
-      "source": "/legal/community-guidelines",
-      "destination": "/brandweb/community-guidelines.html"
-    },
-    {
-      "source": "/legal/booking-terms",
-      "destination": "/brandweb/booking-terms.html"
-    },
-    {
-      "source": "/legal/service-provider-agreement",
-      "destination": "/brandweb/service-provider-agreement.html"
-    },
-    {
-      "source": "/legal/privacy-choices",
-      "destination": "/brandweb/privacy-choices.html"
-    },
-    {
-      "source": "/auth",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/auth/callback",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/reset-password",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/reset-password-direct",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/reset-password-inline",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/reset-password-inline-healthaction",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/update-password",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/support",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/verify",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/turnstile-health",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/turnstile-health-resetaction",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/signup/:path*",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/join/:code",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/admin/:path*",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/admin",
-      "destination": "/index.html"
-    }
+    { "src": "^/signup(?:/.*)?$", "dest": "/index.html" },
+    { "src": "^/join/[^/]+/?$", "dest": "/index.html" },
+    { "src": "^/admin(?:/.*)?$", "dest": "/index.html" },
+    { "src": "^/assets/.*$", "status": 404 },
+    { "src": "^/fonts/.*$", "status": 404 },
+    { "src": "^/.*\\..*$", "status": 404 }
   ]
 }
