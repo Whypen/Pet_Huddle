@@ -213,7 +213,7 @@ nav#nav.scrolled .nav-menu-btn:hover { background: rgba(33,69,207,0.08); }
 
 /* ── INNER PAGE HERO ── */
 .page-hero {
-  position: relative; padding: 180px 0 clamp(80px, 10vw, 140px);
+  position: relative; padding: 180px 0 calc(clamp(88px, 11vw, 152px) + clamp(60px, 7vw, 110px));
   background: var(--blue-deep); color: var(--white);
   overflow: hidden;
 }
@@ -240,14 +240,14 @@ nav#nav.scrolled .nav-menu-btn:hover { background: rgba(33,69,207,0.08); }
 
 /* Bottom wave after page hero */
 .hero-wave-out {
-  position: relative; background: var(--cream); margin-top: -1px;
-  background-size: cover;
-  background-position: var(--hero-wave-position, center);
+  position: relative;
+  background: transparent;
+  margin-top: calc(-1 * clamp(60px, 7vw, 110px));
+  pointer-events: none;
+  z-index: 2;
 }
 .hero-wave-out svg { display: block; width: 100%; height: clamp(60px, 7vw, 110px); }
-.hero-wave-out.has-hero-image svg path {
-  fill: rgba(20,46,153,0.84);
-}
+.hero-wave-out svg path { fill: var(--cream); }
 
 /* ── EYEBROW + TITLES ── */
 .eyebrow {
