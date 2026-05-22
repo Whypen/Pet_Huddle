@@ -148,6 +148,15 @@
   background: var(--coral); color: var(--white);
   font-size: 9px; font-weight: 800; padding: 2px 7px; border-radius: 999px;
 }
+/* filter pills (top-left below bar) */
+.lm-filters { position: absolute; top: 40px; left: 9px; z-index: 9; display: flex; gap: 5px; }
+.lm-filters .lmf {
+  width: 24px; height: 24px; border-radius: 50%;
+  background: rgba(255,255,255,0.96); display: grid; place-items: center;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+  font-size: 10px; color: var(--ink);
+}
+.lm-filters .lmf.active { background: var(--blue); color: var(--white); }
 /* pins */
 .lm-pin { position: absolute; transform: translate(-50%,-100%); display: flex; flex-direction: column; align-items: center; z-index: 5; }
 .lm-pin-body {
@@ -175,6 +184,32 @@
 .lm-card .lm-ico { width: 26px; height: 26px; border-radius: 7px; background: rgba(255,127,80,0.18); display: grid; place-items: center; flex-shrink: 0; font-size: 12px; }
 .lm-card .lm-lbl { font-size: 10.5px; font-weight: 800; color: var(--ink); }
 .lm-card .lm-sub { font-size: 9.5px; font-weight: 500; color: var(--fg2); margin-top: 1px; }
+
+/* ── Pin detail callout (real app screen) ── */
+.pin-detail {
+  display: grid; grid-template-columns: minmax(0, 0.9fr) 1fr;
+  gap: clamp(40px, 6vw, 80px); align-items: center;
+  margin-top: clamp(80px, 10vw, 120px);
+  padding-top: clamp(56px, 7vw, 84px);
+  border-top: 1px solid rgba(255,255,255,0.10);
+}
+@media (max-width: 860px) { .pin-detail { grid-template-columns: 1fr; gap: 32px; } }
+.app-phone {
+  position: relative; width: 100%; max-width: 280px;
+  aspect-ratio: 9 / 18.5;
+  border-radius: 36px; padding: 8px;
+  background: var(--ink);
+  box-shadow: 0 40px 80px -30px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.06) inset;
+  transition: transform 0.45s cubic-bezier(0.25, 1, 0.5, 1);
+  overflow: hidden;
+  margin: 0 auto;
+}
+.app-phone img { width: 100%; height: 100%; object-fit: cover; border-radius: 28px; display: block; }
+.app-phone:hover { transform: translateY(-6px); }
+.app-phone .notch {
+  position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
+  width: 38%; height: 18px; background: var(--ink); border-radius: 0 0 14px 14px; z-index: 2;
+}
 </style>
 </head>
 <body data-page="live-map" data-nav="solid">
@@ -276,6 +311,12 @@
                 <span>Live Map</span>
                 <span class="lm-count">4 pins nearby</span>
               </div>
+              <!-- Filter pills -->
+              <div class="lm-filters" aria-hidden="true">
+                <div class="lmf active">🔔</div>
+                <div class="lmf">👥</div>
+                <div class="lmf">↻</div>
+              </div>
               <!-- Pins -->
               <div class="lm-pin lost" style="top:44%; left:26%;">
                 <span class="lm-pulse"></span>
@@ -308,6 +349,22 @@
             </div>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- Tap any pin · real app screen -->
+    <div class="pin-detail reveal">
+      <div class="reveal-l">
+        <figure class="app-phone">
+          <span class="notch"></span>
+          <img src="/brandweb/screenshots/iOS_Alertdetails.png" alt="huddle pin detail — Caution: loose leash clip">
+        </figure>
+      </div>
+      <div class="reveal-r">
+        <div class="eyebrow on-blue">Tap any pin</div>
+        <h3 class="s-title" style="margin-top:14px;color:var(--white);font-size:clamp(28px,3vw,40px)">Read the full<br>report. Respond<br><span style="color:var(--coral)">in two taps.</span></h3>
+        <p style="font-size:16px;line-height:1.55;color:rgba(255,255,255,0.85);margin-top:20px">Every pin opens a full report — photo, location, what happened, when it happened, who dropped it, and what people nearby are saying. Like, comment, follow the situation, or jump straight to the Social Forum thread for wider reach.</p>
+        <p style="font-size:14px;color:rgba(255,255,255,0.6);margin-top:16px;letter-spacing:0.02em">Actual app screen · example pin shown for preview.</p>
       </div>
     </div>
   </div>

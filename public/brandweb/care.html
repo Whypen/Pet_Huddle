@@ -223,6 +223,38 @@
 }
 .editorial-aside-p.on-blue { color: rgba(255,255,255,0.88); opacity: 1; }
 .editorial-aside-p.on-blue::before { color: var(--lime); }
+
+/* ── Real app-phone duo (Browse → Tap story) ── */
+.app-duo {
+  display: grid; grid-template-columns: 1fr 1fr; gap: clamp(24px, 4vw, 56px);
+  align-items: end; justify-items: center;
+  max-width: 760px; margin: 0 auto;
+}
+@media (max-width: 720px) { .app-duo { grid-template-columns: 1fr; gap: 32px; } }
+.app-phone {
+  position: relative; width: 100%; max-width: 280px;
+  aspect-ratio: 9 / 18.5;
+  border-radius: 36px; padding: 8px;
+  background: var(--ink);
+  box-shadow: 0 40px 80px -30px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.06) inset;
+  transition: transform 0.45s cubic-bezier(0.25, 1, 0.5, 1);
+  overflow: hidden;
+}
+.app-phone img { width: 100%; height: 100%; object-fit: cover; border-radius: 28px; display: block; }
+.app-phone.left  { transform: translateY(20px) rotate(-3deg); }
+.app-phone.right { transform: translateY(0)     rotate(3deg); }
+.app-phone:hover { transform: translateY(-6px) rotate(0deg); }
+.app-phone .notch {
+  position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
+  width: 38%; height: 18px; background: var(--ink); border-radius: 0 0 14px 14px; z-index: 2;
+}
+.app-caption {
+  display: inline-flex; align-items: center; gap: 6px; margin-top: 18px;
+  background: rgba(255,255,255,0.10); color: var(--white);
+  padding: 6px 12px; border-radius: 999px;
+  font-size: 12px; font-weight: 700; letter-spacing: 0.02em;
+}
+.app-caption .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--lime); }
 </style>
 </head>
 <body data-page="care" data-nav="solid">
@@ -315,33 +347,28 @@
   </svg>
 </div>
 
-<!-- Provider example -->
+<!-- Real screens · browse → tap story -->
 <section class="s deep">
   <div class="container">
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:clamp(48px,7vw,96px);align-items:center">
-      <div class="reveal-l">
-        <div class="eyebrow on-blue">Carer profile</div>
-        <h2 class="s-title" style="margin-top:16px;color:var(--white)">Know who's<br>caring for your pet<br><span style="color:var(--coral)">before you book.</span></h2>
-        <p style="font-size:17px;line-height:1.55;color:rgba(255,255,255,0.85);margin-top:24px">Every profile shows their verification status, the Groups they're in, what they've posted in the Forum, how fast they reply, and reviews from people who've actually booked. Read the room before you hand over the keys.</p>
-        <p style="font-size:14px;color:rgba(255,255,255,0.6);margin-top:20px;letter-spacing:0.02em">Example profile — anonymised for preview.</p>
-      </div>
-      <div class="reveal-r">
-        <div class="profile-mock">
-          <div class="avatar">M</div>
-          <div class="name">Marco</div>
-          <div class="meta">Sai Ying Pun · Sitter, walker, boarder</div>
-          <div class="badges">
-            <span class="badge verified">✓ Verified</span>
-            <span class="badge">Phone confirmed</span>
-            <span class="badge gold">huddle Gold</span>
-          </div>
-          <div class="stat-row">
-            <div class="stat"><div class="stat-num">4.9★</div><div class="stat-lbl">126 reviews</div></div>
-            <div class="stat"><div class="stat-num">~12m</div><div class="stat-lbl">Replies in</div></div>
-            <div class="stat"><div class="stat-num">3yr</div><div class="stat-lbl">On huddle</div></div>
-          </div>
-        </div>
-      </div>
+    <div class="reveal" style="max-width:780px;text-align:center;margin:0 auto 48px">
+      <div class="eyebrow on-blue">Inside huddle Care</div>
+      <h2 class="s-title" style="margin-top:16px;color:var(--white)">Browse. Tap.<br><span style="color:var(--coral)">Know who's caring.</span></h2>
+      <p style="font-size:17px;line-height:1.55;color:rgba(255,255,255,0.85);margin-top:20px">Real verified carers near you. Real photos. Real reviews from people who've actually booked. Tap any profile to see who they are before you hand over the keys.</p>
+    </div>
+
+    <div class="app-duo reveal">
+      <figure class="app-phone left">
+        <span class="notch"></span>
+        <img src="/brandweb/screenshots/iOS_Care1.png" alt="huddle Care — browse verified pet carers near you">
+      </figure>
+      <figure class="app-phone right">
+        <span class="notch"></span>
+        <img src="/brandweb/screenshots/iOS_Carer1.png" alt="huddle Care — Pet Carer profile">
+      </figure>
+    </div>
+
+    <div style="text-align:center;margin-top:36px">
+      <span class="app-caption"><span class="dot"></span> Actual app screens · names anonymised for preview</span>
     </div>
   </div>
 </section>

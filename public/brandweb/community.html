@@ -110,6 +110,27 @@
 /* ── Feature media hover micro-zoom ── */
 .feat-media { transition: transform 0.35s var(--ease); }
 .feat-row:hover .feat-media { transform: scale(1.025); }
+
+/* ── Real app phone (single, in feat-media slots) ── */
+.feat-phone-wrap { display: flex; justify-content: center; align-items: center; padding: 24px 0; }
+.app-phone {
+  position: relative; width: 100%; max-width: 280px;
+  aspect-ratio: 9 / 18.5;
+  border-radius: 36px; padding: 8px;
+  background: var(--ink);
+  box-shadow: 0 40px 80px -30px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.06) inset;
+  transition: transform 0.45s cubic-bezier(0.25, 1, 0.5, 1);
+  overflow: hidden;
+}
+.app-phone img,
+.app-phone video { width: 100%; height: 100%; object-fit: cover; border-radius: 28px; display: block; background: var(--cream); }
+.app-phone:hover { transform: translateY(-6px) rotate(0deg); }
+.app-phone.tilt-l { transform: rotate(-3deg); }
+.app-phone.tilt-r { transform: rotate(3deg); }
+.app-phone .notch {
+  position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
+  width: 38%; height: 18px; background: var(--ink); border-radius: 0 0 14px 14px; z-index: 2;
+}
 </style>
 </head>
 <body data-page="community" data-nav="solid">
@@ -149,7 +170,17 @@
         </div>
       </div>
       <div class="reveal-r">
-        <div class="feat-media" style="background-image:url('https://images.pexels.com/photos/20883960/pexels-photo-20883960.jpeg?auto=compress&cs=tinysrgb&w=1200&q=85');background-size:cover;background-position:center"></div>
+        <div class="feat-phone-wrap">
+          <figure class="app-phone tilt-l">
+            <span class="notch"></span>
+            <video
+              src="/brandweb/screenshots/iOS_Social_Video.mp4"
+              poster="/brandweb/screenshots/iOS_Social_US.png"
+              autoplay muted loop playsinline preload="metadata"
+              aria-label="huddle Social Forum — local pet community posts">
+            </video>
+          </figure>
+        </div>
       </div>
     </div>
 
@@ -183,7 +214,12 @@
         </div>
       </div>
       <div class="reveal-r">
-        <div class="feat-media" style="background-image:url('https://images.pexels.com/photos/4479542/pexels-photo-4479542.jpeg?auto=compress&cs=tinysrgb&w=1200&q=85');background-size:cover;background-position:center"></div>
+        <div class="feat-phone-wrap">
+          <figure class="app-phone tilt-r">
+            <span class="notch"></span>
+            <img src="/brandweb/screenshots/iOS_Group_US.png" alt="huddle Groups — public and private pet groups near you">
+          </figure>
+        </div>
       </div>
     </div>
 
