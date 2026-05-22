@@ -1,5 +1,5 @@
 /* huddle shell — injects shared nav + footer.
-   Page must declare <body data-page="home|about|care|live-map|community|pet-profiles|pricing|careers|faq|contact|legal">
+   Page must declare <body data-page="home|about|care|live-map|community|pet-profiles|pricing|faq|contact|legal">
    Optional: data-nav="solid" forces light nav at top (non-hero pages). */
 (function () {
   const body = document.body;
@@ -66,7 +66,6 @@
     ]},
     { title: "Company", items: [
       ["/about", "About huddle"],
-      ["/careers", "Careers"],
       ["/faq", "FAQ"],
       ["/contact", "Contact"],
     ]},
@@ -160,7 +159,6 @@
     ]),
     col("Company", [
       ["/about", "About huddle"],
-      ["/careers", "Careers"],
       ["/faq", "FAQ"],
       ["/contact", "Contact"],
     ]),
@@ -194,7 +192,7 @@
   }, { threshold: 0.12 });
   document.querySelectorAll(".reveal, .reveal-l, .reveal-r").forEach(el => io.observe(el));
 
-  // COOKIE CONSENT (PDPO HK + GDPR EEA + ePrivacy) ─────────────
+  // COOKIE CONSENT (regional privacy rules + GDPR EEA + ePrivacy) ─────────────
   // Compliance principles applied:
   //   • Non-essential cookies blocked until explicit opt-in (no pre-ticked boxes)
   //   • "Reject" must be as prominent as "Accept" (no dark patterns)

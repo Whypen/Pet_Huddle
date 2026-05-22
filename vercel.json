@@ -67,7 +67,7 @@
     { "src": "^/pet-profiles/?$", "dest": "/brandweb/pet-profiles.html" },
     { "src": "^/about/?$", "dest": "/brandweb/about.html" },
     { "src": "^/press/?$", "dest": "/brandweb/press.html" },
-    { "src": "^/careers/?$", "dest": "/brandweb/careers.html" },
+    { "src": "^/careers/?$", "dest": "/brandweb/huddle-v5.html" },
     { "src": "^/contact/?$", "dest": "/brandweb/contact.html" },
     { "src": "^/faq/?$", "dest": "/brandweb/faq.html" },
     { "src": "^/knowledge-base/?$", "dest": "/brandweb/knowledge-base.html" },

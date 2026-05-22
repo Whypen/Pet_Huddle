@@ -375,7 +375,7 @@ section.s.lime .eyebrow { color: var(--ink); }
 .huddle-footer .footer-bottom { padding-top: 32px; display: flex; justify-content: space-between; align-items: center; font-size: 12.5px; color: var(--fg2); flex-wrap: wrap; gap: 12px; }
 .huddle-footer .coral-strip { height: 8px; background: var(--coral); width: 100%; }
 
-/* ── COOKIE CONSENT (PDPO HK + GDPR EEA + ePrivacy) ── */
+/* ── COOKIE CONSENT (regional privacy rules + GDPR EEA + ePrivacy) ── */
 .consent-banner {
   position: fixed; left: 16px; right: 16px; bottom: 16px; z-index: 9000;
   background: var(--white); border-radius: 18px;
