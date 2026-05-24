@@ -1,6 +1,7 @@
 const PUBLIC_EXACT_PATHS = new Set([
   "/auth",
   "/auth/callback",
+  "/signupname",
   "/reset-password",
   "/reset-password-direct",
   "/reset-password-inline",

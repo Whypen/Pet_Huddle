@@ -19,6 +19,7 @@ export const ROUTE_MANIFEST: ReadonlyArray<string> = [
   "/auth/callback",
   "/signup/dob",
   "/signup/name",
+  "/signupname",
   "/signup/credentials",
   "/signup/verify",
   "/signup/email-confirmation",
