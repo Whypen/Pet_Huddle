@@ -1,4 +1,3 @@
-import huddleFullLogo from "@/assets/huddle full logo.png";
 import huddleVideoFallback from "@/assets/huddle video fallback.png";
 import huddleVideo from "@/assets/huddle video.mp4";
 
@@ -7,8 +6,7 @@ const SignupContinueInApp = () => (
     <section className="w-full max-w-[360px] flex flex-col items-center text-center">
       <div className="relative w-[180px] h-[148px] overflow-hidden bg-white">
         <img
-          alt=""
-          aria-hidden="true"
+          alt="Huddle"
           className="absolute inset-0 m-auto h-[180px] w-[180px] object-contain"
           src={huddleVideoFallback}
         />
@@ -23,8 +21,7 @@ const SignupContinueInApp = () => (
           src={huddleVideo}
         />
       </div>
-      <img alt="huddle" className="mt-1 h-auto w-[142px] object-contain" src={huddleFullLogo} />
-      <h1 className="mt-10 text-[28px] font-extrabold leading-tight text-[#424965]">
+      <h1 className="mt-12 text-[28px] font-extrabold leading-tight text-[#424965]">
         Continue sign-up in the app
       </h1>
       <p className="mt-3 text-[16px] font-medium leading-relaxed text-[#8c91a7]">
