@@ -1,3 +1,4 @@
+import huddleBlueWordmark from "@/assets/huddle-blue.png";
 import huddleVideoFallback from "@/assets/huddle video fallback.png";
 import huddleVideo from "@/assets/huddle video.mp4";
 
@@ -21,7 +22,8 @@ const SignupContinueInApp = () => (
           src={huddleVideo}
         />
       </div>
-      <h1 className="mt-12 text-[28px] font-extrabold leading-tight text-[#424965]">
+      <img alt="huddle" className="mt-1 h-auto w-[142px] object-contain" src={huddleBlueWordmark} />
+      <h1 className="mt-10 text-[28px] font-extrabold leading-tight text-[#424965]">
         Continue sign-up in the app
       </h1>
       <p className="mt-3 text-[16px] font-medium leading-relaxed text-[#8c91a7]">
