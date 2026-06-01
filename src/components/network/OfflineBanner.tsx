@@ -54,7 +54,7 @@ export const OfflineBanner = () => {
     if (!isServerReachable) {
       return {
         icon: <CloudOff className="w-4 h-4" />,
-        message: "Maintenance mode",
+        message: "Connection check failed",
         bgColor: "bg-orange-500",
         textColor: "text-orange-900",
       };
