@@ -364,7 +364,7 @@
       "name": "How does huddle verify Pet Carers and other providers?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "huddle uses identity verification as a core trust layer for all providers, and requires professional credential submission for Licensed Medical Care listings. Every provider completes huddle's three-step identity verification — phone OTP, camera liveness check, and card validation — before being listed in huddle Care. For Licensed Medical Care specifically, providers must submit a professional credential with licence number, issuing body, and expiry date. huddle attempts to match this against external registries, certificate databases, professional organisations, and licensed directories. A Verified credential badge means a match was found; Self-declared means the provider submitted the details but a registry match could not be confirmed. Verified badges reflect a match at the time of submission only and do not guarantee current registration, conduct, or fitness for the care you require."
+        "text": "huddle uses identity verification as a core trust layer for all providers, and requires professional credential submission for Licensed Medical Care listings. Every provider completes huddle's identity verification — phone OTP, camera liveness check, ID/Passport verification, and payment method confirmation — before being listed in huddle Care. For Licensed Medical Care specifically, providers must submit a professional credential with licence number, issuing body, and expiry date. huddle attempts to match this against external registries, certificate databases, professional organisations, and licensed directories. A Verified credential badge means a match was found; Self-declared means the provider submitted the details but a registry match could not be confirmed. Verified badges reflect a match at the time of submission only and do not guarantee current registration, conduct, or fitness for the care you require."
       }
     },
     {
@@ -584,7 +584,7 @@
       }
     }    ,
     {"@type":"Question","name":"How do I sign in to huddle?","acceptedAnswer":{"@type":"Answer","text":"Sign up with email and a password, or use Sign in with Apple. Once your account exists, you can enable Biometric Sign In (Face ID or Touch ID) for daily access on your device, and turn on two-factor authentication (2FA) for extra security. Biometric credentials stay on your device only and are never sent to huddle."}},
-    {"@type":"Question","name":"What does huddle identity verification actually check?","acceptedAnswer":{"@type":"Answer","text":"Identity verification on huddle is a three-step flow: (1) phone verification via SMS one-time code, (2) human liveness check via a short camera pose sequence (centre, left, right) to confirm a real person, (3) card check through our payment partner — huddle stores only card brand and last four digits, plus your legal name. Huddle does not ask for passports, identity cards, or driver's licences."}},
+    {"@type":"Question","name":"What does huddle identity verification actually check?","acceptedAnswer":{"@type":"Answer","text":"Identity verification on huddle is a four-step flow: (1) phone verification via SMS one-time code, (2) human liveness check via a short camera pose sequence (centre, left, right) to confirm a real person, (3) ID/Passport verification via a government-issued document to confirm legal identity, (4) payment method confirmation through our payment partner. Identity verification is required to become a Pet Carer or create a Group."}},
     {"@type":"Question","name":"Can I use huddle if I don't have a pet yet?","acceptedAnswer":{"@type":"Answer","text":"Yes. huddle supports two profile types: Pet Parent (for people with one or more pets) and Animal Friend (No Pet) for people who love animals but do not currently have a pet of their own. Animal Friends can use the Social feed, join Groups, follow Pet Profiles of friends, volunteer with rescues, and offer help on the Live Map."}},
     {"@type":"Question","name":"What is the difference between a Wave and a Star on huddle?","acceptedAnswer":{"@type":"Answer","text":"Both are ways to reach out to a huddle member you don't already know. Wave is a casual, free hello. Star is a more intentional outreach, limited per plan: Free (free allowance), huddle+ (4/month), huddle Gold (10/month). Stars surface as priority connections in the recipient's inbox. Both protect everyone from spam outreach."}},
     {"@type":"Question","name":"What are a Care Scope and a Start PIN on huddle?","acceptedAnswer":{"@type":"Answer","text":"The Care Scope is the agreement between you and the Pet Carer on rate, dates, and care details, confirmed in-app before payment. The Start PIN is a short code you share with the Pet Carer at handoff to officially start the booking. Sharing the PIN records your handoff consent. The booking only enters in-progress once the Pet Carer submits the valid Start PIN plus the required handoff photo and provider confirmation."}},
@@ -715,13 +715,14 @@
   <details>
     <summary>What does huddle identity verification actually check?</summary>
     <div class="answer">
-      <p>Identity verification on huddle is a three-step flow, completed in this order inside the app:</p>
+      <p>Identity verification on huddle is a four-step flow, completed in this order inside the app:</p>
       <ul>
         <li><strong>1. Phone verification</strong> — confirm your phone number via a one-time SMS code.</li>
         <li><strong>2. Human liveness check</strong> — a short camera pose check (centre, left, right) confirms you are a real person in front of the device. Camera-based liveness data is processed only to confirm presence and help prevent fraud. Huddle does not store raw facial recognition templates or biometric identifiers after verification is complete.</li>
-        <li><strong>3. Card check</strong> — through our payment partner, huddle validates a real card. Only the card brand and last four digits are stored. Your legal name is captured at this step.</li>
+        <li><strong>3. ID/Passport verification</strong> — a government-issued document (national ID or passport) is checked to confirm legal identity. Document data is processed for verification only.</li>
+        <li><strong>4. Payment method confirmation</strong> — through our payment partner, huddle confirms a valid payment method. No anonymous accounts at the trust layer.</li>
       </ul>
-      <p>Huddle does not ask for passports, identity cards, or driver's licences.</p>
+      <p>Identity verification is required to become a Pet Carer or create a Group. Other huddle features (Social Forum, Discover, Live Map pin drops) do not require it.</p>
     </div>
   </details>
   <details>
@@ -1253,7 +1254,7 @@
       <div class="answer">
         <p>huddle uses identity verification as a core trust layer for all providers, and requires professional credential submission for Licensed Medical Care listings — giving pet owners more accountability than open listings with limited or no verification.</p>
         <ul>
-          <li>Every provider completes huddle's three-step identity verification — <strong>phone OTP</strong>, <strong>camera liveness check</strong>, and <strong>card validation</strong> — before being listed in huddle Care.</li>
+          <li>Every provider completes huddle's identity verification — <strong>phone OTP</strong>, <strong>camera liveness check</strong>, <strong>ID/Passport verification</strong>, and <strong>payment method confirmation</strong> — before being listed in huddle Care.</li>
           <li>For <strong>Licensed Medical Care</strong> specifically, providers must submit a professional credential with licence number, issuing body, and expiry date. huddle attempts to match this against external registries, certificate databases, professional organisations, and licensed directories. A <strong>Verified</strong> credential badge means a match was found; <strong>Self-declared</strong> means the provider submitted the details but a registry match could not be confirmed.</li>
           <li>Professional credential badges are shown on provider profiles. Verified badges reflect a match at the time of submission only and do not guarantee current registration, conduct, or fitness for the care you require.</li>
         </ul>
