@@ -33,7 +33,7 @@ const privacy: NativeLegalPageContent = {
         "Account information: email address, password credentials, date of birth, and phone number.",
         "Sign-in information: where you use Apple Sign-In, the Apple subject identifier and any email Apple provides. Huddle receives only what Apple shares, which may be a private relay address.",
         "Profile and pet information: display name, photos, social handle, bio, location name, pet name, species, date of birth, weight, photos, and publicly shared pet details.",
-        "Identity verification data: legal name and card brand and last four digits processed via Stripe for card checks; liveness or human-presence data captured via the device camera to confirm a real person is present and to prevent fraud. Huddle does not store raw facial templates or biometric identifiers after verification completes.",
+        "Identity verification data: legal name, government-issued ID or passport document data, payment method confirmation through our payment partner, and liveness or human-presence data captured via the device camera to confirm a real person is present and to prevent fraud. Document data is processed for verification only. Huddle does not store raw facial templates or biometric identifiers after verification completes.",
         "Security credentials: two-factor authentication (TOTP) enrolment status. Biometric credentials (Face ID, Touch ID) are stored on your device only and are never transmitted to Huddle.",
         "Content and communications: messages, social posts, comments, media uploads, care booking details, handoff records, Start PIN events, mid-care photos, check-in submissions, emergency contact, care instructions, and medication, allergy, and behaviour notes submitted in bookings.",
         "Payment and subscription data: subscription tier and billing status, billing events, refund and dispute records, and limited payment metadata. Raw card numbers are not stored by Huddle.",
@@ -104,6 +104,13 @@ const privacy: NativeLegalPageContent = {
         "Depending on applicable law, you may have rights to access, correct, delete, restrict, object to, or receive a copy of your personal information, to withdraw consent where processing is consent-based, and to opt out of certain marketing or advertising uses. To exercise these rights, see Privacy Choices.",
       ],
     },
+    {
+      title: "10. Deleting your account",
+      body: [
+        "You can delete your Huddle account at any time from Account → Delete Account in the app. When you delete your account, your profile, photos, posts, pets, chats, and uploaded content are permanently removed, and your email is removed from Huddle's mailing lists. Huddle may retain a minimal record — such as hashed identifiers, moderation history for banned accounts, and transaction records — where required by law, to prevent abuse, or to resolve disputes.",
+        "If you would like a copy of your data before deleting, email support@huddle.pet and Huddle will respond within 30 days where required by applicable law.",
+      ],
+    },
   ],
 };
 
@@ -118,7 +125,7 @@ const terms: NativeLegalPageContent = {
     {
       title: "1. Who can use Huddle",
       body: [
-        "Huddle is for users aged 13 and above. Discover and stranger chat are limited to users aged 16 and above. The care marketplace and identity verification require users to be at least 18. You must provide accurate information, keep your credentials secure, and use only your own account. Huddle may require phone verification, identity verification, card checks, liveness checks, or other trust steps to access or continue using certain features.",
+        "Huddle is for users aged 13 and above. Discover and stranger chat are limited to users aged 16 and above. The care marketplace and identity verification require users to be at least 18. You must provide accurate information, keep your credentials secure, and use only your own account. Huddle may require phone verification, identity verification, ID/passport checks, liveness checks, payment method confirmation, or other trust steps to access or continue using certain features.",
       ],
     },
     {
@@ -328,7 +335,7 @@ const serviceProviderAgreement: NativeLegalPageContent = {
     {
       title: "3. Eligibility and identity verification",
       body: [
-        "You must be at least 18 years old. You must complete all identity verification, card checks, and trust steps Huddle requires before accessing the care marketplace. Your marketplace access is conditional on maintaining good standing, up-to-date verification, and a valid Stripe Connect payout account. Huddle may pause or revoke your marketplace access if any required verification lapses or becomes invalid.",
+        "You must be at least 18 years old. You must complete all identity verification, ID/passport checks, payment method confirmation, and trust steps Huddle requires before accessing the care marketplace. Your marketplace access is conditional on maintaining good standing, up-to-date verification, and a valid Stripe Connect payout account. Huddle may pause or revoke your marketplace access if any required verification lapses or becomes invalid.",
       ],
     },
     {
@@ -370,19 +377,26 @@ const serviceProviderAgreement: NativeLegalPageContent = {
       ],
     },
     {
-      title: "9. Customer data and confidentiality",
+      title: "9. Reviews",
+      body: [
+        "Customers may submit a post-booking review including a star rating, review tags, written feedback, and up to six media files. Reviews are posted publicly on your provider profile. Huddle may moderate or remove reviews that violate the Terms of Service or Community Guidelines.",
+        "You must not solicit, offer, or arrange for false, coerced, or incentivised reviews. You must not retaliate against customers who submit honest negative reviews.",
+      ],
+    },
+    {
+      title: "10. Customer data and confidentiality",
       body: [
         "You may receive personal information about customers and pets — including names, addresses, contact details, medical information, behaviour notes, and access instructions — solely to perform confirmed bookings. You must not use, share, copy, retain, or otherwise process this information for any other purpose. This obligation survives termination of your marketplace access.",
       ],
     },
     {
-      title: "10. Suspension and termination",
+      title: "11. Suspension and termination",
       body: [
         "Huddle may suspend, restrict, or permanently revoke your marketplace access — with or without prior notice — for breach of this Agreement or any Huddle policy; safety, fraud, legal, quality, or reputational risk; repeated customer complaints; failure to maintain required verification or Stripe Connect status; or conduct that harms users, pets, or the platform. Huddle may block related devices, phone numbers, or payout accounts to prevent re-entry where permitted by law.",
       ],
     },
     {
-      title: "11. Other applicable terms",
+      title: "12. Other applicable terms",
       body: [
         "The disclaimers, liability limits, indemnity provisions, governing law, and dispute process in the Terms of Service apply to you as a Care Service Provider.",
       ],
@@ -392,7 +406,7 @@ const serviceProviderAgreement: NativeLegalPageContent = {
 
 const bookingTerms: NativeLegalPageContent = {
   path: "/booking-terms",
-  title: "Care Service Booking Agreement",
+  title: "Care Service Booking Terms",
   effectiveDate: "20 May 2026",
   intro: [
     "These terms apply when you create a Care Scope Request, book, pay for, or receive care services through Huddle as a pet owner or care customer. They work together with the Terms of Service, Privacy Policy, and Community Guidelines. Where these terms conflict with the Terms of Service, these terms control for booking matters.",
@@ -418,7 +432,7 @@ const bookingTerms: NativeLegalPageContent = {
     {
       title: "3. Consequences of inaccurate information",
       body: [
-        "Providing incomplete, inaccurate, or misleading booking information — including omitting known health conditions, behaviour risks, medication needs, or access hazards — is a breach of these terms. Huddle or the provider may reject, cancel, or stop a booking without refund where booking information is materially incomplete or misleading.",
+        "Providing incomplete, inaccurate, or misleading booking information, including omitting known health conditions, behaviour risks, medication needs, or access hazards, is a breach of these terms. Huddle or the provider may reject, cancel, or stop a booking without refund where booking information is materially incomplete or misleading.",
         "Where a care incident arises from information you failed to disclose or misrepresented, your ability to make a claim against the provider or Huddle for that incident may be reduced or extinguished.",
       ],
     },
@@ -437,21 +451,22 @@ const bookingTerms: NativeLegalPageContent = {
       ],
     },
     {
-      title: "6. Payments, cancellations, and refunds",
+      title: "6. Cancellation policy",
       body: [
-        "Huddle charges a 10% platform service fee on the provider's quoted care scope price. This fee is shown as a separate line item before you confirm payment.",
-        "Cancellation more than 24 hours before the scheduled start of care: refund of the care scope price, less the platform service fee, unless the booking confirmation states otherwise.",
-        "Cancellation within 24 hours of the scheduled start: partial or no refund as disclosed at the time of booking.",
-        "Provider cancellation or Huddle-initiated cancellation at any time: full refund including the platform service fee.",
+        "You can cancel a paid booking from the chat at any time before care starts.",
+        "Cancellations made within 24 hours of the scheduled start of care are non-refundable. The provider keeps the booking amount in recognition of the time they reserved.",
+        "Huddle does not commit to a specific refund schedule for cancellations outside the non-refundable window. Refunds are reviewed case by case, taking into account the situation, the provider's response, and the booking history.",
+        "If the provider cancels, does not show up, or Huddle cancels the booking, you receive a full refund of the booking amount to your original payment method.",
+        "For urgent or exceptional circumstances — medical emergency, family crisis, or safety concern — contact support@huddle.pet. Huddle may cover the cancellation cost on your behalf as a goodwill exception, at its discretion.",
         "Nothing in this section limits rights you have under applicable consumer protection law.",
       ],
     },
     {
-      title: "7. Dispute window and resolution",
+      title: "7. Trust & Safety review",
       body: [
-        "You must raise any dispute, complaint, or refund request within 48 hours of the actual or expected completion of care. Disputes raised outside this window may not be eligible for a refund.",
-        "Huddle will review platform records, messages, timestamps, Start PIN events, handoff evidence, check-in submissions, and mid-care photos when resolving disputes. Huddle's determination of the final refund amount and provider payout is binding, subject to the provider's right to appeal and any mandatory rights you have under applicable consumer protection law.",
-        "Submitting a dispute report may temporarily place the booking, associated payment, and related communications under review while Huddle investigates.",
+        "If something serious happens — the provider did not show up, there was a problem at handoff, or you have a safety concern about how care was delivered — you can send the case with evidence to support@huddle.pet. Huddle will hold payment to the provider while the Trust & Safety team reviews it.",
+        "The Trust & Safety team reviews booking records, messages, timestamps, Start PIN events, check-in photos, and any evidence you share. Outcomes range from a full refund, to a partial refund, to releasing payment to the provider, depending on what the records show.",
+        "Raise any serious issue within 48 hours of the actual or expected completion of care. Issues raised outside this window may not be eligible for review.",
       ],
     },
     {
@@ -467,19 +482,31 @@ const bookingTerms: NativeLegalPageContent = {
       ],
     },
     {
-      title: "10. Incident reporting",
+      title: "10. Post-booking reviews",
+      body: [
+        "After a booking is completed, you may submit a review including a star rating, review tags, written feedback, and up to six media files. Your review will be posted publicly on the provider's profile. You must not submit false, misleading, coerced, or incentivised reviews. Reviews may be moderated or removed by Huddle for policy violations.",
+      ],
+    },
+    {
+      title: "11. Incident reporting",
       body: [
         "Report any serious incident to Huddle within 48 hours. A serious incident includes: pet injury or illness during or following care; property damage; provider misconduct or a safety concern; a booking that did not start or complete as agreed; or any other event a reasonable person would consider material to the care provided.",
       ],
     },
     {
-      title: "11. Disclaimers and liability",
+      title: "12. Session history and records",
+      body: [
+        "Completed care sessions are removed from your active view 14 days after the session ends. They remain accessible in Care History within the app. Huddle also retains booking records for safety, legal compliance, dispute resolution, financial purposes, and audit, regardless of what is shown in your active view.",
+      ],
+    },
+    {
+      title: "13. Disclaimers and liability",
       body: [
         "To the maximum extent permitted by law, Huddle is not responsible for the acts, omissions, conduct, quality, safety, qualifications, or suitability of any provider, care service, or booking outcome. Huddle does not provide insurance or guaranteed reimbursement for care incidents unless expressly stated. Huddle's total liability is limited as set out in the Terms of Service.",
       ],
     },
     {
-      title: "12. Force majeure",
+      title: "14. Force majeure",
       body: [
         "Neither Huddle nor the provider is liable for failure or delay in performance caused by events beyond their reasonable control, including natural disasters, extreme weather, public health emergencies, or government actions. Where such events affect a booking, Huddle may cancel it and issue refunds in accordance with platform policy.",
       ],
