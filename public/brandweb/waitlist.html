@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#2145CF">
+
+<!-- Primary SEO -->
+<title>Join the waitlist — huddle is almost here</title>
+<meta name="description" content="huddle is almost here — a circle for every pet. A community layer where ordinary pet people spot trouble, raise the alarm, and rally help together. Join the waitlist.">
+<meta name="keywords" content="huddle waitlist, pet safety app waitlist, lost pet community, stray animal alert, pet community early access">
+<link rel="canonical" href="https://huddle.pet/waitlist">
+
+<!-- Open Graph -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="huddle">
+<meta property="og:locale" content="en_US">
+<meta property="og:url" content="https://huddle.pet/waitlist">
+<meta property="og:title" content="A circle for every pet — join the huddle waitlist">
+<meta property="og:description" content="You don't have to be a rescuer to make a pet safer. You just need a place to start. huddle is almost here.">
+<meta property="og:image" content="https://huddle.pet/brandweb/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:alt" content="huddle — a circle for every pet">
+
+<!-- Twitter / X -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:site" content="@huddlepet">
+<meta name="twitter:creator" content="@huddlepet">
+<meta name="twitter:title" content="A circle for every pet — join the huddle waitlist">
+<meta name="twitter:description" content="You don't have to be a rescuer to make a pet safer. You just need a place to start.">
+<meta name="twitter:image" content="https://huddle.pet/brandweb/og-card.png">
+
+<!-- Favicons -->
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="apple-touch-icon" href="/favicon.png">
+
+<link rel="stylesheet" href="/brandweb/huddle.css">
+<style>
+/* ── Waitlist email form ── */
+.wl-form {
+  display: flex; gap: 12px; margin-top: 36px; max-width: 520px;
+  flex-wrap: wrap;
+}
+.wl-form input[type="email"] {
+  flex: 1 1 240px; min-width: 0;
+  font-family: inherit; font-size: 16px; font-weight: 500;
+  padding: 16px 20px; border-radius: 999px;
+  border: 2px solid rgba(255,255,255,0.28);
+  background: rgba(255,255,255,0.10); color: var(--white);
+  transition: border-color 0.2s, background 0.2s;
+}
+.wl-form input[type="email"]::placeholder { color: rgba(255,255,255,0.6); }
+.wl-form input[type="email"]:focus { outline: none; border-color: var(--lime); background: rgba(255,255,255,0.16); }
+.wl-form button {
+  flex: 0 0 auto;
+  font-family: inherit; font-size: 16px; font-weight: 800; letter-spacing: -0.01em;
+  padding: 16px 28px; border-radius: 999px; border: 0; cursor: pointer;
+  background: var(--white); color: var(--blue);
+  transition: transform 0.25s var(--ease), background 0.2s, color 0.2s;
+}
+.wl-form button:hover { transform: translateY(-2px); background: var(--coral); color: var(--white); }
+.wl-note { font-size: 13px; font-weight: 500; color: rgba(255,255,255,0.62); margin-top: 16px; }
+
+/* honeypot — hidden from humans, catches bots */
+.wl-hp { position: absolute; left: -5000px; width: 1px; height: 1px; overflow: hidden; }
+
+/* Light-section variant (final CTA on coral) */
+.wl-form.on-coral input[type="email"] { border-color: rgba(255,255,255,0.35); }
+.wl-form.on-coral button { background: var(--ink); color: var(--white); }
+.wl-form.on-coral button:hover { background: var(--white); color: var(--ink); }
+
+/* Success state (shown when ?joined=1) */
+.wl-success {
+  display: none; margin-top: 32px; max-width: 520px;
+  padding: 22px 26px; border-radius: 18px;
+  background: rgba(191,255,0,0.16); border: 1px solid rgba(191,255,0,0.4);
+  color: var(--white);
+}
+.wl-success.show { display: block; }
+.wl-success strong { color: var(--lime); }
+.wl-error { font-size: 13px; font-weight: 600; color: var(--coral); margin-top: 10px; display: none; }
+.wl-error.show { display: block; }
+.on-coral + .wl-error, .wl-form.on-coral ~ .wl-error { color: var(--white); }
+
+/* The four-line stack */
+.wl-stack { margin-top: 8px; }
+.wl-stack p {
+  font-size: clamp(22px, 3vw, 32px); font-weight: 800; letter-spacing: -0.02em;
+  line-height: 1.25; color: var(--ink);
+}
+.wl-stack p.muted { color: var(--fg1); font-weight: 700; }
+.wl-stack p.punch { color: var(--coral); margin-top: 6px; }
+.wl-stack.on-dark { margin-top: 30px; }
+.wl-stack.on-dark p { color: var(--white); }
+.wl-stack.on-dark p.muted { color: rgba(255,255,255,0.72); }
+.wl-stack.on-dark p.punch { color: var(--lime); }
+
+/* The chain (spot → report → …) */
+.wl-chain {
+  display: flex; flex-wrap: wrap; gap: 10px 14px; margin-top: 28px; align-items: center;
+}
+.wl-chain .step {
+  font-size: 15px; font-weight: 800; letter-spacing: -0.01em;
+  padding: 10px 18px; border-radius: 999px;
+  background: var(--white); color: var(--blue);
+  border: 1px solid rgba(33,69,207,0.12);
+}
+.wl-chain .arrow { color: var(--coral); font-weight: 800; font-size: 18px; }
+@media (max-width: 540px) { .wl-chain .arrow { display: none; } }
+</style>
+</head>
+<body data-page="waitlist" data-nav="solid">
+
+<div class="geo-seed" aria-hidden="true">
+  huddle waitlist · pet safety app early access · a circle for every pet · lost pet community alert ·
+  stray animal report · report warn gather visibility · community pet safety layer · huddle coming soon
+</div>
+
+<!-- HERO + primary capture -->
+<div class="page-hero">
+  <div class="container">
+    <div class="eyebrow">Coming soon</div>
+    <h1>A circle for<br><span class="coral">every pet.</span></h1>
+    <p class="lead">huddle is almost here — a place where ordinary pet people spot trouble, raise the alarm, and rally help, together. Add your email and you'll know the moment it opens.</p>
+
+    <form class="wl-form" method="POST" action="/api/waitlist" data-wl novalidate>
+      <input type="email" name="email" placeholder="your@email.com" autocomplete="email" required>
+      <button type="submit">Join the circle →</button>
+      <!-- honeypot -->
+      <div class="wl-hp" aria-hidden="true"><input type="text" name="email_address_check" value="" tabindex="-1" autocomplete="off"></div>
+    </form>
+    <div class="wl-success" id="wl-success"><strong>You're in the circle.</strong> Check your inbox — we'll tell you the moment huddle opens near you.</div>
+    <p class="wl-note" data-wl-error-anchor>We'll only email you when it's time. No spam, no noise.</p>
+  </div>
+</div>
+<div class="hero-wave-out">
+  <svg viewBox="0 0 1440 110" preserveAspectRatio="none" aria-hidden="true">
+    <path d="M0,40 C240,110 480,0 720,40 C960,80 1200,10 1440,50 L1440,110 L0,110 Z" fill="#142E99"/>
+  </svg>
+</div>
+
+<!-- THE FIRST USEFUL THING -->
+<section class="s white">
+  <div class="container">
+    <div class="reveal" style="max-width:780px">
+      <div class="eyebrow">Where caring meets doing</div>
+      <h2 class="s-title" style="margin-top:16px">Most helpless moments<br>fail at <span class="coral">step one.</span></h2>
+      <p class="s-lead">You see a stray, a hazard, a dog that's clearly lost — you feel it in your chest — and then nothing happens, because there's nowhere to put it.</p>
+      <p class="s-lead" style="margin-top:14px;font-weight:700;color:var(--ink)">huddle is that somewhere.</p>
+      <div class="wl-chain" aria-label="spot, report, warn, gather, make visible">
+        <span class="step">Spot it</span><span class="arrow">→</span>
+        <span class="step">Report it</span><span class="arrow">→</span>
+        <span class="step">Warn nearby</span><span class="arrow">→</span>
+        <span class="step">Gather help</span><span class="arrow">→</span>
+        <span class="step">Impossible to ignore</span>
+      </div>
+      <p class="s-lead" style="margin-top:28px">You don't have to be a rescuer to make a pet safer. You just need a place to start.</p>
+    </div>
+  </div>
+</section>
+
+<div class="wave-div" style="background:var(--blue-deep)">
+  <svg viewBox="0 0 1440 100" preserveAspectRatio="none" aria-hidden="true">
+    <path d="M0,50 C220,10 520,90 780,50 C1040,10 1240,80 1440,40 L1440,0 L0,0 Z" fill="var(--white)"/>
+  </svg>
+</div>
+
+<!-- POSITIONING -->
+<section class="s deep">
+  <div class="container">
+    <div class="reveal" style="max-width:760px">
+      <div class="eyebrow on-blue">What huddle is</div>
+      <h2 class="s-title" style="color:var(--white);margin-top:16px">The missing step<br>between <span style="color:var(--coral)">caring and doing.</span></h2>
+      <p style="color:rgba(255,255,255,0.88);font-size:17px;line-height:1.6;margin-top:20px">huddle isn't an organisation, and it isn't a charity asking for your guilt or your money. It's a community layer — built by pet people, for the moment something needs doing and you're the one who's there.</p>
+      <div class="wl-stack on-dark">
+        <p class="muted">Not everyone can rescue full-time.</p>
+        <p class="muted">Not everyone can foster.</p>
+        <p class="muted">Not everyone knows who to call.</p>
+        <p class="punch">But everyone can do something.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="wave-div" style="background:var(--coral)">
+  <svg viewBox="0 0 1440 100" preserveAspectRatio="none" aria-hidden="true">
+    <path d="M0,40 C240,90 520,0 780,40 C1040,80 1240,10 1440,50 L1440,0 L0,0 Z" fill="var(--blue-deep)"/>
+  </svg>
+</div>
+
+<!-- FINAL CTA + capture -->
+<section class="s coral" style="padding-top:64px">
+  <div class="container">
+    <div class="reveal" style="max-width:620px">
+      <h2 class="s-title" style="color:var(--white)">Be part of the<br>first circle.</h2>
+      <p style="color:rgba(255,255,255,0.92);font-size:17px;font-weight:500;margin-top:20px">When huddle opens near you, you'll be among the first to know — and the first to have somewhere to act.</p>
+      <form class="wl-form on-coral" method="POST" action="/api/waitlist" data-wl novalidate>
+        <input type="email" name="email" placeholder="your@email.com" autocomplete="email" required>
+        <button type="submit">Notify me →</button>
+        <div class="wl-hp" aria-hidden="true"><input type="text" name="email_address_check" value="" tabindex="-1" autocomplete="off"></div>
+      </form>
+      <p class="wl-note" style="color:rgba(255,255,255,0.7)" data-wl-error-anchor>We'll only email you when it's time. No spam, no noise.</p>
+    </div>
+  </div>
+</section>
+
+<div class="wave-div" style="background:var(--cream)">
+  <svg viewBox="0 0 1440 90" preserveAspectRatio="none" aria-hidden="true">
+    <path d="M0,50 C300,10 600,80 900,40 C1140,10 1300,60 1440,30 L1440,0 L0,0 Z" fill="var(--coral)"/>
+  </svg>
+</div>
+
+<script>
+(function () {
+  var params = new URLSearchParams(location.search);
+  if (params.get("joined") === "1") {
+    var s = document.getElementById("wl-success");
+    if (s) { s.classList.add("show"); s.scrollIntoView({ behavior: "smooth", block: "center" }); }
+    document.querySelectorAll(".wl-form").forEach(function (f) { f.style.display = "none"; });
+  } else if (params.get("error") === "1") {
+    document.querySelectorAll(".wl-form").forEach(function (f) {
+      var err = f.nextElementSibling && f.nextElementSibling.classList.contains("wl-error")
+        ? f.nextElementSibling : null;
+      if (err) err.classList.add("show");
+    });
+  }
+
+  // Progressive enhancement: submit via fetch so users get inline feedback
+  // without a full page reload. Falls back to plain POST if fetch fails.
+  document.querySelectorAll('form[data-wl]').forEach(function (form) {
+    var errorEl = document.createElement("p");
+    errorEl.className = "wl-error";
+    errorEl.textContent = "Something went wrong. Please try again.";
+    form.insertAdjacentElement("afterend", errorEl);
+
+    form.addEventListener("submit", function (e) {
+      e.preventDefault();
+      errorEl.classList.remove("show");
+      var btn = form.querySelector("button");
+      var originalText = btn ? btn.textContent : "";
+      if (btn) { btn.disabled = true; btn.textContent = "Joining…"; }
+
+      var data = new FormData(form);
+      fetch(form.getAttribute("action"), {
+        method: "POST",
+        headers: { Accept: "application/json" },
+        body: data,
+      })
+        .then(function (res) { return res.json().then(function (json) { return { ok: res.ok, json: json }; }); })
+        .then(function (result) {
+          if (result.ok && result.json && result.json.ok) {
+            var success = document.getElementById("wl-success");
+            document.querySelectorAll(".wl-form").forEach(function (f) { f.style.display = "none"; });
+            document.querySelectorAll(".wl-error").forEach(function (el) { el.classList.remove("show"); });
+            if (success) {
+              success.classList.add("show");
+              success.scrollIntoView({ behavior: "smooth", block: "center" });
+            }
+          } else {
+            errorEl.textContent = (result.json && result.json.error) || "Something went wrong. Please try again.";
+            errorEl.classList.add("show");
+            if (btn) { btn.disabled = false; btn.textContent = originalText; }
+          }
+        })
+        .catch(function () {
+          // Network/JS failure — fall back to a real (non-JS) form submission.
+          // HTMLFormElement.submit() bypasses the "submit" event entirely, so this won't loop.
+          form.submit();
+        });
+    });
+  });
+})();
+</script>
+<script src="/brandweb/huddle-shell.js"></script>
+</body>
+</html>

@@ -69,6 +69,7 @@
     { "src": "^/press/?$", "dest": "/brandweb/press.html" },
     { "src": "^/careers/?$", "dest": "/brandweb/huddle-v5.html" },
     { "src": "^/contact/?$", "dest": "/brandweb/contact.html" },
+    { "src": "^/waitlist/?$", "dest": "/brandweb/waitlist.html" },
     { "src": "^/faq/?$", "dest": "/brandweb/faq.html" },
     { "src": "^/knowledge-base/?$", "dest": "/brandweb/knowledge-base.html" },
     { "src": "^/legal/terms/?$", "dest": "/brandweb/terms.html" },
@@ -79,6 +80,7 @@
     { "src": "^/legal/service-provider-agreement/?$", "dest": "/brandweb/service-provider-agreement.html" },
     { "src": "^/legal/privacy-choices/?$", "dest": "/brandweb/privacy-choices.html" },
     { "src": "^/share/([^/]+)$", "dest": "/api/share?id=$1" },
+    { "src": "^/api/waitlist/?$", "dest": "/api/waitlist" },
     {
       "src": "^/turnstile-native\\.html$",
       "dest": "/turnstile-native.html",
@@ -105,9 +107,14 @@
     },
     { "handle": "filesystem" },
     {
+      "src": "^/carerprofile/(stripe-return|stripe-refresh)(?:/)?$",
+      "dest": "/index.html"
+    },
+    {
       "src": "^/(auth|auth/callback|reset-password|reset-password-direct|reset-password-inline|reset-password-inline-healthaction|update-password|support|verify|turnstile-health|turnstile-health-resetaction)(?:/)?$",
       "dest": "/index.html"
     },
+    { "src": "^/security/secure/?$", "dest": "/index.html" },
     { "src": "^/signup(?:/.*)?$", "dest": "/index.html" },
     { "src": "^/join/[^/]+/?$", "dest": "/index.html" },
     { "src": "^/admin(?:/.*)?$", "dest": "/index.html" },
