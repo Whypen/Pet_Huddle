@@ -68,6 +68,7 @@
       ["/about", "About huddle"],
       ["/faq", "FAQ"],
       ["/contact", "Contact"],
+      ["/waitlist", "Join the waitlist"],
     ]},
     { title: "Legal", items: [
       ["/legal/privacy", "Privacy policy"],
@@ -144,8 +145,12 @@
     h("img", { src: asset("wm-coral-shadow-alt.png"), alt: "huddle", class: "footer-logo" }),
     h("p", { text: "An app for every pet — even the ones on the streets. Every pet deserves more. We leave no pet behind." }),
     h("div", { class: "footer-stores" }, [
-      h("a", { href: "/#download", class: "btn-store-sm", text: "⌘ iOS" }),
-      h("a", { href: "/#download", class: "btn-store-sm", text: "▸ Android" }),
+      h("a", { href: "/#download", class: "btn-store-sm", "aria-label": "Download on the App Store" }, [
+        h("img", { src: asset("badge-appstore.svg"), alt: "Download on the App Store", class: "store-badge-img" }),
+      ]),
+      h("a", { href: "/#download", class: "btn-store-sm", "aria-label": "Get it on Google Play" }, [
+        h("img", { src: asset("badge-googleplay.png"), alt: "Get it on Google Play", class: "store-badge-img" }),
+      ]),
     ]),
   ]);
   const top = h("div", { class: "footer-top" }, [
@@ -161,6 +166,7 @@
       ["/about", "About huddle"],
       ["/faq", "FAQ"],
       ["/contact", "Contact"],
+      ["/waitlist", "Join the waitlist"],
     ]),
     col("Legal", [
       ["/legal/privacy", "Privacy policy"],

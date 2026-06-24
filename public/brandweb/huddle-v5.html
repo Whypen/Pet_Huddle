@@ -695,18 +695,13 @@ section.s {
 .cta-inner .s-title .blue { color: var(--blue-deep); }
 .cta-actions { display: flex; gap: 14px; margin-top: 36px; flex-wrap: wrap; }
 .btn-store {
-  background: var(--white); color: var(--blue);
-  padding: 16px 26px; border-radius: 14px;
-  font-weight: 800; font-size: 15px;
+  display: inline-flex; align-items: center;
   text-decoration: none;
-  display: inline-flex; align-items: center; gap: 12px;
-  transition: transform 0.25s var(--ease), background 0.25s, color 0.25s;
-  box-shadow: 0 14px 30px -10px rgba(0,0,0,0.25);
+  transition: transform 0.25s var(--ease), opacity 0.25s;
+  filter: drop-shadow(0 14px 30px rgba(0,0,0,0.25));
 }
-.btn-store:hover { transform: translateY(-3px); background: var(--blue-deep); color: var(--white); }
-.btn-store .glyph { font-size: 22px; line-height: 1; }
-.btn-store .stack { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.1; }
-.btn-store .stack small { font-weight: 500; font-size: 11px; opacity: 0.7; letter-spacing: 0.04em; }
+.btn-store:hover { transform: translateY(-3px); opacity: 0.88; }
+.btn-store .store-badge-img { height: 50px; width: auto; display: block; }
 
 /* ── FOOTER (cream so blue wordmark is visible) ── */
 .footer-wrap {
@@ -1365,8 +1360,8 @@ section.s {
         <h2 class="s-title">Every pet<br>deserves <span class="blue">better.</span><br>Even the ones who aren't yours yet.</h2>
         <p class="s-lead" style="color:rgba(255,255,255,0.92)">For the lost ones, the loved ones, the ones on the streets, and the ones figuring out their walk routine. The Map, the Forum, the Carers, the records — all here, all free at the core. Plus and huddle＊ add reach when you need it.</p>
         <div class="cta-actions">
-          <a href="#download" class="btn-store" data-magnet data-store-placeholder="true"><span class="glyph">⌘</span><span class="stack"><small>Download on the</small>App Store</span></a>
-          <a href="#download" class="btn-store" data-magnet data-store-placeholder="true"><span class="glyph">▸</span><span class="stack"><small>Get it on</small>Google Play</span></a>
+          <a href="#download" class="btn-store" data-magnet aria-label="Download on the App Store"><img src="/brandweb/badge-appstore.svg" alt="Download on the App Store" class="store-badge-img"></a>
+          <a href="#download" class="btn-store" data-magnet aria-label="Get it on Google Play"><img src="/brandweb/badge-googleplay.png" alt="Get it on Google Play" class="store-badge-img"></a>
         </div>
       </div>
       <div class="reveal-r" style="text-align:center;">
