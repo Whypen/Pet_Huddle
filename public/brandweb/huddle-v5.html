@@ -693,15 +693,17 @@ section.s {
 @media (max-width: 900px) { .cta-inner { grid-template-columns: 1fr; text-align: center; justify-items: center; } }
 .cta-inner .s-title { color: var(--white); }
 .cta-inner .s-title .blue { color: var(--blue-deep); }
-.cta-actions { display: flex; gap: 14px; margin-top: 36px; flex-wrap: wrap; }
+.cta-waitlist-link { display: inline-block; margin-top: 28px; font-size: 15px; font-weight: 800; letter-spacing: -0.01em; color: var(--white); text-decoration: underline; text-underline-offset: 4px; text-decoration-thickness: 2px; transition: color 0.2s, transform 0.2s; }
+.cta-waitlist-link:hover { color: var(--blue-deep); transform: translateX(4px); }
+.cta-actions { display: flex; gap: 18px; margin-top: 18px; flex-wrap: wrap; align-items: center; }
 .btn-store {
   display: inline-flex; align-items: center;
   text-decoration: none;
-  transition: transform 0.25s var(--ease), opacity 0.25s;
+  transition: transform 0.25s var(--ease);
   filter: drop-shadow(0 14px 30px rgba(0,0,0,0.25));
 }
-.btn-store:hover { transform: translateY(-3px); opacity: 0.88; }
-.btn-store .store-badge-img { height: 50px; width: auto; display: block; }
+.btn-store:hover { transform: scale(1.09); }
+.btn-store .store-badge-img { height: 48px; width: auto; display: block; }
 
 /* ── FOOTER (cream so blue wordmark is visible) ── */
 .footer-wrap {
@@ -1350,6 +1352,7 @@ section.s {
         <div class="eyebrow" style="color:var(--white)">Free to start</div>
         <h2 class="s-title">Every pet<br>deserves <span class="blue">better.</span><br>Even the ones who aren't yours yet.</h2>
         <p class="s-lead" style="color:rgba(255,255,255,0.92)">For the lost ones, the loved ones, the ones on the streets, and the ones figuring out their walk routine. The Map, the Forum, the Carers, the records — all here, all free at the core. huddle+ and huddle＊ add reach when you need it.</p>
+        <a href="/waitlist" class="cta-waitlist-link">Join the waitlist →</a>
         <div class="cta-actions">
           <a href="#download" class="btn-store" data-magnet aria-label="Download on the App Store"><img src="/brandweb/badge-appstore.svg" alt="Download on the App Store" class="store-badge-img"></a>
           <a href="#download" class="btn-store" data-magnet aria-label="Get it on Google Play"><img src="/brandweb/badge-googleplay.png" alt="Get it on Google Play" class="store-badge-img"></a>
