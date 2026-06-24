@@ -366,8 +366,10 @@ section.s.lime .eyebrow { color: var(--ink); }
 .huddle-footer .footer-brand { max-width: 400px; }
 .huddle-footer .footer-logo { height: clamp(72px, 8vw, 104px); width: auto; margin: 0 0 28px -6px; display: block; }
 .huddle-footer .footer-brand p { font-size: 15px; line-height: 1.6; color: var(--fg1); max-width: 34ch; }
-.huddle-footer .footer-stores { display: flex; gap: 10px; margin-top: 22px; flex-wrap: wrap; }
-.huddle-footer .btn-store-sm { display: inline-flex; align-items: center; transition: transform 0.2s, opacity 0.2s; }
+.huddle-footer .footer-waitlist-link { display: inline-block; margin-top: 18px; font-size: 14px; font-weight: 700; color: var(--blue); transition: color 0.2s, transform 0.2s; }
+.huddle-footer .footer-waitlist-link:hover { color: var(--coral); transform: translateX(3px); }
+.huddle-footer .footer-stores { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+.huddle-footer .btn-store-sm { background: none; padding: 0; border-radius: 0; display: inline-flex; align-items: center; transition: transform 0.2s, opacity 0.2s; }
 .huddle-footer .btn-store-sm:hover { transform: translateY(-2px); opacity: 0.85; }
 .huddle-footer .store-badge-img { height: 38px; width: auto; display: block; }
 .huddle-footer .footer-col h4 { font-size: 11.5px; font-weight: 800; letter-spacing: 0.16em; text-transform: uppercase; color: var(--blue); margin-bottom: 18px; }

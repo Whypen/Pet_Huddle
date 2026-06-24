@@ -144,6 +144,7 @@
   const brandCol = h("div", { class: "footer-brand" }, [
     h("img", { src: asset("wm-coral-shadow-alt.png"), alt: "huddle", class: "footer-logo" }),
     h("p", { text: "An app for every pet — even the ones on the streets. Every pet deserves more. We leave no pet behind." }),
+    h("a", { href: "/waitlist", class: "footer-waitlist-link", text: "Join the waitlist →" }),
     h("div", { class: "footer-stores" }, [
       h("a", { href: "/#download", class: "btn-store-sm", "aria-label": "Download on the App Store" }, [
         h("img", { src: asset("badge-appstore.svg"), alt: "Download on the App Store", class: "store-badge-img" }),
@@ -166,7 +167,6 @@
       ["/about", "About huddle"],
       ["/faq", "FAQ"],
       ["/contact", "Contact"],
-      ["/waitlist", "Join the waitlist"],
     ]),
     col("Legal", [
       ["/legal/privacy", "Privacy policy"],
