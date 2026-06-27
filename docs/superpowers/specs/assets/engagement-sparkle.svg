@@ -1,11 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="-18 -18 36 36">
   <title>Huddle engagement sparkle — tier reference</title>
-  <desc>4-point sparkle path used for the engagement/trust corner badge. Active = outline only; Trusted = half-white/half-gold fill; Pillar = full gold fill (pair with a separate radial shimmer halo behind the avatar).</desc>
+  <desc>4-point sparkle path used for the engagement/trust corner badge. Active = outline only; Trusted = smooth white-to-gold gradient fill; Pillar = full gold fill, paired with an animated shimmer sweep across the sparkle, username, and avatar ring (ring colour itself is never altered).</desc>
   <defs>
-    <linearGradient id="halfGold" x1="0%" y1="0%" x2="100%" y2="100%">
+    <linearGradient id="softGold" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#FFFFFF"/>
-      <stop offset="49.9%" stop-color="#FFFFFF"/>
-      <stop offset="50%" stop-color="#E8B23D"/>
+      <stop offset="50%" stop-color="#F6DFA0"/>
       <stop offset="100%" stop-color="#E8B23D"/>
     </linearGradient>
     <linearGradient id="fullGold" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -13,7 +12,12 @@
       <stop offset="50%" stop-color="#F2C14E"/>
       <stop offset="100%" stop-color="#C8861A"/>
     </linearGradient>
+    <linearGradient id="shimmerSweep" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="50%" stop-color="#ffffff" stop-opacity="0.85"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
   </defs>
-  <!-- Reference path only; implementation should render one variant per tier, not all three stacked. -->
+  <!-- Reference path only; implementation renders one variant per tier, not all stacked. Pillar variant additionally needs the shimmerSweep gradient animated (e.g. translateX keyframe) across sparkle/name/ring as a separate overlay layer — it must never replace the ring's own stroke colour. -->
   <path id="sparkle-path" d="M0,-16 C1,-5 5,-1 16,0 C5,1 1,5 0,16 C-1,5 -5,1 -16,0 C-5,-1 -1,-5 0,-16 Z" fill="url(#fullGold)"/>
 </svg>

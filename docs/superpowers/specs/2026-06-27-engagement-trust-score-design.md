@@ -79,16 +79,16 @@ Score is **not lifetime-cumulative** — each source table is filtered to `creat
 | New | 0 | none | normal | default (today's look, incl. existing verification ring) |
 | Active | 1–49 | outline-only sparkle | normal | default |
 | Trusted | 50–149 | gradient-gold sparkle (filled) | normal | default |
-| Pillar | 150+ | full solid-gold sparkle | Huddle Gold colored + shimmer text effect | shimmer overlay animation (verification ring stays untouched underneath — shimmer is additive, never replaces it) |
+| Pillar | 150+ | full solid-gold sparkle + shimmer sweep | Huddle Gold colored + shimmer sweep | shimmer sweep animation plays across the ring (never recolors it — verification blue/etc. underneath is untouched) |
 
 Thresholds carried over from earlier drafts; worth re-checking against real 90-day distributions once the view is live, since point values per action changed since these were set (e.g. a single completed carer booking is now +20, well over a third of the way to "Active"). Tuning the threshold numbers later is a config change, not a re-architecture.
 
 **Sparkle SVG — approved design:** a single 4-point sparkle/diamond-star shape (path: `M0,-16 C1,-5 5,-1 16,0 C5,1 1,5 0,16 C-1,5 -5,1 -16,0 C-5,-1 -1,-5 0,-16 Z`), consistent across all three tiers, positioned top-right overlapping the avatar's edge:
 - **Active**: outline only, no fill, gold stroke (`#C8861A`).
-- **Trusted**: filled, sharp **half-white / half-gold** diagonal split (linear gradient, hard 50% stop — not a soft blend), thin gold stroke.
-- **Pillar**: filled, full gold gradient (`#FFE9A8 → #F2C14E → #C8861A`), plus a soft radial shimmer/glow halo behind the avatar (white-to-gold, fading to transparent).
+- **Trusted**: filled, **smooth white-to-gold gradient** (soft blend, no hard stop — `#FFFFFF → #F6DFA0 → #E8B23D`), thin gold stroke.
+- **Pillar**: filled, full gold gradient (`#FFE9A8 → #F2C14E → #C8861A`), plus an **animated shimmer sweep** — a soft diagonal highlight that periodically passes across the sparkle, the username text, and the avatar ring.
 
-**The avatar ring color never changes at any tier** — a verified user's ring stays exactly its current blue at Active, Trusted, and Pillar alike. The shimmer halo at Pillar sits behind/around the ring as a glow effect only; it does not recolor or replace the ring itself. (Username gold-tint/shimmer at Pillar is a separate, text-only effect — see tier table above.)
+**The avatar ring is never touched at any tier** — no recoloring, no added glow/halo sitting behind it, nothing. A verified user's ring stays pixel-for-pixel its current blue at Active, Trusted, and Pillar alike. At Pillar, the shimmer sweep is purely an animated highlight that plays *across* the ring's existing color (same trick as a CSS shine-on-hover effect) — the ring's underlying color value is never modified, only momentarily overlaid by a moving light highlight. Username gold-tint at Pillar gets the same shimmer sweep treatment, layered over its base color.
 
 Approval mockup (corrected version) shared during design review; the reference sparkle path/gradients are saved at [`assets/engagement-sparkle.svg`](assets/engagement-sparkle.svg). Source a free/CC-licensed sparkle asset matching this shape at implementation time (e.g. via Iconify/Flaticon) — do not embed the specific paid Magnific stock asset directly; the shape is generic/common enough to recreate freely.
 
