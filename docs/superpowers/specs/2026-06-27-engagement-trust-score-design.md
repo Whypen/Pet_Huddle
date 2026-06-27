@@ -27,8 +27,8 @@ Computed via a Postgres view aggregating existing tables — **no new tables** f
 
 | Event | Who gets points | Points | Daily cap | Source table |
 |---|---|---:|---|---|
-| Completed care booking | Carer | +20 | max +40/day | `marketplace_bookings` |
-| Completed care booking | Requester/owner | +10 | max +20/day | `marketplace_bookings` |
+| Completed care booking | Carer | +10 | max +20/day | `marketplace_bookings` |
+| Completed care booking | Requester/owner | +5 | max +10/day | `marketplace_bookings` |
 | Create map alert pin | Creator | +5 | max +15/day | `broadcast_alerts` |
 | Create post | Author | +3 | max +9/day | `threads` |
 | Comment / reply / share | Actor | +2 | max +10/day | `thread_comments` |
@@ -66,10 +66,11 @@ Score is **not lifetime-cumulative** — each source table is filtered to `creat
 
 ### Anti-gaming guardrails — an action only counts if ALL of:
 - **Actor is not the target** (no self-likes, self-comments, self-reactions on your own content).
-- **Content is not deleted/hidden** at time of scoring (deleted posts/comments don't retroactively earn points).
+- **Content is not deleted/hidden** at time of scoring. Self-healing by construction: since the score is a live view over current table state, deleting a post/comment automatically drops its points on the next computation — no separate "retroactive removal" logic needed.
 - **Actor and target are not blocked** from each other.
-- **Diminishing returns per actor/target pair**: max 3 score-earning interactions per actor/target pair per day (e.g. liking the same person's posts repeatedly).
+- **Diminishing returns per actor/target pair**: max 3 score-earning interactions per actor/target pair per day — this applies to **care bookings too**, not just social actions, since bookings are now the single highest-value action and the most attractive target for two colluding accounts ping-ponging fake completions. (Assumes `marketplace_bookings.status = 'completed'` already implies the booking's escrow/payment was genuinely captured, not a client-settable flag — confirm this at implementation time.)
 - **Per-action and overall daily caps**, per the table above.
+- **Banned users are explicitly zeroed**: the view's final step applies `WHERE moderation_state != 'banned'` (or equivalent `CASE` to force score to 0) — without this explicit clause, a banned user's historical actions would still mathematically sum to a nonzero score, since "banned" doesn't delete their past rows.
 
 ## Tiers (fixed point thresholds — primary driver of visuals, internal names only)
 
@@ -82,7 +83,14 @@ Score is **not lifetime-cumulative** — each source table is filtered to `creat
 
 Thresholds carried over from earlier drafts; worth re-checking against real 90-day distributions once the view is live, since point values per action changed since these were set (e.g. a single completed carer booking is now +20, well over a third of the way to "Active"). Tuning the threshold numbers later is a config change, not a re-architecture.
 
-**Sparkle SVG — approved design:** a 4-point sparkle/diamond-star shape, consistent across all three tiers, rendered as: outline-only (Active) → gold gradient fill (Trusted) → full gold gradient fill + soft radial shimmer halo around the avatar ring (Pillar, ring itself untouched underneath). See approval mockup shared during design review. Source a free/CC-licensed sparkle asset matching this shape at implementation time (e.g. via Iconify/Flaticon) — do not embed the specific paid Magnific stock asset directly; the shape is generic/common enough to recreate freely.
+**Sparkle SVG — approved design:** a single 4-point sparkle/diamond-star shape (path: `M0,-16 C1,-5 5,-1 16,0 C5,1 1,5 0,16 C-1,5 -5,1 -16,0 C-5,-1 -1,-5 0,-16 Z`), consistent across all three tiers, positioned top-right overlapping the avatar's edge:
+- **Active**: outline only, no fill, gold stroke (`#C8861A`).
+- **Trusted**: filled, sharp **half-white / half-gold** diagonal split (linear gradient, hard 50% stop — not a soft blend), thin gold stroke.
+- **Pillar**: filled, full gold gradient (`#FFE9A8 → #F2C14E → #C8861A`), plus a soft radial shimmer/glow halo behind the avatar (white-to-gold, fading to transparent).
+
+**The avatar ring color never changes at any tier** — a verified user's ring stays exactly its current blue at Active, Trusted, and Pillar alike. The shimmer halo at Pillar sits behind/around the ring as a glow effect only; it does not recolor or replace the ring itself. (Username gold-tint/shimmer at Pillar is a separate, text-only effect — see tier table above.)
+
+Approval mockup (corrected version) shared during design review; the reference sparkle path/gradients are saved at [`assets/engagement-sparkle.svg`](assets/engagement-sparkle.svg). Source a free/CC-licensed sparkle asset matching this shape at implementation time (e.g. via Iconify/Flaticon) — do not embed the specific paid Magnific stock asset directly; the shape is generic/common enough to recreate freely.
 
 ### Percentile gate (secondary, nightly-computed)
 - A nightly job computes each scoring user's percentile rank among all users with 90-day score > 0.
@@ -114,10 +122,13 @@ user_engagement_tier_cache
 
 This is the only new persistent state in the entire system — everything else (raw score, anti-gaming filters) is computed live from existing tables in the view; this table just stores the *result* of the nightly computation so the client and the notification job both have something stable to read.
 
+**Sparsity:** only upsert a row for a user who currently has score > 0 or already has an existing row (so a drop back to "New" can still be reflected by updating `effective_tier`). Users who have never scored never get a row — absence of a row means "New" by default on the client. Keeps the table from growing with rows for inactive accounts.
+
 When the nightly job detects `effective_tier > previous_tier`:
 - Insert a row into the existing `notifications` table.
 - Trigger push notification + in-app popup.
 - Set `promoted_at` to the run timestamp.
+- **Anti-flapping guard:** skip firing the notification if the user was already promoted into this same tier within the last 14 days (check `promoted_at`). Prevents repeat "you just earned a sparkle!" pings if a score oscillates right at a threshold boundary across several nightly runs.
 
 ### Notification copy (lowercase "huddle", warm/casual tone, no tier names)
 
