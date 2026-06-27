@@ -156,7 +156,6 @@ export default async function handler(req: RequestShape, res: ResponseShape) {
       email,
       listIds: [listId],
       updateEnabled: true,
-      attributes: { SIGNUP_SOURCE: "waitlist" },
     });
     // 201 created, 204 updated. A 400 "already exists" is fine (idempotent).
     if (!r.ok && r.status !== 204) {
