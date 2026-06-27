@@ -6,7 +6,7 @@ Date: 2026-06-27
 
 Identify and visually celebrate positive, engaged Huddle users (posting, caring for pets, helping the community) to build trust signals across the app. The system is purely positive/celebratory — there is no punitive visual state. Banned or restricted users simply look the same as a brand-new user, never singled out negatively.
 
-This is distinct from the existing admin-only `trust_score` / `moderation_state` / `penalty_count` fields used in `view_admin_safety_users`, which remain a separate, admin-facing safety system. The new engagement score only *reads* `moderation_state` as a negative input — it does not replace, merge with, or get stored inside the safety system. (Confirmed: `trust_score`/`penalty_count`/`moderation_state` are not physical writable columns in `schema_public.sql` — they're admin-view-only fields. We can't repurpose them to store engagement-tier state; see "Minimal new state" below.)
+This is distinct from the existing admin-only `trust_score` / `moderation_state` / `penalty_count` fields used in `view_admin_safety_users`, which remain a separate, admin-facing safety system. The new engagement score only *reads* `moderation_state` as a negative input — it does not replace, merge with, or get stored inside the safety system. (Confirmed: `trust_score`/`penalty_count`/`moderation_state` are not physical writable columns in `schema_public.sql` — they're admin-view-only fields. We can't repurpose them to store engagement-tier state; see "Cache table" below.)
 
 **No tier names are ever shown to users.** "New / Active / Trusted / Pillar" are internal/code-only identifiers for engineering convenience. All user-facing copy and UI describes the sparkle visually or by percentage — never by a label that could be (mis)interpreted as a status judgment.
 
@@ -19,25 +19,46 @@ This is distinct from the existing admin-only `trust_score` / `moderation_state`
 | Duolingo / Headspace "we noticed..." nudges | Warm, lowercase, casual tone for the notification copy below |
 | Airbnb Superhost | Status can fade with inactivity — keeps behavior sustained, not banked once |
 
-This keeps the system "simple as possible": one computed view, one nightly job, no new tables except the one minimal field noted below, and copy that never requires the user to understand a scoring scheme.
+This keeps the system "simple as possible": one computed view, one nightly job, one small cache table (see below — the only new table), and copy that never requires the user to understand a scoring scheme.
 
 ## Scoring model
 
-Computed via a Postgres view aggregating existing tables — **no new tables** for the score itself.
+Computed via a Postgres view aggregating existing tables — **no new tables** for the raw score itself (see "Cache table" below for the one table the system does need, for UI/notification purposes).
 
-| Action | Points | Source table |
-|---|---|---|
-| Like/react, comment, reply | +2 | `social_interactions`, `thread_comments` |
-| Wave sent/match accepted | +2 | `waves`, `matches` |
-| Map pin view/click | +1 (capped ~5/day) | `alert_interactions` |
-| Create a post | +5 | `threads` |
-| Create a map alert pin | +5 | `broadcast_alerts` |
-| Stray/caution pin resolved | +10 bonus | `broadcast_alerts` |
-| Care booking completed (carer AND owner, both get points) | +10 each | `marketplace_bookings` (status = completed) |
-| Confirmed moderation action (warning/restriction — admin-actioned, not a raw report) | −10 | `penalty_count` / `moderation_state` (existing admin fields) |
-| Banned | frozen at 0 | `moderation_state` |
+| Event | Who gets points | Points | Daily cap | Source table |
+|---|---|---:|---|---|
+| Completed care booking | Carer | +20 | max +40/day | `marketplace_bookings` |
+| Completed care booking | Requester/owner | +10 | max +20/day | `marketplace_bookings` |
+| Create map alert pin | Creator | +5 | max +15/day | `broadcast_alerts` |
+| Create post | Author | +3 | max +9/day | `threads` |
+| Comment / reply / share | Actor | +2 | max +10/day | `thread_comments` |
+| Like / react | Actor | +1 | max +3/day | `social_interactions` |
+| Wave sent / match accepted | Actor | +1 | max +2/day | `waves`, `matches` |
+| Map pin view/click | Nobody | 0 | analytics only | `alert_interactions` |
+| Raw report received | Nobody | 0 | no effect | `social_interactions` |
+| Confirmed moderation action (admin-actioned warning/restriction — not a raw report) | Target | −10 | — | `penalty_count`/`moderation_state` (existing admin fields) |
+| Banned | — | frozen at 0 | — | `moderation_state` |
 
-**Raw reports received do NOT affect the public engagement tier.** A report is just an allegation; only a confirmed admin moderation action moves the score. This prevents bad-faith mass-reporting from being used to grief another user's public standing.
+**Raw reports received never affect the public tier.** Only a confirmed admin moderation action moves the score — this prevents bad-faith mass-reporting from being used to grief someone's public standing. Map pin views are analytics-only, not scored at all (dropped from the score entirely rather than capped, since they're too low-effort to mean anything).
+
+In addition to the per-action daily caps above, an **overall daily positive cap of +50/day** applies on top — whichever limit binds first.
+
+### Rules summary
+
+| Rule | Decision |
+|---|---|
+| Score window | Rolling 90 days |
+| Tier method | Fixed point thresholds + percentile gate (MVP) |
+| Self-actions | Never count |
+| Deleted/hidden/spam content | Never count |
+| Blocked users | Interactions between blocked users never count |
+| Same actor/target farming | Max 3 score-earning interactions per actor/target pair per day |
+| Daily positive cap | +50/day total (on top of per-action caps above) |
+| Demotion notification | None |
+| Promotion notification | Yes |
+| Public tier names | None — internal/code-only |
+| Paid membership (Free/Plus/Gold subscription) effect | None — entirely independent of this system |
+| Admin/carer manual boost | None for v1 (code path exists, disabled) |
 
 ### Scoring window: rolling 90 days
 
@@ -47,8 +68,8 @@ Score is **not lifetime-cumulative** — each source table is filtered to `creat
 - **Actor is not the target** (no self-likes, self-comments, self-reactions on your own content).
 - **Content is not deleted/hidden** at time of scoring (deleted posts/comments don't retroactively earn points).
 - **Actor and target are not blocked** from each other.
-- **Diminishing returns per actor/target pair**: same-pair interactions stop earning points after the 3rd time per day (e.g. liking the same person's posts repeatedly).
-- **Low-effort action daily caps**: pin views capped at ~5/day; total positive accrual capped at roughly +50/day overall, so the score reflects sustained behavior, not single-session farming.
+- **Diminishing returns per actor/target pair**: max 3 score-earning interactions per actor/target pair per day (e.g. liking the same person's posts repeatedly).
+- **Per-action and overall daily caps**, per the table above.
 
 ## Tiers (fixed point thresholds — primary driver of visuals, internal names only)
 
@@ -59,7 +80,9 @@ Score is **not lifetime-cumulative** — each source table is filtered to `creat
 | Trusted | 50–149 | gradient-gold sparkle (filled) | normal | default |
 | Pillar | 150+ | full solid-gold sparkle | Huddle Gold colored + shimmer text effect | shimmer overlay animation (verification ring stays untouched underneath — shimmer is additive, never replaces it) |
 
-Sparkle SVG: source a free/CC-licensed sparkle-star asset matching a 4-point gradient sparkle look (e.g. via Iconify/Flaticon) at implementation time — do not embed the specific paid Magnific stock asset directly.
+Thresholds carried over from earlier drafts; worth re-checking against real 90-day distributions once the view is live, since point values per action changed since these were set (e.g. a single completed carer booking is now +20, well over a third of the way to "Active"). Tuning the threshold numbers later is a config change, not a re-architecture.
+
+**Sparkle SVG — approved design:** a 4-point sparkle/diamond-star shape, consistent across all three tiers, rendered as: outline-only (Active) → gold gradient fill (Trusted) → full gold gradient fill + soft radial shimmer halo around the avatar ring (Pillar, ring itself untouched underneath). See approval mockup shared during design review. Source a free/CC-licensed sparkle asset matching this shape at implementation time (e.g. via Iconify/Flaticon) — do not embed the specific paid Magnific stock asset directly; the shape is generic/common enough to recreate freely.
 
 ### Percentile gate (secondary, nightly-computed)
 - A nightly job computes each scoring user's percentile rank among all users with 90-day score > 0.
@@ -74,11 +97,27 @@ Sparkle SVG: source a free/CC-licensed sparkle-star asset matching a 4-point gra
 
 Demotions are silent — no notification, no popup. Only crossing *up* into a new tier fires anything. This avoids ever sending a "you lost something" message, consistent with the celebration-only design.
 
-**Mechanism:** the nightly job needs to know "what tier was this user at yesterday" to detect a promotion. This is the one piece of state that can't be reused from anything existing (`trust_score` etc. are admin-only view fields, not writable, and intentionally kept separate from this system). **Minimal new state required:** one small new column (e.g. `last_known_engagement_tier` on `profiles`, or an equally small dedicated lookup) updated by the nightly job after each run. This is the smallest possible footprint — a single column, not a new table or history log.
+### Cache table (the one new table this system needs)
 
-When the nightly job detects `today's tier > yesterday's tier`:
+A single small new table, not a single column — a bare column on `profiles` isn't enough because the UI also needs percentile text, a computed timestamp, and the raw score for debugging, and the notification logic needs to diff against yesterday's tier:
+
+```
+user_engagement_tier_cache
+- user_id            (PK / FK to profiles)
+- score_90d           int
+- effective_tier      text   (internal: New/Active/Trusted/Pillar)
+- percentile_rank     numeric, nullable
+- previous_tier       text
+- computed_at         timestamptz
+- promoted_at         timestamptz, nullable
+```
+
+This is the only new persistent state in the entire system — everything else (raw score, anti-gaming filters) is computed live from existing tables in the view; this table just stores the *result* of the nightly computation so the client and the notification job both have something stable to read.
+
+When the nightly job detects `effective_tier > previous_tier`:
 - Insert a row into the existing `notifications` table.
 - Trigger push notification + in-app popup.
+- Set `promoted_at` to the run timestamp.
 
 ### Notification copy (lowercase "huddle", warm/casual tone, no tier names)
 
@@ -98,21 +137,28 @@ No "you might lose this" language anywhere — loss-aversion stays implicit (a s
 
 ## UI surfaces
 
-1. **Avatar corner sparkle** — top-right of the avatar, slightly overlapping the avatar ring. Renders wherever a tiered user's avatar appears with tier styling: `ProfileModal` and Discover Card. Style (outline/gradient/filled/shimmer) per tier table above.
+1. **Avatar corner sparkle** — top-right of the avatar, slightly overlapping the avatar ring. Renders on:
+   - Profile modal
+   - Discover card
+   - Care booking profile preview
+   - Social (post author / commenter avatars)
+   - **Not** on map pin avatar icons — too small at typical map zoom (~24–32px) to render legibly, and would compete visually with pin-status colors, which need to stay the primary signal on the map. Could revisit if a tap-to-expand pin detail view with a larger avatar is ever added.
+
+   Style (outline/gradient/filled/shimmer) per tier table above and the approved sparkle mockup.
 2. **Info/explainer affordance** — a single tappable icon in the Profile modal (near the name/badge cluster). Tapping shows the 3-second auto-dismissing explainer popup above. This is the only explainer entry point — no duplicate indicator elsewhere.
-3. **Percentile line** — cosmetic-only text in the membership-status area at the bottom of the Profile modal, with **no tier name attached**, e.g. "top 18% of active members this month." Sourced from the nightly job's output. Purely descriptive flavor text; the tier itself already incorporates the percentile gate above — this line never independently drives color/star.
+3. **Percentile line** — cosmetic-only text in the membership-status area at the bottom of the Profile modal, with **no tier name attached**, e.g. "top 18% of active members this month." Sourced from `user_engagement_tier_cache.percentile_rank`. Purely descriptive flavor text; the tier itself already incorporates the percentile gate above — this line never independently drives color/star.
 
 ## Implementation approach (v1)
 
-1. A Postgres `VIEW` (`view_user_engagement_score`) computing 90-day rolling point totals from existing tables, applying the anti-gaming filters above.
-2. A nightly scheduled job (Supabase `pg_cron` or equivalent) that:
+1. A Postgres `VIEW` (`view_user_engagement_score`) computing 90-day rolling point totals from existing tables, applying the anti-gaming filters and per-action/overall daily caps above.
+2. The new `user_engagement_tier_cache` table (see schema above) — the system's only new persistent state.
+3. A nightly scheduled job (Supabase `pg_cron` or equivalent) that:
    - Reads `view_user_engagement_score`.
    - Computes percentile rank among score > 0 users.
    - Determines computed tier (threshold AND percentile gate). Role-floor override exists in code but is disabled (see above).
-   - Compares to `last_known_engagement_tier` (the one new column) to detect promotions only.
-   - Inserts a `notifications` row + triggers push/popup for any user who was promoted.
-   - Updates `last_known_engagement_tier` to the new computed tier for every user (used for next night's comparison; also what the client reads to render the sparkle).
-3. Client: profile/discover-card components read `last_known_engagement_tier` (+ percentile text) and render sparkle/username/avatar styling accordingly.
+   - Reads each user's current `effective_tier` from `user_engagement_tier_cache` as `previous_tier`, writes the new row (`score_90d`, `effective_tier`, `percentile_rank`, `previous_tier`, `computed_at`, `promoted_at` if applicable).
+   - Inserts a `notifications` row + triggers push/popup for any user whose tier increased.
+4. Client: profile/discover-card/social/care-booking-preview components read `user_engagement_tier_cache` (effective_tier + percentile_rank) and render sparkle/username/avatar styling accordingly.
 
 ## Explicitly out of scope for v1
 - Groups (no `groups` table exists yet — excluded entirely until that feature ships).
