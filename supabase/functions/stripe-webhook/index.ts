@@ -6,7 +6,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import Stripe from "https://esm.sh/stripe@14.11.0?target=deno";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.93.1";
 
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") as string, {
   apiVersion: "2023-10-16",
@@ -14,9 +14,31 @@ const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") as string, {
 });
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL") as string;
-const supabaseServiceKey = (Deno.env.get("HUDDLE_SUPABASE_SERVICE_KEY") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")) as string;
 const webhookSecret = Deno.env.get("STRIPE_WEBHOOK_SECRET") as string;
 const allowWebhookTestBypass = Deno.env.get("ALLOW_WEBHOOK_TEST_BYPASS") === "true";
+
+const firstSecretKey = (value: string | null | undefined) => {
+  const raw = String(value || "").trim().replace(/^['"]+|['"]+$/g, "");
+  if (!raw) return "";
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      const fromArray = parsed.map((item) => String(item || "").trim()).find(Boolean);
+      if (fromArray) return fromArray;
+    }
+    if (parsed && typeof parsed === "object") {
+      const fromObject = Object.values(parsed).map((item) => String(item || "").trim()).find(Boolean);
+      if (fromObject) return fromObject;
+    }
+  } catch {
+    // Fall through to delimited secret parsing.
+  }
+  return raw.split(/[\s,]+/).map((item) => item.trim().replace(/^['"]+|['"]+$/g, "")).find(Boolean) || "";
+};
+const supabaseServiceKey =
+  firstSecretKey(Deno.env.get("SUPABASE_SECRET_KEYS")) ||
+  firstSecretKey(Deno.env.get("SUPABASE_SECRET_KEY")) ||
+  firstSecretKey(Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"));
 
 // Initialize Supabase client with SERVICE ROLE (bypasses RLS)
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
@@ -36,6 +58,105 @@ interface WebhookResponse {
   success: boolean;
   message: string;
   eventId?: string;
+  statusCode?: number;
+}
+
+async function requestCareAgreementPdf(serviceChatId: string, source: string) {
+  const cleanServiceChatId = String(serviceChatId || "").trim();
+  if (!cleanServiceChatId) return;
+  try {
+    await supabase.rpc("enqueue_care_agreement_pdf_generation", {
+      p_service_chat_id: cleanServiceChatId,
+      p_reason: source,
+    });
+  } catch (error) {
+    console.warn("[stripe-webhook] care agreement pdf enqueue deferred:", error instanceof Error ? error.message : String(error));
+  }
+  try {
+    const { data, error } = await supabase.functions.invoke("generate-care-agreement-pdf", {
+      headers: { Authorization: `Bearer ${supabaseServiceKey}` },
+      body: { service_chat_id: cleanServiceChatId, source },
+    });
+    if (error || (data as { ok?: boolean } | null)?.ok !== true) {
+      console.warn("[stripe-webhook] care agreement pdf generation deferred:", error?.message || JSON.stringify(data || {}));
+    }
+  } catch (error) {
+    console.warn("[stripe-webhook] care agreement pdf generation deferred:", error instanceof Error ? error.message : String(error));
+  }
+}
+
+async function refundServiceScopeConflict(
+  session: Stripe.Checkout.Session,
+  serviceChat: { id: string; chat_id?: string; requester_id: string; status?: string | null },
+  scopeVersionId: string,
+  paymentIntentId: string,
+  reason: string,
+) {
+  const amountMinor = Number(session.amount_total || 0);
+  if (!Number.isFinite(amountMinor) || amountMinor <= 0) {
+    throw new Error("service_booking scope-conflict refund amount missing");
+  }
+
+  const refund = await stripe.refunds.create(
+    {
+      payment_intent: paymentIntentId,
+      amount: amountMinor,
+      metadata: {
+        service_chat_id: serviceChat.chat_id || session.metadata?.service_chat_id || "",
+        requester_id: serviceChat.requester_id,
+        reason,
+      },
+    },
+    { idempotencyKey: `svc_scope_conflict_refund:${session.id}` },
+  );
+
+  await supabase
+    .from("care_scope_versions")
+    .update({
+      payment_status: "cancelled",
+      stripe_refund_id: refund.id,
+      checkout_session_id: session.id,
+      payment_intent_id: paymentIntentId,
+      payment_scope_conflict_reason: reason,
+    })
+    .eq("id", scopeVersionId);
+
+  await supabase
+    .from("service_chats")
+    .update({ stripe_checkout_session_id: null, booking_snapshot_pending: null })
+    .eq("id", serviceChat.id)
+    .eq("stripe_checkout_session_id", session.id);
+
+  await supabase.from("admin_audit_logs").insert({
+    actor_id: serviceChat.requester_id,
+    action: "service_scope_conflict_auto_refund",
+    notes: "Service payment refunded because booking scope changed before completion.",
+    details: {
+      service_chat_id: serviceChat.id,
+      chat_id: serviceChat.chat_id || session.metadata?.service_chat_id || null,
+      checkout_session_id: session.id,
+      payment_intent_id: paymentIntentId,
+      stripe_refund_id: refund.id,
+      amount_minor: amountMinor,
+      currency: session.currency,
+      reason,
+    },
+  });
+
+  await supabase.rpc("service_notify", {
+    p_user_id: serviceChat.requester_id,
+    p_kind: "service_payment_returned_scope_changed",
+    p_title: "Payment returned",
+    p_body: "Your payment was returned because the booking changed before it completed.",
+    p_href: `/chats?tab=service&room=${serviceChat.chat_id || session.metadata?.service_chat_id || ""}`,
+    p_data: {
+      kind: "service_payment_returned_scope_changed",
+      chatId: serviceChat.chat_id || session.metadata?.service_chat_id || "",
+      stripeRefundId: refund.id,
+    },
+  });
+
+  return refund.id;
 }
 
 function normalizeType(value?: string | null): string {
@@ -47,6 +168,33 @@ function isSharePerksType(value?: string | null): boolean {
   if (!raw) return false;
   if (SHARE_PERKS_KEYS.has(raw)) return true;
   return SHARE_PERKS_KEYS.has(raw.toLowerCase());
+}
+
+async function verifyStripeWebhookSignature(body: string, signature: string | null, secret: string): Promise<boolean> {
+  if (!signature || !secret) return false;
+  const parts = signature.split(",").map((part) => part.trim());
+  const timestamp = parts.find((part) => part.startsWith("t="))?.slice(2) || "";
+  const signatures = parts.filter((part) => part.startsWith("v1=")).map((part) => part.slice(3));
+  const timestampSeconds = Number(timestamp);
+  if (!timestamp || !Number.isFinite(timestampSeconds) || signatures.length === 0) return false;
+  if (Math.abs(Date.now() / 1000 - timestampSeconds) > 300) return false;
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const digest = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`${timestamp}.${body}`));
+  const expected = Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  return signatures.some((candidate) => {
+    if (candidate.length !== expected.length) return false;
+    let diff = 0;
+    for (let index = 0; index < expected.length; index += 1) {
+      diff |= expected.charCodeAt(index) ^ candidate.charCodeAt(index);
+    }
+    return diff === 0;
+  });
 }
 
 function extractSharePerksSubscriptionIds(prefs: unknown): string[] {
@@ -69,7 +217,7 @@ function buildSharePerksPrefs(prefs: unknown, ids: string[]): Record<string, unk
 function subscriptionContainsSharePerksPrice(subscription: Stripe.Subscription): boolean {
   if (!SHARE_PERKS_PRICE_ID) return false;
   const items = subscription.items?.data || [];
-  return items.some((item) => item?.price?.id === SHARE_PERKS_PRICE_ID);
+  return items.some((item: Stripe.SubscriptionItem) => item?.price?.id === SHARE_PERKS_PRICE_ID);
 }
 
 function isSharePerksSubscription(subscription: Stripe.Subscription): boolean {
@@ -113,6 +261,22 @@ async function notifyServiceBookingConfirmed(chatId: string) {
   const { error } = await supabase.rpc("notify_service_booking_confirmed", { p_chat_id: chatId });
   if (error) {
     console.warn(`[CHECKOUT COMPLETED] service_booking notification failed: ${error.message}`);
+  }
+}
+
+async function recordCheckoutTransaction(session: Stripe.Checkout.Session, eventId: string, userId: string, type?: string | null) {
+  const { error } = await supabase.from("transactions").insert({
+    user_id: userId,
+    stripe_event_id: eventId,
+    stripe_session_id: session.id,
+    type: type || "unknown",
+    amount: session.amount_total,
+    currency: session.currency,
+    status: "completed",
+    metadata: session.metadata || {},
+  });
+  if (error && !String(error.message || "").toLowerCase().includes("duplicate")) {
+    throw new Error(`Transaction creation failed: ${error.message}`);
   }
 }
 
@@ -200,30 +364,17 @@ serve(async (req: Request): Promise<Response> => {
       console.log(`[STRIPE WEBHOOK] Local bypass mode accepted event: ${event.type} (ID: ${event.id})`);
     } else {
       try {
-        event = stripe.webhooks.constructEvent(body, signature, webhookSecret);
+        const verified = await verifyStripeWebhookSignature(body, signature, webhookSecret);
+        if (!verified) throw new Error("stripe_signature_mismatch");
+        event = JSON.parse(body) as Stripe.Event;
         console.log(`[STRIPE WEBHOOK] Verified event: ${event.type} (ID: ${event.id})`);
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         console.error(`[STRIPE WEBHOOK] Signature verification failed: ${message}`);
-        // Fallback for signature drift: verify by authoritative event retrieval.
-        // This still requires a valid Stripe event id from our own account.
-        const parsed = JSON.parse(body) as Partial<Stripe.Event> | null;
-        const eventId = String(parsed?.id || "").trim();
-        if (!eventId) {
-          return new Response(JSON.stringify({ error: "Invalid signature" }), {
-            status: 400,
-            headers: { "Content-Type": "application/json" },
-          });
-        }
-        const remoteEvent = await stripe.events.retrieve(eventId).catch(() => null);
-        if (!remoteEvent || remoteEvent.type !== parsed?.type) {
-          return new Response(JSON.stringify({ error: "Invalid signature" }), {
-            status: 400,
-            headers: { "Content-Type": "application/json" },
-          });
-        }
-        event = remoteEvent;
-        console.warn(`[STRIPE WEBHOOK] Accepted via Stripe API fallback: ${event.type} (ID: ${event.id})`);
+        return new Response(JSON.stringify({ error: "Invalid signature" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        });
       }
     }
 
@@ -258,6 +409,10 @@ serve(async (req: Request): Promise<Response> => {
         result = await handleCheckoutSessionCompleted(event);
         break;
 
+      case "checkout.session.expired":
+        result = await handleCheckoutSessionExpired(event);
+        break;
+
       case "payment_intent.succeeded":
         result = await handlePaymentIntentSucceeded(event);
         break;
@@ -287,7 +442,7 @@ serve(async (req: Request): Promise<Response> => {
     }
 
     return new Response(JSON.stringify(result), {
-      status: 200,
+      status: result.statusCode || 200,
       headers: { "Content-Type": "application/json" },
     });
   } catch (error: unknown) {
@@ -308,6 +463,59 @@ serve(async (req: Request): Promise<Response> => {
 });
 
 // =====================================================
+// HANDLER: checkout.session.expired
+// =====================================================
+async function handleCheckoutSessionExpired(
+  event: Stripe.Event
+): Promise<WebhookResponse> {
+  const session = event.data.object as Stripe.Checkout.Session;
+  const type = session.metadata?.type;
+  if (type !== "service_booking") {
+    return { success: true, message: "Checkout session expiry ignored", eventId: event.id };
+  }
+
+  const serviceChatId = String(session.metadata?.service_chat_id || "").trim();
+  if (!serviceChatId) {
+    return { success: true, message: "Service booking expiry missing chat metadata", eventId: event.id };
+  }
+
+  // A chat_id can have multiple service_chats rows (e.g. a completed past booking plus a new
+  // pending one); resolve to the canonical non-terminal row first so this lookup never quietly
+  // returns null (which supabase-js does for a chat_id.maybeSingle() with 2+ matches) instead of
+  // clearing the expired checkout session id.
+  const { data: canonicalId } = await supabase.rpc("current_active_service_chat_id_for_room", { p_chat_id: serviceChatId });
+  const { data: serviceChat } = await supabase
+    .from("service_chats")
+    .select("id, stripe_checkout_session_id")
+    .eq("id", canonicalId)
+    .maybeSingle();
+
+  const scopeVersionId = String(session.metadata?.scope_version_id || "").trim();
+  if (scopeVersionId) {
+    await supabase
+      .from("care_scope_versions")
+      .update({
+        payment_status: "expired",
+        payment_pending_started_at: null,
+        payment_pending_expires_at: null,
+      })
+      .eq("id", scopeVersionId)
+      .eq("checkout_session_id", session.id)
+      .in("payment_status", ["creating", "pending"]);
+  }
+
+  if (serviceChat?.stripe_checkout_session_id === session.id) {
+    const serviceChatRow = serviceChat as { id: string; stripe_checkout_session_id?: string | null };
+    await supabase
+      .from("service_chats")
+      .update({ stripe_checkout_session_id: null })
+      .eq("id", serviceChatRow.id);
+  }
+
+  return { success: true, message: "Service booking checkout expired", eventId: event.id };
+}
+
+// =====================================================
 // HANDLER: checkout.session.completed
 // =====================================================
 async function handleCheckoutSessionCompleted(
@@ -323,21 +531,8 @@ async function handleCheckoutSessionCompleted(
 
   console.log(`[CHECKOUT COMPLETED] User: ${userId}, Type: ${type}, Mode: ${session.mode}`);
 
-  // Create transaction record (idempotency enforced by unique stripe_event_id)
-  const { error: txError } = await supabase.from("transactions").insert({
-    user_id: userId,
-    stripe_event_id: event.id,
-    stripe_session_id: session.id,
-    type: type || "unknown",
-    amount: session.amount_total,
-    currency: session.currency,
-    status: "completed",
-    metadata: session.metadata || {},
-  });
-
-  if (txError) {
-    console.error(`[CHECKOUT COMPLETED] Failed to create transaction: ${txError.message}`);
-    throw new Error(`Transaction creation failed: ${txError.message}`);
+  if (type !== "service_booking") {
+    await recordCheckoutTransaction(session, event.id, userId, type);
   }
 
   // =====================================================
@@ -484,31 +679,89 @@ async function handleCheckoutSessionCompleted(
           ? session.payment_intent
           : (session.payment_intent as { id?: string } | null)?.id ?? null;
       if (paymentIntentId) {
+        // A chat_id can have multiple service_chats rows (e.g. a completed past booking plus a
+        // new pending one) -- .eq("chat_id", ...).maybeSingle() throws when 2+ rows match, which
+        // would fail this webhook handler outright and cause Stripe to keep retrying it. Resolve
+        // the canonical non-terminal row first, same as the other service-payment functions.
+        const { data: canonicalServiceChatId } = await supabase.rpc("current_active_service_chat_id_for_room", { p_chat_id: session.metadata.service_chat_id });
         const { data: serviceChatForSnapshot, error: snapshotLoadErr } = await supabase
           .from("service_chats")
-          .select("booking_snapshot_pending, provider_id, requester_id")
-          .eq("chat_id", session.metadata.service_chat_id)
-          .eq("status", "pending")
+          .select("id, chat_id, status, booking_snapshot_pending, stripe_checkout_session_id, stripe_payment_intent_id, provider_id, requester_id")
+          .eq("id", canonicalServiceChatId)
           .maybeSingle();
         if (snapshotLoadErr) {
           console.error(`[CHECKOUT COMPLETED] service_booking snapshot load failed: ${snapshotLoadErr.message}`);
         }
-        const { error: chatErr } = await supabase
-          .from("service_chats")
-          .update({
-            status: "booked",
-            care_status: "awaiting_handoff",
-            booking_snapshot: serviceChatForSnapshot?.booking_snapshot_pending || null,
-            booking_snapshot_pending: null,
-            stripe_checkout_session_id: session.id,
-            stripe_payment_intent_id: paymentIntentId,
-            booked_at: new Date().toISOString(),
-          })
-          .eq("chat_id", session.metadata.service_chat_id)
-          .eq("status", "pending"); // idempotent: only advances from pending
+        const pendingSnapshot = (serviceChatForSnapshot?.booking_snapshot_pending || {}) as Record<string, unknown>;
+        const pendingPrice = (pendingSnapshot.price || {}) as Record<string, unknown>;
+        const expectedAmount = Number(pendingPrice.requesterTotal || 0);
+        const expectedCurrency = String(pendingPrice.currency || "").trim().toLowerCase();
+        const storedSessionId = String(serviceChatForSnapshot?.stripe_checkout_session_id || "").trim();
+        const sessionCurrency = String(session.currency || "").trim().toLowerCase();
+        if (!serviceChatForSnapshot) {
+          console.error(`[CHECKOUT COMPLETED] service_booking ignored: pending chat not found for chat=${session.metadata.service_chat_id}`);
+          throw new Error("service_booking chat not found");
+        }
+        const metadataRequesterId = String(session.metadata.requester_id || session.metadata.user_id || "").trim();
+        if (!metadataRequesterId || metadataRequesterId !== serviceChatForSnapshot.requester_id) {
+          console.error(`[CHECKOUT COMPLETED] service_booking ignored: requester mismatch chat=${session.metadata.service_chat_id}`);
+          throw new Error("service_booking requester mismatch");
+        }
+        if (storedSessionId && storedSessionId !== session.id) {
+          console.error(`[CHECKOUT COMPLETED] service_booking ignored: checkout session mismatch chat=${session.metadata.service_chat_id}`);
+          throw new Error("service_booking checkout session mismatch");
+        }
+        const scopeVersionId = String(session.metadata.scope_version_id || "").trim();
+        const scopeHash = String(session.metadata.scope_hash || "").trim();
+        if (!scopeVersionId || !scopeHash) {
+          throw new Error("service_booking missing care scope metadata");
+        }
+        if (serviceChatForSnapshot.status !== "pending") {
+          if (serviceChatForSnapshot.status !== "booked" || (serviceChatForSnapshot.stripe_payment_intent_id && serviceChatForSnapshot.stripe_payment_intent_id !== paymentIntentId)) {
+            const refundId = await refundServiceScopeConflict(
+              session,
+              serviceChatForSnapshot,
+              scopeVersionId,
+              paymentIntentId,
+              "payment_succeeded_after_chat_left_pending",
+            );
+            await recordCheckoutTransaction(session, event.id, userId, type);
+            return { success: true, message: `service_booking refunded after scope conflict: ${refundId}`, eventId: event.id };
+          }
+          await requestCareAgreementPdf(serviceChatForSnapshot.id, "stripe_webhook_already_booked");
+          return { success: true, message: "service_booking already booked", eventId: event.id };
+        }
+        if (expectedAmount <= 0 || Number(session.amount_total || 0) !== expectedAmount || !expectedCurrency || sessionCurrency !== expectedCurrency) {
+          console.error(`[CHECKOUT COMPLETED] service_booking ignored: amount/currency mismatch chat=${session.metadata.service_chat_id}`);
+          throw new Error("service_booking amount or currency mismatch");
+        }
+        const { data: agreement, error: chatErr } = await supabase.rpc("finalize_service_care_agreement_for_payment", {
+          p_chat_id: session.metadata.service_chat_id,
+          p_checkout_session_id: session.id,
+          p_payment_intent_id: paymentIntentId,
+          p_scope_version_id: scopeVersionId,
+          p_scope_hash: scopeHash,
+          p_booking_snapshot: serviceChatForSnapshot?.booking_snapshot_pending || null,
+          p_payment_status: "succeeded",
+        });
         if (chatErr) {
+          if ((chatErr.message || "").includes("payment_scope_conflict")) {
+            const refundId = await refundServiceScopeConflict(
+              session,
+              serviceChatForSnapshot,
+              scopeVersionId,
+              paymentIntentId,
+              "payment_scope_conflict",
+            );
+            await recordCheckoutTransaction(session, event.id, userId, type);
+            return { success: true, message: `service_booking refunded after scope conflict: ${refundId}`, eventId: event.id };
+          }
           console.error(`[CHECKOUT COMPLETED] service_booking advance failed: ${chatErr.message}`);
+          throw new Error(`service_booking advance failed: ${chatErr.message}`);
         } else {
+          const pdfServiceChatId = String((agreement as { service_chat_id?: string } | null)?.service_chat_id || serviceChatForSnapshot.id || "").trim();
+          await requestCareAgreementPdf(pdfServiceChatId, "stripe_webhook_checkout_completed");
+          await recordCheckoutTransaction(session, event.id, userId, type);
           await insertServiceBookedMessage(session.metadata.service_chat_id, session.metadata.requester_id || session.metadata.user_id || "system");
           await notifyServiceBookingConfirmed(session.metadata.service_chat_id);
           console.log(`[CHECKOUT COMPLETED] service_booking booked: chat=${session.metadata.service_chat_id} pi=${paymentIntentId}`);
@@ -625,7 +878,7 @@ async function handleSubscriptionDeleted(
   fetch(brevoSyncUrl, {
     method: "POST",
     headers: {
-      "Authorization": `Bearer ${(Deno.env.get("HUDDLE_SUPABASE_SERVICE_KEY") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"))}`,
+      "Authorization": `Bearer ${supabaseServiceKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ event: "subscription_changed", user_id: profile.id, tier: "free", subscription_status: "canceled" }),
@@ -748,7 +1001,7 @@ async function handleSubscriptionUpdated(
   fetch(brevoSyncUrl, {
     method: "POST",
     headers: {
-      "Authorization": `Bearer ${(Deno.env.get("HUDDLE_SUPABASE_SERVICE_KEY") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"))}`,
+      "Authorization": `Bearer ${supabaseServiceKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ event: "subscription_changed", user_id: profile.id, tier, subscription_status: status }),
@@ -832,7 +1085,7 @@ async function handlePaymentIntentSucceeded(
         ? paymentIntent.latest_charge
         : paymentIntent.latest_charge?.id;
 
-    await supabase
+    const { error: nannyInsertError } = await supabase
       .from("marketplace_bookings")
       .insert({
         client_id: meta["user_id"] || "unknown",
@@ -849,11 +1102,10 @@ async function handlePaymentIntentSucceeded(
         paid_at: new Date().toISOString(),
         escrow_release_date: escrowRelease.toISOString(),
         escrow_status: "pending",
-      })
-      .catch((err: unknown) => {
-        const message = err instanceof Error ? err.message : String(err);
-        console.warn("[PAYMENT_INTENT] Nanny insert:", message);
       });
+    if (nannyInsertError) {
+      console.warn("[PAYMENT_INTENT] Nanny insert:", nannyInsertError.message);
+    }
 
     console.log(`[PAYMENT_INTENT] Nanny booking recorded: nanny=${meta.nanny_id}`);
   }

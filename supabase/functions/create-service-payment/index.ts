@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import Stripe from "https://esm.sh/stripe@14.11.0?target=deno";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.93.1";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -37,6 +37,13 @@ const STRIPE_MINIMUM_CHARGE_CENTS: Record<string, number> = {
   sgd: 50,
   usd: 50,
 };
+const CARE_PAYMENT_RETRY_LOCK_MS = 5 * 60 * 1000;
+const STRIPE_ZERO_DECIMAL_CURRENCIES = new Set(["bif", "clp", "djf", "gnf", "jpy", "kmf", "krw", "mga", "pyg", "rwf", "ugx", "vnd", "vuv", "xaf", "xof", "xpf"]);
+const CARE_CANCELLATION_TERMS = "More than 72 hours before care starts -- full refund. 24 to 72 hours before -- 50% refund; the retained 50% covers the provider's reserved time and the cost of arranging the booking. Less than 24 hours before -- the booking is final and non-refundable, and cancelling within this window forfeits the full booking amount.";
+const toStripeMinorUnitAmount = (amount: number, currency: string) =>
+  STRIPE_ZERO_DECIMAL_CURRENCIES.has(currency)
+    ? Math.round(amount)
+    : Math.round(amount * 100);
 
 const createStripeClient = (secret: string): Stripe =>
   new Stripe(secret, {
@@ -45,7 +52,28 @@ const createStripeClient = (secret: string): Stripe =>
   });
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL") as string;
-const supabaseServiceKey = (Deno.env.get("HUDDLE_SUPABASE_SERVICE_KEY") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")) as string;
+const firstSecretKey = (value: string | null | undefined) => {
+  const raw = String(value || "").trim().replace(/^['"]+|['"]+$/g, "");
+  if (!raw) return "";
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      const fromArray = parsed.map((item) => String(item || "").trim()).find(Boolean);
+      if (fromArray) return fromArray;
+    }
+    if (parsed && typeof parsed === "object") {
+      const fromObject = Object.values(parsed).map((item) => String(item || "").trim()).find(Boolean);
+      if (fromObject) return fromObject;
+    }
+  } catch {
+    // Fall through to delimited secret parsing.
+  }
+  return raw.split(/[\s,]+/).map((item) => item.trim().replace(/^['"]+|['"]+$/g, "")).find(Boolean) || "";
+};
+const supabaseServiceKey =
+  firstSecretKey(Deno.env.get("SUPABASE_SECRET_KEYS")) ||
+  firstSecretKey(Deno.env.get("SUPABASE_SECRET_KEY")) ||
+  firstSecretKey(Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"));
 const appEnv = String(Deno.env.get("APP_ENV") || Deno.env.get("HUDDLE_ENV") || Deno.env.get("ENVIRONMENT") || Deno.env.get("VERCEL_ENV") || "").toLowerCase();
 const isNonProductionRuntime = appEnv === "staging" || appEnv === "preview" || appEnv === "development" || appEnv === "test" || appEnv === "local" || appEnv === "dev";
 
@@ -96,6 +124,48 @@ const requireSnapshotString = (snapshot: Record<string, unknown>, key: string, l
   if (!value) throw new Error(`${label} is required`);
   return value;
 };
+const parseRequestDates = (requestCard: Record<string, unknown>) => {
+  const requestedDates = Array.isArray(requestCard.requestedDates)
+    ? requestCard.requestedDates.map(clean).filter(Boolean).sort()
+    : [];
+  const fallbackDate = clean(requestCard.requestedDate);
+  return {
+    firstDate: requestedDates[0] || fallbackDate,
+    lastDate: requestedDates[requestedDates.length - 1] || fallbackDate,
+  };
+};
+const tzOffsetSuffix = (requestCard: Record<string, unknown>) => {
+  const raw = clean(requestCard.tzOffset) || clean(requestCard.timezoneOffset) || clean(requestCard.tzOffsetMinutes);
+  if (/^[+-]\d{2}:\d{2}$/.test(raw)) return raw;
+  if (/^[+-]?\d+$/.test(raw)) {
+    const value = Number(raw);
+    const totalMinutes = Math.abs(value) <= 14 ? Math.abs(value) * 60 : Math.abs(value);
+    const sign = Math.abs(value) <= 14
+      ? (value < 0 ? "-" : "+")
+      : (value <= 0 ? "+" : "-");
+    const hours = String(Math.floor(totalMinutes / 60)).padStart(2, "0");
+    const minutes = String(totalMinutes % 60).padStart(2, "0");
+    return `${sign}${hours}:${minutes}`;
+  }
+  return "Z";
+};
+const buildServiceDateTime = (date: string, time: string, requestCard: Record<string, unknown>) => {
+  if (!date || !time) return "";
+  const parsed = new Date(`${date}T${time}:00${tzOffsetSuffix(requestCard)}`);
+  return Number.isNaN(parsed.getTime()) ? "" : parsed.toISOString();
+};
+const buildServiceWindow = (requestCard: Record<string, unknown>, startDate: string, startTime: string, endDate: string, endTime: string) => {
+  const explicitStartAt = clean(requestCard.startAtIso) || clean(requestCard.startAt);
+  const explicitEndAt = clean(requestCard.endAtIso) || clean(requestCard.endAt);
+  const startAt = explicitStartAt || buildServiceDateTime(startDate, startTime, requestCard);
+  const rawEndAt = explicitEndAt || buildServiceDateTime(endDate, endTime, requestCard);
+  if (!startAt || !rawEndAt) return { startAt, endAt: rawEndAt, error: "" };
+  const startMs = new Date(startAt).getTime();
+  const endMs = new Date(rawEndAt).getTime();
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return { startAt, endAt: rawEndAt, error: "booking_time_invalid" };
+  if (endMs <= startMs) return { startAt, endAt: rawEndAt, error: "booking_time_invalid" };
+  return { startAt, endAt: rawEndAt, error: "" };
+};
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -133,11 +203,23 @@ serve(async (req) => {
       return json({ error: "Booking confirmation is required" }, 400);
     }
 
-    const { data: serviceChat, error: serviceChatErr } = await supabase
+    let serviceChatResult = await supabase
       .from("service_chats")
-      .select("chat_id, requester_id, provider_id, status, request_card, quote_card")
-      .eq("chat_id", serviceChatId)
+      .select("id, chat_id, requester_id, provider_id, status, request_card, quote_card")
+      .eq("id", serviceChatId)
       .maybeSingle();
+    if (!serviceChatResult.error && !serviceChatResult.data) {
+      // Old app builds sent the conversation chat_id. Reused conversations can have
+      // completed/history rows, so resolve only the explicit active service row.
+      const { data: canonicalId, error: canonicalIdErr } = await supabase.rpc("current_active_service_chat_id_for_room", { p_chat_id: serviceChatId });
+      if (canonicalIdErr) return json({ error: "Service lookup failed" }, 500);
+      serviceChatResult = await supabase
+        .from("service_chats")
+        .select("id, chat_id, requester_id, provider_id, status, request_card, quote_card")
+        .eq("id", canonicalId)
+        .maybeSingle();
+    }
+    const { data: serviceChat, error: serviceChatErr } = serviceChatResult;
     if (serviceChatErr) {
       logStageError("service_chat_load_failed", serviceChatErr);
       return stageJson("service_chat_load_failed", "Service lookup failed", 500, exposeStage);
@@ -145,6 +227,9 @@ serve(async (req) => {
     if (!serviceChat) return json({ error: "Service chat not found" }, 404);
     if (serviceChat.requester_id !== user.id) return json({ error: "Forbidden" }, 403);
     if (serviceChat.status !== "pending") return json({ error: "Service is no longer pending" }, 409);
+    if (serviceChat.provider_id === user.id) {
+      return json({ error: "You can't book your own care service.", code: "owner_cannot_book_own_service" }, 409);
+    }
 
     // Amount and currency are authoritative from the server-side quote_card, not the client.
     // This prevents a requester from manipulating the charge amount or currency.
@@ -155,20 +240,33 @@ serve(async (req) => {
     if (!Number.isFinite(parsedPrice) || parsedPrice <= 0) {
       return stageJson("quote_invalid", "Quote has no valid price", 409, exposeStage);
     }
-    const amountCents = Math.round(parsedPrice * 100);
     const currency = String(quoteCard.currency || "").trim().toLowerCase();
     if (!currency) {
       return stageJson("quote_invalid", "Quote has no currency", 409, exposeStage);
     }
+    const amountCents = toStripeMinorUnitAmount(parsedPrice, currency);
 
     const { data: providerCarer, error: providerErr } = await supabase
       .from("pet_care_profiles")
-      .select("stripe_account_id, stripe_payout_status")
+      .select("stripe_account_id, stripe_payout_status, stripe_payouts_enabled, currency")
       .eq("user_id", serviceChat.provider_id)
       .maybeSingle();
     if (providerErr) return json({ error: "Provider lookup failed" }, 500);
-    if (!providerCarer?.stripe_account_id || providerCarer.stripe_payout_status !== "complete") {
-      return json({ error: "Provider has not completed payout setup" }, 409);
+    if (!providerCarer?.stripe_account_id || providerCarer.stripe_payout_status !== "complete" || providerCarer.stripe_payouts_enabled !== true) {
+      return json({
+        error: "Provider has not completed payout setup",
+        code: "provider_payout_setup_required",
+        action: "refresh_stripe_account_status",
+      }, 409);
+    }
+    if (String(providerCarer.currency || "").trim().toLowerCase() !== currency) {
+      return stageJson("quote_invalid", "Quote currency does not match provider profile currency", 409, exposeStage);
+    }
+
+    const incomingRequesterId = clean(incomingSnapshot.requesterId);
+    const incomingProviderId = clean(incomingSnapshot.providerId);
+    if ((incomingRequesterId && incomingRequesterId !== user.id) || (incomingProviderId && incomingProviderId !== serviceChat.provider_id)) {
+      return json({ error: "Booking confirmation is out of date" }, 400);
     }
 
     const mode = resolveMode(req.headers.get("origin"), successUrl, cancelUrl);
@@ -219,8 +317,11 @@ serve(async (req) => {
       return stageJson("stripe_customer_create_failed", "Stripe customer could not be created", 500, exposeStage, { stripe: stripeErrorFields(error) });
     }
 
-    // Dual-sided fee: 10% added to requester charge, 10% deducted from provider payout
-    const REQUESTER_FEE_RATE = 0.10;
+    // Owner pays 0% (promotional — encourages adoption). Carer's payout still nets 10%,
+    // covering Stripe processing + platform costs. Change these two numbers only — the
+    // frontend mirror (CARE_REQUESTER_FEE_RATE / CARE_PROVIDER_FEE_RATE in
+    // NativeServiceChatScreen.tsx) must be kept identical to what's charged here.
+    const REQUESTER_FEE_RATE = 0;
     const PROVIDER_FEE_RATE = 0.10;
     const quoteCents = amountCents; // authoritative from server-side quote_card
     const requesterFee = Math.round(quoteCents * REQUESTER_FEE_RATE);
@@ -234,38 +335,180 @@ serve(async (req) => {
     const platformGross = requesterFee + providerFee;
 
     const requestCard = (serviceChat.request_card || {}) as Record<string, unknown>;
-    const snapshot = {
-      serviceType: clean(quoteCard.serviceType) || clean(requestCard.serviceType) || requireSnapshotString(incomingSnapshot, "serviceType", "Service type"),
-      petId: clean(quoteCard.petId) || clean(requestCard.petId) || requireSnapshotString(incomingSnapshot, "petId", "Pet"),
-      startAt: clean(incomingSnapshot.startAt) || clean(requestCard.startAt) || clean(requestCard.requestedDate),
-      endAt: clean(incomingSnapshot.endAt) || clean(requestCard.endAt) || clean(requestCard.requestedDate),
-      handoffMethod: requireSnapshotString(incomingSnapshot, "handoffMethod", "Service location or handoff method"),
-      emergencyContact: requireSnapshotString(incomingSnapshot, "emergencyContact", "Emergency contact"),
-      careInstructions: requireSnapshotString(incomingSnapshot, "careInstructions", "Care instructions"),
-      medicationAllergyNotes: clean(incomingSnapshot.medicationAllergyNotes),
-      behaviorEscapeRisk: clean(incomingSnapshot.behaviorEscapeRisk),
-      emergencyVetPermission: incomingSnapshot.emergencyVetPermission === true,
-      price: {
-        currency,
-        providerQuote: quoteCents,
-        requesterTotal: customerTotal,
-      },
-      cancellationTerms: "Final once confirmed unless Huddle, the provider, platform policy, or applicable law allows otherwise.",
-      disputeIssueWindow: "Booking records, messages, timestamps, Start PIN events, check-in records, payment records, and related evidence may be reviewed for disputes or safety reports.",
-      requesterId: user.id,
-      providerId: serviceChat.provider_id,
-      createdAt: new Date().toISOString(),
-    };
+    const requestDates = parseRequestDates(requestCard);
+    const vetAuthorization = (incomingSnapshot.emergencyVetAuthorization || {}) as Record<string, unknown>;
+    const vetAuthChoiceProvided = typeof vetAuthorization.authorized === "boolean";
+    const vetAuthorized = vetAuthChoiceProvided ? vetAuthorization.authorized === true : false;
+    const vetCapMinor = Number(vetAuthorization.capMinor || 0);
+    const vetAuthCurrency = clean(vetAuthorization.currency) || currency;
+    if (!vetAuthChoiceProvided) {
+      return json({ error: "Emergency vet authorization choice is required" }, 400);
+    }
+    if (vetAuthorized && (!Number.isFinite(vetCapMinor) || vetCapMinor <= 0)) {
+      return json({ error: "Add an emergency vet care limit to continue." }, 400);
+    }
+    const { data: careAgreement, error: agreementErr } = await supabase
+      .from("service_care_agreements")
+      .select("requester_signature, requester_signature_path, requester_signed_at, scope_version_id, scope_hash")
+      .eq("service_chat_id", serviceChat.id)
+      .maybeSingle();
+    if (agreementErr) {
+      logStageError("service_chat_load_failed", agreementErr);
+      return stageJson("service_chat_load_failed", "Care Agreement lookup failed", 500, exposeStage);
+    }
+    const agreementRequesterSignature = careAgreement?.requester_signature && typeof careAgreement.requester_signature === "object"
+      ? careAgreement.requester_signature as Record<string, unknown>
+      : null;
+    let scopeOwnerSignature: Record<string, unknown> | null = null;
+    let scopeOwnerSignaturePath = "";
+    let scopeOwnerSignedAt = "";
+    if (!incomingSnapshot.requesterSignature && !agreementRequesterSignature) {
+      const { data: activeScopeSignature, error: activeScopeSignatureErr } = await supabase
+        .from("care_scope_versions")
+        .select("scope_hash, care_scope_signatures!inner(signature,image_bucket,image_path,signed_at,role)")
+        .eq("service_chat_id", serviceChat.id)
+        .eq("is_active", true)
+        .eq("care_scope_signatures.role", "owner")
+        .limit(1)
+        .maybeSingle();
+      if (activeScopeSignatureErr) {
+        logStageError("service_chat_load_failed", activeScopeSignatureErr);
+        return stageJson("service_chat_load_failed", "Care Agreement lookup failed", 500, exposeStage);
+      }
+      const signatureRows = Array.isArray(activeScopeSignature?.care_scope_signatures)
+        ? activeScopeSignature.care_scope_signatures
+        : activeScopeSignature?.care_scope_signatures
+          ? [activeScopeSignature.care_scope_signatures]
+          : [];
+      const ownerSignatureRow = signatureRows.find((row) => row && typeof row === "object") as Record<string, unknown> | undefined;
+      scopeOwnerSignature = ownerSignatureRow?.signature && typeof ownerSignatureRow.signature === "object"
+        ? ownerSignatureRow.signature as Record<string, unknown>
+        : null;
+      scopeOwnerSignaturePath = clean(ownerSignatureRow?.image_path);
+      scopeOwnerSignedAt = clean(ownerSignatureRow?.signed_at);
+    }
+    const requesterSignature = incomingSnapshot.requesterSignature && typeof incomingSnapshot.requesterSignature === "object"
+      ? incomingSnapshot.requesterSignature as Record<string, unknown>
+      : agreementRequesterSignature
+        ? {
+          ...agreementRequesterSignature,
+          imageBucket: "care_agreements",
+          imagePath: clean(careAgreement?.requester_signature_path),
+          path: clean(careAgreement?.requester_signature_path) || clean(agreementRequesterSignature.path),
+          signedAt: clean(careAgreement?.requester_signed_at) || clean(agreementRequesterSignature.signedAt),
+        }
+        : scopeOwnerSignature
+          ? {
+            ...scopeOwnerSignature,
+            imageBucket: "care_agreements",
+            imagePath: scopeOwnerSignaturePath,
+            path: scopeOwnerSignaturePath || clean(scopeOwnerSignature.path),
+            signedAt: scopeOwnerSignedAt || clean(scopeOwnerSignature.signedAt),
+          }
+        : null;
+    // Preferred vet contact is optional — the carer decides if it is left blank.
+    const serviceWindow = buildServiceWindow(
+      requestCard,
+      requestDates.firstDate,
+      clean(requestCard.startTime),
+      requestDates.lastDate,
+      clean(requestCard.endTime),
+    );
+    // requireSnapshotString THROWS on a missing field (by design, to fail loudly) — but a raw
+    // throw here skips every other graceful 400/409 response in this function and falls into
+    // the catch-all at the bottom, which returns a generic 500 "internal_error". That mis-reports
+    // an ordinary missing-field client issue (e.g. Care Instructions not filled in yet) as a
+    // server crash, with the real reason invisible to both the user and the logs. Scope the
+    // catch to just this construction so the actual field name reaches the client as a normal 400.
+    let snapshot: Record<string, unknown>;
+    try {
+      snapshot = {
+        serviceType: clean(quoteCard.serviceType) || clean(requestCard.serviceType) || requireSnapshotString(incomingSnapshot, "serviceType", "Service type"),
+        petId: clean(quoteCard.petId) || clean(requestCard.petId) || clean(incomingSnapshot.petId),
+        petName: clean(quoteCard.petName) || clean(requestCard.petName) || requireSnapshotString(incomingSnapshot, "petName", "Pet name"),
+        petSpecies: clean(quoteCard.petSpecies) || clean(requestCard.petSpecies) || clean(quoteCard.petType) || clean(requestCard.petType) || clean(incomingSnapshot.petSpecies) || clean(incomingSnapshot.petType),
+        petBreed: clean(quoteCard.petBreed) || clean(requestCard.petBreed) || clean(incomingSnapshot.petBreed),
+        startAt: serviceWindow.startAt,
+        endAt: serviceWindow.endAt,
+        handoffMethod: requireSnapshotString(incomingSnapshot, "handoffMethod", "Service location or handoff method"),
+        otherTasks: clean(quoteCard.otherTasks),
+        scopeTasks: Array.isArray(quoteCard.scopeTasks) ? quoteCard.scopeTasks.map(clean).filter(Boolean) : [],
+        scopeFrequency: clean(quoteCard.scopeFrequency),
+        contact: requireSnapshotString(incomingSnapshot, "contact", "Contact"),
+        emergencyContact: requireSnapshotString(incomingSnapshot, "emergencyContact", "Emergency contact"),
+        handoffLocation: requireSnapshotString(incomingSnapshot, "handoffLocation", "Hand-off location"),
+        careInstructions: clean(incomingSnapshot.careInstructions),
+        medicationAllergyNotes: clean(incomingSnapshot.medicationAllergyNotes),
+        behaviorEscapeRisk: clean(incomingSnapshot.behaviorEscapeRisk),
+        emergencyVetContact: clean(incomingSnapshot.emergencyVetContact),
+        emergencyVetPermission: vetAuthorized,
+        emergencyVetAuthorization: {
+          authorized: vetAuthorized,
+          ...(vetAuthorized ? { capMinor: vetCapMinor, currency: vetAuthCurrency } : {}),
+        },
+        price: {
+          currency,
+          providerQuote: quoteCents,
+          requesterTotal: customerTotal,
+        },
+        cancellationTerms: CARE_CANCELLATION_TERMS,
+        disputeIssueWindow: "If something serious happens -- provider no-show, handoff issue, or safety concern -- send the case with evidence to huddle Support. We'll hold payment while we review it.",
+        termsVersion: clean(incomingSnapshot.termsVersion),
+        termsPath: clean(incomingSnapshot.termsPath),
+        agreedAt: clean(incomingSnapshot.agreedAt) || new Date().toISOString(),
+        requesterSignature,
+        requesterId: user.id,
+        providerId: serviceChat.provider_id,
+        createdAt: new Date().toISOString(),
+      };
+    } catch (error) {
+      return json({ error: error instanceof Error ? error.message : "Booking confirmation is incomplete", code: "booking_snapshot_field_missing" }, 400);
+    }
     if (!snapshot.startAt) return json({ error: "Booking start time is required" }, 400);
     if (!snapshot.endAt) return json({ error: "Booking end time is required" }, 400);
+    if (serviceWindow.error) return json({ error: "Booking end time must be after the start time", code: serviceWindow.error }, 400);
 
     const { error: validateSnapshotErr } = await supabase.rpc("validate_service_booking_snapshot", { p_snapshot: snapshot });
-    if (validateSnapshotErr) return json({ error: "Booking confirmation is incomplete" }, 400);
+    if (validateSnapshotErr) {
+      return stageJson("snapshot_pending_write_failed", "Booking confirmation is incomplete", 400, exposeStage, {
+        code: clean(validateSnapshotErr.message),
+      });
+    }
+
+    const ownerPaymentConsent = {
+      scopeVersionRequired: true,
+      paymentAmount: customerTotal,
+      paymentCurrency: currency,
+      providerQuote: quoteCents,
+      requesterFee,
+      providerFee,
+      platformGross,
+      cancellationRefundAcknowledged: true,
+      termsPath: snapshot.termsPath,
+      termsVersion: snapshot.termsVersion,
+      checkoutRequestedAt: new Date().toISOString(),
+    };
+    const { data: consentVersion, error: consentErr } = await supabase.rpc("record_owner_payment_consent", {
+      p_service_chat_id: serviceChat.id,
+      p_consent: ownerPaymentConsent,
+    });
+    if (consentErr) {
+      if (consentErr.message === "care_scope_payment_pending") {
+        return json({ error: "A payment for this booking is already in progress.", code: "care_scope_payment_pending" }, 409);
+      }
+      return json({ error: consentErr.message || "Care Agreement signatures are required before payment", code: "care_scope_not_mutually_signed" }, 409);
+    }
+    const scopeVersion = consentVersion as { id?: string; scope_hash?: string } | null;
+    const scopeVersionId = clean(scopeVersion?.id);
+    const scopeHash = clean(scopeVersion?.scope_hash);
+    if (!scopeVersionId || !scopeHash) {
+      return json({ error: "Care scope version is not ready for payment", code: "care_scope_version_missing" }, 409);
+    }
 
     const { error: snapshotErr } = await supabase
       .from("service_chats")
       .update({ booking_snapshot_pending: snapshot })
-      .eq("chat_id", serviceChatId)
+      .eq("id", serviceChat.id)
       .eq("status", "pending");
     if (snapshotErr) {
       logStageError("snapshot_pending_write_failed", snapshotErr);
@@ -275,12 +518,12 @@ serve(async (req) => {
     // Idempotency key scoped to this service chat prevents duplicate checkout
     // sessions if the client retries on network failure.
     let session: Stripe.Checkout.Session;
+    const paymentAttemptId = crypto.randomUUID();
     try {
       session = await stripe.checkout.sessions.create(
         {
           customer: customerId,
           mode: "payment",
-          payment_method_types: ["card"],
           line_items: [
             {
               price_data: {
@@ -288,7 +531,10 @@ serve(async (req) => {
                 unit_amount: customerTotal,
                 product_data: {
                   name: "Pet Care Service Booking",
-                  description: rate ? `Service booking (${rate}) - includes 10% platform service fee` : "Service booking - includes 10% platform service fee",
+                  description: (() => {
+                    const feeSuffix = REQUESTER_FEE_RATE > 0 ? ` - includes ${Math.round(REQUESTER_FEE_RATE * 100)}% platform service fee` : "";
+                    return rate ? `Service booking (${rate})${feeSuffix}` : `Service booking${feeSuffix}`;
+                  })(),
                 },
               },
               quantity: 1,
@@ -297,7 +543,8 @@ serve(async (req) => {
           payment_intent_data: {
             metadata: {
               type: "service_booking",
-              service_chat_id: serviceChatId,
+              service_chat_id: serviceChat.id,
+              chat_id: serviceChat.chat_id,
               requester_id: user.id,
               provider_id: serviceChat.provider_id,
               provider_stripe_account_id: providerCarer.stripe_account_id,
@@ -308,32 +555,80 @@ serve(async (req) => {
               platform_gross_cents: String(platformGross),
               platform_fee_cents: String(platformGross),   // kept for backward compat with any tooling
               provider_payout_cents: String(providerPayout),
+              scope_version_id: scopeVersionId,
+              scope_hash: scopeHash,
             },
           },
           metadata: {
             type: "service_booking",
-            service_chat_id: serviceChatId,
+            service_chat_id: serviceChat.id,
+            chat_id: serviceChat.chat_id,
             user_id: user.id,
             requester_id: user.id,
             provider_id: serviceChat.provider_id,
+            payment_attempt_id: paymentAttemptId,
+            scope_version_id: scopeVersionId,
+            scope_hash: scopeHash,
           },
           success_url: successUrl,
           cancel_url: cancelUrl,
         },
-        { idempotencyKey: `svc_pay_${serviceChatId}_${mode}_${customerId}_${currency}_${customerTotal}` },
+        { idempotencyKey: `svc_pay_${serviceChat.id}_${mode}_${customerId}_${currency}_${customerTotal}_${scopeVersionId}_${scopeHash}_${paymentAttemptId}` },
       );
     } catch (error) {
       logStageError("stripe_checkout_create_failed", error);
       return stageJson("stripe_checkout_create_failed", "Stripe Checkout could not be created", 500, exposeStage, { stripe: stripeErrorFields(error) });
     }
 
+    const stripeExpiresAtMs = typeof session.expires_at === "number" ? session.expires_at * 1000 : 0;
+    const retryLockExpiresAtMs = Date.now() + CARE_PAYMENT_RETRY_LOCK_MS;
+    const pendingExpiresAt = new Date(stripeExpiresAtMs > 0 ? Math.min(stripeExpiresAtMs, retryLockExpiresAtMs) : retryLockExpiresAtMs).toISOString();
+    const { error: pendingErr } = await supabase.rpc("begin_service_care_payment_pending", {
+      p_service_chat_id: serviceChat.id,
+      p_checkout_session_id: session.id,
+      p_payment_intent_id: typeof session.payment_intent === "string" ? session.payment_intent : "",
+      p_scope_version_id: scopeVersionId,
+      p_scope_hash: scopeHash,
+      p_expires_at: pendingExpiresAt,
+    });
+    if (pendingErr) {
+      try {
+        await stripe.checkout.sessions.expire(session.id);
+      } catch (expireError) {
+        console.error("[create-service-payment] checkout_session_expire_failed_after_scope_race", stripeErrorFields(expireError));
+      }
+      return json({ error: pendingErr.message || "Care scope changed before payment could start", code: "care_scope_payment_lock_failed" }, 409);
+    }
+
     const { error: checkoutSessionErr } = await supabase
       .from("service_chats")
       .update({ stripe_checkout_session_id: session.id })
-      .eq("chat_id", serviceChatId)
+      .eq("id", serviceChat.id)
       .eq("status", "pending");
     if (checkoutSessionErr) {
       logStageError("service_chat_update_failed", checkoutSessionErr);
+      try {
+        await stripe.checkout.sessions.expire(session.id);
+      } catch (expireError) {
+        console.error("[create-service-payment] checkout_session_expire_failed_after_save_error", stripeErrorFields(expireError));
+      }
+      await supabase
+        .from("care_scope_versions")
+        .update({
+          payment_status: "failed",
+          payment_scope_conflict_reason: "checkout_session_save_failed",
+          payment_pending_expires_at: new Date().toISOString(),
+        })
+        .eq("id", scopeVersionId)
+        .eq("checkout_session_id", session.id);
+      await supabase
+        .from("service_chats")
+        .update({
+          booking_snapshot_pending: null,
+          stripe_checkout_session_id: null,
+        })
+        .eq("id", serviceChat.id)
+        .eq("status", "pending");
       return stageJson("service_chat_update_failed", "Checkout session could not be saved", 500, exposeStage);
     }
 
@@ -344,7 +639,10 @@ serve(async (req) => {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.error("[create-service-payment] failed:", message);
-    return json({ error: "internal_error" }, 500);
+    const stack = error instanceof Error ? error.stack : undefined;
+    console.error("[create-service-payment] unhandled_crash:", { message, stack });
+    // Surface the real message/stage instead of a bare "internal_error" so a crash is
+    // diagnosable from the client's own error popup, not just server logs.
+    return json({ error: message || "internal_error", code: "unhandled_crash", stack }, 500);
   }
 });
