@@ -78,6 +78,56 @@ type DisputesQueueRow = Database["public"]["Views"]["view_admin_service_disputes
   customer_refund_amount?: number | null;
   huddle_retained_amount?: number | null;
   currency_code?: string | null;
+  care_status?: string | null;
+  pin_shared_at?: string | null;
+  pin_attempt_count?: number | null;
+  last_pin_attempt_at?: string | null;
+  pin_locked_until?: string | null;
+  care_started_at?: string | null;
+  care_completed_at?: string | null;
+  checkin_submitted_at?: string | null;
+  checkin_photo_url?: string | null;
+  checkin_note?: string | null;
+  checkin_server_received_at?: string | null;
+  checkin_device_captured_at?: string | null;
+  checkin_location_lat?: number | null;
+  checkin_location_lng?: number | null;
+  checkin_location_accuracy_m?: number | null;
+  checkin_location_permission_denied?: boolean | null;
+  service_stripe_refund_id?: string | null;
+  service_stripe_transfer_id?: string | null;
+  dispute_stripe_refund_id?: string | null;
+  dispute_stripe_transfer_id?: string | null;
+  stripe_action_status?: string | null;
+  provider_trust_events?: unknown[] | null;
+};
+type ServiceCareEvidenceRow = {
+  service_chat_id: string | null;
+  chat_id: string | null;
+  chat_status: string | null;
+  care_status: string | null;
+  pin_shared_at?: string | null;
+  pin_attempt_count?: number | null;
+  last_pin_attempt_at?: string | null;
+  pin_locked_until?: string | null;
+  care_started_at: string | null;
+  care_completed_at: string | null;
+  checkin_submitted_at: string | null;
+  checkin_photo_url: string | null;
+  checkin_note?: string | null;
+  checkin_server_received_at: string | null;
+  checkin_device_captured_at: string | null;
+  checkin_location_lat: number | null;
+  checkin_location_lng: number | null;
+  checkin_location_accuracy_m: number | null;
+  checkin_location_permission_denied: boolean | null;
+  stripe_payment_intent_id?: string | null;
+  service_stripe_refund_id?: string | null;
+  service_stripe_transfer_id?: string | null;
+  payout_release_requested_at?: string | null;
+  payout_released_at?: string | null;
+  disputes?: unknown[] | null;
+  provider_trust_events: unknown[] | null;
 };
 type AuditTimelineRow = Database["public"]["Views"]["view_admin_safety_audit_timeline"]["Row"] & {
   action_source?: "manual" | "sentinel" | null;
@@ -89,6 +139,28 @@ type ServiceDisputeRow = Database["public"]["Tables"]["service_disputes"]["Row"]
   decision_actor_id?: string | null;
   decision_at?: string | null;
   decision_version?: number | null;
+};
+type CareCaseReport = {
+  id?: string;
+  actor_id?: string | null;
+  event_type?: string | null;
+  note?: string | null;
+  media_urls?: unknown;
+  metadata?: Record<string, unknown> | null;
+  created_at?: string | null;
+};
+type CareCasePacket = {
+  case?: Record<string, unknown> | null;
+  booking?: Record<string, unknown> | null;
+  participants?: Record<string, unknown> | null;
+  care_scope?: Record<string, unknown> | null;
+  agreement?: Record<string, unknown> | null;
+  reports?: CareCaseReport[] | null;
+  care_timeline?: CareCaseReport[] | null;
+  chat_timeline?: unknown[] | null;
+  handoff?: Record<string, unknown> | null;
+  payment?: Record<string, unknown> | null;
+  decision_history?: unknown[] | null;
 };
 type ServiceChatRow = Database["public"]["Tables"]["service_chats"]["Row"];
 type ServiceChatMeta = {
@@ -389,15 +461,15 @@ const CASE_MESSAGE_TEMPLATES = [
   },
   {
     id: "evidence_request_dispute",
-    label: "Evidence Request (Dispute)",
+    label: "Evidence Request (Care Case)",
     body:
-      "We are currently reviewing your service dispute. To help us reach a resolution, please reply with any relevant photos or screenshots as attachments.\n\n*Note: This is an automated case notification. This thread is only monitored for evidence collection and is not a live support chat.*",
+      "We are reviewing your Care case. Please add any relevant photos or screenshots through Report Issue so our team can review them with the booking.\n\n*Note: This is an automated case notification. Please do not reply to this message.*",
   },
   {
     id: "dispute_resolution_final",
-    label: "Dispute Resolution (Final)",
+    label: "Care Case Decision (Final)",
     body:
-      "Our review of your recent service dispute is complete. A final decision has been reached and processed. You can view the update in your Service history.\n\n*Note: This is an automated case notification. This thread is closed and is no longer monitored.*",
+      "Our review of your Care case is complete. The decision has been processed and is available in your Care history.\n\n*Note: This is an automated case notification. Please do not reply to this message.*",
   },
   {
     id: "warning_community_standards",
@@ -518,10 +590,26 @@ const resolveStorageOrPublicUrl = (rawValue: string | null | undefined) => {
   return supabase.storage.from("notices").getPublicUrl(normalized).data.publicUrl;
 };
 
+const normalizeCareEvidenceItems = (value: unknown): Array<{ bucket: string | null; path: string }> => {
+  const source = Array.isArray(value) ? value : [];
+  return source.flatMap((item) => {
+    let parsed: unknown = item;
+    if (typeof item === "string" && item.trim().startsWith("{")) {
+      try { parsed = JSON.parse(item); } catch { parsed = item; }
+    }
+    if (typeof parsed === "string") return parsed.trim() ? [{ bucket: null, path: parsed.trim() }] : [];
+    if (!parsed || typeof parsed !== "object") return [];
+    const descriptor = parsed as Record<string, unknown>;
+    const path = String(descriptor.path ?? descriptor.url ?? "").trim();
+    if (!path) return [];
+    return [{ bucket: typeof descriptor.bucket === "string" ? descriptor.bucket : null, path }];
+  });
+};
+
 const formatEventGroupLabel = (group: string) => {
   if (group === "reports_received") return "Reports Received";
   if (group === "reports_filed") return "Reports Filed";
-  if (group === "disputes") return "Disputes";
+  if (group === "disputes") return "Care Cases";
   if (group === "penalties") return "Penalties";
   return "Audit";
 };
@@ -558,11 +646,17 @@ const AdminSafety = () => {
   const [usersQueue, setUsersQueue] = useState<SafetyUserRow[]>([]);
   const [auditRows, setAuditRows] = useState<AuditTimelineRow[]>([]);
   const [queueLoadError, setQueueLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const requestedTab = new URLSearchParams(location.search).get("tab");
+    if (requestedTab === "disputes") setActiveTab("disputes");
+  }, [location.search]);
   const [demoReportTargetIds, setDemoReportTargetIds] = useState<Set<string>>(new Set());
 
   const [caseSelection, setCaseSelection] = useState<CaseSelection>(null);
   const [reportCasefile, setReportCasefile] = useState<ReportCasefileRow[]>([]);
   const [disputeCasefile, setDisputeCasefile] = useState<ServiceDisputeRow | null>(null);
+  const [careCasePacket, setCareCasePacket] = useState<CareCasePacket | null>(null);
   const [serviceChatPreview, setServiceChatPreview] = useState<ServiceChatPreviewData | null>(null);
   const [serviceChatPreviewOpen, setServiceChatPreviewOpen] = useState(false);
   const [profilePreviewUserId, setProfilePreviewUserId] = useState<string | null>(null);
@@ -572,6 +666,7 @@ const AdminSafety = () => {
   const [userTimelineFilter, setUserTimelineFilter] = useState<"all" | "reports_received" | "reports_filed" | "disputes" | "penalties" | "audit">("all");
   const [serviceChatTotals, setServiceChatTotals] = useState<Record<string, number | null>>({});
   const [serviceChatMetaById, setServiceChatMetaById] = useState<Record<string, ServiceChatMeta>>({});
+  const [serviceCareEvidenceByChatId, setServiceCareEvidenceByChatId] = useState<Record<string, ServiceCareEvidenceRow>>({});
   const [reportsSort, setReportsSort] = useState<SortState<ReportsSortKey>>({
     key: "latest_report_at",
     direction: "desc",
@@ -1052,10 +1147,22 @@ const AdminSafety = () => {
       setDisputesQueue(rows);
       const chatIds = rows.map((row) => row.service_chat_id).filter((value): value is string => Boolean(value));
       if (chatIds.length > 0) {
-        const { data: chats } = await supabase
-          .from("service_chats")
-          .select("id, quote_card, request_card")
-          .in("id", Array.from(new Set(chatIds)));
+        const uniqueChatIds = Array.from(new Set(chatIds));
+        const [{ data: chats }, { data: careEvidence }] = await Promise.all([
+          supabase
+            .from("service_chats")
+            .select("id, quote_card, request_card")
+            .in("id", uniqueChatIds),
+          supabase
+            .from("view_admin_service_care_evidence" as never)
+            .select("*")
+            .in("service_chat_id", uniqueChatIds),
+        ]);
+        const evidenceMap: Record<string, ServiceCareEvidenceRow> = {};
+        for (const row of (careEvidence ?? []) as unknown as ServiceCareEvidenceRow[]) {
+          if (row.service_chat_id) evidenceMap[row.service_chat_id] = row;
+        }
+        setServiceCareEvidenceByChatId(evidenceMap);
         if (chats) {
           const totals: Record<string, number | null> = {};
           const meta: Record<string, ServiceChatMeta> = {};
@@ -1101,6 +1208,7 @@ const AdminSafety = () => {
       } else {
         setServiceChatTotals({});
         setServiceChatMetaById({});
+        setServiceCareEvidenceByChatId({});
       }
     }
     if (!auditRes.error) setAuditRows(auditRes.data ?? []);
@@ -1125,18 +1233,19 @@ const AdminSafety = () => {
   const loadDisputeCasefile = async (disputeId: string | null) => {
     if (!disputeId) {
       setDisputeCasefile(null);
+      setCareCasePacket(null);
       setServiceChatPreview(null);
       setServiceChatPreviewOpen(false);
       return;
     }
 
-    const { data } = await supabase
-      .from("service_disputes")
-      .select("*")
-      .eq("id", disputeId)
-      .maybeSingle();
+    const [caseResult, packetResult] = await Promise.all([
+      supabase.from("service_disputes").select("*").eq("id", disputeId).maybeSingle(),
+      supabase.rpc("admin_get_service_care_case_packet" as never, { p_case_id: disputeId } as never),
+    ]);
 
-    setDisputeCasefile((data as ServiceDisputeRow | null) ?? null);
+    setDisputeCasefile((caseResult.data as ServiceDisputeRow | null) ?? null);
+    setCareCasePacket(packetResult.error ? null : (packetResult.data as CareCasePacket | null));
   };
 
   const loadTeamHuddleCorrespondence = async (recipientUserId: string | null) => {
@@ -1333,6 +1442,26 @@ const AdminSafety = () => {
   const currentDisputeMeta: ServiceChatMeta = disputeHeader
     ? getDisputeServiceMeta(serviceChatMetaById, disputeHeader)
     : { serviceLabel: "Unknown Service", bookingPeriodLabel: "Unknown booking period", serviceDate: null };
+  const currentCareEvidence = disputeHeader?.service_chat_id
+    ? serviceCareEvidenceByChatId[disputeHeader.service_chat_id] ?? null
+    : null;
+  const careCaseReports = (() => {
+    const reports = [...(careCasePacket?.reports ?? [])];
+    const seenIds = new Set(reports.map((report) => report.id).filter(Boolean));
+    for (const event of careCasePacket?.care_timeline ?? []) {
+      const eventCaseId = String(event.metadata?.case_id ?? "");
+      if (
+        event.event_type !== "booking_cancelled" ||
+        eventCaseId !== selectedDisputeId ||
+        (event.id && seenIds.has(event.id))
+      ) continue;
+      reports.push(event);
+      if (event.id) seenIds.add(event.id);
+    }
+    return reports.sort((left, right) =>
+      String(left.created_at ?? "").localeCompare(String(right.created_at ?? "")),
+    );
+  })();
   const currentReportState = reportHeader?.moderation_state ?? reportCasefile[0]?.moderation_state ?? "active";
   const currentAutomationPaused =
     reportHeader?.automation_paused ?? reportCasefile[0]?.automation_paused ?? false;
@@ -1746,10 +1875,15 @@ const AdminSafety = () => {
     setProfilePreviewName(fallbackName ?? "Profile");
   };
 
-  const openMediaViewer = (items: Array<string | null | undefined>, title: string) => {
-    const normalized = items
-      .map((item, index) => ({ url: resolveStorageOrPublicUrl(item), label: `Item ${index + 1}` }))
-      .filter((item) => item.url.length > 0);
+  const openMediaViewer = async (items: Array<string | null | undefined>, title: string) => {
+    const descriptors = normalizeCareEvidenceItems(items);
+    const normalized = (await Promise.all(descriptors.map(async (item, index) => {
+      if (item.bucket === "service_care_evidence") {
+        const { data } = await supabase.storage.from(item.bucket).createSignedUrl(item.path, 900);
+        return { url: data?.signedUrl ?? "", label: `Item ${index + 1}` };
+      }
+      return { url: resolveStorageOrPublicUrl(item.path), label: `Item ${index + 1}` };
+    }))).filter((item) => item.url.length > 0);
     if (normalized.length === 0) return;
     setMediaViewerTitle(title);
     setMediaViewerItems(normalized);
@@ -1995,7 +2129,7 @@ const AdminSafety = () => {
 
     const trimmedNote = disputeAdminNote.trim();
     if (!trimmedNote) {
-      setDisputeActionError("Admin note is required for dispute decisions.");
+      setDisputeActionError("Add a reason before confirming this decision.");
       return;
     }
 
@@ -2065,7 +2199,7 @@ const AdminSafety = () => {
       <div className="flex items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">Trust &amp; Safety Console</h1>
-          <p className="text-sm text-muted-foreground">Read-only foundation for reports, disputes, and audit trail.</p>
+          <p className="text-sm text-muted-foreground">Review reports, evidence, booking records, and Care case decisions in one place.</p>
           {queueLoadError ? <p className="mt-1 text-sm text-red-600">{queueLoadError}</p> : null}
         </div>
         <Button type="button" variant="outline" onClick={() => { void refreshSafetyData(); }} disabled={refreshing || loading}>
@@ -2079,7 +2213,7 @@ const AdminSafety = () => {
         <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as ActiveTab)}>
           <TabsList>
             <TabsTrigger value="reports">Reports</TabsTrigger>
-            <TabsTrigger value="disputes">Disputes</TabsTrigger>
+            <TabsTrigger value="disputes">Care Cases</TabsTrigger>
             <TabsTrigger value="users">Users</TabsTrigger>
             <TabsTrigger value="audit">Audit Log</TabsTrigger>
           </TabsList>
@@ -2275,7 +2409,7 @@ const AdminSafety = () => {
                     {disputesSorted.length === 0 ? (
                       <tr>
                         <td colSpan={7} className="px-3 py-8 text-center text-sm text-muted-foreground">
-                          No disputes in queue yet.
+                          No Care cases in queue yet.
                         </td>
                       </tr>
                     ) : (
@@ -2871,15 +3005,15 @@ const AdminSafety = () => {
           {caseSelection?.type === "dispute" && (
             <>
               <SheetHeader>
-                <SheetTitle>Dispute Case File</SheetTitle>
+                <SheetTitle>Care Case</SheetTitle>
                 <SheetDescription>
-                  Dispute {selectedDisputeId}
+                  Case {selectedDisputeId}
                 </SheetDescription>
               </SheetHeader>
 
               <div className="mt-4 space-y-4 text-sm">
                 <section className="rounded-lg border p-3 space-y-2">
-                  <h3 className="font-semibold">Dispute Summary</h3>
+                  <h3 className="font-semibold">Case Summary</h3>
                   <div className="rounded-md border bg-muted/20 p-2">
                     <div className="text-sm font-medium">
                       Service booked: {currentDisputeMeta.serviceLabel}
@@ -2947,10 +3081,14 @@ const AdminSafety = () => {
                     </button>{" "}
                   </div>
                   <div className="font-mono text-xs">Payment intent: {disputeHeader?.stripe_payment_intent_id ?? "-"}</div>
+                  <div className="font-mono text-xs">Service refund: {disputeHeader?.service_stripe_refund_id ?? "-"}</div>
+                  <div className="font-mono text-xs">Service transfer: {disputeHeader?.service_stripe_transfer_id ?? "-"}</div>
+                  <div className="font-mono text-xs">Dispute refund: {disputeHeader?.dispute_stripe_refund_id ?? "-"}</div>
+                  <div className="font-mono text-xs">Dispute transfer: {disputeHeader?.dispute_stripe_transfer_id ?? "-"}</div>
                 </section>
 
                 <section className="rounded-lg border p-3 space-y-2">
-                  <h3 className="font-semibold">Dispute Detail</h3>
+                  <h3 className="font-semibold">Report Summary</h3>
                         <div className="whitespace-pre-wrap break-words">{stripDemoFixtureMarker(disputeCasefile?.description)}</div>
                   <div>Admin notes: {stripDemoFixtureMarker(disputeCasefile?.admin_notes)}</div>
                   <div className="flex items-center gap-2">
@@ -2960,12 +3098,83 @@ const AdminSafety = () => {
                         type="button"
                         variant="outline"
                         size="sm"
-                        onClick={() => openMediaViewer(disputeCasefile?.evidence_urls ?? disputeHeader?.evidence_urls ?? [], "Dispute Evidence")}
+                        onClick={() => { void openMediaViewer(disputeCasefile?.evidence_urls ?? disputeHeader?.evidence_urls ?? [], "Case Evidence"); }}
                       >
                         View
                       </Button>
                     ) : null}
                   </div>
+                </section>
+
+                {careCaseReports.length ? (
+                  <section className="rounded-lg border p-3 space-y-3">
+                    <h3 className="font-semibold">Reports &amp; Evidence</h3>
+                    {careCaseReports.map((report, index) => {
+                      const metadata = report.metadata ?? {};
+                      const role = String(metadata.role ?? metadata.reporter_role ?? "Participant");
+                      const reason = String(metadata.reason ?? report.event_type ?? "Care issue");
+                      const evidence = Array.isArray(report.media_urls)
+                        ? report.media_urls.map((item) => typeof item === "string" ? item : JSON.stringify(item))
+                        : [];
+                      return (
+                        <div key={report.id ?? `${report.event_type ?? "report"}-${index}`} className="rounded-md border bg-muted/20 p-3">
+                          <div className="flex flex-wrap items-start justify-between gap-2">
+                            <div>
+                              <div className="font-medium capitalize">{role}: {reason.replaceAll("_", " ")}</div>
+                              <div className="text-xs text-muted-foreground">{formatDateTime(report.created_at ?? null)}</div>
+                            </div>
+                            {evidence.length > 0 ? (
+                              <Button type="button" variant="outline" size="sm" onClick={() => { void openMediaViewer(evidence, "Support Evidence"); }}>
+                                View {evidence.length} image{evidence.length === 1 ? "" : "s"}
+                              </Button>
+                            ) : null}
+                          </div>
+                          {report.note ? <div className="mt-2 whitespace-pre-wrap break-words">{report.note}</div> : null}
+                        </div>
+                      );
+                    })}
+                  </section>
+                ) : null}
+
+                <section className="rounded-lg border p-3 space-y-2">
+                  <h3 className="font-semibold">Care evidence</h3>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>Care started: {formatDateTime(currentCareEvidence?.care_started_at ?? null)}</div>
+                    <div>Care completed: {formatDateTime(currentCareEvidence?.care_completed_at ?? null)}</div>
+                    <div>Check-in submitted: {formatDateTime(currentCareEvidence?.checkin_submitted_at ?? null)}</div>
+                    <div>Check-in note: {currentCareEvidence?.checkin_note || "-"}</div>
+                    <div>PIN shared: {formatDateTime(disputeHeader?.pin_shared_at ?? currentCareEvidence?.pin_shared_at ?? null)}</div>
+                    <div>PIN attempts: {disputeHeader?.pin_attempt_count ?? currentCareEvidence?.pin_attempt_count ?? 0}</div>
+                    <div>Last PIN attempt: {formatDateTime(disputeHeader?.last_pin_attempt_at ?? currentCareEvidence?.last_pin_attempt_at ?? null)}</div>
+                    <div>PIN locked until: {formatDateTime(disputeHeader?.pin_locked_until ?? currentCareEvidence?.pin_locked_until ?? null)}</div>
+                    <div>Server received: {formatDateTime(currentCareEvidence?.checkin_server_received_at ?? null)}</div>
+                    <div>Device captured: {formatDateTime(currentCareEvidence?.checkin_device_captured_at ?? null)}</div>
+                    <div>Location permission denied: {currentCareEvidence?.checkin_location_permission_denied ? "Yes" : "No"}</div>
+                    <div>
+                      Check-in location: {currentCareEvidence?.checkin_location_lat != null && currentCareEvidence?.checkin_location_lng != null
+                        ? `${currentCareEvidence.checkin_location_lat.toFixed(5)}, ${currentCareEvidence.checkin_location_lng.toFixed(5)}`
+                        : "-"}
+                    </div>
+                    <div>
+                      Location accuracy: {currentCareEvidence?.checkin_location_accuracy_m != null
+                        ? `${Math.round(currentCareEvidence.checkin_location_accuracy_m)}m`
+                        : "-"}
+                    </div>
+                    <div>Provider trust events: {Array.isArray(currentCareEvidence?.provider_trust_events) ? currentCareEvidence.provider_trust_events.length : 0}</div>
+                    <div>Linked disputes: {Array.isArray(currentCareEvidence?.disputes) ? currentCareEvidence.disputes.length : 0}</div>
+                    <div>Payout release requested: {formatDateTime(currentCareEvidence?.payout_release_requested_at ?? disputeHeader?.payout_release_requested_at ?? null)}</div>
+                    <div>Payout released: {formatDateTime(currentCareEvidence?.payout_released_at ?? disputeHeader?.payout_released_at ?? null)}</div>
+                  </div>
+                  {currentCareEvidence?.checkin_photo_url ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => openMediaViewer([currentCareEvidence.checkin_photo_url as string], "Check-in Photo")}
+                    >
+                      View check-in photo
+                    </Button>
+                  ) : null}
                 </section>
 
                 <section className="rounded-lg border p-3 space-y-3">
@@ -3030,7 +3239,7 @@ const AdminSafety = () => {
                 </section>
 
                 <section className="rounded-lg border p-3 space-y-3">
-                  <h3 className="font-semibold">Dispute Decision Controls</h3>
+                  <h3 className="font-semibold">Case Decision</h3>
                   <div className="flex flex-wrap items-center gap-2">
                     <span className={badgeClasses}>Status: {formatDisputeStatusLabel(disputeHeader?.dispute_status)}</span>
                     {disputeHeader?.decision_at ? (
@@ -3041,7 +3250,7 @@ const AdminSafety = () => {
                   <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2">
                     <div className="text-sm font-medium text-amber-900">Funds on Hold</div>
                     <div className="text-xs text-amber-800">
-                      This dispute keeps payout on hold until a final decision is recorded.
+                      This case keeps payout on hold until a final decision is recorded.
                     </div>
                   </div>
 
@@ -3322,7 +3531,7 @@ const AdminSafety = () => {
                       { id: "all", label: "All" },
                       { id: "reports_received", label: "Reports Received" },
                       { id: "reports_filed", label: "Reports Filed" },
-                      { id: "disputes", label: "Disputes" },
+                      { id: "disputes", label: "Care Cases" },
                       { id: "penalties", label: "Penalties" },
                       { id: "audit", label: "Audit" },
                     ].map((filter) => (
