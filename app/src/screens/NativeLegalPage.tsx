@@ -38,7 +38,7 @@ export function NativeLegalPage({ page }: NativeLegalPageProps) {
               ))}
             </View>
           ))}
-          <Text style={styles.meta}>{page.effectiveDate}</Text>
+          <Text style={styles.meta}>Date of creation: {page.effectiveDate}</Text>
         </View>
       </ScrollView>
     </View>

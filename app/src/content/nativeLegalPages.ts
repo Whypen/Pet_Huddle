@@ -183,7 +183,7 @@ const terms: NativeLegalPageContent = {
     {
       title: "10. Governing law and disputes",
       body: [
-        "These Terms are governed by the laws of Hong Kong. Before filing any legal claim, contact support@huddle.pet and give Huddle a reasonable opportunity to resolve the issue informally. Disputes that cannot be resolved informally will be handled by the courts of Hong Kong, unless mandatory local law requires otherwise.",
+        "These Terms apply globally and are governed by the law that applies to the huddle entity contracting with you, without regard to conflict-of-law rules, except where mandatory law in your country of residence requires otherwise. Before starting a legal claim, contact support@huddle.pet and give huddle a reasonable opportunity to resolve the matter informally.",
       ],
     },
     {
@@ -250,7 +250,7 @@ const communityGuidelines: NativeLegalPageContent = {
 
 const cookies: NativeLegalPageContent = {
   path: "/cookies",
-  title: "Cookies and Similar Technologies",
+  title: "Cookies and Similar Technologies Notice",
   effectiveDate: "20 May 2026",
   intro: [
     "Huddle may use cookies, SDKs, local storage, and similar technologies in its app, websites, and related services.",

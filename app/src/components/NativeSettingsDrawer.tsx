@@ -470,7 +470,7 @@ export function NativeSettingsDrawer({ accessToken, openFamilyIntent, open, sess
       { label: "Privacy Choices", icon: "shield", onPress: () => openPath("/privacy-choices") },
       { label: "Terms of Service", icon: "file-text", onPress: () => openPath("/terms") },
       { label: "Community Guidelines", icon: "file-text", onPress: () => openPath("/community-guidelines") },
-      { label: "Cookies Notice", icon: "file-text", onPress: () => openPath("/cookies") },
+      { label: "Cookies and Similar Technologies Notice", icon: "file-text", onPress: () => openPath("/cookies") },
       {
         label: "Care Provider Agreement",
         iconNode: <MaterialCommunityIcons color={huddleColors.iconMuted} name="paw-outline" size={18} />,
