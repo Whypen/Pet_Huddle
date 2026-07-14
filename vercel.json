@@ -1,4 +1,14 @@
 {
+  "redirects": [
+    { "source": "/legal/privacy.html", "destination": "/legal/privacy", "permanent": true },
+    { "source": "/legal/terms.html", "destination": "/legal/terms", "permanent": true },
+    { "source": "/legal/privacy-choices.html", "destination": "/legal/privacy-choices", "permanent": true },
+    { "source": "/legal/cookies.html", "destination": "/legal/cookies", "permanent": true },
+    { "source": "/legal/community-guidelines.html", "destination": "/legal/community-guidelines", "permanent": true },
+    { "source": "/legal/collection-notice.html", "destination": "/legal/collection-notice", "permanent": true },
+    { "source": "/legal/service-provider-agreement.html", "destination": "/legal/service-provider-agreement", "permanent": true },
+    { "source": "/legal/service-requester-agreement.html", "destination": "/legal/booking-terms", "permanent": true }
+  ],
   "headers": [
     {
       "source": "/assets/(.*)",

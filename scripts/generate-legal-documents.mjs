@@ -57,13 +57,14 @@ const routeLinks = [
   ["Care Service Booking Terms", "/booking-terms"],
 ];
 
-function linkify(text) {
+function linkify(text, hrefPrefix = "") {
   let value = escapeHtml(text);
   value = value.replaceAll("support@huddle.pet", '<a href="mailto:support@huddle.pet">support@huddle.pet</a>');
   for (const [label, route] of routeLinks) {
     const escapedLabel = escapeHtml(label);
-    value = value.replaceAll(escapedLabel, `<a href="${route}">${escapedLabel}</a>`);
+    value = value.replaceAll(escapedLabel, `<a href="${hrefPrefix}${route}">${escapedLabel}</a>`);
   }
+  value = value.replace(/\bHUDDLE\b/g, '<strong class="brand-name">HUDDLE</strong>');
   return value;
 }
 
@@ -75,17 +76,18 @@ html,body{margin:0;background:var(--canvas);color:var(--ink);font-family:'Urbani
 h1{margin:0 0 10px;color:var(--heading);font-size:28px;line-height:1.2;font-weight:700;letter-spacing:-.02em}
 h2{margin:28px 0 8px;color:var(--heading);font-size:17px;line-height:1.4;font-weight:700}
 p,li{margin:0 0 12px;color:var(--ink);font-size:15px;line-height:1.7}
+strong.brand-name{font-weight:800}
 ul{margin:10px 0 12px;padding-left:22px}
 .meta{margin:36px 0 0;padding-top:16px;border-top:1px solid var(--line);color:var(--muted);font-size:13px;line-height:1.5}
 a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 @media(max-width:640px){.wrap{padding:24px 18px 56px}h1{font-size:24px}h2{font-size:16px}p,li{font-size:14px}}
 `;
 
-function renderHtml(document) {
+function renderHtml(document, hrefPrefix = "") {
   const sections = document.sections.map((section) => {
-    const body = section.body.map((paragraph) => `<p>${linkify(paragraph)}</p>`).join("\n");
+    const body = section.body.map((paragraph) => `<p>${linkify(paragraph, hrefPrefix)}</p>`).join("\n");
     const bullets = section.bullets?.length
-      ? `<ul>${section.bullets.map((bullet) => `<li>${linkify(bullet)}</li>`).join("\n")}</ul>`
+      ? `<ul>${section.bullets.map((bullet) => `<li>${linkify(bullet, hrefPrefix)}</li>`).join("\n")}</ul>`
       : "";
     return `<section>\n<h2>${escapeHtml(section.title)}</h2>\n${body}\n${bullets}\n</section>`;
   }).join("\n");
@@ -94,16 +96,16 @@ function renderHtml(document) {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>${escapeHtml(document.title)} | huddle</title>
+  <title>${escapeHtml(document.title)} | HUDDLE</title>
   <meta name="description" content="${escapeHtml(document.title)}">
   <style>${commonStyle}</style>
 </head>
 <body>
   <main class="wrap">
     <h1>${escapeHtml(document.title)}</h1>
-    ${document.intro.map((paragraph) => `<p>${linkify(paragraph)}</p>`).join("\n    ")}
+    ${document.intro.map((paragraph) => `<p>${linkify(paragraph, hrefPrefix)}</p>`).join("\n    ")}
     ${sections}
-    <p class="meta">Date of creation: ${escapeHtml(document.effectiveDate)}</p>
+    <p class="meta">Updated: ${escapeHtml(document.effectiveDate)}</p>
   </main>
 </body>
 </html>
@@ -112,9 +114,9 @@ function renderHtml(document) {
 
 function renderBrandHtml(document) {
   const sections = document.sections.map((section) => {
-    const body = section.body.map((paragraph) => `<p>${linkify(paragraph)}</p>`).join("\n");
+    const body = section.body.map((paragraph) => `<p>${linkify(paragraph, "/legal")}</p>`).join("\n");
     const bullets = section.bullets?.length
-      ? `<ul>${section.bullets.map((bullet) => `<li>${linkify(bullet)}</li>`).join("\n")}</ul>`
+      ? `<ul>${section.bullets.map((bullet) => `<li>${linkify(bullet, "/legal")}</li>`).join("\n")}</ul>`
       : "";
     return `<h2>${escapeHtml(section.title)}</h2>\n${body}\n${bullets}`;
   }).join("\n\n");
@@ -123,7 +125,7 @@ function renderBrandHtml(document) {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>${escapeHtml(document.title)} · huddle</title>
+<title>${escapeHtml(document.title)} · HUDDLE</title>
 <meta name="description" content="${escapeHtml(document.title)}">
 <meta name="theme-color" content="#2145CF">
 <link rel="canonical" href="https://huddle.pet/legal${escapeHtml(document.path)}">
@@ -134,9 +136,9 @@ function renderBrandHtml(document) {
 <body data-page="legal" data-nav="solid">
 <div class="page-hero"><div class="container"><div class="eyebrow">Legal</div><h1>${escapeHtml(document.title)}</h1></div></div>
 <section class="s cream"><div class="container"><div class="prose">
-${document.intro.map((paragraph) => `<p>${linkify(paragraph)}</p>`).join("\n")}
+${document.intro.map((paragraph) => `<p>${linkify(paragraph, "/legal")}</p>`).join("\n")}
 ${sections}
-<p class="meta">Date of creation: ${escapeHtml(document.effectiveDate)}</p>
+<p class="meta">Updated: ${escapeHtml(document.effectiveDate)}</p>
 </div></div></section>
 <script src="/brandweb/huddle-shell.js"></script>
 </body>
@@ -156,18 +158,18 @@ function renderIndex() {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Legal | huddle</title>
-  <meta name="description" content="huddle legal information">
+  <title>Legal | HUDDLE</title>
+  <meta name="description" content="HUDDLE legal information">
   <style>${commonStyle}</style>
 </head>
 <body>
   <main class="wrap">
     <h1>Legal</h1>
-    <p>Read the terms and policies that apply to huddle.</p>
+    <p>Read the terms and policies that apply to HUDDLE.</p>
     <ul>
 ${links}
     </ul>
-    <p class="meta">Date of creation: ${escapeHtml(documents.map((document) => document.effectiveDate).sort().at(-1) || "")}</p>
+    <p class="meta">Updated: ${escapeHtml(documents.map((document) => document.effectiveDate).sort().at(-1) || "")}</p>
   </main>
 </body>
 </html>
@@ -176,8 +178,10 @@ ${links}
 
 const outputs = new Map([
   ...documents.map((document) => [path.join(root, "src", "legal", routeToFile[document.path]), renderHtml(document)]),
+  ...documents.map((document) => [path.join(root, "public", "legal", routeToFile[document.path]), renderHtml(document, "/legal")]),
   ...documents.map((document) => [path.join(root, "public", "brandweb", routeToBrandFile[document.path]), renderBrandHtml(document)]),
   [path.join(root, "src", "legal", "index.html"), renderIndex()],
+  [path.join(root, "public", "legal", "index.html"), renderIndex()],
   [path.join(root, "app", "src", "content", "nativeLegalPages.ts"), renderNative()],
 ]);
 

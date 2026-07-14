@@ -26,7 +26,7 @@ if (paths.length !== expectedPaths.length || expectedPaths.some((expected) => !p
 
 const dates = new Set(documents.map((document) => document.effectiveDate));
 if (dates.size !== 1) {
-  throw new Error("Canonical legal documents must use one Date of creation.");
+  throw new Error("Canonical legal documents must use one effective date.");
 }
 
 const flattened = documents.map((document) => JSON.stringify(document)).join("\n");
@@ -35,14 +35,27 @@ for (const forbidden of [/Hong Kong/i, /\bHK\b/i, /Operated by huddle/i, /\/nati
     throw new Error(`Forbidden legal copy found: ${forbidden}.`);
   }
 }
+if (/\bhuddle\b(?!\.pet)/.test(flattened)) {
+  throw new Error("Canonical legal copy must use the registered HUDDLE brand name outside email addresses.");
+}
 
 const requiredCoverage = {
-  "/privacy": ["messaging, social feed, map, care marketplace", "Automated systems and safety review"],
+  "/privacy": [
+    "messaging, social feed, map, care marketplace",
+    "3. How HUDDLE uses information",
+    "Authenticate accounts and support sign-in methods",
+    "4. When HUDDLE shares information",
+    "Supabase — database",
+    "Stripe — payment processing",
+    "Mapbox — map tile rendering",
+    "Expo — push notification delivery",
+    "Automated systems and safety review",
+  ],
   "/terms": ["Social, Discover, Groups, and Map", "individual arbitration"],
   "/community-guidelines": ["Consent and meaningful interactions", "Care marketplace conduct"],
   "/service-provider-agreement": ["Independent carer status", "Stripe Connect", "Start PIN"],
   "/booking-terms": ["confirmed Care Scope and booking record", "Start PIN and handoff", "Trust & Safety review"],
-  "/collection-notice": ["Personal Information Collection Notice", "Why huddle collects it"],
+  "/collection-notice": ["Personal Information Collection Notice", "2. Why HUDDLE collects it"],
 };
 
 for (const [documentPath, phrases] of Object.entries(requiredCoverage)) {
@@ -75,10 +88,18 @@ const brandOutputFileByPath = {
   "/service-provider-agreement": "service-provider-agreement.html",
   "/booking-terms": "booking-terms.html",
 };
+const publicOutputFileByPath = outputFileByPath;
+const canonicalPublicPathByDocumentPath = Object.fromEntries(
+  Object.entries(brandOutputFileByPath).map(([documentPath, fileName]) => [documentPath, `/legal/${fileName.replace(/\.html$/, "")}`]),
+);
 const publicRuntimePaths = fs.readFileSync(path.join(root, "src", "routes", "publicRuntimePaths.ts"), "utf8");
 const publicAuthRoutes = fs.readFileSync(path.join(root, "src", "routes", "PublicAuthRoutes.tsx"), "utf8");
 const nativeLegalRoutes = fs.readFileSync(path.join(root, "app", "src", "navigation", "RootNavigator.tsx"), "utf8");
+const vercelConfig = fs.readFileSync(path.join(root, "vercel.json"), "utf8");
 const nativeOutput = fs.readFileSync(path.join(root, "app", "src", "content", "nativeLegalPages.ts"), "utf8");
+const nativeAuthRenderer = fs.readFileSync(path.join(root, "app", "src", "screens", "NativeAuthScreen.tsx"), "utf8");
+const nativeSignupRenderer = fs.readFileSync(path.join(root, "app", "src", "screens", "NativeSignupScreen.tsx"), "utf8");
+const nativeLegalRenderer = fs.readFileSync(path.join(root, "app", "src", "screens", "NativeLegalPage.tsx"), "utf8");
 const htmlToText = (value) => value
   .replace(/<[^>]+>/g, "")
   .replaceAll("&nbsp;", " ")
@@ -89,6 +110,7 @@ const htmlToText = (value) => value
   .replaceAll("&#039;", "'");
 
 for (const document of documents) {
+  const canonicalPublicPath = canonicalPublicPathByDocumentPath[document.path];
   if (!publicRuntimePaths.includes(`\"${document.path}\"`)) {
     throw new Error(`Public runtime routing is missing ${document.path}.`);
   }
@@ -98,10 +120,23 @@ for (const document of documents) {
   if (!nativeLegalRoutes.includes(`\"${document.path}\"`)) {
     throw new Error(`Native legal routing is missing ${document.path}.`);
   }
+  if (!vercelConfig.includes(`\"src\": \"^${canonicalPublicPath}/?$\"`)) {
+    throw new Error(`Public canonical route is missing ${canonicalPublicPath}.`);
+  }
   const webOutput = fs.readFileSync(path.join(root, "src", "legal", outputFileByPath[document.path]), "utf8");
   const webText = htmlToText(webOutput);
+  const publicOutput = fs.readFileSync(path.join(root, "public", "legal", publicOutputFileByPath[document.path]), "utf8");
+  const publicText = htmlToText(publicOutput);
   const brandOutput = fs.readFileSync(path.join(root, "public", "brandweb", brandOutputFileByPath[document.path]), "utf8");
   const brandText = htmlToText(brandOutput);
+  if (!webOutput.includes("Updated ") || !publicOutput.includes("Updated ") || !brandOutput.includes("Updated ")) {
+    throw new Error(`Legal output date label is not synchronized for ${document.path}.`);
+  }
+  for (const [label, output] of [["Brand", brandOutput], ["Public", publicOutput]]) {
+    if (/href="\/(privacy|terms|privacy-choices|cookies|community-guidelines|collection-notice|service-provider-agreement|booking-terms)(?:["#?])/i.test(output)) {
+      throw new Error(`${label} legal links must use /legal/ canonical routes for ${document.path}.`);
+    }
+  }
   const phrases = [
     document.title,
     document.effectiveDate,
@@ -116,9 +151,30 @@ for (const document of documents) {
     if (!webText.includes(phrase)) {
       throw new Error(`Web legal output is not synchronized for ${document.path}.`);
     }
+    if (!publicText.includes(phrase)) {
+      throw new Error(`Public legal output is not synchronized for ${document.path}.`);
+    }
     if (!brandText.includes(phrase)) {
       throw new Error(`Public legal output is not synchronized for ${document.path}.`);
     }
+  }
+}
+
+for (const [documentPath, outputFile] of Object.entries(publicOutputFileByPath)) {
+  const legacyPath = `/legal/${outputFile}`;
+  const canonicalPublicPath = canonicalPublicPathByDocumentPath[documentPath];
+  if (!vercelConfig.includes(`\"source\": \"${legacyPath}\"`) || !vercelConfig.includes(`\"destination\": \"${canonicalPublicPath}\"`)) {
+    throw new Error(`Legacy public legal URL ${legacyPath} must permanently redirect to ${canonicalPublicPath}.`);
+  }
+}
+
+for (const [label, renderer] of Object.entries({
+  NativeAuthScreen: nativeAuthRenderer,
+  NativeSignupScreen: nativeSignupRenderer,
+  NativeLegalPage: nativeLegalRenderer,
+})) {
+  if (!renderer.includes("bullets?.map")) {
+    throw new Error(`${label} does not render canonical legal bullet lists.`);
   }
 }
 

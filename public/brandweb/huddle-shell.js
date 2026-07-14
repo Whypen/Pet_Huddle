@@ -76,7 +76,7 @@
       ["/legal/cookies", "Cookies notice"],
       ["/legal/community-guidelines", "Community guidelines"],
       ["/legal/privacy-choices", "Privacy choices"],
-      ["/legal/service-provider-agreement", "Care Service Provider Agreement"],
+      ["/legal/service-provider-agreement", "Care Service Carer Agreement"],
       ["/legal/booking-terms", "Care Service Booking Terms"],
     ]},
   ];
@@ -174,7 +174,7 @@
       ["/legal/cookies", "Cookies notice"],
       ["/legal/community-guidelines", "Community guidelines"],
       ["/legal/privacy-choices", "Privacy choices"],
-      ["/legal/service-provider-agreement", "Care Service Provider Agreement"],
+      ["/legal/service-provider-agreement", "Care Service Carer Agreement"],
       ["/legal/booking-terms", "Care Service Booking Terms"],
     ]),
   ]);

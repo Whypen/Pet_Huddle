@@ -6,28 +6,28 @@
       "title": "Privacy Policy",
       "effectiveDate": "14 July 2026",
       "intro": [
-        "This Policy explains what personal information huddle collects, why it is used, when it is shared, how long it is kept, and what rights and choices you have."
+        "This Policy explains what personal information HUDDLE collects, why it is used, when it is shared, how long it is kept, and what rights and choices you have."
       ],
       "sections": [
         {
           "title": "1. Scope",
           "body": [
-            "This Policy applies to huddle's app, websites, support channels, and all features including messaging, social feed, map, care marketplace, subscriptions, and identity verification."
+            "This Policy applies to HUDDLE's app, websites, support channels, and all features including messaging, social feed, map, care marketplace, subscriptions, and identity verification."
           ]
         },
         {
-          "title": "2. What huddle collects",
+          "title": "2. What HUDDLE collects",
           "body": [
-            "huddle may collect the following categories of information:"
+            "HUDDLE may collect the following categories of information:"
           ],
           "bullets": [
             "Account information: email address, password credentials, date of birth, and phone number.",
-            "Sign-in information: where you use Apple Sign-In, the Apple subject identifier and any email Apple provides. huddle receives only what Apple shares, which may be a private relay address.",
+            "Sign-in information: where you use Apple Sign-In, the Apple subject identifier and any email Apple provides. HUDDLE receives only what Apple shares, which may be a private relay address.",
             "Profile and pet information: display name, photos, social handle, bio, location name, pet name, species, date of birth, weight, photos, and publicly shared pet details.",
-            "Identity verification data: legal name, government-issued ID or passport document data, payment method confirmation through our payment partner, and liveness or human-presence data captured via the device camera to confirm a real person is present and to prevent fraud. Document data is processed for verification only. huddle does not store raw facial templates or biometric identifiers after verification completes.",
-            "Security credentials: biometric credentials (Face ID, Touch ID) are stored on your device only and are never transmitted to huddle.",
+            "Identity verification data: legal name, government-issued ID or passport document data, payment method confirmation through our payment partner, and liveness or human-presence data captured via the device camera to confirm a real person is present and to prevent fraud. Document data is processed for verification only. HUDDLE does not store raw facial templates or biometric identifiers after verification completes.",
+            "Security credentials: biometric credentials (Face ID, Touch ID) are stored on your device only and are never transmitted to HUDDLE.",
             "Content and communications: messages, social posts, comments, media uploads, care booking details, handoff records, Start PIN events, mid-care photos, check-in submissions, emergency contact, care instructions, and medication, allergy, and behaviour notes submitted in bookings.",
-            "Payment and subscription data: subscription tier and billing status, billing events, refund and dispute records, and limited payment metadata. Raw card numbers are not stored by huddle.",
+            "Payment and subscription data: subscription tier and billing status, billing events, refund and dispute records, and limited payment metadata. Raw card numbers are not stored by HUDDLE.",
             "Device and app data: device type, operating system, app version, push notification token, IP address, and crash data.",
             "Location data: coordinates and timestamps where you enable location or pin your location on the map, including pin expiry information.",
             "Trust and safety data: phone-verification status, identity-verification status, fraud signals, moderation records, and complaint records.",
@@ -36,9 +36,9 @@
           ]
         },
         {
-          "title": "3. How huddle uses information",
+          "title": "3. How HUDDLE uses information",
           "body": [
-            "huddle uses information to:"
+            "HUDDLE uses information to:"
           ],
           "bullets": [
             "Authenticate accounts and support sign-in methods including email/password, Apple Sign-In, and biometric login.",
@@ -53,9 +53,9 @@
           ]
         },
         {
-          "title": "4. When huddle shares information",
+          "title": "4. When HUDDLE shares information",
           "body": [
-            "huddle may share information with:"
+            "HUDDLE may share information with:"
           ],
           "bullets": [
             "Supabase — database, authentication, real-time messaging, and storage infrastructure.",
@@ -64,54 +64,84 @@
             "Expo — push notification delivery.",
             "Apple and Google — app distribution, in-app purchase processing, and Apple Sign-In.",
             "Other users — profile information, map pins, social posts, and booking details shared with your counterpart as required to provide the feature you are using.",
-            "Analytics, measurement, and crash-reporting partners — subject to applicable law and any required consent or opt-out. huddle does not share information with third-party advertising networks for cross-app tracking.",
+            "Analytics, measurement, and crash-reporting partners — subject to applicable law and any required consent or opt-out. HUDDLE does not share information with third-party advertising networks for cross-app tracking.",
             "Legal authorities — where required by law, court order, or to protect safety.",
             "Parties in a merger, acquisition, or sale of assets."
           ]
         },
         {
-          "title": "5. Automated systems and safety review",
+          "title": "5. Public and community features",
           "body": [
-            "huddle may use automated systems to help rank content and profiles, detect spam, fraud, unsafe activity, policy violations, and account-security risks, and to route reports for review. These systems may use information described in this Policy and platform activity such as reports, booking records, device signals, and interaction patterns.",
-            "Automated tools assist huddle’s safety and operational decisions. Where appropriate, huddle may also use human review. You may contact support@huddle.pet if you believe a safety or enforcement decision was made in error. This does not require huddle to reverse a decision where the available records support it or where action is required to protect users, pets, or the platform."
+            "Some information may be visible to other users or the public depending on your settings and the feature you use. This may include profile and pet details, posts, comments, reviews, service listings, booking information shared with a counterpart, and map-related activity. Other users may keep or reshare information that you make available, even after you remove it from HUDDLE."
           ]
         },
         {
-          "title": "6. Location and map data",
+          "title": "6. Legal bases",
           "body": [
-            "If you pin your location on the map, your approximate location is visible to other users for the duration of your pin. You can remove your pin at any time through the map. Location data may also be used for nearby discovery, care matching, alert features, fraud prevention, and analytics. You can manage location access in your device settings."
+            "Where applicable law requires a legal basis, HUDDLE relies on one or more of contract, legitimate interests, legal obligation, consent, or protection of vital interests. Where HUDDLE relies on consent, you can withdraw it through the available control or by contacting HUDDLE, without affecting processing that occurred before withdrawal."
           ]
         },
         {
-          "title": "7. Retention and security",
+          "title": "7. Automated systems and safety review",
           "body": [
-            "huddle retains information for as long as needed for service operation, legal compliance, fraud prevention, dispute resolution, and safety. huddle uses technical and organisational controls to protect information. No system is completely secure. Where required by law, huddle will notify affected users or authorities of data breaches."
+            "HUDDLE may use automated systems to help rank content and profiles, detect spam, fraud, unsafe activity, policy violations, and account-security risks, and to route reports for review. These systems may use information described in this Policy and platform activity such as reports, booking records, device signals, and interaction patterns.",
+            "Automated tools assist HUDDLE’s safety and operational decisions. Where appropriate, HUDDLE may also use human review. You may contact support@huddle.pet if you believe a safety or enforcement decision was made in error. This does not require HUDDLE to reverse a decision where the available records support it or where action is required to protect users, pets, or the platform."
           ]
         },
         {
-          "title": "8. Age rules",
+          "title": "8. Location and map data",
           "body": [
-            "huddle is for users aged 13 and above. Discover, stranger chat, and certain social features are limited to users aged 16 and above. Identity verification and care marketplace access require users to be at least 18. huddle uses age data, feature gating, and enforcement to apply these limits."
+            "If you pin your location on the map, the location precision you choose — such as an area or a more precise pin — is visible to other users for the duration of your pin. Public map views do not expose raw GPS coordinates beyond the selected precision. You can remove your pin at any time through the map. Location data may also be used for nearby discovery, care matching, alert features, fraud prevention, and analytics. You can manage location access in your device settings; disabling access may limit location-dependent features."
           ]
         },
         {
-          "title": "9. International transfers",
+          "title": "9. Retention and security",
           "body": [
-            "Information may be processed outside your country. Where required by law, huddle applies appropriate transfer safeguards."
+            "HUDDLE retains information for as long as reasonably needed for service operation, legal compliance, fraud prevention, dispute resolution, financial records, and safety. Retention periods vary by data type, account status, and legal requirements. HUDDLE uses technical and organisational controls to protect information. No system is completely secure. Where required by law, HUDDLE will notify affected users or authorities of data breaches."
           ]
         },
         {
-          "title": "10. Your rights and choices",
+          "title": "10. Advertising, analytics, and personalisation",
+          "body": [
+            "HUDDLE may use personal information for analytics, recommendations, measurement, crash reporting, and personalisation. HUDDLE does not share information with third-party advertising networks for cross-app tracking. Where applicable law requires notice, consent, or an opt-out for a particular use, HUDDLE will provide the required control."
+          ]
+        },
+        {
+          "title": "11. Age rules",
+          "body": [
+            "HUDDLE is for users aged 13 and above. Discover, stranger chat, and certain social features are limited to users aged 16 and above. Identity verification and care marketplace access require users to be at least 18. HUDDLE uses age data, feature gating, and enforcement to apply these limits."
+          ]
+        },
+        {
+          "title": "12. International transfers",
+          "body": [
+            "Information may be processed outside your country. Where required by law, HUDDLE applies appropriate transfer safeguards."
+          ]
+        },
+        {
+          "title": "13. Your rights and choices",
           "body": [
             "Depending on applicable law, you may have rights to access, correct, delete, restrict, object to, or receive a copy of your personal information, to withdraw consent where processing is consent-based, and to opt out of marketing communications. To exercise these rights, see Privacy Choices."
           ]
         },
         {
-          "title": "11. Deleting your account",
+          "title": "14. Third-party services",
           "body": [
-            "You can delete your huddle account at any time from Account → Delete Account in the app. Deletion is immediate and permanent — there is no delay, grace period, or way to undo it once confirmed. Your profile, photos, posts, pets, chats, messages, and uploaded content are removed at that time, and your email is removed from huddle's mailing lists.",
-            "huddle retains two limited categories of information after deletion, for as long as legally or operationally necessary: (1) a hashed identifier for accounts that were banned, to prevent re-registration by the same person; and (2) payment, payout, and dispute records tied to your bookings, to meet financial, tax, and legal record-keeping obligations. These records are not linked to your deleted profile and are not used for any purpose other than fraud prevention and legal or financial compliance.",
-            "If you would like a copy of your data before deleting, email support@huddle.pet and huddle will respond within 30 days where required by applicable law."
+            "HUDDLE may link to or rely on third-party services such as app stores, payment providers, maps, messaging infrastructure, notification delivery, analytics, verification, and support tools. Their own terms and privacy notices apply to their services. HUDDLE may use de-identified or aggregated information where lawful."
+          ]
+        },
+        {
+          "title": "15. Deleting your account",
+          "body": [
+            "You can delete your HUDDLE account at any time from Account → Delete Account in the app. Deletion is immediate and permanent — there is no delay, grace period, or way to undo it once confirmed. Your profile, photos, posts, pets, chats, messages, and uploaded content are removed at that time, and your email is removed from HUDDLE's mailing lists.",
+            "HUDDLE retains two limited categories of information after deletion, for as long as legally or operationally necessary: (1) a hashed identifier for accounts that were banned, to prevent re-registration by the same person; and (2) payment, payout, and dispute records tied to your bookings, to meet financial, tax, and legal record-keeping obligations. These records are not linked to your deleted profile and are not used for any purpose other than fraud prevention and legal or financial compliance.",
+            "If you would like a copy of your data before deleting, email support@huddle.pet and HUDDLE will respond within 30 days where required by applicable law."
+          ]
+        },
+        {
+          "title": "16. Changes to this Policy",
+          "body": [
+            "HUDDLE may update this Policy from time to time. The latest version will appear on HUDDLE's public legal pages. Where required by law, HUDDLE will provide additional notice or seek consent before a material change takes effect."
           ]
         }
       ]
@@ -121,104 +151,106 @@
       "title": "Terms of Service",
       "effectiveDate": "14 July 2026",
       "intro": [
-        "These Terms govern your access to and use of huddle's app, websites, messaging, social feed, map, care marketplace, subscriptions, identity verification, and all related features and services. By using huddle, you agree to these Terms."
+        "These Terms govern your access to and use of HUDDLE's app, websites, messaging, social feed, map, care marketplace, subscriptions, identity verification, and all related features and services. By using HUDDLE, you agree to these Terms."
       ],
       "sections": [
         {
-          "title": "1. Who can use huddle",
+          "title": "1. Who can use HUDDLE",
           "body": [
-            "huddle is for users aged 13 and above. Discover and stranger chat are limited to users aged 16 and above. The care marketplace and identity verification require users to be at least 18. You must provide accurate information, keep your credentials secure, and use only your own account. huddle may require phone verification, identity verification, ID/passport checks, liveness checks, payment method confirmation, or other trust steps to access or continue using certain features."
+            "HUDDLE is for users aged 13 and above. Discover and stranger chat are limited to users aged 16 and above. The care marketplace and identity verification require users to be at least 18. You must provide accurate information, keep your credentials secure, and use only your own account. HUDDLE may require phone verification, identity verification, ID/passport checks, liveness checks, payment method confirmation, or other trust steps to access or continue using certain features."
           ]
         },
         {
-          "title": "2. What huddle is — and is not",
+          "title": "2. What HUDDLE is — and is not",
           "body": [
-            "huddle is a communication, community, and care marketplace platform. huddle is not a care provider, employer, agent, veterinarian, emergency service, or party to care arranged between users. Unless huddle expressly states otherwise, huddle does not provide, supervise, guarantee, or insure any care service listed on the platform.",
-            "Identity verification badges, trust indicators, and credential displays reflect completion of huddle's applicable verification steps at the time they are issued. They are not a guarantee of any user's current qualifications, conduct, insurance, or suitability."
+            "HUDDLE is a communication, community, and care marketplace platform. HUDDLE is not a care provider, employer, agent, veterinarian, emergency service, or party to care arranged between users. Unless HUDDLE expressly states otherwise, HUDDLE does not provide, supervise, guarantee, or insure any care service listed on the platform.",
+            "Identity verification badges, trust indicators, and credential displays reflect completion of HUDDLE's applicable verification steps at the time they are issued. They are not a guarantee of any user's current qualifications, conduct, insurance, or suitability."
           ]
         },
         {
           "title": "3. Your content",
           "body": [
-            "You keep ownership of content you submit to huddle. By submitting content, you grant huddle a worldwide, irrevocable, royalty-free, sublicensable licence to host, store, copy, adapt, publish, display, distribute, and promote that content to operate, protect, improve, and market huddle, subject to applicable law and the Privacy Policy. Private messages and booking communications are not used for public advertising or social media promotion without your separate consent.",
-            "If you believe content on huddle infringes your intellectual property rights, email support@huddle.pet with a description of the work, the material you believe infringes it, and your contact details. huddle may remove or disable access to reported content and may terminate the accounts of repeat infringers."
+            "You keep ownership of content you submit to HUDDLE. By submitting content, you grant HUDDLE a worldwide, irrevocable, royalty-free, sublicensable licence to host, store, copy, adapt, publish, display, distribute, and promote that content to operate, protect, improve, and market HUDDLE, subject to applicable law and the Privacy Policy. Private messages and booking communications are not used for public advertising or social media promotion without your separate consent.",
+            "If you believe content on HUDDLE infringes your intellectual property rights, email support@huddle.pet with a description of the work, the material you believe infringes it, and your contact details. HUDDLE may remove or disable access to reported content and may terminate the accounts of repeat infringers."
           ]
         },
         {
           "title": "4. Subscriptions and virtual items",
           "body": [
-            "Some features require a paid subscription. huddle offers huddle+ and huddle＊ subscription tiers. Subscriptions renew automatically until cancelled. You must cancel through the channel where you subscribed — Apple App Store or Google Play. Deleting the app or your huddle account does not cancel your subscription and does not entitle you to a refund of any remaining subscription period.",
-            "Family Sharing extends your plan's benefits to one linked account, except Stars. Family Sharing is included on huddle＊; on other tiers it is available as a separate paid add-on. Family Sharing does not include Super Broadcast, Profile Booster, or any other add-on — those are purchased and licensed separately.",
+            "Some features require a paid subscription. HUDDLE offers HUDDLE+ and HUDDLE＊ subscription tiers. Subscriptions renew automatically until cancelled. You must cancel through the channel where you subscribed — Apple App Store or Google Play. Deleting the app or your HUDDLE account does not cancel your subscription and does not entitle you to a refund of any remaining subscription period.",
+            "Family Sharing extends your plan's benefits to one linked account, except Stars. Family Sharing is included on HUDDLE＊; on other tiers it is available as a separate paid add-on. Family Sharing does not include Super Broadcast, Profile Booster, or any other add-on — those are purchased and licensed separately.",
             "Stars, broadcast credits, profile boosts, and similar virtual items are licensed features — not sold. They have no cash value, are non-transferable, and may be modified or withdrawn where allowed by law."
           ]
         },
         {
           "title": "5. Payments and fees",
           "body": [
-            "A request, quote, or pending Care Scope is not a confirmed booking. A paid booking forms only when huddle confirms the Care Scope and the required payment succeeds. A no-payment booking forms only when huddle confirms the Care Scope and the voluntary confirmation is completed. A failed, pending, expired, reversed, or disputed payment does not create a paid booking or guarantee that care will proceed.",
-            "The confirmed Care Scope and booking record are the controlling snapshot for the pets, dates, times, location, price, and cancellation terms. Chat messages or later operational instructions do not amend that snapshot unless huddle records a new Care Scope revision and the required parties confirm it.",
-            "huddle processes payments through Stripe. Any applicable care-booking service fee, payout deduction, or other charge is shown in the booking or payment flow before you confirm it; no fee rate in these Terms is a promise that a rate will remain unchanged.",
-            "huddle or Stripe may hold, delay, or reverse payments for fraud review, disputes, chargebacks, policy enforcement, or legal compliance. Fees are generally non-refundable once a paid period or feature has started, except where required by law or the applicable app store's refund rules.",
-            "You must use huddle's booking dispute process before initiating a payment dispute or chargeback. A chargeback made in bad faith or instead of that process is a material breach and may result in payment holds, recovery action, suspension, and loss of platform protections, to the extent permitted by applicable law. Nothing in these Terms limits a non-waivable right to dispute a charge with your payment provider."
+            "A request, quote, or pending Care Scope is not a confirmed booking. A paid booking forms only when HUDDLE confirms the Care Scope and the required payment succeeds. A no-payment booking forms only when HUDDLE confirms the Care Scope and the voluntary confirmation is completed. A failed, pending, expired, reversed, or disputed payment does not create a paid booking or guarantee that care will proceed.",
+            "The confirmed Care Scope and booking record are the controlling snapshot for the pets, dates, times, location, price, and cancellation terms. Chat messages or later operational instructions do not amend that snapshot unless HUDDLE records a new Care Scope revision and the required parties confirm it.",
+            "HUDDLE processes payments through Stripe. Any applicable care-booking service fee, payout deduction, or other charge is shown in the booking or payment flow before you confirm it; no fee rate in these Terms is a promise that a rate will remain unchanged.",
+            "HUDDLE or Stripe may hold, delay, or reverse payments for fraud review, disputes, chargebacks, policy enforcement, or legal compliance. Fees are generally non-refundable once a paid period or feature has started, except where required by law or the applicable app store's refund rules.",
+            "You must use HUDDLE's booking dispute process before initiating a payment dispute or chargeback. A chargeback made in bad faith or instead of that process is a material breach and may result in payment holds, recovery action, suspension, and loss of platform protections, to the extent permitted by applicable law. Nothing in these Terms limits a non-waivable right to dispute a charge with your payment provider."
           ]
         },
         {
           "title": "6. Acceptable use",
           "body": [
-            "You must not: impersonate anyone; misrepresent your age, identity, or qualifications; harass, threaten, or exploit any person or animal; post unlawful or harmful content; endanger people or pets; submit fake reviews, fake bookings, or false map alerts; misuse safety or moderation systems; solicit or accept off-platform payments to bypass huddle's fees, booking system, or dispute process; create duplicate or evasion accounts after suspension or banning; or interfere with the security or operation of the service.",
-            "An off-platform arrangement, payment, or communication made to bypass huddle voids all huddle platform protections, dispute rights, payout guarantees, and booking safeguards for that arrangement. huddle has no responsibility for any off-platform arrangement or event, to the fullest extent permitted by applicable law.",
-            "huddle has zero tolerance for objectionable content and abusive users. You can report content or a user from any profile, post, message, comment, or booking, and you can block other users at any time. huddle may review reports and act on confirmed violations, including removing content and restricting or ejecting users."
+            "You must not: impersonate anyone; misrepresent your age, identity, or qualifications; harass, threaten, or exploit any person or animal; post unlawful or harmful content; endanger people or pets; submit fake reviews, fake bookings, or false map alerts; misuse safety or moderation systems; solicit or accept off-platform payments to bypass HUDDLE's fees, booking system, or dispute process; create duplicate or evasion accounts after suspension or banning; or interfere with the security or operation of the service.",
+            "An off-platform arrangement, payment, or communication made to bypass HUDDLE voids all HUDDLE platform protections, dispute rights, payout guarantees, and booking safeguards for that arrangement. HUDDLE has no responsibility for any off-platform arrangement or event, to the fullest extent permitted by applicable law.",
+            "HUDDLE has zero tolerance for objectionable content and abusive users. You can report content or a user from any profile, post, message, comment, or booking, and you can block other users at any time. HUDDLE may review reports and act on confirmed violations, including removing content and restricting or ejecting users."
           ]
         },
         {
           "title": "7. Social, Discover, Groups, and Map",
           "body": [
-            "huddle does not guarantee that you will find a connection, group, service provider, customer, route, place, event, or other opportunity through the platform. Rankings, recommendations, visibility, alerts, eligibility, and feature availability may change at any time and are not a promise of reach, response, match, booking, or outcome.",
+            "HUDDLE does not guarantee that you will find a connection, group, service provider, customer, route, place, event, or other opportunity through the platform. Rankings, recommendations, visibility, alerts, eligibility, and feature availability may change at any time and are not a promise of reach, response, match, booking, or outcome.",
             "You are solely responsible for your choices and interactions with other users, including meeting, messaging, joining a group, using a map feature, or arranging care. Use reasonable judgment, follow the Community Guidelines, and do not rely on a profile, badge, map pin, recommendation, or platform record as a guarantee of identity, safety, suitability, or availability.",
-            "Group creators and members may set community expectations, but no group rule overrides these Terms, the Community Guidelines, or a huddle safety decision. huddle may change, limit, remove, or make unavailable any social, discovery, group, or map feature where permitted by law."
+            "Group creators and members may set community expectations, but no group rule overrides these Terms, the Community Guidelines, or a HUDDLE safety decision. HUDDLE may change, limit, remove, or make unavailable any social, discovery, group, or map feature where permitted by law."
           ]
         },
         {
           "title": "8. Enforcement",
           "body": [
-            "huddle may investigate, restrict, suspend, or terminate accounts or access — with or without prior notice — where huddle reasonably believes a user has breached these Terms, created safety or legal risk, or harmed the platform or its users. Enforcement may include content removal, feature suspension, payment holds, trust badge revocation, and permanent bans. huddle may block related devices, phone numbers, or payment methods to prevent re-entry where permitted by law."
+            "HUDDLE may investigate, restrict, suspend, or terminate accounts or access — with or without prior notice — where HUDDLE reasonably believes a user has breached these Terms, created safety or legal risk, or harmed the platform or its users. Enforcement may include content removal, feature suspension, payment holds, trust badge revocation, and permanent bans. HUDDLE may block related devices, phone numbers, or payment methods to prevent re-entry where permitted by law.",
+            "Where an appeal route is available, you may contact support@huddle.pet with the relevant account or case details. An appeal does not automatically restore content, access, payments, or trust signals, and HUDDLE may preserve restrictions where needed for safety, fraud prevention, or legal compliance."
           ]
         },
         {
           "title": "9. Disclaimers",
           "body": [
-            "To the maximum extent permitted by law, huddle is provided \"as is\" and \"as available\" without any warranty of uninterrupted availability, error-free operation, accuracy of user-submitted content, or any particular outcome."
+            "To the maximum extent permitted by law, HUDDLE is provided \"as is\" and \"as available\" without any warranty of uninterrupted availability, error-free operation, accuracy of user-submitted content, or any particular outcome."
           ]
         },
         {
           "title": "10. Limitation of liability",
           "body": [
-            "To the maximum extent permitted by law, huddle has no liability for care arranged between users. If liability cannot legally be excluded, huddle's total liability for a claim is capped at the fees huddle collected for the booking giving rise to that claim; for a no-payment booking, that amount is zero. huddle is not liable for indirect, incidental, consequential, or punitive damages, or for loss of data, revenue, goodwill, or opportunity. Nothing in these Terms excludes liability that cannot lawfully be excluded.",
-            "You indemnify huddle and its affiliates against third-party claims, losses, and reasonable costs arising from care you request, provide, arrange, or receive, your acts or omissions, or your breach of these Terms, except to the extent caused by liability huddle cannot lawfully exclude."
+            "To the maximum extent permitted by law, HUDDLE has no liability for care arranged between users. If liability cannot legally be excluded, HUDDLE's total liability for a claim is capped at the fees HUDDLE collected for the booking giving rise to that claim; for a no-payment booking, that amount is zero. HUDDLE is not liable for indirect, incidental, consequential, or punitive damages, or for loss of data, revenue, goodwill, or opportunity. Nothing in these Terms excludes liability that cannot lawfully be excluded.",
+            "You indemnify HUDDLE and its affiliates against third-party claims, losses, and reasonable costs arising from care you request, provide, arrange, or receive, your acts or omissions, or your breach of these Terms, except to the extent caused by liability HUDDLE cannot lawfully exclude."
           ]
         },
         {
           "title": "11. Governing law and disputes",
           "body": [
-            "These Terms apply globally and are governed by the law that applies to the huddle entity contracting with you, without regard to conflict-of-law rules, except where mandatory law in your country of residence requires otherwise. Before starting a legal claim, contact support@huddle.pet and give huddle a reasonable opportunity to resolve the matter informally.",
-            "To the fullest extent permitted by applicable law, any dispute arising from or relating to these Terms or huddle must be resolved by final and binding individual arbitration, not in court. The arbitration will be administered under the consumer rules of a recognised arbitration provider selected by huddle, unless applicable law requires a different provider or process. Either party may bring an eligible individual claim in small-claims court, and either party may seek court relief necessary to protect intellectual property, confidential information, or platform security.",
-            "You and huddle may bring claims only in an individual capacity, not as a plaintiff, class member, or representative in any class, collective, consolidated, private-attorney-general, or other representative proceeding. If a court finds any part of this arbitration or representative-action waiver unenforceable for a particular claim, that claim may proceed in a court of competent jurisdiction while the remaining provisions continue to apply. Nothing in this section limits rights that cannot lawfully be waived."
+            "These Terms apply globally and are governed by the law that applies to the HUDDLE entity contracting with you, without regard to conflict-of-law rules, except where mandatory law in your country of residence requires otherwise. Before starting a legal claim, contact support@huddle.pet and give HUDDLE a reasonable opportunity to resolve the matter informally.",
+            "To the fullest extent permitted by applicable law, any dispute arising from or relating to these Terms or HUDDLE must be resolved by final and binding individual arbitration, not in court. The arbitration will be administered under the consumer rules of a recognised arbitration provider selected by HUDDLE, unless applicable law requires a different provider or process. Either party may bring an eligible individual claim in small-claims court, and either party may seek court relief necessary to protect intellectual property, confidential information, or platform security.",
+            "You and HUDDLE may bring claims only in an individual capacity, not as a plaintiff, class member, or representative in any class, collective, consolidated, private-attorney-general, or other representative proceeding. If a court finds any part of this arbitration or representative-action waiver unenforceable for a particular claim, that claim may proceed in a court of competent jurisdiction while the remaining provisions continue to apply. Nothing in this section limits rights that cannot lawfully be waived."
           ]
         },
         {
           "title": "12. General",
           "body": [
-            "These Terms, together with the policies and booking terms they incorporate, are the entire agreement between you and huddle about the service and replace prior understandings about that subject.",
+            "These Terms, together with the policies and booking terms they incorporate, are the entire agreement between you and HUDDLE about the service and replace prior understandings about that subject.",
             "If any provision is held invalid or unenforceable, it will be enforced to the maximum extent permitted and the remaining provisions will remain in effect.",
-            "A failure by huddle to enforce a provision is not a waiver of that provision or any other right. You may not assign or transfer these Terms or your account without huddle's written consent. huddle may assign these Terms in connection with a merger, acquisition, reorganisation, sale of assets, or by operation of law.",
-            "Electronic signatures, confirmations, notices, timestamps, and records captured through huddle's app or services are binding to the fullest extent permitted by law. Booking cutoffs and deadlines use the confirmed booking's displayed local schedule and huddle's recorded platform time; a device clock does not control.",
-            "These Terms do not create rights for any third-party beneficiary. No person other than huddle and the user who accepted the applicable terms may enforce them, except where applicable law provides otherwise."
+            "A failure by HUDDLE to enforce a provision is not a waiver of that provision or any other right. You may not assign or transfer these Terms or your account without HUDDLE's written consent. HUDDLE may assign these Terms in connection with a merger, acquisition, reorganisation, sale of assets, or by operation of law.",
+            "Electronic signatures, confirmations, notices, timestamps, and records captured through HUDDLE's app or services are binding to the fullest extent permitted by law. Booking cutoffs and deadlines use the confirmed booking's displayed local schedule and HUDDLE's recorded platform time; a device clock does not control.",
+            "These Terms do not create rights for any third-party beneficiary. No person other than HUDDLE and the user who accepted the applicable terms may enforce them, except where applicable law provides otherwise.",
+            "App-store, payment-provider, mapping, notification, identity-verification, and other third-party terms may also apply to the service or a feature. If a third-party term conflicts with these Terms, the third-party term controls only for that third-party service and does not change the agreement between you and HUDDLE."
           ]
         },
         {
           "title": "13. Changes",
           "body": [
-            "huddle may update these Terms at any time. Continued use of huddle after updated Terms take effect constitutes acceptance, to the extent permitted by law."
+            "HUDDLE may update these Terms at any time. Continued use of HUDDLE after updated Terms take effect constitutes acceptance, to the extent permitted by law."
           ]
         }
       ]
@@ -228,7 +260,7 @@
       "title": "Privacy Choices",
       "effectiveDate": "14 July 2026",
       "intro": [
-        "This page explains how to manage your privacy settings in the app and how to contact huddle for requests that cannot be completed in-app."
+        "This page explains how to manage your privacy settings in the app and how to contact HUDDLE for requests that cannot be completed in-app."
       ],
       "sections": [
         {
@@ -240,19 +272,19 @@
         {
           "title": "2. Submitting a request",
           "body": [
-            "For access, correction, deletion, restriction, data portability, consent withdrawal, marketing opt-out, or any other privacy or legal request, email support@huddle.pet. Include the email address or phone number linked to your account, the type of request, sufficient detail for huddle to understand and locate the relevant information, and reasonable information to verify your identity."
+            "For access, correction, deletion, restriction, data portability, consent withdrawal, marketing opt-out, or any other privacy or legal request, email support@huddle.pet. Include the email address or phone number linked to your account, the type of request, sufficient detail for HUDDLE to understand and locate the relevant information, and reasonable information to verify your identity."
           ]
         },
         {
           "title": "3. How requests are handled",
           "body": [
-            "huddle may verify your identity before acting on a request. huddle may decline or limit a request where permitted by law — for example, where information must be retained for fraud prevention, dispute resolution, legal compliance, or safety. huddle will respond within the timeframe required by applicable law."
+            "HUDDLE may verify your identity before acting on a request. HUDDLE may decline or limit a request where permitted by law — for example, where information must be retained for fraud prevention, dispute resolution, legal compliance, or safety. HUDDLE will respond within the timeframe required by applicable law."
           ]
         },
         {
           "title": "4. Complaints",
           "body": [
-            "If you have a privacy complaint, contact huddle first at support@huddle.pet. You may also have the right to file a complaint with the data protection authority in your country of residence."
+            "If you have a privacy complaint, contact HUDDLE first at support@huddle.pet. You may also have the right to file a complaint with the data protection authority in your country of residence."
           ]
         }
       ]
@@ -262,25 +294,31 @@
       "title": "Cookies and Similar Technologies Notice",
       "effectiveDate": "14 July 2026",
       "intro": [
-        "huddle may use cookies, SDKs, local storage, and similar technologies in its app, websites, and related services."
+        "HUDDLE may use cookies, SDKs, local storage, and similar technologies in its app, websites, and related services."
       ],
       "sections": [
         {
-          "title": "1. Why huddle uses these tools",
+          "title": "1. Why HUDDLE uses these tools",
           "body": [
-            "These technologies support authentication, security, session persistence, usage analytics, recommendations, and crash reporting. huddle does not use third-party advertising networks or cross-app tracking."
+            "These technologies may include cookies, SDKs, pixels, tags, local storage, device identifiers, and similar tools. They support authentication, security, session persistence, usage analytics, recommendations, and crash reporting. HUDDLE does not use third-party advertising networks or cross-app tracking."
           ]
         },
         {
           "title": "2. Your choices",
           "body": [
-            "Depending on the technology and your location, choices may be available through your device settings, app permissions, or privacy controls within the app. Where consent is required by law before non-essential technologies are used, huddle will request it."
+            "Depending on the technology and your location, choices may be available through your device settings, app permissions, or privacy controls within the app. Where consent is required by law before non-essential technologies are used, HUDDLE will request it."
           ]
         },
         {
           "title": "3. More information",
           "body": [
-            "For full details on how huddle uses personal information, see the Privacy Policy. To manage your privacy choices or submit a request, see Privacy Choices."
+            "For full details on how HUDDLE uses personal information, see the Privacy Policy. To manage your privacy choices or submit a request, see Privacy Choices."
+          ]
+        },
+        {
+          "title": "4. Retention and changes",
+          "body": [
+            "These technologies may remain on a device until they expire, are cleared, or are disabled through the applicable control. HUDDLE may update this Notice when its technologies or legal obligations change; the latest version will appear on HUDDLE's public legal pages."
           ]
         }
       ]
@@ -290,7 +328,7 @@
       "title": "Community Guidelines",
       "effectiveDate": "14 July 2026",
       "intro": [
-        "These rules apply across every part of huddle — profiles, pets, photos, messages, social posts, comments, map features, care bookings, reviews, and support interactions."
+        "These rules apply across every part of HUDDLE — profiles, pets, photos, messages, social posts, comments, map features, care bookings, reviews, and support interactions."
       ],
       "sections": [
         {
@@ -314,15 +352,15 @@
         {
           "title": "4. Consent and meaningful interactions",
           "body": [
-            "Do not use huddle to pressure, deceive, sexually exploit, manipulate, or repeatedly contact another person. Do not send unwanted commercial solicitations, use deceptive profiles, scrape or harvest information, coordinate spam, or use another person’s content, image, or identity without permission.",
+            "Do not use HUDDLE to pressure, deceive, sexually exploit, manipulate, or repeatedly contact another person. Do not send unwanted commercial solicitations, use deceptive profiles, scrape or harvest information, coordinate spam, or use another person’s content, image, or identity without permission.",
             "You must respect a person’s boundaries, consent, and decision to stop communicating. Do not use social, discovery, group, map, or care features to target, shame, expose, or retaliate against another person."
           ]
         },
         {
           "title": "5. No fraud or manipulation",
           "body": [
-            "Do not submit false or fabricated lost-pet, stray, or caution alerts on the map. Do not solicit, submit, or offer fake reviews or inflate ratings for care providers or customers. Do not fabricate or tamper with booking evidence, handoff records, or Start PIN confirmations. Do not engage in off-platform payment schemes to avoid huddle's fees, safety tools, or dispute process.",
-            "Off-platform care arrangements, payments, or communications made to bypass huddle void all huddle platform protections, dispute rights, payout guarantees, and booking safeguards for that arrangement. huddle has no responsibility for any off-platform arrangement or event, to the fullest extent permitted by applicable law."
+            "Do not submit false or fabricated lost-pet, stray, or caution alerts on the map. Do not solicit, submit, or offer fake reviews or inflate ratings for care providers or customers. Do not fabricate or tamper with booking evidence, handoff records, or Start PIN confirmations. Do not engage in off-platform payment schemes to avoid HUDDLE's fees, safety tools, or dispute process.",
+            "Off-platform care arrangements, payments, or communications made to bypass HUDDLE void all HUDDLE platform protections, dispute rights, payout guarantees, and booking safeguards for that arrangement. HUDDLE has no responsibility for any off-platform arrangement or event, to the fullest extent permitted by applicable law."
           ]
         },
         {
@@ -334,14 +372,26 @@
         {
           "title": "7. Follow the law",
           "body": [
-            "Comply with all applicable laws, including animal welfare regulations. Do not use huddle for unlawful commerce, harassment, fraud, money laundering, or any other illegal purpose."
+            "Comply with all applicable laws, including animal welfare regulations. Do not use HUDDLE for unlawful commerce, harassment, fraud, money laundering, or any other illegal purpose."
           ]
         },
         {
           "title": "8. Enforcement",
           "body": [
-            "Violations may result in content removal, feature suspension, payout holds, trust badge revocation, account suspension, or permanent ban. huddle may block related devices, phone numbers, or payment methods to prevent re-entry where permitted by law.",
-            "huddle may review reports of objectionable content or abusive users and act on confirmed violations, including removing content and restricting or ejecting users."
+            "Violations may result in content removal, feature suspension, payout holds, trust badge revocation, account suspension, or permanent ban. HUDDLE may block related devices, phone numbers, or payment methods to prevent re-entry where permitted by law.",
+            "HUDDLE may review reports of objectionable content or abusive users and act on confirmed violations, including removing content and restricting or ejecting users."
+          ]
+        },
+        {
+          "title": "9. Safety-sensitive content",
+          "body": [
+            "HUDDLE has zero tolerance for child sexual exploitation, grooming, sexual exploitation of any person, non-consensual intimate imagery, credible threats of violence, violent extremist recruitment, or content that encourages self-harm. Do not post or send such content, even as a joke, threat, solicitation, or attempt to expose another person. Huddle may remove content, preserve evidence, restrict accounts, and notify appropriate authorities where required or permitted by law."
+          ]
+        },
+        {
+          "title": "10. Reports and appeals",
+          "body": [
+            "Use in-app reporting and blocking tools where available. Include enough detail and evidence for HUDDLE to understand the concern. If you believe an enforcement action was made in error, contact support@huddle.pet with the relevant account or case details. HUDDLE may review an appeal, but an appeal does not automatically restore content, access, payments, or trust signals, and HUDDLE may preserve restrictions where needed for safety, fraud prevention, or legal compliance."
           ]
         }
       ]
@@ -351,85 +401,85 @@
       "title": "Care Service Carer Agreement",
       "effectiveDate": "14 July 2026",
       "intro": [
-        "This Agreement applies to any user who registers, is approved, or offers care services through huddle. These users are called Care Service Carers. By registering or providing services through huddle, you agree to this Agreement, the Terms of Service, Privacy Policy, and Community Guidelines. Where this Agreement conflicts with the Terms of Service, this Agreement controls for carer matters."
+        "This Agreement applies to any user who registers, is approved, or offers care services through HUDDLE. These users are called Care Service Carers. By registering or providing services through HUDDLE, you agree to this Agreement, the Terms of Service, Privacy Policy, and Community Guidelines. Where this Agreement conflicts with the Terms of Service, this Agreement controls for carer matters."
       ],
       "sections": [
         {
-          "title": "1. huddle's role",
+          "title": "1. HUDDLE's role",
           "body": [
-            "huddle is a technology platform that enables users to find each other, communicate, and arrange care services. huddle does not provide, supervise, direct, or control how you perform any care service and does not employ you."
+            "HUDDLE is a technology platform that enables users to find each other, communicate, and arrange care services. HUDDLE does not provide, supervise, direct, or control how you perform any care service and does not employ you."
           ]
         },
         {
           "title": "2. Independent carer status",
           "body": [
-            "You are an independent carer — not an employee, worker, agent, partner, or joint venturer of huddle. You are solely responsible for your own taxes, licences, permits, insurance, and legal compliance. You must not represent yourself as an employee, agent, or representative of huddle to customers or any third party.",
+            "You are an independent carer — not an employee, worker, agent, partner, or joint venturer of HUDDLE. You are solely responsible for your own taxes, licences, permits, insurance, and legal compliance. You must not represent yourself as an employee, agent, or representative of HUDDLE to customers or any third party.",
             "Where mandatory local law imposes a different worker-classification test, that law governs to the extent it cannot lawfully be waived, and this section otherwise applies to the fullest extent permitted."
           ]
         },
         {
           "title": "3. Eligibility and identity verification",
           "body": [
-            "You must be at least 18 years old. You must complete all identity verification, ID/passport checks, payment method confirmation, and trust steps huddle requires before accessing the care marketplace. Your marketplace access is conditional on maintaining good standing, up-to-date verification, and a valid Stripe Connect payout account. huddle may pause or revoke your marketplace access if any required verification lapses or becomes invalid."
+            "You must be at least 18 years old. You must complete all identity verification, ID/passport checks, payment method confirmation, and trust steps HUDDLE requires before accessing the care marketplace. Your marketplace access is conditional on maintaining good standing, up-to-date verification, and a valid Stripe Connect payout account. HUDDLE may pause or revoke your marketplace access if any required verification lapses or becomes invalid."
           ]
         },
         {
           "title": "4. Profile accuracy and credentials",
           "body": [
             "Your profile, listings, rates, availability, qualifications, and service descriptions must be accurate and not misleading at all times.",
-            "Credential badges on your profile are labelled as either verified (Registry matched, Certificate matched, Organisation matched, or Directory matched) or Self-declared. Self-declared badges are based solely on your own claim and are not verified by huddle. huddle makes no representation about the accuracy of self-declared credentials.",
-            "You must notify huddle promptly if any listed credential lapses, is suspended, or materially changes. You must never claim qualifications, licences, insurance, or certifications you do not hold."
+            "Credential badges on your profile are labelled as either verified (Registry matched, Certificate matched, Organisation matched, or Directory matched) or Self-declared. Self-declared badges are based solely on your own claim and are not verified by HUDDLE. HUDDLE makes no representation about the accuracy of self-declared credentials.",
+            "You must notify HUDDLE promptly if any listed credential lapses, is suspended, or materially changes. You must never claim qualifications, licences, insurance, or certifications you do not hold."
           ]
         },
         {
           "title": "5. Care standards and handoff obligations",
           "body": [
             "You must provide care with reasonable skill, care, and professionalism; follow all agreed care instructions; communicate with customers in a timely manner; and complete confirmed bookings unless prevented by genuine emergency.",
-            "You may not delegate, subcontract, substitute, or transfer a confirmed booking to another person without huddle's and the customer's prior approval through a new confirmed booking. You may refuse or pause a handoff that is unsafe, unlawful, inaccessible, or materially different from the confirmed Care Scope, but you must report the issue through huddle immediately.",
+            "You may not delegate, subcontract, substitute, or transfer a confirmed booking to another person without HUDDLE's and the customer's prior approval through a new confirmed booking. You may refuse or pause a handoff that is unsafe, unlawful, inaccessible, or materially different from the confirmed Care Scope, but you must report the issue through HUDDLE immediately.",
             "Where a booking requires a Start PIN or check-in photo, you must not submit or record a start confirmation until the customer has genuinely completed handoff and you are ready to begin care. Submitting false, fabricated, or misleading handoff evidence — including confirming a Start PIN you did not receive from the customer, or uploading a check-in photo that does not reflect the actual start of care — is a material breach of this Agreement. It may result in immediate suspension, forfeiture of payout, and permanent ban.",
-            "You must report any serious incident — including pet injury, illness, escape, property damage, safety concerns, or police involvement — to both huddle and the customer without undue delay.",
-            "If the owner or emergency contact cannot be reached after the booked service ends, you may take reasonable protective steps and, within 12 hours after the booked end or sooner for safety, transfer the pet to animal control, law enforcement, a licensed shelter, a veterinarian, a licensed boarding provider, or another lawful provider that accepts the pet. You are not required to provide unpaid care beyond what applicable law requires. huddle may assist at its discretion but does not assume custody, transport, housing, rehoming, payment, or placement responsibility."
+            "You must report any serious incident — including pet injury, illness, escape, property damage, safety concerns, or police involvement — to both HUDDLE and the customer without undue delay.",
+            "If the owner or emergency contact cannot be reached after the booked service ends, you may take reasonable protective steps and, within 12 hours after the booked end or sooner for safety, transfer the pet to animal control, law enforcement, a licensed shelter, a veterinarian, a licensed boarding provider, or another lawful provider that accepts the pet. You are not required to provide unpaid care beyond what applicable law requires. HUDDLE may assist at its discretion but does not assume custody, transport, housing, rehoming, payment, or placement responsibility."
           ]
         },
         {
           "title": "6. Emergency vet permission",
           "body": [
             "Where a customer grants emergency vet permission in a booking, you are authorised to consent to emergency veterinary treatment on the customer's behalf only where: (a) the pet faces a genuine, time-critical medical emergency, and (b) you have made reasonable attempts to contact the customer first and could not reach them in time.",
-            "All veterinary costs arising from treatment authorised under emergency vet permission are the customer's sole financial responsibility. huddle is not liable for any veterinary costs, treatment outcomes, or decisions made under this permission.",
-            "Any displayed treatment limit limits your authority to consent; it does not limit the customer's responsibility for treatment costs or create a payment obligation for huddle or you.",
+            "All veterinary costs arising from treatment authorised under emergency vet permission are the customer's sole financial responsibility. HUDDLE is not liable for any veterinary costs, treatment outcomes, or decisions made under this permission.",
+            "Any displayed treatment limit limits your authority to consent; it does not limit the customer's responsibility for treatment costs or create a payment obligation for HUDDLE or you.",
             "This permission does not authorise you to consent to elective, non-urgent, or preventative treatment. Misusing emergency vet permission — including using it outside a genuine emergency — is a breach of this Agreement and the Community Guidelines."
           ]
         },
         {
           "title": "7. Fees, payouts, and Stripe Connect",
           "body": [
-            "huddle may charge a service fee or apply another disclosed payout deduction on the agreed care scope price. Any applicable amount is shown in your booking and payout details before you accept — it may change over time and is not fixed in this Agreement.",
-            "Payouts are processed through Stripe Connect. You must complete Stripe Connect onboarding and maintain a valid payout account. huddle is not responsible for payout delays caused by incomplete Stripe onboarding, bank processing times, or Stripe's own processing requirements. Payouts may be held where required for fraud review, dispute resolution, regulatory compliance, or platform risk management. Where a payout is held, huddle will notify you and release it as soon as reasonably practicable once the relevant review is resolved.",
-            "If you cancel a confirmed booking before care starts, huddle may cancel the booking and refund amounts for care not provided; you receive no payout for that cancelled booking. A cancellation may also affect your Care record, visibility, ranking, booking access, or account status. huddle may help the customer find another carer, but does not guarantee replacement care or an alternate booking.",
+            "HUDDLE may charge a service fee or apply another disclosed payout deduction on the agreed care scope price. Any applicable amount is shown in your booking and payout details before you accept — it may change over time and is not fixed in this Agreement.",
+            "Payouts are processed through Stripe Connect. You must complete Stripe Connect onboarding and maintain a valid payout account. HUDDLE is not responsible for payout delays caused by incomplete Stripe onboarding, bank processing times, or Stripe's own processing requirements. Payouts may be held where required for fraud review, dispute resolution, regulatory compliance, or platform risk management. Where a payout is held, HUDDLE will notify you and release it as soon as reasonably practicable once the relevant review is resolved.",
+            "If you cancel a confirmed booking before care starts, HUDDLE may cancel the booking and refund amounts for care not provided; you receive no payout for that cancelled booking. A cancellation may also affect your Care record, visibility, ranking, booking access, or account status. HUDDLE may help the customer find another carer, but does not guarantee replacement care or an alternate booking.",
             "Where the agreed Care Scope requires photo updates, notes with photos, or daily summaries, you must submit each required update before requesting completion. Missing a required photo or note may prevent completion and delay payout. Daily summaries may be completed through the completion flow's recorded exception where that option is shown.",
             "If neither party reports a blocking issue, an eligible booking may be completed automatically after the scheduled end time and payout may then be released. You must report any issue that may affect completion or payout before the platform's completion cutoff.",
-            "You must not move a huddle booking, payment, or care arrangement off-platform. An off-platform arrangement voids all huddle platform protections, dispute rights, payout guarantees, and booking safeguards for that arrangement. huddle has no responsibility for any off-platform arrangement or event, to the fullest extent permitted by applicable law."
+            "You must not move a HUDDLE booking, payment, or care arrangement off-platform. An off-platform arrangement voids all HUDDLE platform protections, dispute rights, payout guarantees, and booking safeguards for that arrangement. HUDDLE has no responsibility for any off-platform arrangement or event, to the fullest extent permitted by applicable law."
           ]
         },
         {
           "title": "8. Cancellations and disputes",
           "body": [
-            "You must honour all confirmed bookings. Acceptable grounds for cancellation are limited to: a genuine emergency preventing you from performing care; a safety concern for you, the pet, or a third party that huddle accepts; the owner's failure to complete handoff as required; or a huddle-authorised cancellation. Repeated or unexplained cancellations may reduce your visibility, ranking, and marketplace access.",
+            "You must honour all confirmed bookings. Acceptable grounds for cancellation are limited to: a genuine emergency preventing you from performing care; a safety concern for you, the pet, or a third party that HUDDLE accepts; the owner's failure to complete handoff as required; or a HUDDLE-authorised cancellation. Repeated or unexplained cancellations may reduce your visibility, ranking, and marketplace access.",
             "A cancellation trust penalty is a marketplace-ranking consequence, not an undisclosed cash deduction. Any payout amount or payout deduction is shown in the booking or payout details before you accept.",
-            "For an owner's late cancellation, a paid booking cancelled 24 to 72 hours before the scheduled start gives the owner a 50% refund and huddle retains 50%; a booking cancelled less than 24 hours before the start is non-refundable. Any carer payout or trust consequence is determined by the booking record and applicable policy; no payout is guaranteed. On a no-payment booking no payment is involved, but the owner's repeated or last-minute cancellation or no-show is treated as a trust violation under this Agreement.",
+            "For an owner's late cancellation, a paid booking cancelled 24 to 72 hours before the scheduled start gives the owner a 50% refund and HUDDLE retains 50%; a booking cancelled less than 24 hours before the start is non-refundable. Any carer payout or trust consequence is determined by the booking record and applicable policy; no payout is guaranteed. On a no-payment booking no payment is involved, but the owner's repeated or last-minute cancellation or no-show is treated as a trust violation under this Agreement.",
             "System no-start cancellation is separate from either party cancelling the booking. If care has not started by the scheduled end time, the system cancels the booking under the no-start policy and PIN/check-in actions stop. Either party may submit one no-start report after the significant-delay warning and before the scheduled end time; the report reason is required and notes or supporting evidence are optional.",
-            "If you do not report a handoff or no-start problem before the scheduled end time, huddle may treat the unreported failure to start as a failure to protect the booking. This may affect your Care record, visibility, ranking, booking access, account status, or payout. A paid no-start outcome may include no payout, a reserved-time payout where the records support it, a refund, a retained amount, or review. huddle may use reports, non-response, Start PIN records, check-in evidence, messages, timestamps, and other platform records to decide responsibility and the applicable refund, payout, or account outcome.",
+            "If you do not report a handoff or no-start problem before the scheduled end time, HUDDLE may treat the unreported failure to start as a failure to protect the booking. This may affect your Care record, visibility, ranking, booking access, account status, or payout. A paid no-start outcome may include no payout, a reserved-time payout where the records support it, a refund, a retained amount, or review. HUDDLE may use reports, non-response, Start PIN records, check-in evidence, messages, timestamps, and other platform records to decide responsibility and the applicable refund, payout, or account outcome.",
             "A no-start or handoff report must be submitted through the in-app report flow before the scheduled end time. Other serious incident or financial claims must be reported within 48 hours of the actual or expected completion of care, unless applicable law requires a longer period. Safety or legal reports may be reviewed outside that period, but no financial outcome is guaranteed.",
-            "After valid check-in, the pre-start cancellation and no-start rules no longer apply. If care cannot safely continue, you must report the issue immediately. Ending care early by mutual agreement does not itself create a refund or reduce the agreed price; any safety or emergency report is reviewed under huddle's Trust & Safety process, and huddle does not promise a refund or payout adjustment.",
-            "A multi-day Care Scope is one booking for the total agreed price, not separate daily bookings. Early mutual completion does not create an automatic daily refund or proration. Any partial-performance dispute is decided under huddle's Trust & Safety process using the care delivered and platform records.",
-            "Where a dispute is raised, huddle may review platform records, messages, timestamps, handoff evidence, Start PIN logs, check-in submissions, and mid-care photos. huddle's determination of the final payout and owner refund is final and binding for the platform process. No response time or outcome is guaranteed, and any reconsideration is discretionary unless applicable law requires otherwise.",
-            "A handoff, no-start, or care-issue report may place the booking in review and pause payment handling. While review is open, no refund, retained amount, payout, or resolution time is guaranteed. After huddle executes a refund or payout, that financial decision is final for the platform process except where applicable law requires otherwise."
+            "After valid check-in, the pre-start cancellation and no-start rules no longer apply. If care cannot safely continue, you must report the issue immediately. Ending care early by mutual agreement does not itself create a refund or reduce the agreed price; any safety or emergency report is reviewed under HUDDLE's Trust & Safety process, and HUDDLE does not promise a refund or payout adjustment.",
+            "A multi-day Care Scope is one booking for the total agreed price, not separate daily bookings. Early mutual completion does not create an automatic daily refund or proration. Any partial-performance dispute is decided under HUDDLE's Trust & Safety process using the care delivered and platform records.",
+            "Where a dispute is raised, HUDDLE may review platform records, messages, timestamps, handoff evidence, Start PIN logs, check-in submissions, and mid-care photos. HUDDLE's determination of the final payout and owner refund is final and binding for the platform process. No response time or outcome is guaranteed, and any reconsideration is discretionary unless applicable law requires otherwise.",
+            "A handoff, no-start, or care-issue report may place the booking in review and pause payment handling. While review is open, no refund, retained amount, payout, or resolution time is guaranteed. After HUDDLE executes a refund or payout, that financial decision is final for the platform process except where applicable law requires otherwise."
           ]
         },
         {
           "title": "9. Reviews",
           "body": [
-            "Customers may submit a post-booking review including a star rating, review tags, written feedback, and up to six media files. Reviews are posted publicly on your carer profile. huddle may moderate or remove reviews that violate the Terms of Service or Community Guidelines.",
+            "Customers may submit a post-booking review including a star rating, review tags, written feedback, and up to six media files. Reviews are posted publicly on your carer profile. HUDDLE may moderate or remove reviews that violate the Terms of Service or Community Guidelines.",
             "You must not solicit, offer, or arrange for false, coerced, or incentivised reviews. You must not retaliate against customers who submit honest negative reviews."
           ]
         },
@@ -442,7 +492,7 @@
         {
           "title": "11. Suspension and termination",
           "body": [
-            "huddle may suspend, restrict, or permanently revoke your marketplace access — with or without prior notice — for breach of this Agreement or any huddle policy; safety, fraud, legal, quality, or reputational risk; repeated customer complaints; failure to maintain required verification or Stripe Connect status; or conduct that harms users, pets, or the platform. huddle may block related devices, phone numbers, or payout accounts to prevent re-entry where permitted by law."
+            "HUDDLE may suspend, restrict, or permanently revoke your marketplace access — with or without prior notice — for breach of this Agreement or any HUDDLE policy; safety, fraud, legal, quality, or reputational risk; repeated customer complaints; failure to maintain required verification or Stripe Connect status; or conduct that harms users, pets, or the platform. HUDDLE may block related devices, phone numbers, or payout accounts to prevent re-entry where permitted by law."
           ]
         },
         {
@@ -458,14 +508,14 @@
       "title": "Care Service Booking Terms",
       "effectiveDate": "14 July 2026",
       "intro": [
-        "These terms apply when you create a Care Scope Request, book, pay for, or receive care services through huddle as a pet owner or care customer. They work together with the Terms of Service, Privacy Policy, and Community Guidelines. Where these terms conflict with the Terms of Service, these terms control for booking matters."
+        "These terms apply when you create a Care Scope Request, book, pay for, or receive care services through HUDDLE as a pet owner or care customer. They work together with the Terms of Service, Privacy Policy, and Community Guidelines. Where these terms conflict with the Terms of Service, these terms control for booking matters."
       ],
       "sections": [
         {
-          "title": "1. huddle's role",
+          "title": "1. HUDDLE's role",
           "body": [
-            "huddle is a technology platform. It enables users to find carers, communicate, and arrange care. huddle is not the carer, does not employ carers, and does not supervise or control how care is performed.",
-            "A request, quote, or pending Care Scope is not a confirmed booking. A paid booking forms only when huddle confirms the Care Scope and the required payment succeeds; a no-payment booking forms only when huddle confirms the Care Scope and voluntary confirmation is completed. A failed, pending, expired, reversed, or disputed payment does not create a paid booking or guarantee that care will proceed. The confirmed Care Scope and booking record control the agreed pets, dates, times, location, price, and cancellation terms. Chat does not amend them unless huddle records a new confirmed Care Scope revision."
+            "HUDDLE is a technology platform. It enables users to find carers, communicate, and arrange care. HUDDLE is not the carer, does not employ carers, and does not supervise or control how care is performed.",
+            "A request, quote, or pending Care Scope is not a confirmed booking. A paid booking forms only when HUDDLE confirms the Care Scope and the required payment succeeds; a no-payment booking forms only when HUDDLE confirms the Care Scope and voluntary confirmation is completed. A failed, pending, expired, reversed, or disputed payment does not create a paid booking or guarantee that care will proceed. The confirmed Care Scope and booking record control the agreed pets, dates, times, location, price, and cancellation terms. Chat does not amend them unless HUDDLE records a new confirmed Care Scope revision."
           ]
         },
         {
@@ -486,16 +536,16 @@
         {
           "title": "3. Consequences of inaccurate information",
           "body": [
-            "Providing incomplete, inaccurate, or misleading booking information, including omitting known health conditions, behaviour risks, medication needs, or access hazards, is a breach of these terms. huddle or the carer may reject, cancel, or stop a booking without refund where booking information is materially incomplete or misleading.",
-            "Where a care incident arises from information you failed to disclose or misrepresented, your ability to make a claim against the carer or huddle for that incident may be reduced or extinguished."
+            "Providing incomplete, inaccurate, or misleading booking information, including omitting known health conditions, behaviour risks, medication needs, or access hazards, is a breach of these terms. HUDDLE or the carer may reject, cancel, or stop a booking without refund where booking information is materially incomplete or misleading.",
+            "Where a care incident arises from information you failed to disclose or misrepresented, your ability to make a claim against the carer or HUDDLE for that incident may be reduced or extinguished."
           ]
         },
         {
           "title": "4. Emergency vet permission",
           "body": [
             "The booking flow includes an option to grant emergency vet permission. If you grant this permission, you authorise the carer to consent to emergency veterinary treatment on your pet's behalf only where: (a) your pet faces a genuine, time-critical medical emergency, and (b) the carer cannot reach you in time.",
-            "Granting emergency vet permission does not transfer any financial obligation to the carer or to huddle. All costs for emergency veterinary treatment authorised under this permission are your sole financial responsibility. Neither the carer nor huddle is liable for any veterinary costs, treatment decisions, or treatment outcomes resulting from care authorised under this permission.",
-            "Any displayed treatment limit limits the carer's authority to consent; it does not limit your responsibility for treatment costs or create a payment obligation for huddle or the carer."
+            "Granting emergency vet permission does not transfer any financial obligation to the carer or to HUDDLE. All costs for emergency veterinary treatment authorised under this permission are your sole financial responsibility. Neither the carer nor HUDDLE is liable for any veterinary costs, treatment decisions, or treatment outcomes resulting from care authorised under this permission.",
+            "Any displayed treatment limit limits the carer's authority to consent; it does not limit your responsibility for treatment costs or create a payment obligation for HUDDLE or the carer."
           ]
         },
         {
@@ -503,9 +553,9 @@
           "body": [
             "Some bookings use a Start PIN or check-in photo to confirm the start of care. Share your Start PIN only when you have completed handoff and you are ready for the carer to begin. Sharing the Start PIN records your consent that handoff is complete.",
             "If care has not started by the scheduled end time, the system automatically cancels the booking under the no-start policy. This is a system cancellation, not a cancellation requested by either party. The PIN and check-in actions then stop immediately.",
-            "If the carer is a no-show, you must submit a no-start report with reason 'Carer no-show' after the significant-delay warning and before the scheduled end time. Reporting protects your ability to receive the outcome supported by the booking evidence. If you do not report before the deadline, huddle may treat the unreported session as an accepted no-start outcome, which can result in no refund.",
+            "If the carer is a no-show, you must submit a no-start report with reason 'Carer no-show' after the significant-delay warning and before the scheduled end time. Reporting protects your ability to receive the outcome supported by the booking evidence. If you do not report before the deadline, HUDDLE may treat the unreported session as an accepted no-start outcome, which can result in no refund.",
             "A paid no-start outcome is determined under the applicable evidence-based no-start policy and may be a full refund, no refund, a reserved-time payout to the carer, a retained amount, or review. The 50% retained amount described below applies to the applicable owner-requested self-cancellation tier, not as a fixed system no-start result. For a no-payment booking, no payment, refund, retention, or payout occurs. Silence does not guarantee a refund.",
-            "huddle may consider reports and non-response from both parties, Start PIN records, check-in evidence, messages, timestamps, and other platform records when deciding responsibility, refund, payout, and account consequences."
+            "HUDDLE may consider reports and non-response from both parties, Start PIN records, check-in evidence, messages, timestamps, and other platform records when deciding responsibility, refund, payout, and account consequences."
           ]
         },
         {
@@ -513,74 +563,74 @@
           "body": [
             "You may request self-cancellation only while the cancellation action is available in the app and before the earlier of Start PIN sharing or the scheduled start time. After that point, the self-cancellation tiers no longer apply; the handoff, no-start, or care-issue process governs instead. For paid bookings, your refund depends on the notice given before the scheduled start:",
             "72 hours or more before the start: full refund to your original payment method.",
-            "24 to 72 hours before the start: 50% refund. huddle retains the remaining 50%.",
+            "24 to 72 hours before the start: 50% refund. HUDDLE retains the remaining 50%.",
             "Less than 24 hours before the start: no refund.",
             "For no-payment bookings, no payment is involved, but a confirmed booking remains a commitment. Repeated or last-minute cancellations or no-shows may restrict your access to bookings, the same as on a paid booking.",
             "After valid check-in, you cannot use this pre-start cancellation policy to end the booking. If care ends early by mutual agreement, the agreed price remains payable and no automatic refund or daily proration applies. Safety or emergency reports are handled through the Trust & Safety process, without a promise of refund or payout adjustment.",
             "A multi-day Care Scope is one booking for the total agreed price. It is not automatically divided into daily cancellation units. Any partial-performance dispute is decided from the care delivered and platform records.",
             "If neither party reports a blocking issue, an eligible paid booking may automatically complete 48 hours after the scheduled end time and the carer's payout may then be released. Report any issue that may affect completion, refund, or payout before that deadline.",
-            "If a carer cancels before care starts, huddle may cancel the booking, refund amounts for care not provided, release no carer payout, and apply trust, visibility, ranking, access, or account consequences. huddle may help users find another carer, but does not guarantee replacement care or an alternate booking.",
-            "You must retrieve your pet and any property at the end of the booked service period or arrange and pay for lawful alternate care. If the pet remains and you or your emergency contact cannot be reached, the carer may take reasonable protective steps and, within 12 hours after the booked end or sooner for safety, transfer the pet to animal control, law enforcement, a licensed shelter, a veterinarian, a licensed boarding provider, or another lawful provider that accepts the pet. huddle may assist at its discretion but is not the pet's custodian and has no duty to transport, house, rehome, pay for, or secure placement. You authorize necessary disclosure of pet and contact information and remain responsible for all resulting costs."
+            "If a carer cancels before care starts, HUDDLE may cancel the booking, refund amounts for care not provided, release no carer payout, and apply trust, visibility, ranking, access, or account consequences. HUDDLE may help users find another carer, but does not guarantee replacement care or an alternate booking.",
+            "You must retrieve your pet and any property at the end of the booked service period or arrange and pay for lawful alternate care. If the pet remains and you or your emergency contact cannot be reached, the carer may take reasonable protective steps and, within 12 hours after the booked end or sooner for safety, transfer the pet to animal control, law enforcement, a licensed shelter, a veterinarian, a licensed boarding provider, or another lawful provider that accepts the pet. HUDDLE may assist at its discretion but is not the pet's custodian and has no duty to transport, house, rehome, pay for, or secure placement. You authorize necessary disclosure of pet and contact information and remain responsible for all resulting costs."
           ]
         },
         {
           "title": "7. Trust & Safety review",
           "body": [
-            "If something serious happens — the carer did not show up, there was a handoff problem, or you have a safety concern — submit the case with evidence through huddle's booking dispute process. huddle may place the booking in review, hold or reverse payment, issue or deny a refund, release or withhold payout, or apply account restrictions based on the available records.",
+            "If something serious happens — the carer did not show up, there was a handoff problem, or you have a safety concern — submit the case with evidence through HUDDLE's booking dispute process. HUDDLE may place the booking in review, hold or reverse payment, issue or deny a refund, release or withhold payout, or apply account restrictions based on the available records.",
             "A no-start or handoff report must be submitted through the in-app report flow before the scheduled end time. Other serious incident or financial claims must be reported within 48 hours of the actual or expected completion of care, unless applicable law requires a longer period. Safety or legal reports may be reviewed outside that period, but no financial outcome is guaranteed.",
-            "huddle may review booking records, messages, timestamps, Start PIN events, check-in photos, and other evidence. huddle's determination is final and binding for the platform process. No response time or outcome is guaranteed, and any reconsideration is discretionary unless applicable law requires otherwise.",
-            "After huddle executes a refund or payout, that financial decision is final for the platform process except where applicable law requires otherwise.",
-            "Use huddle's booking dispute process before starting a payment dispute or chargeback. A chargeback made in bad faith or instead of that process is a material breach and may result in payment holds, recovery action, suspension, and loss of platform protections, to the extent permitted by applicable law. Nothing in these Booking Terms limits a non-waivable right to dispute a charge with your payment provider."
+            "HUDDLE may review booking records, messages, timestamps, Start PIN events, check-in photos, and other evidence. HUDDLE's determination is final and binding for the platform process. No response time or outcome is guaranteed, and any reconsideration is discretionary unless applicable law requires otherwise.",
+            "After HUDDLE executes a refund or payout, that financial decision is final for the platform process except where applicable law requires otherwise.",
+            "Use HUDDLE's booking dispute process before starting a payment dispute or chargeback. A chargeback made in bad faith or instead of that process is a material breach and may result in payment holds, recovery action, suspension, and loss of platform protections, to the extent permitted by applicable law. Nothing in these Booking Terms limits a non-waivable right to dispute a charge with your payment provider."
           ]
         },
         {
           "title": "8. Carer credentials and suitability",
           "body": [
-            "You are responsible for reviewing a carer's profile, listed credentials, ratings, and limitations before booking. Credential badges marked Self-declared are based solely on the carer's own claim and have not been verified by huddle. Verified badges reflect completion of huddle's applicable verification steps at the time of issue only and do not guarantee the carer's current qualifications, insurance, conduct, or fitness for the care you require."
+            "You are responsible for reviewing a carer's profile, listed credentials, ratings, and limitations before booking. Credential badges marked Self-declared are based solely on the carer's own claim and have not been verified by HUDDLE. Verified badges reflect completion of HUDDLE's applicable verification steps at the time of issue only and do not guarantee the carer's current qualifications, insurance, conduct, or fitness for the care you require."
           ]
         },
         {
           "title": "9. Off-platform dealings",
           "body": [
-            "You must not agree with or pressure carers to make payments outside huddle's system, proceed without a confirmed booking, or otherwise bypass huddle's fees, safety tools, booking records, or dispute process where huddle requires use of in-app booking, messaging, and payment tools.",
-            "Any off-platform care arrangement, payment, or communication made to bypass huddle voids all huddle platform protections, dispute rights, payout guarantees, and booking safeguards for that arrangement. huddle has no responsibility for any off-platform arrangement or event, to the fullest extent permitted by applicable law."
+            "You must not agree with or pressure carers to make payments outside HUDDLE's system, proceed without a confirmed booking, or otherwise bypass HUDDLE's fees, safety tools, booking records, or dispute process where HUDDLE requires use of in-app booking, messaging, and payment tools.",
+            "Any off-platform care arrangement, payment, or communication made to bypass HUDDLE voids all HUDDLE platform protections, dispute rights, payout guarantees, and booking safeguards for that arrangement. HUDDLE has no responsibility for any off-platform arrangement or event, to the fullest extent permitted by applicable law."
           ]
         },
         {
           "title": "10. Post-booking reviews",
           "body": [
-            "After a booking is completed, you may submit a review including a star rating, review tags, written feedback, and up to six media files. Your review will be posted publicly on the carer's profile. You must not submit false, misleading, coerced, or incentivised reviews. Reviews may be moderated or removed by huddle for policy violations."
+            "After a booking is completed, you may submit a review including a star rating, review tags, written feedback, and up to six media files. Your review will be posted publicly on the carer's profile. You must not submit false, misleading, coerced, or incentivised reviews. Reviews may be moderated or removed by HUDDLE for policy violations."
           ]
         },
         {
           "title": "11. Incident reporting",
           "body": [
-            "Report any serious incident to huddle within 48 hours. A serious incident includes: pet injury or illness during or following care; property damage; carer misconduct or a safety concern; a booking that did not start or complete as agreed; or any other event a reasonable person would consider material to the care provided."
+            "Report any serious incident to HUDDLE within 48 hours. A serious incident includes: pet injury or illness during or following care; property damage; carer misconduct or a safety concern; a booking that did not start or complete as agreed; or any other event a reasonable person would consider material to the care provided."
           ]
         },
         {
           "title": "12. Session history and records",
           "body": [
-            "Completed care sessions are removed from your active view 14 days after the session ends. They remain accessible in Care History within the app. huddle also retains booking records for safety, legal compliance, dispute resolution, financial purposes, and audit, regardless of what is shown in your active view."
+            "Completed care sessions are removed from your active view 14 days after the session ends. They remain accessible in Care History within the app. HUDDLE also retains booking records for safety, legal compliance, dispute resolution, financial purposes, and audit, regardless of what is shown in your active view."
           ]
         },
         {
           "title": "13. Assumption of risk and release",
           "body": [
             "Care services and interactions with pets carry inherent risks, including injury, illness, escape, loss, property damage, and conduct by another user or animal. You voluntarily assume those risks. Disputes about the care itself are between the owner and carer.",
-            "To the fullest extent permitted by applicable law, you release huddle and its affiliates from claims arising from another user's conduct, a pet's conduct, or the care arranged between users. This release does not apply to liability that cannot lawfully be released."
+            "To the fullest extent permitted by applicable law, you release HUDDLE and its affiliates from claims arising from another user's conduct, a pet's conduct, or the care arranged between users. This release does not apply to liability that cannot lawfully be released."
           ]
         },
         {
           "title": "14. Disclaimers and liability",
           "body": [
-            "To the maximum extent permitted by law, huddle is not responsible for the acts, omissions, conduct, quality, safety, qualifications, or suitability of any carer, care service, or booking outcome. huddle does not provide insurance or guaranteed reimbursement for care incidents unless expressly stated. huddle's total liability is limited as set out in the Terms of Service."
+            "To the maximum extent permitted by law, HUDDLE is not responsible for the acts, omissions, conduct, quality, safety, qualifications, or suitability of any carer, care service, or booking outcome. HUDDLE does not provide insurance or guaranteed reimbursement for care incidents unless expressly stated. HUDDLE's total liability is limited as set out in the Terms of Service."
           ]
         },
         {
           "title": "15. Force majeure",
           "body": [
-            "Neither huddle nor the carer is liable for failure or delay in performance caused by events beyond their reasonable control, including natural disasters, extreme weather, public health emergencies, or government actions. Where such events affect a booking, huddle may cancel it and issue refunds in accordance with platform policy."
+            "Neither HUDDLE nor the carer is liable for failure or delay in performance caused by events beyond their reasonable control, including natural disasters, extreme weather, public health emergencies, or government actions. Where such events affect a booking, HUDDLE may cancel it and issue refunds in accordance with platform policy."
           ]
         }
       ]
@@ -590,19 +640,19 @@
       "title": "Personal Information Collection Notice",
       "effectiveDate": "14 July 2026",
       "intro": [
-        "This notice summarises the personal information huddle collects when you use its services and why it is needed. Read it together with the Privacy Policy and Privacy Choices."
+        "This notice summarises the personal information HUDDLE collects when you use its services and why it is needed. Read it together with the Privacy Policy and Privacy Choices."
       ],
       "sections": [
         {
-          "title": "1. Information huddle may collect",
+          "title": "1. Information HUDDLE may collect",
           "body": [
-            "huddle may collect account, profile, pet, communications, location, device, payment, verification, care-booking, safety, support, and usage information. The exact information depends on the features you choose to use."
+            "HUDDLE may collect account, profile, pet, communications, location, device, payment, verification, care-booking, safety, support, and usage information. The exact information depends on the features you choose to use."
           ]
         },
         {
-          "title": "2. Why huddle collects it",
+          "title": "2. Why HUDDLE collects it",
           "body": [
-            "huddle uses this information to provide and secure accounts and features, support social, discovery, map, and care services, process payments and payouts, prevent fraud and abuse, handle reports and disputes, communicate with you, and meet legal obligations."
+            "HUDDLE uses this information to provide and secure accounts and features, support social, discovery, map, and care services, process payments and payouts, prevent fraud and abuse, handle reports and disputes, communicate with you, and meet legal obligations."
           ]
         },
         {
@@ -614,7 +664,7 @@
         {
           "title": "4. Who may receive it",
           "body": [
-            "huddle may share information with the other user when a feature requires it, with infrastructure, payment, mapping, notification, support, analytics, and verification providers, and with authorities or other parties where required for safety, law, or a corporate transaction."
+            "HUDDLE may share information with the other user when a feature requires it, with infrastructure, payment, mapping, notification, support, analytics, and verification providers, and with authorities or other parties where required for safety, law, or a corporate transaction."
           ]
         },
         {

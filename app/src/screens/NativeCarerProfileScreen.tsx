@@ -777,7 +777,7 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
     if (data.listed || requireListing) {
       if (!isVerified) nextErrors.listing = "Complete identity verification first.";
       if (!data.stripePayoutsEnabled) mark("wallet", "Set up wallet before providing care.");
-      if (!data.agreementAccepted) mark("agreement", "Accept the Care Service Provider Agreement.");
+      if (!data.agreementAccepted) mark("agreement", "Accept the Care Service Carer Agreement.");
     }
     return { errors: nextErrors, firstInvalid: firstInvalid[0] ?? null };
   }, [isVerified]);
@@ -1835,7 +1835,7 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
                       </View>
                       <Text style={styles.agreementText}>
                         I have read and agree to the{" "}
-                        <Text onPress={() => onNavigate("/service-provider-agreement")} style={styles.linkText}>Care Service Provider Agreement</Text>.
+                        <Text onPress={() => onNavigate("/service-provider-agreement")} style={styles.linkText}>Care Service Carer Agreement</Text>.
                       </Text>
                     </Pressable>
                   </View>
@@ -1920,7 +1920,7 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
             >
               <View style={styles.agreementModalCard}>
                 <View style={styles.agreementModalHeader}>
-                  <Text style={styles.sheetTitle}>Care Service Provider Agreement</Text>
+                  <Text style={styles.sheetTitle}>Care Service Carer Agreement</Text>
                   <Pressable accessibilityLabel="Close" onPress={() => setAgreementSheetVisible(false)} style={styles.iconCircle}>
                     <Feather color={huddleColors.iconMuted} name="x" size={18} />
                   </Pressable>
@@ -1965,7 +1965,7 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
                   <View style={[styles.checkbox, formData.agreementAccepted ? styles.checkboxActive : null]}>
                     {formData.agreementAccepted ? <Feather color={huddleColors.onPrimary} name="check" size={14} /> : null}
                   </View>
-                  <Text style={styles.agreementText}>I have read and agree to the Care Service Provider Agreement.</Text>
+                  <Text style={styles.agreementText}>I have read and agree to the Care Service Carer Agreement.</Text>
                 </Pressable>
                 </View>
               </View>
