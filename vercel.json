@@ -79,6 +79,7 @@
     { "src": "^/legal/booking-terms/?$", "dest": "/brandweb/booking-terms.html" },
     { "src": "^/legal/service-provider-agreement/?$", "dest": "/brandweb/service-provider-agreement.html" },
     { "src": "^/legal/privacy-choices/?$", "dest": "/brandweb/privacy-choices.html" },
+    { "src": "^/legal/collection-notice/?$", "dest": "/brandweb/collection-notice.html" },
     { "src": "^/share/([^/]+)$", "dest": "/api/share?id=$1" },
     { "src": "^/api/waitlist/?$", "dest": "/api/waitlist" },
     {
