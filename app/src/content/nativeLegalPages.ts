@@ -247,7 +247,8 @@ const DOCUMENTS: NativeLegalPageContent[] = [
         "body": [
           "These Terms apply globally and are governed by the law that applies to the HUDDLE entity contracting with you, without regard to conflict-of-law rules, except where mandatory law in your country of residence requires otherwise. Before starting a legal claim, contact support@huddle.pet and give HUDDLE a reasonable opportunity to resolve the matter informally.",
           "To the fullest extent permitted by applicable law, any dispute arising from or relating to these Terms or HUDDLE must be resolved by final and binding individual arbitration, not in court. The arbitration will be administered under the consumer rules of a recognised arbitration provider selected by HUDDLE, unless applicable law requires a different provider or process. Either party may bring an eligible individual claim in small-claims court, and either party may seek court relief necessary to protect intellectual property, confidential information, or platform security.",
-          "You and HUDDLE may bring claims only in an individual capacity, not as a plaintiff, class member, or representative in any class, collective, consolidated, private-attorney-general, or other representative proceeding. If a court finds any part of this arbitration or representative-action waiver unenforceable for a particular claim, that claim may proceed in a court of competent jurisdiction while the remaining provisions continue to apply. Nothing in this section limits rights that cannot lawfully be waived."
+          "You and HUDDLE may bring claims only in an individual capacity, not as a plaintiff, class member, or representative in any class, collective, consolidated, private-attorney-general, or other representative proceeding. If a court finds any part of this arbitration or representative-action waiver unenforceable for a particular claim, that claim may proceed in a court of competent jurisdiction while the remaining provisions continue to apply. Nothing in this section limits rights that cannot lawfully be waived.",
+          "You may opt out of this arbitration and class-action-waiver provision by emailing support@huddle.pet within 30 days of the date you first agreed to these Terms, stating your name and that you opt out of arbitration. Opting out does not affect any other part of these Terms."
         ]
       },
       {
@@ -399,7 +400,7 @@ const DOCUMENTS: NativeLegalPageContent[] = [
       {
         "title": "9. Safety-sensitive content",
         "body": [
-          "HUDDLE has zero tolerance for child sexual exploitation, grooming, sexual exploitation of any person, non-consensual intimate imagery, credible threats of violence, violent extremist recruitment, or content that encourages self-harm. Do not post or send such content, even as a joke, threat, solicitation, or attempt to expose another person. Huddle may remove content, preserve evidence, restrict accounts, and notify appropriate authorities where required or permitted by law."
+          "HUDDLE has zero tolerance for child sexual exploitation, grooming, sexual exploitation of any person, non-consensual intimate imagery, credible threats of violence, violent extremist recruitment, or content that encourages self-harm. Do not post or send such content, even as a joke, threat, solicitation, or attempt to expose another person. HUDDLE may remove content, preserve evidence, restrict accounts, and notify appropriate authorities where required or permitted by law."
         ]
       },
       {
