@@ -1,4 +1,5 @@
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
+import { LegalContent } from "@/components/legal/LegalContent";
 import { NeuControl } from "@/components/ui/NeuControl";
 import { ArrowLeft } from "lucide-react";
 import { useNavigate, useLocation } from "react-router-dom";
@@ -27,14 +28,10 @@ const ServiceProviderAgreement = () => {
         >
           <ArrowLeft size={20} strokeWidth={1.75} aria-hidden />
         </NeuControl>
-        <h1 className="text-xl font-bold">Service Provider Agreement</h1>
+        <h1 className="text-xl font-bold">Care Service Carer Agreement</h1>
       </header>
-      <div className="flex-1 min-h-0 overflow-hidden">
-        <iframe
-          src="/legal/service-provider-agreement.html"
-          className="w-full h-full border-0"
-          title="Service Provider Agreement"
-        />
+      <div className="flex-1 min-h-0 overflow-y-auto px-4 py-6">
+        <LegalContent type="service-agreement" />
       </div>
     </div>
   );

@@ -13,6 +13,12 @@ const PUBLIC_EXACT_PATHS = new Set([
   "/privacy",
   "/terms",
   "/privacy-choices",
+  "/cookies",
+  "/community-guidelines",
+  "/collection-notice",
+  "/service-agreement",
+  "/service-provider-agreement",
+  "/booking-terms",
   "/support",
 ]);
 

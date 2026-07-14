@@ -18,12 +18,19 @@ const ResetPasswordInline = lazy(() => import("@/pages/ResetPasswordInline"));
 const ResetPasswordInlineHealthAction = lazy(() => import("@/pages/ResetPasswordInlineHealthAction"));
 const UpdatePassword = lazy(() => import("@/pages/UpdatePassword"));
 const AuthCallback = lazy(() => import("@/pages/AuthCallback"));
+const SecureAccount = lazy(() => import("@/pages/SecureAccount"));
 const TurnstileHealth = lazy(() => import("@/pages/TurnstileHealth"));
 const TurnstileHealthResetAction = lazy(() => import("@/pages/TurnstileHealthResetAction"));
 const JoinGroup = lazy(() => import("@/pages/JoinGroup"));
 const Privacy = lazy(() => import("@/pages/Privacy"));
 const Terms = lazy(() => import("@/pages/Terms"));
 const PrivacyChoices = lazy(() => import("@/pages/PrivacyChoices"));
+const CommunityGuidelines = lazy(() => import("@/pages/CommunityGuidelines"));
+const CookiesPolicy = lazy(() => import("@/pages/CookiesPolicy"));
+const CollectionNotice = lazy(() => import("@/pages/CollectionNotice"));
+const ServiceAgreement = lazy(() => import("@/pages/ServiceAgreement"));
+const ServiceProviderAgreement = lazy(() => import("@/pages/ServiceProviderAgreement"));
+const BookingTerms = lazy(() => import("@/pages/BookingTerms"));
 const Support = lazy(() => import("@/pages/Support"));
 const NotFound = lazy(() => import("@/pages/NotFound"));
 
@@ -36,6 +43,7 @@ export const PublicAuthRoutes = () => (
     <Route path="/reset-password-inline-healthaction" element={<RouteSuspense><ResetPasswordInlineHealthAction /></RouteSuspense>} />
     <Route path="/update-password" element={<PublicRoute><RouteSuspense><UpdatePassword /></RouteSuspense></PublicRoute>} />
     <Route path="/auth/callback" element={<PublicRoute><RouteSuspense><AuthCallback /></RouteSuspense></PublicRoute>} />
+    <Route path="/security/secure" element={<RouteSuspense><SecureAccount /></RouteSuspense>} />
     <Route path="/signup/dob" element={<PublicRoute><RouteSuspense><SignupDob /></RouteSuspense></PublicRoute>} />
     <Route path="/signup/name" element={<RouteSuspense><SignupContinueInApp /></RouteSuspense>} />
     <Route path="/signupname" element={<RouteSuspense><SignupContinueInApp /></RouteSuspense>} />
@@ -50,6 +58,12 @@ export const PublicAuthRoutes = () => (
     <Route path="/privacy" element={<RouteSuspense><Privacy /></RouteSuspense>} />
     <Route path="/terms" element={<RouteSuspense><Terms /></RouteSuspense>} />
     <Route path="/privacy-choices" element={<RouteSuspense><PrivacyChoices /></RouteSuspense>} />
+    <Route path="/community-guidelines" element={<RouteSuspense><CommunityGuidelines /></RouteSuspense>} />
+    <Route path="/cookies" element={<RouteSuspense><CookiesPolicy /></RouteSuspense>} />
+    <Route path="/collection-notice" element={<RouteSuspense><CollectionNotice /></RouteSuspense>} />
+    <Route path="/service-agreement" element={<RouteSuspense><ServiceAgreement /></RouteSuspense>} />
+    <Route path="/service-provider-agreement" element={<RouteSuspense><ServiceProviderAgreement /></RouteSuspense>} />
+    <Route path="/booking-terms" element={<RouteSuspense><BookingTerms /></RouteSuspense>} />
     <Route path="/support" element={<RouteSuspense><Support /></RouteSuspense>} />
     <Route path="*" element={<RouteSuspense><NotFound /></RouteSuspense>} />
   </Routes>

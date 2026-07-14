@@ -20,21 +20,9 @@ const HTML_MAP: Record<LegalType, string> = {
   "booking-terms": bookingTermsHtml,
 };
 
-const APP_STYLE = `<style>
-*{box-sizing:border-box;margin:0;padding:0}
-html,body{background:transparent;color:#424965;font-family:'Urbanist',-apple-system,BlinkMacSystemFont,sans-serif;font-size:14px;line-height:1.6}
-.wrap{padding:16px 0 80px}
-.top,.nav,.footer{display:none!important}
-.card{background:transparent;border:none;box-shadow:none;padding:0}
-h1{display:none}
-h2{font-size:15px;font-weight:600;color:#1a1f36;margin:22px 0 6px}
-p{font-size:14px;color:#424965;margin-bottom:10px}
-li{font-size:14px;color:#424965;margin-bottom:4px}
-ul{padding-left:18px;margin-bottom:10px}
-.meta{display:block!important;color:#8d93a6;font-size:12px;line-height:1.5;margin:28px 0 0;padding-top:12px;border-top:1px solid rgba(66,73,101,.12)}
-a{color:#2145CF;text-decoration:none}
-.note{padding:10px 12px;background:#f0f4ff;border-radius:10px;color:#21306b;font-size:13px;margin:10px 0}
-</style>`;
+// The generated document owns all legal typography. The app only removes the
+// duplicate page title because the surrounding route already renders it.
+const EMBED_STYLE = "<style>html,body{background:transparent}.wrap{padding:16px 0 80px}h1{display:none}</style>";
 
 const LEGAL_ROUTE_MAP: Record<string, string> = {
   "privacy.html": "/privacy",
@@ -46,10 +34,9 @@ const LEGAL_ROUTE_MAP: Record<string, string> = {
 };
 
 function withAppStyles(html: string): string {
-  const withStyles = html.replace(/<style>[\s\S]*?<\/style>/, APP_STYLE);
-  const withTopTarget = withStyles.includes("<head>")
-    ? withStyles.replace("<head>", `<head><base target="_top" />`)
-    : withStyles;
+  const withTopTarget = html.includes("<head>")
+    ? html.replace("<head>", `<head><base target="_top" />${EMBED_STYLE}`)
+    : html;
   return Object.entries(LEGAL_ROUTE_MAP).reduce(
     (acc, [from, to]) =>
       acc
