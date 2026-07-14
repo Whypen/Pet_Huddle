@@ -100,6 +100,8 @@ const nativeOutput = fs.readFileSync(path.join(root, "app", "src", "content", "n
 const nativeAuthRenderer = fs.readFileSync(path.join(root, "app", "src", "screens", "NativeAuthScreen.tsx"), "utf8");
 const nativeSignupRenderer = fs.readFileSync(path.join(root, "app", "src", "screens", "NativeSignupScreen.tsx"), "utf8");
 const nativeLegalRenderer = fs.readFileSync(path.join(root, "app", "src", "screens", "NativeLegalPage.tsx"), "utf8");
+const nativeCarerAgreementRenderer = fs.readFileSync(path.join(root, "app", "src", "screens", "NativeCarerProfileScreen.tsx"), "utf8");
+const nativeServiceAgreementRenderer = fs.readFileSync(path.join(root, "app", "src", "screens", "NativeServiceChatScreen.tsx"), "utf8");
 const htmlToText = (value) => value
   .replace(/<[^>]+>/g, "")
   .replaceAll("&nbsp;", " ")
@@ -129,7 +131,7 @@ for (const document of documents) {
   const publicText = htmlToText(publicOutput);
   const brandOutput = fs.readFileSync(path.join(root, "public", "brandweb", brandOutputFileByPath[document.path]), "utf8");
   const brandText = htmlToText(brandOutput);
-  if (!webOutput.includes("Updated ") || !publicOutput.includes("Updated ") || !brandOutput.includes("Updated ")) {
+  if (!webOutput.includes("Updated: ") || !publicOutput.includes("Updated: ") || !brandOutput.includes("Updated: ")) {
     throw new Error(`Legal output date label is not synchronized for ${document.path}.`);
   }
   for (const [label, output] of [["Brand", brandOutput], ["Public", publicOutput]]) {
@@ -163,7 +165,8 @@ for (const document of documents) {
 for (const [documentPath, outputFile] of Object.entries(publicOutputFileByPath)) {
   const legacyPath = `/legal/${outputFile}`;
   const canonicalPublicPath = canonicalPublicPathByDocumentPath[documentPath];
-  if (!vercelConfig.includes(`\"source\": \"${legacyPath}\"`) || !vercelConfig.includes(`\"destination\": \"${canonicalPublicPath}\"`)) {
+  const legacyRoutePattern = `\"src\": \"^${legacyPath.replaceAll(".", "\\\\.")}$\"`;
+  if (!vercelConfig.includes(legacyRoutePattern) || !vercelConfig.includes(`\"Location\": \"${canonicalPublicPath}\"`) || !vercelConfig.includes("\"status\": 308")) {
     throw new Error(`Legacy public legal URL ${legacyPath} must permanently redirect to ${canonicalPublicPath}.`);
   }
 }
@@ -175,6 +178,15 @@ for (const [label, renderer] of Object.entries({
 })) {
   if (!renderer.includes("bullets?.map")) {
     throw new Error(`${label} does not render canonical legal bullet lists.`);
+  }
+}
+
+for (const [label, renderer] of Object.entries({
+  NativeCarerProfileScreen: nativeCarerAgreementRenderer,
+  NativeServiceChatScreen: nativeServiceAgreementRenderer,
+})) {
+  if (!renderer.includes("bullets?.map")) {
+    throw new Error(`${label} does not render canonical legal bullet lists in care agreement sheets.`);
   }
 }
 
