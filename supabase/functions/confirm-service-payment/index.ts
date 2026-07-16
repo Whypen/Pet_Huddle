@@ -64,10 +64,10 @@ const expectedPayment = (serviceChat: Record<string, unknown>) => {
 const validateSessionForServiceChat = (
   session: Stripe.Checkout.Session,
   serviceChat: Record<string, unknown>,
-  serviceChatIds: string[],
+  serviceChatId: string,
   userId: string,
 ) => {
-  if (session.metadata?.type !== "service_booking" || !serviceChatIds.includes(clean(session.metadata?.service_chat_id)) || session.metadata?.requester_id !== userId) {
+  if (session.metadata?.type !== "service_booking" || clean(session.metadata?.service_chat_id) !== serviceChatId || session.metadata?.requester_id !== userId) {
     return "Checkout session does not match this booking";
   }
   if (clean(serviceChat.stripe_checkout_session_id) && clean(serviceChat.stripe_checkout_session_id) !== session.id) {
@@ -112,8 +112,8 @@ const insertServiceBookedMessage = async (supabase: SupabaseAdminClient, chatId:
   return true;
 };
 
-const notifyServiceBookingConfirmed = async (supabase: SupabaseAdminClient, chatId: string) => {
-  const { error } = await supabase.rpc("notify_service_booking_confirmed", { p_chat_id: chatId });
+const notifyServiceBookingConfirmed = async (supabase: SupabaseAdminClient, serviceChatId: string) => {
+  const { error } = await supabase.rpc("notify_service_booking_confirmed_by_service_id", { p_service_chat_id: serviceChatId });
   if (error) {
     console.warn("[confirm-service-payment] booking notification failed:", error.message);
   }
@@ -141,7 +141,11 @@ const refundScopeConflictPayment = async (
     {
       payment_intent: intentId,
       amount: amountReceived,
-      metadata: { service_chat_id: serviceChatId, requester_id: requesterId, reason },
+      metadata: {
+        service_chat_id: serviceChatDbId,
+        requester_id: requesterId,
+        reason,
+      },
     },
     { idempotencyKey: `svc_scope_conflict_refund:${session.id}` },
   );
@@ -167,7 +171,6 @@ const refundScopeConflictPayment = async (
     notes: "Service payment refunded because booking scope changed before completion.",
     details: {
       service_chat_id: serviceChatDbId,
-      chat_id: serviceChatId,
       checkout_session_id: session.id,
       payment_intent_id: intentId,
       stripe_refund_id: refund.id,
@@ -181,8 +184,8 @@ const refundScopeConflictPayment = async (
     p_kind: "service_payment_returned_scope_changed",
     p_title: "Payment returned",
     p_body: "Your payment was returned because the booking changed before it completed.",
-    p_href: `/chats?tab=service&room=${serviceChatId}`,
-    p_data: { kind: "service_payment_returned_scope_changed", chatId: serviceChatId, stripeRefundId: refund.id },
+    p_href: `/service-chat?service=${serviceChatDbId}`,
+    p_data: { kind: "service_payment_returned_scope_changed", serviceChatId: serviceChatDbId, stripeRefundId: refund.id },
   });
   return refund.id;
 };
@@ -205,20 +208,11 @@ serve(async (req) => {
     const checkoutSessionId = clean(payload.checkout_session_id || payload.session_id);
     if (!serviceChatId || !checkoutSessionId) return json({ error: "Missing required fields" }, 400);
 
-    let serviceChatResult = await supabase
+    const serviceChatResult = await supabase
       .from("service_chats")
       .select("id, chat_id, requester_id, provider_id, status, booking_snapshot, booking_snapshot_pending, stripe_payment_intent_id, stripe_checkout_session_id")
       .eq("id", serviceChatId)
       .maybeSingle();
-    if (!serviceChatResult.error && !serviceChatResult.data) {
-      const { data: canonicalId, error: canonicalIdErr } = await supabase.rpc("current_active_service_chat_id_for_room", { p_chat_id: serviceChatId });
-      if (canonicalIdErr) return json({ error: "Service lookup failed" }, 500);
-      serviceChatResult = await supabase
-        .from("service_chats")
-        .select("id, chat_id, requester_id, provider_id, status, booking_snapshot, booking_snapshot_pending, stripe_payment_intent_id, stripe_checkout_session_id")
-        .eq("id", canonicalId)
-        .maybeSingle();
-    }
     const { data: serviceChat, error: serviceChatErr } = serviceChatResult;
     if (serviceChatErr) return json({ error: "Service lookup failed" }, 500);
     if (!serviceChat) return json({ error: "Service chat not found" }, 404);
@@ -243,7 +237,7 @@ serve(async (req) => {
     }
     if (!session || !mode || !stripeForSession) return json({ error: "Checkout session could not be verified", detail: lastStripeMessage }, 409);
     const chatRoomId = serviceChat.chat_id;
-    const sessionValidationError = validateSessionForServiceChat(session, serviceChat as Record<string, unknown>, [serviceChat.id, chatRoomId], user.id);
+    const sessionValidationError = validateSessionForServiceChat(session, serviceChat as Record<string, unknown>, serviceChat.id, user.id);
     if (sessionValidationError) {
       return json({ error: sessionValidationError }, sessionValidationError.includes("not paid") || sessionValidationError.includes("not succeeded") ? 409 : 403);
     }
@@ -272,7 +266,7 @@ serve(async (req) => {
         .eq("id", serviceChat.id);
       if (backfillErr) return json({ error: "Booking payment could not be refreshed" }, 500);
       const inserted = await insertServiceBookedMessage(supabase, chatRoomId, user.id);
-      if (inserted) await notifyServiceBookingConfirmed(supabase, chatRoomId);
+      if (inserted) await notifyServiceBookingConfirmed(supabase, serviceChat.id);
       return json({
         ok: true,
         alreadyConfirmed: true,
@@ -283,8 +277,8 @@ serve(async (req) => {
       });
     }
 
-    const { data: agreement, error: finalizeErr } = await supabase.rpc("finalize_service_care_agreement_for_payment", {
-      p_chat_id: chatRoomId,
+    const { data: agreement, error: finalizeErr } = await supabase.rpc("finalize_service_care_agreement_for_payment_by_service_id", {
+      p_service_chat_id: serviceChat.id,
       p_checkout_session_id: session.id,
       p_payment_intent_id: intentId,
       p_scope_version_id: scopeVersionId,
@@ -300,7 +294,7 @@ serve(async (req) => {
       return json({ error: finalizeErr.message || "Booking payment could not be recorded" }, 409);
     }
     const inserted = await insertServiceBookedMessage(supabase, chatRoomId, user.id);
-    if (inserted) await notifyServiceBookingConfirmed(supabase, chatRoomId);
+    if (inserted) await notifyServiceBookingConfirmed(supabase, serviceChat.id);
     try {
       await supabase.functions.invoke("generate-care-agreement-pdf", {
         headers: { Authorization: `Bearer ${accessToken}` },

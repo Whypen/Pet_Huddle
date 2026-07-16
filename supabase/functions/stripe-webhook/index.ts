@@ -102,7 +102,7 @@ async function refundServiceScopeConflict(
       payment_intent: paymentIntentId,
       amount: amountMinor,
       metadata: {
-        service_chat_id: serviceChat.chat_id || session.metadata?.service_chat_id || "",
+        service_chat_id: serviceChat.id,
         requester_id: serviceChat.requester_id,
         reason,
       },
@@ -133,7 +133,6 @@ async function refundServiceScopeConflict(
     notes: "Service payment refunded because booking scope changed before completion.",
     details: {
       service_chat_id: serviceChat.id,
-      chat_id: serviceChat.chat_id || session.metadata?.service_chat_id || null,
       checkout_session_id: session.id,
       payment_intent_id: paymentIntentId,
       stripe_refund_id: refund.id,
@@ -148,10 +147,10 @@ async function refundServiceScopeConflict(
     p_kind: "service_payment_returned_scope_changed",
     p_title: "Payment returned",
     p_body: "Your payment was returned because the booking changed before it completed.",
-    p_href: `/chats?tab=service&room=${serviceChat.chat_id || session.metadata?.service_chat_id || ""}`,
+    p_href: `/service-chat?service=${serviceChat.id}`,
     p_data: {
       kind: "service_payment_returned_scope_changed",
-      chatId: serviceChat.chat_id || session.metadata?.service_chat_id || "",
+      serviceChatId: serviceChat.id,
       stripeRefundId: refund.id,
     },
   });
@@ -257,8 +256,8 @@ async function insertServiceBookedMessage(chatId: string, senderId: string) {
   return true;
 }
 
-async function notifyServiceBookingConfirmed(chatId: string) {
-  const { error } = await supabase.rpc("notify_service_booking_confirmed", { p_chat_id: chatId });
+async function notifyServiceBookingConfirmed(serviceChatId: string) {
+  const { error } = await supabase.rpc("notify_service_booking_confirmed_by_service_id", { p_service_chat_id: serviceChatId });
   if (error) {
     console.warn(`[CHECKOUT COMPLETED] service_booking notification failed: ${error.message}`);
   }
@@ -433,6 +432,20 @@ serve(async (req: Request): Promise<Response> => {
         result = await handleAccountUpdated(event);
         break;
 
+      case "refund.created":
+      case "refund.updated":
+      case "refund.failed":
+        result = await handleCareRefundChanged(event);
+        break;
+
+      case "payout.created":
+      case "payout.updated":
+      case "payout.paid":
+      case "payout.failed":
+      case "payout.canceled":
+        result = await handleCarePayoutChanged(event);
+        break;
+
       default:
         console.log(`[STRIPE WEBHOOK] Unhandled event type: ${event.type}`);
         return new Response(
@@ -479,15 +492,10 @@ async function handleCheckoutSessionExpired(
     return { success: true, message: "Service booking expiry missing chat metadata", eventId: event.id };
   }
 
-  // A chat_id can have multiple service_chats rows (e.g. a completed past booking plus a new
-  // pending one); resolve to the canonical non-terminal row first so this lookup never quietly
-  // returns null (which supabase-js does for a chat_id.maybeSingle() with 2+ matches) instead of
-  // clearing the expired checkout session id.
-  const { data: canonicalId } = await supabase.rpc("current_active_service_chat_id_for_room", { p_chat_id: serviceChatId });
   const { data: serviceChat } = await supabase
     .from("service_chats")
     .select("id, stripe_checkout_session_id")
-    .eq("id", canonicalId)
+    .eq("id", serviceChatId)
     .maybeSingle();
 
   const scopeVersionId = String(session.metadata?.scope_version_id || "").trim();
@@ -679,15 +687,10 @@ async function handleCheckoutSessionCompleted(
           ? session.payment_intent
           : (session.payment_intent as { id?: string } | null)?.id ?? null;
       if (paymentIntentId) {
-        // A chat_id can have multiple service_chats rows (e.g. a completed past booking plus a
-        // new pending one) -- .eq("chat_id", ...).maybeSingle() throws when 2+ rows match, which
-        // would fail this webhook handler outright and cause Stripe to keep retrying it. Resolve
-        // the canonical non-terminal row first, same as the other service-payment functions.
-        const { data: canonicalServiceChatId } = await supabase.rpc("current_active_service_chat_id_for_room", { p_chat_id: session.metadata.service_chat_id });
         const { data: serviceChatForSnapshot, error: snapshotLoadErr } = await supabase
           .from("service_chats")
           .select("id, chat_id, status, booking_snapshot_pending, stripe_checkout_session_id, stripe_payment_intent_id, provider_id, requester_id")
-          .eq("id", canonicalServiceChatId)
+          .eq("id", session.metadata.service_chat_id)
           .maybeSingle();
         if (snapshotLoadErr) {
           console.error(`[CHECKOUT COMPLETED] service_booking snapshot load failed: ${snapshotLoadErr.message}`);
@@ -735,8 +738,8 @@ async function handleCheckoutSessionCompleted(
           console.error(`[CHECKOUT COMPLETED] service_booking ignored: amount/currency mismatch chat=${session.metadata.service_chat_id}`);
           throw new Error("service_booking amount or currency mismatch");
         }
-        const { data: agreement, error: chatErr } = await supabase.rpc("finalize_service_care_agreement_for_payment", {
-          p_chat_id: session.metadata.service_chat_id,
+        const { data: agreement, error: chatErr } = await supabase.rpc("finalize_service_care_agreement_for_payment_by_service_id", {
+          p_service_chat_id: serviceChatForSnapshot.id,
           p_checkout_session_id: session.id,
           p_payment_intent_id: paymentIntentId,
           p_scope_version_id: scopeVersionId,
@@ -1213,4 +1216,123 @@ async function handleAccountUpdated(event: Stripe.Event): Promise<WebhookRespons
     message: `Account updated — wallet status: ${payoutStatus}`,
     eventId: event.id,
   };
+}
+
+const addRefundBusinessDays = (value: string, days: number) => {
+  const date = new Date(value);
+  let remaining = days;
+  while (remaining > 0) {
+    date.setUTCDate(date.getUTCDate() + 1);
+    const day = date.getUTCDay();
+    if (day !== 0 && day !== 6) remaining -= 1;
+  }
+  return date.toISOString();
+};
+
+async function handleCareRefundChanged(event: Stripe.Event): Promise<WebhookResponse> {
+  const refund = event.data.object as Stripe.Refund;
+  const serviceChatId = normalizeType(refund.metadata?.service_chat_id);
+  if (serviceChatId) {
+    await supabase.rpc("upsert_care_payment_movement", {
+      p_service_chat_id: serviceChatId,
+      p_movement_kind: "owner_refund",
+      p_movement_reason: normalizeType(refund.metadata?.reason) || "service_refund",
+      p_source_kind: "stripe_webhook",
+      p_source_record_id: event.id,
+      p_amount_minor: refund.amount,
+      p_currency: normalizeType(refund.currency).toUpperCase(),
+      p_status: "submitted",
+      p_stripe_payment_intent_id: typeof refund.payment_intent === "string" ? refund.payment_intent : refund.payment_intent?.id || null,
+      p_stripe_refund_id: refund.id,
+      p_stripe_transfer_id: null,
+      p_requested_at: new Date(refund.created * 1000).toISOString(),
+      p_processed_at: null,
+    });
+  }
+
+  const details = (refund as unknown as { destination_details?: Record<string, unknown> | null }).destination_details || {};
+  const detailType = normalizeType(String(details.type || ""));
+  const methodDetail = detailType && details[detailType] && typeof details[detailType] === "object"
+    ? details[detailType] as Record<string, unknown>
+    : {};
+  const normalized = normalizeType(refund.status).toLowerCase();
+  const status = normalized === "succeeded" ? "succeeded"
+    : normalized === "failed" ? "failed"
+    : normalized === "canceled" ? "canceled"
+    : "pending";
+  const createdAt = new Date(refund.created * 1000).toISOString();
+  const { error } = await supabase.from("care_payment_movements").update({
+    amount_minor: refund.amount,
+    currency: normalizeType(refund.currency).toUpperCase(),
+    status,
+    stripe_created_at: createdAt,
+    processed_at: status === "succeeded" ? new Date(event.created * 1000).toISOString() : null,
+    estimated_arrival_at: status === "succeeded" ? addRefundBusinessDays(createdAt, 10) : null,
+    refund_reference_value: normalizeType(String(methodDetail.reference || "")) || null,
+    refund_reference_status: normalizeType(String(methodDetail.reference_status || "")) || null,
+    refund_reference_type: normalizeType(String(methodDetail.reference_type || "")) || (detailType ? `${detailType}_reference` : null),
+    last_synced_at: new Date().toISOString(),
+    next_sync_at: status === "pending"
+      ? new Date(Date.now() + 60 * 60 * 1000).toISOString()
+      : status === "succeeded" && !normalizeType(String(methodDetail.reference || ""))
+        ? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+        : null,
+    sync_attempt_count: 0,
+    reconciliation_attention_at: null,
+    failure_code: status === "failed" ? normalizeType((refund as unknown as { failure_reason?: string | null }).failure_reason) || "refund_failed" : null,
+    failure_message_safe: status === "failed" ? "Stripe reported that the refund failed." : null,
+    updated_at: new Date().toISOString(),
+  }).eq("stripe_refund_id", refund.id);
+  if (error) throw new Error(`care_refund_ledger_update_failed:${error.message}`);
+
+  return { success: true, message: `Care refund ${status}`, eventId: event.id };
+}
+
+async function handleCarePayoutChanged(event: Stripe.Event): Promise<WebhookResponse> {
+  const payout = event.data.object as Stripe.Payout;
+  const connectedAccountId = normalizeType((event as Stripe.Event & { account?: string | null }).account);
+  if (!connectedAccountId) {
+    return { success: true, message: "Platform payout is not a Care connected-account payout", eventId: event.id };
+  }
+  const normalized = normalizeType(payout.status).toLowerCase();
+  const status = normalized === "paid" ? "paid"
+    : normalized === "failed" ? "failed"
+    : normalized === "canceled" ? "canceled"
+    : normalized === "in_transit" ? "in_transit"
+    : "pending";
+  const trace = (payout as unknown as { trace_id?: { status?: string | null; value?: string | null } | null }).trace_id;
+  const arrivalAt = payout.arrival_date ? new Date(payout.arrival_date * 1000).toISOString() : null;
+  const { data: updated, error } = await supabase.from("care_payment_movements").update({
+    status,
+    stripe_connected_account_id: connectedAccountId,
+    stripe_payout_id: payout.id,
+    estimated_arrival_at: arrivalAt,
+    paid_at: status === "paid" ? new Date(event.created * 1000).toISOString() : null,
+    payout_trace_value: normalizeType(trace?.value) || null,
+    payout_trace_status: normalizeType(trace?.status) || null,
+    last_synced_at: new Date().toISOString(),
+    next_sync_at: status === "paid" && (!normalizeType(trace?.value) || normalizeType(trace?.status) === "pending")
+      ? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+      : ["pending", "in_transit"].includes(status)
+        ? new Date(Date.now() + 60 * 60 * 1000).toISOString()
+        : null,
+    sync_attempt_count: 0,
+    reconciliation_attention_at: null,
+    failure_code: status === "failed" ? normalizeType(payout.failure_code) || "payout_failed" : null,
+    failure_message_safe: status === "failed" ? "Stripe reported that the payout failed." : null,
+    updated_at: new Date().toISOString(),
+  }).eq("stripe_payout_id", payout.id).select("id");
+  if (error) throw new Error(`care_payout_ledger_update_failed:${error.message}`);
+
+  // A new automatic payout is initially unknown to Huddle. The sync function
+  // attaches it only when Stripe's payout reconciliation contains the exact
+  // destination payment created by a recorded Care transfer.
+  if (!updated?.length) {
+    const { error: syncError } = await supabase.functions.invoke("sync-care-payment-movements", {
+      headers: { Authorization: `Bearer ${supabaseServiceKey}` },
+      body: { payout_id: payout.id, stripe_account_id: connectedAccountId, source: "stripe_webhook" },
+    });
+    if (syncError) console.warn(`[CARE PAYOUT] Exact payout mapping deferred: ${syncError.message}`);
+  }
+  return { success: true, message: `Care payout ${status}`, eventId: event.id };
 }

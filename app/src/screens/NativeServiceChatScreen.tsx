@@ -1,6 +1,7 @@
 import { Feather, FontAwesome } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Image as ExpoImage } from "expo-image";
+import * as Clipboard from "expo-clipboard";
 import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
@@ -32,13 +33,17 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Line, Path, SvgXml } from "react-native-svg";
+import { launchNativeCameraAsync, launchNativeImageLibraryAsync, requestNativeCameraPermissionDetail } from "../lib/nativeMediaPermissions";
+import { requestNativeForegroundLocationPermissionDetail } from "../lib/nativeLocation";
 import profilePlaceholder from "../../assets/ProfilePlaceholder.png";
 import serviceImage from "../../assets/Notifications/Service.jpg";
 import huddleStampLogo from "../../assets/huddle-coral-shadow.png";
 import { NativeLoadingState } from "../components/NativeLoadingState";
 import { NativeSpinner } from "../components/NativeSpinner";
+import { NativeToast } from "../components/NativeToast";
 import { NativeLocationPinButton } from "../components/NativeLocationPinButton";
 import { NativePhoneField } from "../components/NativePhoneField";
+import { NativeLegalText } from "../components/NativeLegalText";
 import { NativePublicProfileModal } from "../components/profile/NativePublicProfileModal";
 import {
   AppBottomSheet,
@@ -50,8 +55,10 @@ import {
   AppDestructiveSlideConfirm,
   AppSlideConfirm,
   AppConfirmModal,
+  AppNoticeModal,
   AppModalActionRow,
   AppModalButton,
+  AppModalCloseButton,
   AppModalError,
   AppModalField,
   AppModalIconButton,
@@ -63,17 +70,20 @@ import { NativeSocialReportModal } from "../components/social/NativeSocialReport
 import { NativeSocialExternalLinkPreview, NativeSocialMediaCarousel, type NativeSocialCarouselItem } from "../components/social/NativeSocialFeedPrimitives";
 import { NativeCarerProfileContent } from "../components/service/NativeCarerProfileContent";
 import { NativeCareUpdateSheet } from "../components/service/NativeCareUpdateSheet";
+import { endCareSessionActivity, updateCareSessionActivity } from "../lib/nativeActiveSessions";
 import { ServiceCareUpdateCard } from "../components/service/ServiceCareUpdateCard";
 import { NativePolaroidCard, nativePolaroidStyles } from "../components/NativePolaroidCard";
-import { careUpdateCopy, careUpdateIsGated, careUpdateQualifies, deriveCareUpdateKind, getNativeCareUpdateStatus, type NativeCareUpdateStatus } from "../lib/nativeCareUpdates";
+import { CARE_UPDATE_PREFERENCE_OPTIONS, careUpdateIsRequested, deriveCareUpdateKind, getNativeCareUpdateStatus, normalizeCareUpdatePreference, type CareUpdateKind, type CareUpdatePreference, type NativeCareUpdateStatus } from "../lib/nativeCareUpdates";
+import { requiredCareUpdateActionLabel } from "../lib/careUpdateAction";
 import { readNativeChatSelectedRowHandoff } from "../lib/nativeChatHandoff";
 import { NativePetDetailsModal } from "../components/NativePetDetailsModal";
 import { formatMedicationSummary, mapPetRow, type MedicationRecord, type NativePetDetailsData } from "../components/NativePetDetailsContent";
 import { nativeModalStyles } from "../components/nativeModalPrimitives.styles";
 import { getNativeLegalPage } from "../content/nativeLegalPages";
+import { getNativeCarePaymentStatuses, type NativeCarePaymentMovement } from "../lib/nativeCarePayments";
 import { createSingleRealtimeChannel } from "../lib/realtimeChannelManager";
 import { invalidateNativeBlockCascade } from "../lib/nativeBlockCascade";
-import { invalidateNativeChatReadCaches, markNativeChatRoomRead, markNativeServiceTabHasDialogues, readCachedNativeChatMessages, sendNativeChatMessage, writeCachedNativeChatMessages, clearCachedNativeChatMessages, type NativeChatMessage } from "../lib/nativeChat";
+import { fetchNativeChatDialogueSnapshot, invalidateNativeChatReadCaches, markNativeChatRoomRead, markNativeServiceTabHasDialogues, readCachedNativeChatMessages, sendNativeChatMessage, writeCachedNativeChatMessages, clearCachedNativeChatMessages, type NativeChatMessage } from "../lib/nativeChat";
 import { createNativeServiceChat, fetchNativeServiceProviderDetail, incrementNativeServiceProviderView, invalidateNativeServiceProviderCaches, type NativeServiceProvider } from "../lib/nativeService";
 import {
   ALL_SKILLS,
@@ -102,6 +112,7 @@ import { haptic } from "../lib/nativeHaptics";
 import { recordAppReviewInteraction, recordAppReviewNegativeSignal, requestAppReview } from "../lib/nativeAppReview";
 import { nativeFreshImageKey, nativeFreshImageUri, nativeMutableImageVersion } from "../lib/nativeImageFreshness";
 import { nativeSafeErrorCopy } from "../lib/nativeSafeErrorCopy";
+import { useNativeModalTransition } from "../lib/nativeModalTransition";
 import { formatPetSpecies, getBreedOptionsForSpecies, nativePetEmojiForLabel, PET_SPECIES_OPTIONS } from "../lib/nativePetTaxonomy";
 import {
   averageNativeUploadProgress,
@@ -124,13 +135,15 @@ import {
 } from "../lib/nativeSocial";
 import { raceWithTimeoutFallback } from "../lib/nativeAsyncRace";
 import { requireCurrentNativeSession } from "../lib/nativeSessionGuard";
-import { useShakeAnimation } from "../lib/nativeAnimations";
+import { useErrorShake } from "../components/motion/useErrorShake";
 import { resolveNativeProfilePhotoDisplayUrl } from "../lib/nativeProfilePhotos";
 import { fetchNativePublicProfile } from "../lib/nativePublicProfile";
 import { parseChatShareMessage, type ShareModel } from "../lib/shareModel";
-import { getCachedSignedStorageUrl, resolveNativeAvatarUrl } from "../lib/nativeStorageUrlCache";
+import { nativePathForSharedContent, navigateNativeHuddleLink } from "../lib/nativeInternalLinks";
+import { deriveCareConversationState } from "../lib/careConversationState";
+import { getCachedSignedStorageUrl, resolveNativeAvatarUrl, resolveNativePetImageUrlAsync } from "../lib/nativeStorageUrlCache";
 import { supabase } from "../lib/supabase";
-import { huddleButtons, huddleColors, huddleFieldStates, huddleFormControls, huddlePolaroid, huddleRadii, huddleShadows, huddleSpacing, huddleType } from "../theme/huddleDesignTokens";
+import { huddleButtons, huddleColors, huddleFieldStates, huddleFormControls, huddleGlassControls, huddlePolaroid, huddleRadii, huddleShadows, huddleSpacing, huddleType } from "../theme/huddleDesignTokens";
 
 type ServiceStatus = "pending" | "booked" | "in_progress" | "completed" | "disputed" | "cancelled";
 type ServiceCareStatus = "awaiting_handoff" | "pin_shared" | "in_progress" | "handoff_issue_review" | "not_started_refunded" | "handoff_expired_manual_refund_required" | "under_dispute" | "completed" | "cancelled";
@@ -194,6 +207,44 @@ type ServiceRequestPet = {
   petType?: string;
 };
 
+// A Care Scope version owns pet media once it is written. Quote edits may carry
+// a compact pet object without the photo, so merge by pet id and never let that
+// compact copy erase the frozen request-card image reference.
+const mergeCareScopePets = (requestPets?: ServiceRequestPet[], quotePets?: ServiceRequestPet[]) => {
+  const requestById = new Map<string, ServiceRequestPet>();
+  for (const pet of requestPets || []) {
+    const key = clean(pet.petId) || clean(pet.petName);
+    if (key) requestById.set(key, pet);
+  }
+  if (!quotePets?.length) return requestPets || [];
+  return quotePets.map((quotePet) => {
+    const key = clean(quotePet.petId) || clean(quotePet.petName);
+    const requestPet = key ? requestById.get(key) : undefined;
+    return {
+      ...requestPet,
+      ...quotePet,
+      // The profile image is evidence captured by the request card, not a live
+      // profile lookup and not an optional quote display field.
+      petPhotoUrl: clean(requestPet?.petPhotoUrl) || clean(quotePet.petPhotoUrl),
+    };
+  });
+};
+
+const normalizedCareScopeLocationText = (value: string) => clean(value).toLowerCase().replace(/[—–-]/g, " ").replace(/\s+/g, " ").trim();
+const formatCareScopeSetting = (locationStyles?: string[] | null, locationArea?: string | null) => {
+  const styles = (locationStyles || []).map(clean).filter(Boolean);
+  const styleLabel = styles.join(", ");
+  const area = clean(locationArea);
+  if (!styleLabel) return area;
+  if (!area) return styleLabel;
+  const normalizedArea = normalizedCareScopeLocationText(area);
+  const styleAlreadyContainsArea = styles.some((style) => {
+    const normalizedStyle = normalizedCareScopeLocationText(style);
+    return normalizedStyle === normalizedArea || normalizedStyle.includes(normalizedArea) || normalizedArea.includes(normalizedStyle);
+  });
+  return styleAlreadyContainsArea ? styleLabel : `${styleLabel} — ${area}`;
+};
+
 type ServiceQuoteCard = {
   serviceType?: string;
   serviceTypes?: string[];
@@ -202,8 +253,8 @@ type ServiceQuoteCard = {
   petName?: string;
   petSpecies?: string;
   petBreed?: string;
-  petType?: string;
   dogSize?: string;
+  petType?: string;
   pets?: ServiceRequestPet[];
   requestedDates?: string[];
   startTime?: string;
@@ -218,6 +269,7 @@ type ServiceQuoteCard = {
   scopeFrequency?: string;
   scopeTasks?: string[];
   otherTasks?: string;
+  updatePreference?: string;
   voluntary?: boolean;
 };
 
@@ -246,6 +298,12 @@ type ServiceChatRow = {
   completed_at: string | null;
   disputed_at?: string | null;
   payout_released_at?: string | null;
+  cancellation_status?: string | null;
+  cancellation_provider_payout_cents?: number | null;
+  no_start_resolved_at?: string | null;
+  no_start_refund_cents?: number | null;
+  no_start_retained_cents?: number | null;
+  no_start_resolution_status?: string | null;
   requester_mark_finished: boolean;
   provider_mark_finished: boolean;
   dispute_status?: string | null;
@@ -254,7 +312,7 @@ type ServiceChatRow = {
   dispute_resolved_at?: string | null;
 };
 
-const SERVICE_CHAT_SELECT_FIELDS = "id,chat_id,requester_id,provider_id,status,care_status,booking_snapshot,request_card,quote_card,request_sent_at,quote_sent_at,booked_at,updated_at,early_start_allowed_at,early_start_allowed_by,in_progress_at,pin_shared_at,checkin_submitted_at,checkin_photo_url,completed_at,disputed_at,payout_released_at,requester_mark_finished,provider_mark_finished";
+const SERVICE_CHAT_SELECT_FIELDS = "id,chat_id,requester_id,provider_id,status,care_status,booking_snapshot,request_card,quote_card,request_sent_at,quote_sent_at,booked_at,updated_at,early_start_allowed_at,early_start_allowed_by,in_progress_at,pin_shared_at,checkin_submitted_at,checkin_photo_url,completed_at,disputed_at,payout_released_at,cancellation_status,cancellation_provider_payout_cents,no_start_resolved_at,no_start_refund_cents,no_start_retained_cents,no_start_resolution_status,requester_mark_finished,provider_mark_finished";
 
 const serviceChatRowActivityTime = (row: ServiceChatRow) => {
   const candidates = [
@@ -282,6 +340,11 @@ const isTerminalServiceChatRow = (row: ServiceChatRow) => (
   || row.care_status === "handoff_issue_review"
 );
 
+const isCancelledServiceChatRow = (row: ServiceChatRow) => (
+  row.status === "cancelled"
+  || row.care_status === "cancelled"
+);
+
 const isActiveServiceChatRow = (row: ServiceChatRow) => (
   !isTerminalServiceChatRow(row)
   && (
@@ -292,23 +355,45 @@ const isActiveServiceChatRow = (row: ServiceChatRow) => (
   )
 );
 
+// Adapts the strict active row to the shared live-conversation state machine.
+// A terminal row can never enter here; no active row is a clean slate.
+const deriveActiveCareConversationState = (
+  activeServiceChat: ServiceChatRow | null,
+  underReview: boolean,
+): ReturnType<typeof deriveCareConversationState> => deriveCareConversationState(
+  activeServiceChat ? {
+    id: activeServiceChat.id,
+    status: activeServiceChat.status,
+    careStatus: activeServiceChat.care_status,
+    mutualSigned: activeServiceChat.care_scope?.mutualSigned === true,
+  } : null,
+  underReview,
+);
+
 const activeServiceChatRowPriority = (row: ServiceChatRow, activeScopeServiceChatIds: Set<string>) => {
   if (!row.id || !row.chat_id) return -1;
-  if (isTerminalServiceChatRow(row)) return 0;
+  if (!isActiveServiceChatRow(row)) return -1;
   if (activeScopeServiceChatIds.has(row.id) && isActiveServiceChatRow(row)) return 60;
-  if (isActiveServiceChatRow(row)) return 50;
-  if (row.request_card || row.quote_card) return 20;
-  return 10;
+  return 50;
 };
 
 const selectActiveServiceChatRow = (rows: ServiceChatRow[], activeScopeServiceChatIds = new Set<string>()) => {
-  const validRows = rows.filter((row) => row.id && row.chat_id);
+  const validRows = rows.filter((row) => row.id && row.chat_id && isActiveServiceChatRow(row));
   if (validRows.length === 0) return null;
   return [...validRows].sort((a, b) => {
     const priorityDiff = activeServiceChatRowPriority(b, activeScopeServiceChatIds) - activeServiceChatRowPriority(a, activeScopeServiceChatIds);
     if (priorityDiff !== 0) return priorityDiff;
     return serviceChatRowActivityTime(b) - serviceChatRowActivityTime(a);
   })[0] || null;
+};
+
+const selectServiceChatRowForRoute = (rows: ServiceChatRow[], activeScopeServiceChatIds: Set<string>, requestedServiceId?: string | null) => {
+  const targetServiceId = clean(requestedServiceId);
+  if (targetServiceId) {
+    const exact = rows.find((row) => clean(row.id) === targetServiceId);
+    if (exact && isActiveServiceChatRow(exact)) return exact;
+  }
+  return selectActiveServiceChatRow(rows, activeScopeServiceChatIds);
 };
 
 type CachedServiceChatRow = {
@@ -326,6 +411,7 @@ type CareBookingSnapshot = {
   petName?: string;
   petSpecies?: string;
   petBreed?: string;
+  dogSize?: string;
   startAt: string;
   endAt: string;
   handoffMethod: string;
@@ -354,6 +440,17 @@ type CareBookingSnapshot = {
     providerQuote: number;
     requesterTotal: number;
   };
+  noStartPolicy?: {
+    version: string;
+    minimumBookingMinutes: 60;
+    scheduledEndCancellation: true;
+    settlement: "no_start_responsibility_matrix_v2";
+  };
+  noStartPolicyAcknowledgement?: {
+    ownerAcknowledgedAt: string;
+    providerAcknowledgedAt: string;
+    version: string;
+  };
   cancellationTerms?: string;
   disputeIssueWindow?: string;
   agreedAt?: string;
@@ -381,6 +478,7 @@ type CareSignatureSnapshot = {
 
 type ServiceCareAgreementRecord = {
   agreementVersion?: string | null;
+  bookingSnapshot?: CareBookingSnapshot | null;
   pdfGeneratedAt?: string | null;
   pdfPath?: string | null;
   providerSignedAt?: string | null;
@@ -441,6 +539,8 @@ type ChatMessageRow = {
   localStatus?: "pending" | "failed";
 };
 
+const SERVICE_MESSAGE_PAGE_SIZE = 50;
+
 type ServiceChatAttachment = {
   bucket?: "care_attachments" | null;
   mime?: string | null;
@@ -461,6 +561,7 @@ type ServiceParsedMessage = {
   kind: string;
   policy: string;
   role: string;
+  serviceChatId: string;
   scopeVersionId: string;
   linkPreviewUrl: string;
   pin: string;
@@ -558,6 +659,7 @@ const counterpartToProfileFallback = (counterpart: Counterpart | null) => counte
 type PetOption = Partial<NativePetDetailsData> & {
   id: string;
   name: string;
+  pet_size?: string | null;
   species: string | null;
   weight: number | null;
   weight_unit: string | null;
@@ -568,13 +670,14 @@ type PetOption = Partial<NativePetDetailsData> & {
 };
 
 type ManualPetDraft = {
+  dogSize: string;
   id: string;
   name: string;
   species: string;
   breed: string;
 };
 
-type ActiveSheet = "request" | "quote" | "payment" | "review" | "startCare" | "careUpdate" | "completion" | "issue" | "handoffProblem" | "handoffRequesterProblem" | "handoffResponse" | null;
+type ActiveSheet = "request" | "quote" | "payment" | "review" | "startCare" | "careUpdate" | "completion" | "issue" | "handoffProblem" | "handoffRequesterProblem" | "handoffResponse" | "noStartReport" | null;
 
 const STATUS_LABEL: Record<ServiceStatus, string> = {
   pending: "Pending",
@@ -651,6 +754,7 @@ const SERVICE_UNDER_REVIEW_NOTICE = "This session is under review. Please keep a
 // values identical to that file; changing the platform's take rate is exactly these 4 numbers
 // (2 here, 2 there), nothing else.
 const CARE_REQUESTER_FEE_RATE = 0; // owner pays 0% on top of the agreed price
+const CARE_NO_START_POLICY_VERSION = "13 July 2026";
 const CARE_PROVIDER_FEE_RATE = 0.1; // carer's payout is still net of huddle's 10% (covers Stripe + platform costs)
 
 // Status pills whose consecutive repeats are pure noise — during a scope/instruction
@@ -698,6 +802,8 @@ const REQUESTER_HANDOFF_PROBLEM_REASONS = [
   "Safety concern",
   "Other",
 ];
+const OWNER_NO_START_REASONS = ["Carer no-show", "Carer late", "Handoff issue", "Safety concern", "Other"];
+const CARER_NO_START_REASONS = ["Owner unavailable", "Access problem", "Handoff issue", "Safety concern", "Other"];
 const REPORT_ISSUE_REASONS = ["Safety", "Handoff issue", "No-show"];
 
 const clean = (value: unknown) => String(value || "").trim();
@@ -739,6 +845,11 @@ const serviceCareAgreementFromRow = (row: unknown): ServiceCareAgreementRecord |
   if (!record) return null;
   return {
     agreementVersion: clean(record.agreement_version) || clean(record.agreementVersion) || null,
+    bookingSnapshot: record.booking_snapshot && typeof record.booking_snapshot === "object"
+      ? record.booking_snapshot as CareBookingSnapshot
+      : record.bookingSnapshot && typeof record.bookingSnapshot === "object"
+        ? record.bookingSnapshot as CareBookingSnapshot
+        : null,
     pdfGeneratedAt: clean(record.pdf_generated_at) || clean(record.pdfGeneratedAt) || null,
     pdfPath: clean(record.pdf_path) || clean(record.pdfPath) || null,
     providerSignedAt: clean(record.provider_signed_at) || clean(record.providerSignedAt) || null,
@@ -899,7 +1010,7 @@ const PAYMENT_BLOCKERS = {
   missingMedicationNotes: "Add medication and allergy notes before confirming.",
   missingSignature: "Draw your signature before confirming.",
   missingTerms: "Accept the booking terms before confirming.",
-  invalidBookingDuration: "Booking end time must be after the start time.",
+  invalidBookingDuration: "Care bookings must be at least 1 hour.",
   incompleteBooking: "Booking details are incomplete.",
   missingPaymentDetails: "Booking details are incomplete. Please reopen the booking and try again.",
   missingCheckoutUrl: "We couldn't start secure checkout. Please try again.",
@@ -910,6 +1021,7 @@ const PAYMENT_FAILED_COPY = "Payment could not be completed. Please try again.";
 const CARE_SCOPE_CHANGED_COPY = "This Care Scope changed. Refresh and review the latest version.";
 const CANCEL_BOOKING_ISSUES = ["Plans changed", "Schedule no longer works", "Booked another carer", "Safety or handoff issue", "No-show", "Other"] as const;
 const SERVICE_PAYMENT_TIMEOUT_MS = 20000;
+const MAX_CARE_REPORT_EVIDENCE = 10;
 const paymentDraftKey = (requesterId: string, providerId: string, petIds: string[], serviceType: string) =>
   `huddle_native_confirm_booking_draft_v1:${requesterId || "unknown"}:${providerId || "unknown"}:${petIds.join(",") || "no-pet"}:${serviceType || "care"}`;
 const pendingServicePaymentKey = (userId: string, roomId: string, serviceChatId?: string | null) =>
@@ -932,17 +1044,18 @@ const serviceCareEvidencePathFromDescriptor = (value: string | null | undefined)
 };
 const serviceChatRowCacheKey = (userId: string, sessionKey: string, roomId: string) =>
   `huddle_native_service_chat_row_v1:${userId}:${sessionKey}:${roomId}`;
-const serviceStartPinCacheKey = (userId: string, roomId: string) =>
-  `huddle_native_service_start_pin_v1:${userId}:${roomId}`;
+const serviceChatHistoryCacheKey = (userId: string, sessionKey: string, roomId: string) =>
+  `huddle_native_service_chat_history_v1:${userId}:${sessionKey}:${roomId}`;
+// A room is reused for later bookings; a Start PIN is valid for one service row only.
+const serviceStartPinCacheKey = (userId: string, serviceChatId: string) =>
+  `huddle_native_service_start_pin_v2:${userId}:${serviceChatId}`;
 const secureStoreOptions: SecureStore.SecureStoreOptions = {
   keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
 };
-const serviceMidCareReminderNotificationKey = (userId: string, roomId: string) =>
-  `huddle_native_service_midcare_photo_reminder_notified_v1:${userId}:${roomId}`;
-const serviceDailyCareReminderNotificationKey = (userId: string, roomId: string, dateKey: string) =>
-  `huddle_native_service_midcare_photo_reminder_notified_v2:${userId}:${roomId}:${dateKey}`;
 const serviceHistoryHiddenKey = (userId: string, serviceChatId: string) =>
   `huddle_native_service_history_hidden_v1:${userId}:${serviceChatId}`;
+const serviceReviewSubmittedKey = (userId: string, serviceChatId: string) =>
+  `huddle_native_service_review_submitted_v1:${userId}:${serviceChatId}`;
 const SERVICE_HISTORY_AUTO_HIDE_MS = 14 * 24 * 60 * 60 * 1000;
 const SERVICE_PIN_SENT_MESSAGE = "Your Care Session PIN is ready.";
 const PASSCODE_LOCK_ICON_SVG = `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M22 11V8.2C22 7.0799 22 6.51984 21.782 6.09202C21.5903 5.71569 21.2843 5.40973 20.908 5.21799C20.4802 5 19.9201 5 18.8 5H5.2C4.0799 5 3.51984 5 3.09202 5.21799C2.71569 5.40973 2.40973 5.71569 2.21799 6.09202C2 6.51984 2 7.0799 2 8.2V11.8C2 12.9201 2 13.4802 2.21799 13.908C2.40973 14.2843 2.71569 14.5903 3.09202 14.782C3.51984 15 4.0799 15 5.2 15H11M12 10H12.005M17 10H17.005M7 10H7.005M19.25 17V15.25C19.25 14.2835 18.4665 13.5 17.5 13.5C16.5335 13.5 15.75 14.2835 15.75 15.25V17M12.25 10C12.25 10.1381 12.1381 10.25 12 10.25C11.8619 10.25 11.75 10.1381 11.75 10C11.75 9.86193 11.8619 9.75 12 9.75C12.1381 9.75 12.25 9.86193 12.25 10ZM17.25 10C17.25 10.1381 17.1381 10.25 17 10.25C16.8619 10.25 16.75 10.1381 16.75 10C16.75 9.86193 16.8619 9.75 17 9.75C17.1381 9.75 17.25 9.86193 17.25 10ZM7.25 10C7.25 10.1381 7.13807 10.25 7 10.25C6.86193 10.25 6.75 10.1381 6.75 10C6.75 9.86193 6.86193 9.75 7 9.75C7.13807 9.75 7.25 9.86193 7.25 10ZM15.6 21H19.4C19.9601 21 20.2401 21 20.454 20.891C20.6422 20.7951 20.7951 20.6422 20.891 20.454C21 20.2401 21 19.9601 21 19.4V18.6C21 18.0399 21 17.7599 20.891 17.546C20.7951 17.3578 20.6422 17.2049 20.454 17.109C20.2401 17 19.9601 17 19.4 17H15.6C15.0399 17 14.7599 17 14.546 17.109C14.3578 17.2049 14.2049 17.3578 14.109 17.546C14 17.7599 14 18.0399 14 18.6V19.4C14 19.9601 14 20.2401 14.109 20.454C14.2049 20.6422 14.3578 20.7951 14.546 20.891C14.7599 21 15.0399 21 15.6 21Z" stroke="${huddleColors.blue}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
@@ -994,6 +1107,8 @@ const safePaymentErrorMessage = async (error: unknown, fallback: string) => {
   if (/scope|version|hash|stale|changed/.test(raw)) return CARE_SCOPE_CHANGED_COPY;
   // Both sides must sign first
   if (/signature_required|not_mutually_signed|scope_signature|owner_scope|carer_scope/.test(raw)) return "Both sides need to sign the Care Scope agreement first.";
+  // Missing/stale booking identity
+  if (/service_chat_not_found|service_chat_missing|service_chat_id_required/.test(raw)) return "We couldn't find this booking. Close and reopen the chat, then try again.";
   // Payment already in progress
   if (/payment_pending|in progress|already.*pending/.test(raw)) return "A payment for this booking is already in progress. If you finished checkout, it will confirm shortly.";
   // Expired request
@@ -1027,7 +1142,6 @@ const safeCareErrorMessage = (error: unknown, fallback: string) => {
   if (raw.includes("service_dispute_already_reported_by_user")) return "You have already reported this booking.";
   if (raw.includes("invalid_rating")) return "Please choose a rating before submitting your review.";
   if (raw.includes("service_not_completed")) return "Reviews open after the booking is completed.";
-  if (raw.includes("care_update_required")) return "Send a care update for the owner before you finish this session.";
   if (raw.includes("duplicate") || raw.includes("already")) return "You have already reviewed this booking.";
   // Check-in-specific: without these, every one of these distinct backend rejections collapsed
   // into the same generic fallback below, making a real failure indistinguishable from a hang.
@@ -1035,12 +1149,32 @@ const safeCareErrorMessage = (error: unknown, fallback: string) => {
   if (raw.includes("invalid_service_care_evidence_path") || raw.includes("service_care_evidence_content_id_mismatch")) return "We couldn't verify your check-in photo. Please retake it and try again.";
   if (raw.includes("service_care_evidence_permission_denied") || raw.includes("invalid_service_care_evidence_bucket")) return "We couldn't confirm you have access to upload this photo. Please sign in again and retry.";
   if (raw.includes("care_start_too_early")) return "Care can only begin on the scheduled service date.";
+  if (raw.includes("care_start_window_elapsed")) return "This booking passed its scheduled end time and can no longer be started.";
+  if (raw.includes("no_start_report_too_early")) return "You can report a no-start issue after the significant-delay warning appears.";
+  if (raw.includes("no_start_report_window_closed")) return "The reporting window closed at the scheduled end time.";
+  if (raw.includes("no_start_report_already_submitted")) return "You have already reported a no-start issue for this booking.";
+  if (raw.includes("no_start_policy_report_required")) return "Use Report no-start issue for this delayed booking.";
+  if (raw.includes("no_start_evidence_limit_exceeded") || raw.includes("issue_evidence_limit_exceeded")) return "Add up to 10 supporting photos.";
+  if (raw.includes("no_start_policy_acknowledgement_required")) return "Both parties must accept the no-start policy before confirming this booking.";
   if (raw.includes("start_pin_not_shared")) return "The owner hasn't shared the Start PIN yet.";
   if (raw.includes("care_already_started") || raw.includes("invalid_status")) return "This booking has already moved past check-in.";
   if (raw.includes("not_provider")) return "Only the carer on this booking can start care.";
   if (raw.includes("service_chat_not_found")) return "Couldn't find this booking. Close and reopen the chat, then try again.";
   if (/^[a-z0-9_]+$/.test(raw) || raw.includes("_required") || raw.includes("_not_")) return fallback;
   return message || fallback;
+};
+const isAlreadyReviewedError = (error: unknown) => {
+  const raw = [
+    clean((error as { message?: unknown })?.message),
+    clean((error as { code?: unknown })?.code),
+    clean((error as { details?: unknown })?.details),
+    clean((error as { hint?: unknown })?.hint),
+  ].join(" ").toLowerCase();
+  return raw.includes("already")
+    || raw.includes("duplicate")
+    || raw.includes("23505")
+    || raw.includes("service_reviews_service_chat_id_reviewer_id")
+    || raw.includes("service_reviews_reviewer");
 };
 const selectableSkillSet = new Set<string>(ALL_SKILLS as readonly string[]);
 const normalizeServiceSkillLabels = (skills: unknown) => {
@@ -1057,6 +1191,8 @@ const parseParams = (search?: string) => {
   const params = new URLSearchParams(String(search || "").replace(/^\?/, ""));
   return {
     room: clean(params.get("room") || params.get("roomId")),
+    service: clean(params.get("service") || params.get("serviceId")),
+    historyService: clean(params.get("historyService") || params.get("history_service_id")),
     name: clean(params.get("name")),
     avatar: clean(params.get("avatar")),
     peerId: clean(params.get("with") || params.get("peerId")),
@@ -1065,6 +1201,8 @@ const parseParams = (search?: string) => {
     checkoutSessionId: clean(params.get("checkout_session_id") || params.get("session_id") || params.get("checkoutSessionId")),
     request: clean(params.get("request")),
     returnTo: clean(params.get("returnTo")),
+    sheet: clean(params.get("sheet")),
+    notificationAction: clean(params.get("notificationAction")),
     skills: clean(params.get("skills")).split("|").map(clean).filter(Boolean),
   };
 };
@@ -1092,10 +1230,10 @@ const serializeCareUpdatePhoto = (value: unknown) => {
 const parseServiceMessage = (content: string): ServiceParsedMessage => {
   const share = parseChatShareMessage(content);
   if (share) {
-    return { attachments: [], text: "", kind: "huddle_share", policy: "", role: "", scopeVersionId: "", linkPreviewUrl: "", pin: "", careUpdate: null, share };
+    return { attachments: [], text: "", kind: "huddle_share", policy: "", role: "", serviceChatId: "", scopeVersionId: "", linkPreviewUrl: "", pin: "", careUpdate: null, share };
   }
   try {
-    const parsed = JSON.parse(content) as { attachments?: unknown; text?: unknown; kind?: unknown; policy?: unknown; role?: unknown; scopeVersionId?: unknown; linkPreviewUrl?: unknown; pin?: unknown; startPin?: unknown; photo?: unknown; photoUrl?: unknown; note?: unknown; petName?: unknown; capturedAt?: unknown; updateKind?: unknown };
+    const parsed = JSON.parse(content) as { attachments?: unknown; text?: unknown; kind?: unknown; policy?: unknown; role?: unknown; serviceChatId?: unknown; scopeVersionId?: unknown; linkPreviewUrl?: unknown; pin?: unknown; startPin?: unknown; photo?: unknown; photoUrl?: unknown; note?: unknown; petName?: unknown; capturedAt?: unknown; updateKind?: unknown };
     const attachments = Array.isArray(parsed.attachments)
       ? parsed.attachments.map((item): ServiceChatAttachment | null => {
         const value = item && typeof item === "object" ? item as Record<string, unknown> : {};
@@ -1112,18 +1250,19 @@ const parseServiceMessage = (content: string): ServiceParsedMessage => {
       }).filter((item): item is ServiceChatAttachment => Boolean(item?.path))
       : [];
     const text = clean(parsed.text);
-    const careUpdate = clean(parsed.kind) === "service_care_update"
+    const parsedKind = clean(parsed.kind);
+    const careUpdate = ["service_care_update", "service_check_in"].includes(parsedKind)
       ? {
         photoUrl: serializeCareUpdatePhoto(parsed.photo || parsed.photoUrl),
-        note: clean(parsed.note) || text,
+        note: parsedKind === "service_check_in" ? "Care session started." : clean(parsed.note) || text,
         petName: clean(parsed.petName),
         capturedAt: clean(parsed.capturedAt),
         updateKind: clean(parsed.updateKind),
       }
       : null;
-    return { attachments, text, kind: clean(parsed.kind), policy: clean(parsed.policy), role: clean(parsed.role), scopeVersionId: clean(parsed.scopeVersionId), linkPreviewUrl: clean(parsed.linkPreviewUrl) || extractNativeSocialFirstHttpUrl(text || "") || "", pin: sanitizeStartPin(parsed.pin || parsed.startPin), careUpdate, share: null };
+    return { attachments, text, kind: parsedKind, policy: clean(parsed.policy), role: clean(parsed.role), serviceChatId: clean(parsed.serviceChatId), scopeVersionId: clean(parsed.scopeVersionId), linkPreviewUrl: clean(parsed.linkPreviewUrl) || extractNativeSocialFirstHttpUrl(text || "") || "", pin: sanitizeStartPin(parsed.pin || parsed.startPin), careUpdate, share: null };
   } catch {
-    return { attachments: [] as ServiceChatAttachment[], text: content, kind: "", policy: "", role: "", scopeVersionId: "", linkPreviewUrl: extractNativeSocialFirstHttpUrl(content) || "", pin: "", careUpdate: null, share: null };
+    return { attachments: [] as ServiceChatAttachment[], text: content, kind: "", policy: "", role: "", serviceChatId: "", scopeVersionId: "", linkPreviewUrl: extractNativeSocialFirstHttpUrl(content) || "", pin: "", careUpdate: null, share: null };
   }
 };
 
@@ -1154,8 +1293,8 @@ const sanitizeStartPin = (value: unknown) => {
   return digits.length === 4 ? digits : "";
 };
 
-const readCachedStartPin = async (userId: string, roomId: string) => {
-  const key = serviceStartPinCacheKey(userId, roomId);
+const readCachedStartPin = async (userId: string, serviceChatId: string) => {
+  const key = serviceStartPinCacheKey(userId, serviceChatId);
   const pin = await SecureStore.getItemAsync(key, secureStoreOptions).catch(() => null);
   if (pin) {
     await AsyncStorage.removeItem(key).catch(() => undefined);
@@ -1169,18 +1308,18 @@ const readCachedStartPin = async (userId: string, roomId: string) => {
   return sanitizeStartPin(legacyPin);
 };
 
-const purgeCachedStartPin = async (userId: string, roomId: string) => {
-  const key = serviceStartPinCacheKey(userId, roomId);
+const purgeCachedStartPin = async (userId: string, serviceChatId: string) => {
+  const key = serviceStartPinCacheKey(userId, serviceChatId);
   await SecureStore.deleteItemAsync(key, secureStoreOptions).catch(() => undefined);
   await SecureStore.deleteItemAsync(key).catch(() => undefined);
   await AsyncStorage.removeItem(key).catch(() => undefined);
 };
 
-const writeCachedStartPin = async (userId: string, roomId: string, pin: string) => {
+const writeCachedStartPin = async (userId: string, serviceChatId: string, pin: string) => {
   const safePin = sanitizeStartPin(pin);
   if (!safePin) return;
-  await SecureStore.setItemAsync(serviceStartPinCacheKey(userId, roomId), safePin, secureStoreOptions).catch(() => undefined);
-  await AsyncStorage.removeItem(serviceStartPinCacheKey(userId, roomId)).catch(() => undefined);
+  await SecureStore.setItemAsync(serviceStartPinCacheKey(userId, serviceChatId), safePin, secureStoreOptions).catch(() => undefined);
+  await AsyncStorage.removeItem(serviceStartPinCacheKey(userId, serviceChatId)).catch(() => undefined);
 };
 
 const writeCachedServiceChatRow = async (userId: string, sessionKey: string | null, row: ServiceChatRow) => {
@@ -1199,6 +1338,31 @@ const writeCachedServiceChatRow = async (userId: string, sessionKey: string | nu
 const clearCachedServiceChatRow = async (userId: string, sessionKey: string | null, roomId: string) => {
   const cacheSessionKey = sessionKey || `${userId}:0`;
   await AsyncStorage.removeItem(serviceChatRowCacheKey(userId, cacheSessionKey, roomId)).catch(() => undefined);
+};
+
+const readCachedServiceChatHistory = async (userId: string, sessionKey: string | null, roomId: string): Promise<ServiceChatRow[]> => {
+  const cacheSessionKey = sessionKey || `${userId}:0`;
+  try {
+    const raw = await AsyncStorage.getItem(serviceChatHistoryCacheKey(userId, cacheSessionKey, roomId));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as { roomId?: unknown; rows?: unknown; sessionKey?: unknown; userId?: unknown; version?: unknown };
+    if (parsed.version !== 1 || parsed.userId !== userId || parsed.sessionKey !== cacheSessionKey || parsed.roomId !== roomId || !Array.isArray(parsed.rows)) return [];
+    return parsed.rows.filter((row): row is ServiceChatRow => Boolean(row && typeof row === "object" && clean((row as ServiceChatRow).id)));
+  } catch {
+    return [];
+  }
+};
+
+const writeCachedServiceChatHistory = async (userId: string, sessionKey: string | null, roomId: string, rows: ServiceChatRow[]) => {
+  const cacheSessionKey = sessionKey || `${userId}:0`;
+  await AsyncStorage.setItem(serviceChatHistoryCacheKey(userId, cacheSessionKey, roomId), JSON.stringify({
+    cachedAt: Date.now(),
+    roomId,
+    rows,
+    sessionKey: cacheSessionKey,
+    userId,
+    version: 1,
+  })).catch(() => undefined);
 };
 
 const formatMessageTime = (iso: string) => {
@@ -1285,6 +1449,24 @@ const formatTimelineStepDate = (iso: string | null | undefined) => {
   const dt = new Date(raw);
   if (Number.isNaN(dt.getTime())) return "";
   return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric" }).format(dt);
+};
+
+const formatCarePaymentDate = (iso: string | null | undefined) => {
+  const raw = clean(iso);
+  if (!raw) return "";
+  const dt = new Date(raw);
+  if (Number.isNaN(dt.getTime())) return "";
+  return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" }).format(dt);
+};
+
+const formatCarePaymentLastUpdated = (iso: string | null | undefined) => {
+  const raw = clean(iso);
+  if (!raw) return "";
+  const dt = new Date(raw);
+  if (Number.isNaN(dt.getTime())) return "";
+  const time = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false }).format(dt);
+  const date = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" }).format(dt);
+  return `Last updated at ${time} on ${date}`;
 };
 
 // "2:28am on 2 Jul 2026" — used by the care-session started/completed system pills so the
@@ -1389,6 +1571,7 @@ const paymentSnapshotFromAgreedChat = (chat?: ServiceChatRow | null): CareBookin
   ].map(clean).filter(Boolean);
   const petId = selectedPetIds[0] || "";
   const petName = clean(quoteCard?.petName) || clean(requestCard?.petName) || clean(requestCard?.pets?.[0]?.petName) || clean(quoteCard?.pets?.[0]?.petName);
+  const dogSize = clean(requestCard?.pets?.[0]?.dogSize) || clean(quoteCard?.pets?.[0]?.dogSize) || clean(requestCard?.dogSize) || clean(quoteCard?.dogSize);
   const defaultHandoff = [clean(requestCard?.locationStyles?.join(" / ")), clean(requestCard?.locationArea)].filter(Boolean).join(" - ");
   const base = chat?.booking_snapshot;
   const fallbackAgreedAt = clean(chat?.care_agreement?.requesterSignedAt) || clean(chat?.care_agreement?.providerSignedAt) || new Date().toISOString();
@@ -1400,6 +1583,7 @@ const paymentSnapshotFromAgreedChat = (chat?: ServiceChatRow | null): CareBookin
     petName,
     petSpecies: clean(quoteCard?.petSpecies) || clean(requestCard?.petSpecies) || clean(quoteCard?.petType) || clean(requestCard?.petType),
     petBreed: clean(quoteCard?.petBreed) || clean(requestCard?.petBreed),
+    dogSize,
     startAt,
     endAt,
     handoffMethod: clean(details.handoffMethod) || defaultHandoff,
@@ -1420,10 +1604,16 @@ const paymentSnapshotFromAgreedChat = (chat?: ServiceChatRow | null): CareBookin
     emergencyVetAuthorization: details.emergencyVetAuthorization,
     emergencyVetPermission: details.emergencyVetAuthorization?.authorized === true,
     price: { currency: curr, providerQuote: quoteMinor, requesterTotal: totalDueMinor },
+    noStartPolicy: {
+      version: CARE_NO_START_POLICY_VERSION,
+      minimumBookingMinutes: 60,
+      scheduledEndCancellation: true,
+      settlement: "no_start_responsibility_matrix_v2",
+    },
     cancellationTerms: base?.cancellationTerms,
     disputeIssueWindow: base?.disputeIssueWindow,
     termsPath: clean(details.termsPath) || clean(base?.termsPath) || "/booking-terms",
-    termsVersion: clean(details.termsVersion) || clean(base?.termsVersion) || "20 May 2026",
+    termsVersion: clean(details.termsVersion) || clean(base?.termsVersion) || CARE_NO_START_POLICY_VERSION,
     agreedAt: clean(base?.agreedAt) || fallbackAgreedAt,
     requesterSignature: base?.requesterSignature,
     requesterId: chat?.requester_id || "",
@@ -1438,6 +1628,7 @@ const paymentSnapshotFromAgreedChat = (chat?: ServiceChatRow | null): CareBookin
     petName: built.petName,
     petSpecies: built.petSpecies,
     petBreed: built.petBreed,
+    dogSize: built.dogSize,
     startAt: built.startAt,
     endAt: built.endAt,
     handoffMethod: built.handoffMethod,
@@ -1445,6 +1636,7 @@ const paymentSnapshotFromAgreedChat = (chat?: ServiceChatRow | null): CareBookin
     scopeFrequency: built.scopeFrequency,
     scopeTasks: built.scopeTasks,
     price: built.price,
+    noStartPolicy: built.noStartPolicy,
     carerContact: built.carerContact || clean((base as CareBookingSnapshot & { carerContact?: string }).carerContact),
     contact: built.contact || clean((base as CareBookingSnapshot & { contact?: string; ownerContact?: string }).ownerContact) || clean((base as CareBookingSnapshot & { contact?: string }).contact),
     ownerContact: built.contact || clean((base as CareBookingSnapshot & { ownerContact?: string }).ownerContact),
@@ -1463,8 +1655,49 @@ const paymentSnapshotFromAgreedChat = (chat?: ServiceChatRow | null): CareBookin
   };
 };
 
-const serviceRequestCardFromBookingSnapshot = (snapshot?: CareBookingSnapshot | null): ServiceRequestCard | null => {
+type CareHistorySnapshot = CareBookingSnapshot & {
+  careDetails?: CareScopeCareDetails;
+  quoteCard?: ServiceQuoteCard;
+  requestCard?: ServiceRequestCard;
+  scopeHash?: string;
+  scopeVersionId?: string;
+};
+
+const serviceRequestCardFromBookingSnapshot = (snapshot?: CareHistorySnapshot | null): ServiceRequestCard | null => {
   if (!snapshot) return null;
+  const nestedRequest = snapshot.requestCard && typeof snapshot.requestCard === "object" ? snapshot.requestCard : null;
+  const nestedQuote = snapshot.quoteCard && typeof snapshot.quoteCard === "object" ? snapshot.quoteCard : null;
+  if (nestedRequest) {
+    // History is a frozen Care Scope. Keep the original request card intact (including
+    // pet images) and apply only the final agreed quote fields over that same snapshot.
+    return {
+      ...nestedRequest,
+      serviceType: clean(nestedQuote?.serviceType) || clean(nestedRequest.serviceType),
+      serviceTypes: nestedQuote?.serviceTypes?.length ? nestedQuote.serviceTypes : nestedRequest.serviceTypes,
+      petId: clean(nestedQuote?.petId) || clean(nestedRequest.petId),
+      petIds: nestedQuote?.petIds?.length ? nestedQuote.petIds : nestedRequest.petIds,
+      petName: clean(nestedQuote?.petName) || clean(nestedRequest.petName),
+      petType: clean(nestedQuote?.petType) || clean(nestedRequest.petType),
+      petSpecies: clean(nestedQuote?.petSpecies) || clean(nestedRequest.petSpecies),
+      petBreed: clean(nestedQuote?.petBreed) || clean(nestedRequest.petBreed),
+      dogSize: clean(nestedQuote?.dogSize) || clean(nestedRequest.dogSize),
+      pets: mergeCareScopePets(nestedRequest.pets, nestedQuote?.pets),
+      requestedDates: nestedQuote?.requestedDates?.length ? nestedQuote.requestedDates : nestedRequest.requestedDates,
+      requestedDate: clean(nestedQuote?.requestedDates?.[0]) || clean(nestedRequest.requestedDate),
+      startTime: clean(nestedQuote?.startTime) || clean(nestedRequest.startTime),
+      endTime: clean(nestedQuote?.endTime) || clean(nestedRequest.endTime),
+      locationStyles: nestedQuote?.locationStyles?.length ? nestedQuote.locationStyles : nestedRequest.locationStyles,
+      locationArea: clean(nestedQuote?.locationArea) || clean(nestedRequest.locationArea),
+      locationCountry: clean(nestedQuote?.locationCountry) || clean(nestedRequest.locationCountry),
+      suggestedCurrency: clean(nestedQuote?.currency) || clean(nestedRequest.suggestedCurrency),
+      suggestedPrice: clean(nestedQuote?.finalPrice) || clean(nestedRequest.suggestedPrice),
+      suggestedRate: clean(nestedQuote?.rate) || clean(nestedRequest.suggestedRate),
+      voluntary: nestedQuote?.voluntary === true || nestedRequest.voluntary === true,
+      scopeFrequency: clean(nestedQuote?.scopeFrequency) || clean(nestedRequest.scopeFrequency),
+      scopeTasks: nestedQuote?.scopeTasks?.length ? nestedQuote.scopeTasks : nestedRequest.scopeTasks,
+      otherTasks: clean(nestedQuote?.otherTasks) || clean(nestedRequest.otherTasks),
+    };
+  }
   const dateKeyFromIso = (iso: string | null | undefined) => {
     const date = new Date(clean(iso));
     return Number.isNaN(date.getTime()) ? "" : localDateKey(date);
@@ -1482,14 +1715,23 @@ const serviceRequestCardFromBookingSnapshot = (snapshot?: CareBookingSnapshot | 
   const petName = clean(snapshot.petName);
   const petSpecies = clean(snapshot.petSpecies);
   const petBreed = clean(snapshot.petBreed);
+  const dogSize = clean(snapshot.dogSize);
   const petId = clean(snapshot.petId);
   const pet: ServiceRequestPet = {
     petId,
     petName,
     petSpecies,
     petBreed,
+    dogSize,
     petType: petSpecies,
   };
+  const handoffMethod = clean(snapshot.handoffMethod);
+  const locationArea = clean(snapshot.locationArea);
+  const handoffAlreadyContainsArea = Boolean(locationArea) && (
+    handoffMethod === locationArea
+    || handoffMethod.endsWith(` - ${locationArea}`)
+    || handoffMethod.endsWith(` — ${locationArea}`)
+  );
   return {
     serviceType: clean(snapshot.serviceType) || "Care",
     serviceTypes: clean(snapshot.serviceType).split("+").map(clean).filter(Boolean),
@@ -1499,6 +1741,7 @@ const serviceRequestCardFromBookingSnapshot = (snapshot?: CareBookingSnapshot | 
     petType: petSpecies,
     petSpecies,
     petBreed,
+    dogSize,
     pets: petName || petId ? [pet] : [],
     requestedDates,
     requestedDate: requestedDates[0] || "",
@@ -1506,8 +1749,10 @@ const serviceRequestCardFromBookingSnapshot = (snapshot?: CareBookingSnapshot | 
     endAtIso: clean(snapshot.endAt),
     startTime: timeFromIso(snapshot.startAt),
     endTime: timeFromIso(snapshot.endAt),
-    locationStyles: clean(snapshot.handoffMethod) ? [clean(snapshot.handoffMethod)] : [],
-    locationArea: clean(snapshot.locationArea) || clean(snapshot.handoffMethod),
+    locationStyles: handoffMethod ? [handoffMethod] : [],
+    // Older flat snapshots stored the complete setting in handoffMethod and the
+    // area again in locationArea. Do not render that frozen value twice.
+    locationArea: handoffAlreadyContainsArea ? "" : locationArea || handoffMethod,
     locationCountry: clean(snapshot.locationCountry),
     suggestedCurrency: currency,
     suggestedPrice: Number.isFinite(providerQuote) && providerQuote > 0 ? String(fromStripeMinorUnitAmount(providerQuote, currency)) : "",
@@ -1520,11 +1765,27 @@ const serviceRequestCardFromBookingSnapshot = (snapshot?: CareBookingSnapshot | 
 };
 
 const frozenHistoryServiceChatRow = (row: ServiceChatRow): ServiceChatRow => {
-  const frozenRequestCard = serviceRequestCardFromBookingSnapshot(row.booking_snapshot);
+  const frozenSnapshot = (row.care_agreement?.bookingSnapshot || row.booking_snapshot) as CareHistorySnapshot | null;
+  const frozenRequestCard = serviceRequestCardFromBookingSnapshot(frozenSnapshot);
   if (!frozenRequestCard) return row;
+  const frozenCareDetails = normalizeCareScopeCareDetails(frozenSnapshot?.careDetails);
+  const frozenAgreement = row.care_agreement;
   return {
     ...row,
-    care_scope: null,
+    booking_snapshot: frozenSnapshot,
+    care_scope: {
+      actorRole: null,
+      canPay: frozenSnapshot?.price?.providerQuote ? Number(frozenSnapshot.price.providerQuote) > 0 : false,
+      careDetails: frozenCareDetails,
+      carerSigned: Boolean(frozenAgreement?.providerSignedAt),
+      mutualSigned: careAgreementHasSignedParties(frozenAgreement),
+      ownerPaymentConsentHash: null,
+      ownerSigned: Boolean(frozenAgreement?.requesterSignedAt),
+      paymentPendingExpiresAt: null,
+      paymentStatus: null,
+      scopeHash: clean(frozenAgreement?.scopeHash) || clean(frozenSnapshot?.scopeHash),
+      scopeVersionId: clean(frozenAgreement?.scopeVersionId) || clean(frozenSnapshot?.scopeVersionId),
+    },
     quote_card: null,
     request_card: frozenRequestCard,
   };
@@ -1640,6 +1901,15 @@ const addHoursIso = (iso: string | null | undefined, hours: number) => {
   return new Date(dt.getTime() + hours * 60 * 60 * 1000).toISOString();
 };
 
+const serviceScheduledEndIso = (requestCard: ServiceRequestCard | null | undefined, bookingSnapshot?: CareBookingSnapshot | null) => {
+  const requestEnd = clean(requestCard?.endAtIso) || clean((requestCard as { endAt?: unknown } | null | undefined)?.endAt);
+  if (requestEnd && Number.isFinite(Date.parse(requestEnd))) return new Date(requestEnd).toISOString();
+  const bookingEnd = clean(bookingSnapshot?.endAt);
+  if (bookingEnd && Number.isFinite(Date.parse(bookingEnd))) return new Date(bookingEnd).toISOString();
+  const bounds = getServicePeriodBounds(requestCard);
+  return bounds ? new Date(bounds.endAt).toISOString() : "";
+};
+
 const SIGNATURE_MIN_POINTS = 6;
 const SIGNATURE_MIN_DISTANCE = 28;
 
@@ -1687,8 +1957,10 @@ const formatRateUnit = (value: string | null | undefined) => {
 const normalizePetType = (species: string | null): string => {
   const source = clean(species);
   if (!source) return "";
-  const singular = source.toLowerCase().endsWith("s") ? source.slice(0, -1) : source;
-  return singular.replace(/\b\w/g, (char) => char.toUpperCase());
+  const normalized = source.toLowerCase();
+  if (normalized === "cats" || normalized === "cat") return "Cat";
+  if (normalized === "dogs" || normalized === "dog") return "Dog";
+  return source.replace(/\b\w/g, (char) => char.toUpperCase());
 };
 
 const normalizeRequesterLocationStyle = (value: string) => {
@@ -1707,8 +1979,8 @@ const getRequesterLocationOptions = (providerLocationStyles: string[]) => {
   return Array.from(new Set(mapped.filter((item) => item !== "Flexible")));
 };
 
-const UPDATE_PREFERENCE_DEFAULT = "Update as needed";
-const UPDATE_PREFERENCE_OPTIONS = [UPDATE_PREFERENCE_DEFAULT, "Daily summary", "Photo updates", "Notes + photos"] as const;
+const UPDATE_PREFERENCE_DEFAULT: CareUpdatePreference = "Optional";
+const UPDATE_PREFERENCE_OPTIONS = CARE_UPDATE_PREFERENCE_OPTIONS;
 const CARE_SCOPE_TASK_OPTIONS = ["Feeding", "Fresh water", "Walk", "Playtime", "Medication", "Litter / clean-up", "Overnight stay"] as const;
 const PAYOUT_AUTO_RELEASE_HOURS = 48;
 
@@ -1739,6 +2011,32 @@ const normalizeCareScopeComparable = (value: {
   voluntary: value.voluntary === true,
 });
 
+const normalizeServiceRequestComparable = (card?: ServiceRequestCard | null) => ({
+  additionalNotes: clean(card?.additionalNotes),
+  endTime: clean(card?.endTime),
+  locationArea: clean(card?.locationArea),
+  locationCountry: clean(card?.locationCountry),
+  locationStyles: [...(card?.locationStyles || [])].map(clean).filter(Boolean).sort(),
+  otherTasks: clean(card?.otherTasks),
+  pets: card ? requestCardPets(card).map((pet) => ({
+    dogSize: clean(pet.dogSize),
+    petBreed: clean(pet.petBreed),
+    petId: clean(pet.petId),
+    petName: clean(pet.petName),
+    petSpecies: normalizePetType(pet.petSpecies || pet.petType || null),
+  })).sort((a, b) => `${a.petId}:${a.petName}`.localeCompare(`${b.petId}:${b.petName}`)) : [],
+  requestedDates: [...(card?.requestedDates || [])].map(clean).filter(Boolean).sort(),
+  scopeFrequency: clean(card?.scopeFrequency),
+  scopeTasks: normalizeCareTaskList(card?.scopeTasks),
+  serviceTypes: [...(card?.serviceTypes || (card?.serviceType ? [card.serviceType] : []))].map(clean).filter(Boolean).sort(),
+  startTime: clean(card?.startTime),
+  suggestedCurrency: normalizeNativeCarerCurrency(card?.suggestedCurrency) || "",
+  suggestedPrice: clean(card?.suggestedPrice),
+  suggestedRate: Number(clean(card?.suggestedPrice)) > 0 ? CARE_SCOPE_TOTAL_RATE_LABEL : "",
+  updatePreference: normalizeUpdatePreference(card?.updatePreference),
+  voluntary: card?.voluntary === true,
+});
+
 const careCurrencyFromScopeOnly = (quoteCard?: ServiceQuoteCard | null, requestCard?: ServiceRequestCard | null): NativeCarerCurrency | "" => (
   normalizeNativeCarerCurrency(quoteCard?.currency)
   || normalizeNativeCarerCurrency(requestCard?.suggestedCurrency)
@@ -1758,16 +2056,7 @@ const resolveCareScopeDisplayCurrency = (input: {
   })
 );
 
-const normalizeUpdatePreference = (value: string | null | undefined): (typeof UPDATE_PREFERENCE_OPTIONS)[number] => {
-  const raw = clean(value);
-  if (!raw || raw === "No preference" || raw === "Update as needed (Default)") return UPDATE_PREFERENCE_DEFAULT;
-  if (raw === "Daily update") return "Daily summary";
-  if (raw === "Every visit") return "Notes + photos";
-  if (raw === "Photos please") return "Photo updates";
-  return UPDATE_PREFERENCE_OPTIONS.includes(raw as (typeof UPDATE_PREFERENCE_OPTIONS)[number])
-    ? raw as (typeof UPDATE_PREFERENCE_OPTIONS)[number]
-    : UPDATE_PREFERENCE_DEFAULT;
-};
+const normalizeUpdatePreference = normalizeCareUpdatePreference;
 
 const providerEditableLocationStyles = new Set(["Carer's Place", "Flexible", "Outdoor"]);
 const providerCanEditCareScopeLocation = (requestCard: ServiceRequestCard | null | undefined) =>
@@ -1797,6 +2086,7 @@ const requestCardFromQuoteCard = (quoteCard: ServiceQuoteCard | null | undefined
     scopeFrequency: clean(quoteCard.scopeFrequency),
     scopeTasks: normalizeCareTaskList(quoteCard.scopeTasks),
     otherTasks: clean(quoteCard.otherTasks),
+    updatePreference: normalizeUpdatePreference(quoteCard.updatePreference),
   };
 };
 
@@ -1817,7 +2107,7 @@ const requestCardWithCareScopeUpdates = (
     petName: requestCard.petName || clean(quoteCard.petName),
     petType: requestCard.petType || clean(quoteCard.petType),
     dogSize: requestCard.dogSize || clean(quoteCard.dogSize),
-    pets: requestCard.pets?.length ? requestCard.pets : (quoteCard.pets?.length ? quoteCard.pets : requestCard.pets),
+    pets: mergeCareScopePets(requestCard.pets, quoteCard.pets),
     requestedDates: requestCard.requestedDates?.length ? requestCard.requestedDates : quoteCard.requestedDates,
     startTime: requestCard.startTime || clean(quoteCard.startTime),
     endTime: requestCard.endTime || clean(quoteCard.endTime),
@@ -1843,7 +2133,7 @@ const requestCardWithCareScopeUpdates = (
     petName: quoteOwnsCurrentTurn ? clean(quoteCard.petName) || base.petName : base.petName,
     petType: quoteOwnsCurrentTurn ? clean(quoteCard.petType) || base.petType : base.petType,
     dogSize: quoteOwnsCurrentTurn ? clean(quoteCard.dogSize) || base.dogSize : base.dogSize,
-    pets: quoteOwnsCurrentTurn && quoteCard.pets?.length ? quoteCard.pets : base.pets,
+    pets: quoteOwnsCurrentTurn ? mergeCareScopePets(requestCard.pets, quoteCard.pets) : base.pets,
     requestedDates: quoteOwnsCurrentTurn && quoteCard.requestedDates?.length ? quoteCard.requestedDates : base.requestedDates,
     startTime: quoteOwnsCurrentTurn ? clean(quoteCard.startTime) || base.startTime : base.startTime,
     endTime: quoteOwnsCurrentTurn ? clean(quoteCard.endTime) || base.endTime : base.endTime,
@@ -1906,12 +2196,14 @@ const parseProviderRateServices = (rateRows: NativeRateRow[], fallbackServices: 
   return Array.from(new Set(services));
 };
 
-const formatPetCaption = (pet: { species?: string | null; dob?: string | null }) => {
-  const species = clean(pet.species) || "Pet";
+const formatPetCaption = (pet: { species?: string | null; dob?: string | null; dogSize?: string | null; pet_size?: string | null }) => {
+  const species = normalizePetType(pet.species || null) || "Pet";
+  const dogSize = clean(pet.dogSize) || clean(pet.pet_size);
+  const speciesWithSize = species === "Dog" && dogSize ? `Dog (${dogSize})` : species;
   const dob = clean(pet.dob);
-  if (!dob) return species;
+  if (!dob) return speciesWithSize;
   const birthDate = new Date(dob);
-  if (Number.isNaN(birthDate.getTime())) return species;
+  if (Number.isNaN(birthDate.getTime())) return speciesWithSize;
   const today = new Date();
   let years = today.getFullYear() - birthDate.getFullYear();
   let months = today.getMonth() - birthDate.getMonth();
@@ -1921,17 +2213,7 @@ const formatPetCaption = (pet: { species?: string | null; dob?: string | null })
     months += 12;
   }
   const age = years > 0 ? `${years}` : months > 0 ? `${months} mo` : "";
-  return [species, age].filter(Boolean).join(" · ");
-};
-
-const inferDogSize = (weight: number | null, unit: string | null): string => {
-  if (weight == null || Number.isNaN(weight)) return "";
-  const normalizedUnit = clean(unit).toLowerCase();
-  const kg = normalizedUnit === "lb" || normalizedUnit === "lbs" ? weight * 0.45359237 : weight;
-  if (kg <= 10) return "Small";
-  if (kg <= 25) return "Medium";
-  if (kg <= 40) return "Large";
-  return "Giant";
+  return [speciesWithSize, age].filter(Boolean).join(" · ");
 };
 
 const hasServicePeriodPassed = (request: ServiceRequestCard | null | undefined) => {
@@ -1987,26 +2269,27 @@ const getServiceStartMs = (chat: ServiceChatRow | null | undefined) => {
   return getServicePeriodBounds(chat?.request_card)?.startAt ?? null;
 };
 
-// "On or after" (not strict equality to today) -- once the scheduled date has arrived,
-// Start Care must stay available on every later day too. A strict equality check here
-// meant a carer who missed the exact scheduled day got permanently locked out with no
-// recovery path (owner's "Allow Early Start" only applies to dates that haven't arrived
-// yet, so it can't unblock a date that has already passed).
-const isServiceScheduledOnOrAfterToday = (chat: ServiceChatRow | null | undefined) => {
+const isServiceScheduledToStart = (chat: ServiceChatRow | null | undefined, nowMs = Date.now()) => {
   const startMs = getServiceStartMs(chat);
   if (!startMs) return false;
-  return localDateKey(new Date(startMs)) <= localDateKey(new Date());
+  return nowMs >= startMs;
 };
 
-const isServiceBeforeScheduledDate = (chat: ServiceChatRow | null | undefined) => {
-  const startMs = getServiceStartMs(chat);
-  if (!startMs) return false;
-  return localDateKey(new Date()) < localDateKey(new Date(startMs));
-};
-
-const canServiceStartNow = (chat: ServiceChatRow | null | undefined) => (
-  isServiceScheduledOnOrAfterToday(chat) || Boolean(clean(chat?.early_start_allowed_at))
+const canServiceStartNow = (chat: ServiceChatRow | null | undefined, nowMs = Date.now()) => (
+  isServiceScheduledToStart(chat, nowMs)
+  || chat?.care_status === "pin_shared"
+  || Boolean(clean(chat?.early_start_allowed_at))
 );
+
+const getServiceHandoffGraceEndMs = (chat: ServiceChatRow | null | undefined) => {
+  const startMs = getServiceStartMs(chat);
+  const snapshotEnd = clean(chat?.booking_snapshot?.endAt);
+  const endMs = snapshotEnd ? Date.parse(snapshotEnd) : NaN;
+  if (!startMs || !Number.isFinite(endMs) || endMs <= startMs) return null;
+  const durationMs = endMs - startMs;
+  const graceMs = Math.min(60 * 60 * 1000, Math.max(30 * 60 * 1000, durationMs / 2));
+  return startMs + graceMs;
+};
 
 const getServiceMidpointAt = (chat: ServiceChatRow | null | undefined) => {
   const bounds = getServicePeriodBounds(chat?.request_card);
@@ -2026,7 +2309,7 @@ const getCancelPolicy = (chat: ServiceChatRow | null | undefined, isProvider: bo
       tier: "voluntary",
       confirmLabel: "Cancel booking",
       body: isProvider
-        ? "This is a no-charge booking, so cancelling now closes it out with no impact on your Care record."
+        ? "This is a no-charge booking, so no payment or payout is involved. Cancelling still records the commitment and may affect your Care record or booking access."
         : "If you cancel now, the booking will be cancelled. No payment or refund is involved.",
     };
   }
@@ -2060,7 +2343,7 @@ const getCancelPolicy = (chat: ServiceChatRow | null | undefined, isProvider: bo
     return {
       tier: "half",
       confirmLabel: "Cancel booking",
-      body: "If you cancel now, you'll receive a 50% refund to your original payment method. Most refunds typically appear within 5–10 business days.",
+      body: "If you cancel now, you'll receive a 50% refund to your original payment method. huddle retains the remaining 50%.",
     };
   }
   return {
@@ -2069,21 +2352,13 @@ const getCancelPolicy = (chat: ServiceChatRow | null | undefined, isProvider: bo
     body: "This booking is now non-refundable. If something went wrong, report an issue so huddle can review it before provider payout.",
   };
 };
-const shouldShowMidCarePrompt = (chat: ServiceChatRow | null | undefined, hasCareUpdate: boolean) => {
-  if (!chat || hasCareUpdate || chat.care_status !== "in_progress") return false;
-  const bounds = getServicePeriodBounds(chat.request_card);
-  if (!bounds) return false;
-  const durationMs = bounds.endAt - bounds.startAt;
-  if (durationMs <= 4 * 60 * 60 * 1000) return false;
-  return Date.now() >= bounds.startAt + durationMs / 2 && Date.now() <= bounds.endAt;
-};
-
 function ServiceSystemPill({ actorName, createdAt, isRequester, kind, mutualAgreed, policy }: { actorName: string; createdAt?: string | null; isRequester: boolean; kind: string; mutualAgreed?: boolean; policy?: string }) {
   const eventDateTime = formatServiceEventDateTime(createdAt);
   const labels: Record<string, string> = {
     service_request_sent: isRequester ? "Your booking request has been sent." : "You received a booking request.",
     service_request_updated: `${actorName} updated the care request.`,
     service_request_withdrawn: `${actorName} withdrew the care request.`,
+    service_request_declined: `${actorName} declined the care request.`,
     service_quote_sent: `${actorName} shared the Care Scope.`,
     service_care_scope_updated: `${actorName} updated the Care Scope.`,
     service_care_scope_agreed: mutualAgreed ? "Both sides agreed to the Care Scope." : `${actorName} agreed to the Care Scope.`,
@@ -2100,11 +2375,13 @@ function ServiceSystemPill({ actorName, createdAt, isRequester, kind, mutualAgre
     service_issue_reported: "Issue flagged. Our team is looking into this.",
     service_booking_cancelled: /lte_24h/.test(policy || "") ? `${actorName} cancelled close to the booking. huddle is reviewing this cancellation.` : `${actorName} cancelled the booking.`,
     service_handoff_problem_reported: `${actorName} reported a handoff issue.`,
+    service_no_start_cancelled: "The care session is overdue and was cancelled under the no-start policy.",
   };
   const tone: Record<string, "neutral" | "muted" | "info" | "success" | "warning"> = {
     service_request_sent: "neutral",
     service_request_updated: "neutral",
     service_request_withdrawn: "muted",
+    service_request_declined: "muted",
     service_quote_sent: "info",
     service_care_scope_updated: "info",
     service_care_scope_agreed: "success",
@@ -2121,6 +2398,7 @@ function ServiceSystemPill({ actorName, createdAt, isRequester, kind, mutualAgre
     service_issue_reported: "warning",
     service_booking_cancelled: "muted",
     service_handoff_problem_reported: "warning",
+    service_no_start_cancelled: "warning",
   };
   const toneStyle = tone[kind] || "neutral";
   return (
@@ -2570,7 +2848,7 @@ function RequestPetCarousel({
           })}
           <View style={styles.petSelectTile}>
             <Pressable accessibilityLabel="Input pet details" accessibilityRole="button" onPress={onAddManualPet} style={({ pressed }) => [styles.petAddTile, pressed ? nativeModalStyles.pressed : null]}>
-              <Feather color={huddleColors.blue} name="plus" size={22} />
+              <Feather color={huddleColors.text} name="plus" size={22} />
               <Text style={styles.petAddTileText}>Input pet details</Text>
             </Pressable>
           </View>
@@ -2618,7 +2896,7 @@ function SelectedPetPolaroid({ requestCard, onOpenPet }: { requestCard: ServiceR
                 <NativePolaroidCard
                   accessibilityLabel={isProfilePet ? `Open ${pet.petName || "pet"} profile` : `${pet.petName || "manual pet"} details`}
                   captionPrimary={pet.petName || "Pet"}
-                  captionSecondary={<Text numberOfLines={2} style={nativePolaroidStyles.captionSecondaryToken}>{formatPetCaption({ species: pet.petSpecies || pet.petType || null, dob: pet.petDob || null })}</Text>}
+                  captionSecondary={<Text numberOfLines={2} style={nativePolaroidStyles.captionSecondaryToken}>{formatPetCaption({ species: pet.petSpecies || pet.petType || null, dob: pet.petDob || null, dogSize: pet.dogSize })}</Text>}
                   onPress={isProfilePet && pet.petId ? () => onOpenPet?.(pet.petId) : undefined}
                   photo={pet.petPhotoUrl ? (
                     <Image key={nativeFreshImageKey(pet.petPhotoUrl, pet.petId || pet.petPhotoUrl)} resizeMode="cover" source={{ uri: nativeFreshImageUri(pet.petPhotoUrl, pet.petId || pet.petPhotoUrl) }} style={nativePolaroidStyles.photo} />
@@ -2636,7 +2914,7 @@ function SelectedPetPolaroid({ requestCard, onOpenPet }: { requestCard: ServiceR
       {profilePets.length === 0 ? manualPets.map((pet, index) => (
         <View key={`${pet.petName || "manual"}-${index}`} style={styles.manualPetSummaryGroup}>
           <ScopeDetailRow label="Pet name">{pet.petName || "—"}</ScopeDetailRow>
-          <ScopeDetailRow label="Species">{pet.petSpecies || pet.petType || "—"}</ScopeDetailRow>
+          <ScopeDetailRow label="Species">{formatPetCaption({ species: pet.petSpecies || pet.petType || null, dogSize: pet.dogSize })}</ScopeDetailRow>
           <ScopeDetailRow label="Breed">{pet.petBreed || "—"}</ScopeDetailRow>
         </View>
       )) : null}
@@ -2756,6 +3034,7 @@ function RequestSheet({
   const [serviceMenuOpen, setServiceMenuOpen] = useState(false);
   const [manualSpeciesMenuOpen, setManualSpeciesMenuOpen] = useState(false);
   const [manualBreedMenuOpen, setManualBreedMenuOpen] = useState(false);
+  const [manualDogSizeMenuOpen, setManualDogSizeMenuOpen] = useState(false);
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [dateDropdown, setDateDropdown] = useState<"month" | "year" | null>(null);
   const [locationStyleMenuOpen, setLocationStyleMenuOpen] = useState(false);
@@ -2800,6 +3079,7 @@ function RequestSheet({
     const initialManualPets = requestCardPets(initialCard || {} as ServiceRequestCard)
       .filter((pet) => !clean(pet.petId) && (clean(pet.petName) || clean(pet.petSpecies) || clean(pet.petBreed)))
       .map((pet, index) => ({
+        dogSize: clean(pet.dogSize),
         id: `manual-${index}-${clean(pet.petName) || "pet"}`,
         name: clean(pet.petName),
         species: clean(pet.petSpecies || pet.petType),
@@ -2807,6 +3087,7 @@ function RequestSheet({
       }));
     const singleLegacyManualPet = initialPetIds.length === 0 && initialManualPets.length === 0 && (clean(initialCard?.petName) || clean(initialCard?.petSpecies || initialCard?.petType) || clean(initialCard?.petBreed))
       ? [{
+        dogSize: clean(initialCard?.dogSize),
         id: "manual-legacy",
         name: clean(initialCard?.petName),
         species: clean(initialCard?.petSpecies || initialCard?.petType),
@@ -2848,6 +3129,7 @@ function RequestSheet({
     setServiceMenuOpen(false);
     setManualSpeciesMenuOpen(false);
     setManualBreedMenuOpen(false);
+    setManualDogSizeMenuOpen(false);
     setDatePickerOpen(false);
     setDateDropdown(null);
     setLocationStyleMenuOpen(false);
@@ -2886,7 +3168,7 @@ function RequestSheet({
   }, []);
   const addManualPetDraft = useCallback(() => {
     const id = `manual-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    setManualPetDrafts((current) => [...current, { id, name: "", species: "", breed: "" }]);
+    setManualPetDrafts((current) => [...current, { dogSize: "", id, name: "", species: "", breed: "" }]);
     setActiveManualPetId(id);
     setManualPetEntryMode(true);
     setPetChoicesOpen(false);
@@ -2897,6 +3179,8 @@ function RequestSheet({
       if (next.length === 0) {
         setManualPetEntryMode(false);
         setActiveManualPetId(null);
+        // Never strand a requester after removing their only manual pet.
+        setPetChoicesOpen(true);
       } else {
         setActiveManualPetId((activeId) => activeId === id ? next[0]?.id || null : activeId);
       }
@@ -2908,7 +3192,7 @@ function RequestSheet({
     ? selectedPets.map((item) => {
       const nextPetType = normalizePetType(item.species || null);
       return {
-        dogSize: nextPetType.toLowerCase() === "dog" ? inferDogSize(item.weight ?? null, item.weight_unit ?? null) : "",
+        dogSize: nextPetType === "Dog" ? clean(item.pet_size) : "",
         petDob: clean(item.dob),
         petId: item.id,
         petIsPublic: item.is_public !== false,
@@ -2935,13 +3219,13 @@ function RequestSheet({
       const speciesLabel = speciesOption?.label || clean(draft.species);
       const petTypeLabel = speciesValue ? formatPetSpecies(speciesValue) : "";
       return clean(draft.name) || petTypeLabel || clean(draft.breed) ? {
-        dogSize: "",
+        dogSize: speciesValue === "dog" ? clean(draft.dogSize) : "",
         petBreed: clean(draft.breed),
         petId: "",
         petIsPublic: false,
         petName: clean(draft.name),
         petPhotoUrl: "",
-        petSpecies: speciesLabel,
+        petSpecies: petTypeLabel,
         petType: petTypeLabel,
       } : null;
     })
@@ -2951,12 +3235,10 @@ function RequestSheet({
   const petName = clean(primaryPet?.name) || clean(requestPets[0]?.petName) || clean(initialCard?.petName);
   const primaryPetType = clean(requestPets[0]?.petType) || petType;
   const primaryDogSize = clean(requestPets[0]?.dogSize) || dogSize;
-  // Care type follows the carer's offered services. Until the carer profile loads this is
-  // empty and falls back to the full palette — that's the correct "not loaded yet" state;
-  // once loaded it is exactly the carer's offering (verified tied to services_offered+rates).
+  // A booking can only be created for a service the carer offers. The clean-slate
+  // conversation loader hydrates this before the request sheet can be opened.
   const providerServiceOptions = useMemo(() => {
-    const scoped = Array.from(new Set((providerServices || []).map(clean).filter(Boolean)));
-    return scoped.length > 0 ? scoped : [...SERVICES_OFFERED];
+    return Array.from(new Set((providerServices || []).map(clean).filter(Boolean)));
   }, [providerServices]);
   const locationStyleOptions = useMemo(() => {
     const scoped = getRequesterLocationOptions(providerLocationStyles || []);
@@ -2970,7 +3252,7 @@ function RequestSheet({
   // Only treat a half-filled manual pet as an error -- an untouched manual section alongside
   // an already-selected registered pet is not a blocker (it just contributes nothing).
   const manualPetPartial = manualPetDrafts.some((draft) => {
-    const hasAnyValue = Boolean(clean(draft.name) || clean(draft.species) || clean(draft.breed));
+    const hasAnyValue = Boolean(clean(draft.name) || clean(draft.species) || clean(draft.breed) || clean(draft.dogSize));
     if (!hasAnyValue) return false;
     const speciesOption = PET_SPECIES_OPTIONS.find((option) => (
       option.id === draft.species
@@ -2979,7 +3261,8 @@ function RequestSheet({
       || formatPetSpecies(option.value) === draft.species
     ));
     const hasSpecies = Boolean(speciesOption?.value || clean(draft.species));
-    return !clean(draft.name) || !hasSpecies || !clean(draft.breed);
+    const isDog = clean(speciesOption?.value || draft.species).toLowerCase() === "dog";
+    return !clean(draft.name) || !hasSpecies || !clean(draft.breed) || (isDog && !clean(draft.dogSize));
   });
   const missing = {
     serviceType: serviceTypes.length === 0 || serviceTypes.some((item) => !providerServiceOptions.includes(item)),
@@ -2994,6 +3277,44 @@ function RequestSheet({
     locationStyles: locationStyles.length === 0 || locationStyles.some((item) => !locationStyleOptions.includes(item)),
     locationArea: !locationArea.trim(),
   };
+  const normalizedRequestPayment = normalizeCareScopePaymentInput(suggestedPrice, requestCurrency, suggestedRate);
+  const proposedRequestCard: ServiceRequestCard = {
+    serviceType: serviceTypes[0] || "",
+    serviceTypes,
+    petId,
+    petIds,
+    petName,
+    petType: primaryPetType,
+    dogSize: primaryDogSize,
+    pets: requestPets,
+    petPhotoUrl: clean(primaryPet?.photo_url) || clean(requestPets[0]?.petPhotoUrl),
+    petSpecies: clean(primaryPet?.species) || clean(requestPets[0]?.petSpecies),
+    petBreed: clean(requestPets[0]?.petBreed),
+    petDob: clean(primaryPet?.dob) || clean(requestPets[0]?.petDob),
+    petIsPublic: primaryPet ? primaryPet.is_public !== false : requestPets[0]?.petIsPublic,
+    requestedDates,
+    requestedDate: requestedDates[0] || "",
+    startTime,
+    endTime,
+    tzOffset: deviceTzOffset(),
+    startAtIso: wallClockToIso(requestedDates[0] || "", startTime),
+    endAtIso: wallClockToIso(requestedDates[requestedDates.length - 1] || requestedDates[0] || "", endTime),
+    locationStyles,
+    locationArea: locationArea.trim(),
+    locationCountry: locationCountry.trim(),
+    currencySelectedByRequester: requestCurrencyTouched,
+    suggestedCurrency: normalizedRequestPayment.paid ? requestCurrency : "",
+    suggestedPrice: normalizedRequestPayment.finalPrice,
+    suggestedRate: normalizedRequestPayment.paid ? normalizedRequestPayment.rate : "",
+    voluntary: normalizedRequestPayment.paid ? false : true,
+    updatePreference,
+    scopeFrequency: scopeFrequency.trim(),
+    scopeTasks,
+    otherTasks: otherTasks.trim(),
+    additionalNotes: additionalNotes.trim(),
+    allowProfileAccess: true,
+  };
+  const hasEditedRequestScope = !initialCard || JSON.stringify(normalizeServiceRequestComparable(proposedRequestCard)) !== JSON.stringify(normalizeServiceRequestComparable(initialCard));
   const yearOptions = useMemo(() => {
     const current = new Date().getFullYear();
     return Array.from({ length: 4 }, (_, index) => String(current + index));
@@ -3013,12 +3334,7 @@ function RequestSheet({
     const scrollToTarget = () => {
       const layout = fieldLayoutsRef.current[key];
       if (!layout) return;
-      const visibleHeight = Math.max(220, 620 - footerHeight - keyboardHeight - huddleSpacing.x6);
-      const shouldTopAlign = extraOffset >= 160 || key === "requestedDates" || key === "petId";
-      const nextY = shouldTopAlign
-        ? Math.max(0, layout.y - huddleSpacing.x3)
-        : Math.max(0, layout.y + layout.height + extraOffset - visibleHeight + huddleSpacing.x4);
-      scrollRef.current?.scrollTo({ y: nextY, animated: true });
+      scrollRef.current?.scrollTo({ y: Math.max(0, layout.y - huddleSpacing.x3), animated: true });
     };
     requestAnimationFrame(scrollToTarget);
     setTimeout(scrollToTarget, 180);
@@ -3028,6 +3344,7 @@ function RequestSheet({
     if (except !== "service") setServiceMenuOpen(false);
     if (except !== "manualSpecies") setManualSpeciesMenuOpen(false);
     if (except !== "manualBreed") setManualBreedMenuOpen(false);
+    if (except !== "manualDogSize") setManualDogSizeMenuOpen(false);
     if (except !== "dates") {
       setDatePickerOpen(false);
       setDateDropdown(null);
@@ -3136,6 +3453,14 @@ function RequestSheet({
       centerField(firstMissing);
       return;
     }
+    const proposedStartMs = Date.parse(proposedRequestCard.startAtIso || "");
+    const proposedEndMs = Date.parse(proposedRequestCard.endAtIso || "");
+    if (!Number.isFinite(proposedStartMs) || !Number.isFinite(proposedEndMs) || proposedEndMs - proposedStartMs < 60 * 60 * 1000) {
+      setSubmitError("Care bookings must be at least 1 hour.");
+      setSlideResetKey((value) => value + 1);
+      centerField("startTime");
+      return;
+    }
     // If the earliest requested day is today and the chosen start time has already passed,
     // don't silently book a time in the past — prompt the requester to pick a later time.
     const earliestIso = [...requestedDates].sort()[0];
@@ -3148,50 +3473,12 @@ function RequestSheet({
         return;
       }
     }
-    const normalizedRequestPayment = normalizeCareScopePaymentInput(suggestedPrice, requestCurrency, suggestedRate);
     if (normalizedRequestPayment.paid && normalizedRequestPayment.finalPrice !== suggestedPrice.trim()) {
       setSuggestedPrice(normalizedRequestPayment.finalPrice);
     }
     setSubmitting(true);
     try {
-      await onSubmit({
-        serviceType: serviceTypes[0] || "",
-        serviceTypes,
-        petId,
-        petIds,
-        petName,
-        petType: primaryPetType,
-        dogSize: primaryDogSize,
-        pets: requestPets,
-        petPhotoUrl: clean(primaryPet?.photo_url) || clean(requestPets[0]?.petPhotoUrl),
-        petSpecies: clean(primaryPet?.species) || clean(requestPets[0]?.petSpecies),
-        petBreed: clean(requestPets[0]?.petBreed),
-        petDob: clean(primaryPet?.dob) || clean(requestPets[0]?.petDob),
-        petIsPublic: primaryPet ? primaryPet.is_public !== false : requestPets[0]?.petIsPublic,
-        requestedDates,
-        requestedDate: requestedDates[0] || "",
-        startTime,
-        endTime,
-        // Anchor wall-clock times to the requester's timezone so the edge and the
-        // backend validator resolve the exact same instant (no booking_time_mismatch).
-        tzOffset: deviceTzOffset(),
-        startAtIso: wallClockToIso(requestedDates[0] || "", startTime),
-        endAtIso: wallClockToIso(requestedDates[requestedDates.length - 1] || requestedDates[0] || "", endTime),
-        locationStyles,
-        locationArea: locationArea.trim(),
-        locationCountry: locationCountry.trim(),
-        currencySelectedByRequester: requestCurrencyTouched,
-        suggestedCurrency: normalizedRequestPayment.paid ? requestCurrency : "",
-        suggestedPrice: normalizedRequestPayment.finalPrice,
-        suggestedRate: normalizedRequestPayment.paid ? normalizedRequestPayment.rate : "",
-        voluntary: normalizedRequestPayment.paid ? false : true,
-        updatePreference,
-        scopeFrequency: scopeFrequency.trim(),
-        scopeTasks,
-        otherTasks: otherTasks.trim(),
-        additionalNotes: additionalNotes.trim(),
-        allowProfileAccess: true,
-      });
+      await onSubmit(proposedRequestCard);
       onClose();
     } catch (error) {
       setSubmitError(nativeSafeErrorCopy(error, "Unable to send your request. Please try again."));
@@ -3204,13 +3491,12 @@ function RequestSheet({
   if (!open) return null;
   return (
     <View pointerEvents="box-none" style={styles.inlineSheetLayer}>
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={0} pointerEvents="box-none" style={nativeModalStyles.appModalBottomSafeArea}>
+      <Pressable accessibilityLabel="Close booking request sheet" accessibilityRole="button" onPress={onClose} style={nativeModalStyles.appModalBackdrop} />
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={0} pointerEvents="box-none" style={[nativeModalStyles.appModalBottomSafeArea, nativeModalStyles.appBottomSheetEventBoundary]}>
         <AppBottomSheet mode="large" onClose={onClose} swipeToCloseArea="header">
           <AppBottomSheetHeader>
             <Text style={nativeModalStyles.appModalSheetTitle}>Book Care</Text>
-            <AppModalIconButton accessibilityLabel="Close request sheet" onPress={onClose}>
-              <Feather color={huddleColors.text} name="x" size={24} />
-            </AppModalIconButton>
+            <AppModalCloseButton onPress={onClose} />
           </AppBottomSheetHeader>
           <AppBottomSheetScroll
             contentContainerStyle={styles.requestSheetScrollContent}
@@ -3227,6 +3513,7 @@ function RequestSheet({
                 placeholder="Select"
                 selected={serviceTypes}
               />
+              {attempted && missing.serviceType ? <Text style={styles.errorText}>Choose a Care type.</Text> : null}
             </View>
 
             <View onLayout={registerField("petId")} style={styles.petInputStack}>
@@ -3261,9 +3548,15 @@ function RequestSheet({
                       />
                     </View>
                   ))}
+                  <View style={styles.petSelectTile}>
+                    <Pressable accessibilityLabel="Input pet details" accessibilityRole="button" onPress={addManualPetDraft} style={({ pressed }) => [styles.petAddTile, pressed ? nativeModalStyles.pressed : null]}>
+                      <Feather color={huddleColors.text} name="plus" size={22} />
+                      <Text style={styles.petAddTileText}>Input pet details</Text>
+                    </Pressable>
+                  </View>
                 </ScrollView>
               ) : null}
-              {petChoicesOpen ? (
+              {petChoicesOpen || (selectedPets.length === 0 && manualPetDrafts.length === 0) ? (
                 <RequestPetCarousel
                   error={attempted && missing.petId && !manualRequestPets.length}
                   onAddManualPet={addManualPetDraft}
@@ -3272,7 +3565,7 @@ function RequestSheet({
                     setPetIds((current) => current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id]);
                     const nextPetType = normalizePetType(item.species || null);
                     setPetType(nextPetType);
-                    setDogSize(nextPetType.toLowerCase() === "dog" ? inferDogSize(item.weight ?? null, item.weight_unit ?? null) : "");
+                    setDogSize(nextPetType === "Dog" ? clean(item.pet_size) : "");
                     setPetChoicesOpen(isRemovingOnlyPet);
                   }}
                   pets={pets}
@@ -3346,7 +3639,7 @@ function RequestSheet({
                                 emoji={nativePetEmojiForLabel(option.label)}
                                 label={option.label}
                                 onPress={() => {
-                                  updateManualPetDraft(draft.id, { species: option.value, breed: "" });
+                                  updateManualPetDraft(draft.id, { species: option.value, breed: "", dogSize: option.value === "dog" ? draft.dogSize : "" });
                                   setManualSpeciesMenuOpen(false);
                                 }}
                               />
@@ -3368,6 +3661,25 @@ function RequestSheet({
                               <RequestOptionRow key={breed} active={breed === draft.breed} label={breed} onPress={() => { updateManualPetDraft(draft.id, { breed }); setManualBreedMenuOpen(false); }} />
                             ))}
                           </View>
+                        ) : null}
+                        {speciesValue === "dog" ? (
+                          <>
+                            <Pressable
+                              accessibilityRole="button"
+                              onPress={() => { Keyboard.dismiss(); setActiveManualPetId(draft.id); closeMenus("manualDogSize"); setManualDogSizeMenuOpen((value) => isActiveManual ? !value : true); centerField("petId", 240); }}
+                              style={[nativeModalStyles.appModalSelectTrigger, styles.manualPetSelectTrigger, manualDogSizeMenuOpen && isActiveManual ? nativeModalStyles.appModalFieldFocused : null, attempted && missing.petId && !draft.dogSize ? nativeModalStyles.appModalFieldError : null]}
+                            >
+                              <Text numberOfLines={1} style={[nativeModalStyles.appModalSelectText, !draft.dogSize ? nativeModalStyles.appModalSelectPlaceholder : null]}>{draft.dogSize || "Pet size"}</Text>
+                              <Feather color={huddleColors.mutedText} name={manualDogSizeMenuOpen && isActiveManual ? "chevron-up" : "chevron-down"} size={18} />
+                            </Pressable>
+                            {manualDogSizeMenuOpen && isActiveManual ? (
+                              <View style={styles.requestSelectMenu}>
+                                {DOG_SIZES.map((size) => (
+                                  <RequestOptionRow key={size} active={size === draft.dogSize} label={size} onPress={() => { updateManualPetDraft(draft.id, { dogSize: size }); setManualDogSizeMenuOpen(false); }} />
+                                ))}
+                              </View>
+                            ) : null}
+                          </>
                         ) : null}
                         </View>
                       </View>
@@ -3440,16 +3752,19 @@ function RequestSheet({
                   </View>
                 </View>
               </RequestQuoteSelect>
+              {attempted && missing.requestedDates ? <Text style={styles.errorText}>Choose at least one care date.</Text> : null}
             </View>
 
             <View onLayout={registerField("startTime")} style={styles.requestTwoColumn}>
               <View style={styles.requestFlexField}>
                 <Text style={styles.requestCreateLabel}>Start time</Text>
                 <AppModalField error={attempted && missing.startTime} focused={focusedField === "startTime"} keyboardType="numbers-and-punctuation" onBlur={() => { setFocusedField(null); setStartTime((value) => normalizeHHMM(value)); }} onChangeText={setStartTime} onFocus={() => { closeMenus(); setFocusedField("startTime"); centerField("startTime"); }} placeholder="09:00" style={styles.requestFieldHeight} value={startTime} />
+                {attempted && missing.startTime ? <Text style={styles.errorText}>Enter a valid start time.</Text> : null}
               </View>
               <View style={styles.requestFlexField}>
                 <Text style={styles.requestCreateLabel}>End time</Text>
                 <AppModalField error={attempted && missing.endTime} focused={focusedField === "endTime"} keyboardType="numbers-and-punctuation" onBlur={() => { setFocusedField(null); setEndTime((value) => normalizeHHMM(value)); }} onChangeText={setEndTime} onFocus={() => { closeMenus(); setFocusedField("endTime"); centerField("startTime"); }} placeholder="17:00" style={styles.requestFieldHeight} value={endTime} />
+                {attempted && missing.endTime ? <Text style={styles.errorText}>Enter a valid end time.</Text> : null}
               </View>
             </View>
 
@@ -3464,6 +3779,7 @@ function RequestSheet({
                 placeholder="Select"
                 selected={locationStyles}
               />
+              {attempted && missing.locationStyles ? <Text style={styles.errorText}>Choose where care will take place.</Text> : null}
             </View>
 
             <View onLayout={registerField("locationArea")} style={nativeModalStyles.appModalFieldBlock}>
@@ -3501,6 +3817,7 @@ function RequestSheet({
                 />
               </View>
               {locationPinError ? <Text style={styles.errorText}>{locationPinError}</Text> : null}
+              {attempted && missing.locationArea ? <Text style={styles.errorText}>Add the preferred care location.</Text> : null}
               {locationOutOfArea ? <Text style={styles.locationOutOfAreaText}>This area looks outside the carer&apos;s usual service area — they may not be able to take it.</Text> : null}
               {(locationSearchOpen || locationSearching) && (locationSuggestions.length > 0 || locationSearching || manualLocationAllowedQuery === locationArea.trim()) ? (
                 <View style={styles.locationSuggestionCard}>
@@ -3659,7 +3976,9 @@ function RequestSheet({
           </AppBottomSheetScroll>
           <AppBottomSheetFooter onLayout={(event) => setFooterHeight(event.nativeEvent.layout.height)}>
             {submitError ? <AppModalError>{submitError}</AppModalError> : null}
-            <SlideToConfirm busy={submitting} label={submitLabel === "Update" ? "Slide to Update" : "Slide to Send"} onCommit={() => void submit()} resetKey={slideResetKey} />
+            {submitLabel !== "Update" || hasEditedRequestScope ? (
+              <SlideToConfirm busy={submitting} label={submitLabel === "Update" ? "Slide to Update" : "Slide to Send"} onCommit={() => void submit()} resetKey={slideResetKey} />
+            ) : null}
             {returnToPaymentAvailable && onReturnToPayment ? (
               <AppModalButton disabled={submitting} variant="secondary" onPress={onReturnToPayment}>Return without Change</AppModalButton>
             ) : null}
@@ -3680,6 +3999,7 @@ function QuoteSheet({
   currentUserId,
   carerContact,
   initialCard,
+  onDecline,
   onClose,
   onError,
   onOpenPet,
@@ -3705,6 +4025,7 @@ function QuoteSheet({
   currentUserId?: string | null;
   carerContact?: string | null;
   initialCard?: ServiceQuoteCard | null;
+  onDecline?: () => void;
   onClose: () => void;
   onError: (body: string) => void;
   onOpenPet?: (petId: string) => void;
@@ -3878,9 +4199,7 @@ function QuoteSheet({
     const scrollToTarget = () => {
       const layout = fieldLayoutsRef.current[key];
       if (!layout) return;
-      const visibleHeight = Math.max(220, 620 - footerHeight - keyboardHeight - huddleSpacing.x6);
-      const nextY = Math.max(0, layout.y + layout.height + extraOffset - visibleHeight + huddleSpacing.x4);
-      scrollRef.current?.scrollTo({ y: nextY, animated: true });
+      scrollRef.current?.scrollTo({ y: Math.max(0, layout.y - huddleSpacing.x3), animated: true });
     };
     requestAnimationFrame(scrollToTarget);
     setTimeout(scrollToTarget, 180);
@@ -4053,8 +4372,14 @@ function QuoteSheet({
     let uploadedSignaturePath: string | null = null;
     try {
       if (canCaptureProviderSignature) {
-        if (missingAgreementAcknowledgement) {
+        if (missingTermsAcknowledgement) {
           setSlideResetKey((value) => value + 1);
+          centerField("terms");
+          return;
+        }
+        if (missingPolicyAcknowledgement) {
+          setSlideResetKey((value) => value + 1);
+          centerField("policy");
           return;
         }
         if (missingCarerContact) {
@@ -4064,6 +4389,7 @@ function QuoteSheet({
         }
         if (!providerSignature || !signatureCaptureRef.current || !serviceChatId || !currentUserId) {
           setSlideResetKey((value) => value + 1);
+          centerField("signature");
           return;
         }
         const signatureUri = await captureRef(signatureCaptureRef, {
@@ -4092,6 +4418,7 @@ function QuoteSheet({
         const signedAt = new Date().toISOString();
         const { error } = await supabase.rpc("record_service_care_scope_signature", {
           p_acknowledged_terms: true,
+          p_acknowledged_no_start_policy: policyAccepted,
           p_service_chat_id: serviceChatId,
           p_signature: {
             ...providerSignature,
@@ -4130,20 +4457,21 @@ function QuoteSheet({
   if (!open) return null;
   return (
     <View pointerEvents="box-none" style={styles.inlineSheetLayer}>
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={0} pointerEvents="box-none" style={nativeModalStyles.appModalBottomSafeArea}>
+      <Pressable accessibilityLabel="Close care scope sheet" accessibilityRole="button" onPress={onClose} style={nativeModalStyles.appModalBackdrop} />
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={0} pointerEvents="box-none" style={[nativeModalStyles.appModalBottomSafeArea, nativeModalStyles.appBottomSheetEventBoundary]}>
         <AppBottomSheet mode="large" onClose={onClose} swipeToCloseArea="header">
           <AppBottomSheetHeader>
             <Text style={nativeModalStyles.appModalSheetTitle}>{canSignCareScope ? "Review & Sign Care Scope" : "Update Care Scope"}</Text>
-            <AppModalIconButton accessibilityLabel="Close care scope sheet" onPress={onClose}>
-              <Feather color={huddleColors.text} name="x" size={24} />
-            </AppModalIconButton>
+            <AppModalCloseButton onPress={onClose} />
           </AppBottomSheetHeader>
           <AppBottomSheetScroll contentContainerStyle={styles.requestSheetScrollContent} scrollEnabled={!signatureSigning} scrollRef={scrollRef}>
             {proposedScopeRequestCard ? (
               <PaymentCareScopeSummary
                 careScope={careScope || null}
                 disabledEdit={submitting}
+                onDecline={canSignCareScope && !editingQuoteScope && !carerAlreadySigned && !currentMutualSignatures && onDecline ? onDecline : undefined}
                 onEdit={canSignCareScope && !editingQuoteScope ? () => setEditingQuoteScope(true) : undefined}
+                onOpenPet={onOpenPet}
                 providerCurrency={providerCurrency}
                 quoteCard={proposedQuoteCard}
                 requestCard={proposedScopeRequestCard}
@@ -4335,14 +4663,14 @@ function QuoteSheet({
             ) : null}
             {canCaptureProviderSignature ? (
               <>
-                <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: termsAccepted }} onPress={termsAccepted ? () => setTermsAccepted(false) : openTermsSheet} style={styles.checkboxRowTop}>
+                <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: termsAccepted }} onLayout={registerField("terms")} onPress={termsAccepted ? () => setTermsAccepted(false) : openTermsSheet} style={styles.checkboxRowTop}>
                   <View style={[styles.checkbox, attempted && missingTermsAcknowledgement ? styles.checkboxError : null, termsAccepted ? styles.checkboxActive : null]}>{termsAccepted ? <Feather color={huddleColors.onPrimary} name="check" size={14} /> : null}</View>
-                  <Text style={styles.checkboxText}>{careScopeTermsAcknowledgementCopy("provider")}</Text>
+                  <NativeLegalText style={styles.checkboxText}>{careScopeTermsAcknowledgementCopy("provider")}</NativeLegalText>
                 </Pressable>
-                {attempted && missingTermsAcknowledgement ? <Text style={styles.errorText}>Booking terms acknowledgement is required before sign off.</Text> : null}
-                <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: policyAccepted }} onPress={() => setPolicyAccepted((value) => !value)} style={styles.checkboxRowTop}>
+                {attempted && missingTermsAcknowledgement ? <Text style={styles.errorText}>Care Service Carer Agreement acknowledgement is required before sign off.</Text> : null}
+                <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: policyAccepted }} onLayout={registerField("policy")} onPress={() => setPolicyAccepted((value) => !value)} style={styles.checkboxRowTop}>
                   <View style={[styles.checkbox, attempted && missingPolicyAcknowledgement ? styles.checkboxError : null, policyAccepted ? styles.checkboxActive : null]}>{policyAccepted ? <Feather color={huddleColors.onPrimary} name="check" size={14} /> : null}</View>
-                  <Text style={styles.checkboxText}>{careScopeAcknowledgementCopy("provider", proposedNoChargeVoluntary)}</Text>
+                  <NativeLegalText style={styles.checkboxText}>{careScopeAcknowledgementCopy("provider", proposedNoChargeVoluntary)}</NativeLegalText>
                 </Pressable>
                 {attempted && missingPolicyAcknowledgement ? <Text style={styles.errorText}>Cancellation policy acknowledgement is required before sign off.</Text> : null}
                 <View onLayout={registerField("carerContact")} style={nativeModalStyles.appModalFieldBlock}>
@@ -4361,7 +4689,9 @@ function QuoteSheet({
               </>
             ) : null}
             {canCaptureProviderSignature ? (
-              <NativeSignaturePad attempted={attempted} captureViewRef={signatureCaptureRef} onChange={setProviderSignature} onSigningChange={setSignatureSigning} />
+              <View onLayout={registerField("signature")}>
+                <NativeSignaturePad attempted={attempted} captureViewRef={signatureCaptureRef} onChange={setProviderSignature} onSigningChange={setSignatureSigning} />
+              </View>
             ) : null}
             {!hasEditedCareScope && carerAlreadySigned && !currentMutualSignatures ? (
               <View style={styles.paymentInfoBox}>
@@ -4389,12 +4719,12 @@ function QuoteSheet({
             ) : null}
           </AppBottomSheetFooter>
         </AppBottomSheet>
-        <Modal animationType="fade" onRequestClose={() => setTermsSheetVisible(false)} transparent visible={termsSheetVisible}>
-          <View style={[nativeModalStyles.appModalBackdrop, nativeModalStyles.appModalSafeArea]}>
+        {termsSheetVisible ? (
+          <View style={[styles.inlineSheetLayer, nativeModalStyles.appModalBackdrop, nativeModalStyles.appModalSafeArea]}>
             <Pressable accessibilityLabel="Close provider agreement" accessibilityRole="button" onPress={() => setTermsSheetVisible(false)} style={StyleSheet.absoluteFill} />
-            <View {...termsSheetPanResponder.panHandlers} style={styles.termsModalBoundary}>
+            <View style={styles.termsModalBoundary}>
               <View style={styles.termsModalCard}>
-                <View style={styles.termsModalHeader}>
+                <View {...termsSheetPanResponder.panHandlers} style={styles.termsModalHeader}>
                   <Text style={styles.termsModalTitle}>Care Service Carer Agreement</Text>
                   <AppModalIconButton accessibilityLabel="Close provider agreement" onPress={() => setTermsSheetVisible(false)}>
                     <Feather color={huddleColors.text} name="x" size={24} />
@@ -4416,17 +4746,23 @@ function QuoteSheet({
                   {providerAgreementPage ? (
                     <>
                       {providerAgreementPage.intro.map((paragraph, index) => (
-                        <Text key={`provider-intro-${index}`} style={styles.termsSheetText}>{paragraph}</Text>
+                        <NativeLegalText key={`provider-intro-${index}`} style={styles.termsSheetText}>{paragraph}</NativeLegalText>
                       ))}
                       {providerAgreementPage.sections.map((section) => (
                         <View key={section.title} style={styles.termsLegalSection}>
                           <Text style={styles.termsLegalTitle}>{section.title}</Text>
                           {section.body.map((paragraph, index) => (
-                            <Text key={`${section.title}-${index}`} style={styles.termsSheetText}>{paragraph}</Text>
+                            <NativeLegalText key={`${section.title}-${index}`} style={styles.termsSheetText}>{paragraph}</NativeLegalText>
+                          ))}
+                          {section.bullets?.map((bullet, index) => (
+                            <View key={`${section.title}-bullet-${index}`} style={styles.termsBulletRow}>
+                              <Text style={styles.termsBulletDot}>•</Text>
+                              <NativeLegalText style={styles.termsBulletText}>{bullet}</NativeLegalText>
+                            </View>
                           ))}
                         </View>
                       ))}
-                      <Text style={styles.termsSheetText}>{providerAgreementPage.effectiveDate}</Text>
+                      <Text style={styles.termsSheetText}>Updated: {providerAgreementPage.effectiveDate}</Text>
                     </>
                   ) : null}
                 </ScrollView>
@@ -4441,7 +4777,7 @@ function QuoteSheet({
               </View>
             </View>
           </View>
-        </Modal>
+        ) : null}
       </KeyboardAvoidingView>
     </View>
   );
@@ -4461,12 +4797,16 @@ export function NativeServiceChatScreen({
   onNavigate: (path: string) => void;
 }) {
   const insets = useSafeAreaInsets();
+  const { width: windowWidth } = useWindowDimensions();
   const params = useMemo(() => parseParams(search), [search]);
-  const roomId = params.room;
+  const [resolvedServiceRoomId, setResolvedServiceRoomId] = useState("");
+  const roomId = params.room || resolvedServiceRoomId;
   const selectedHandoffRow = useMemo(() => readNativeChatSelectedRowHandoff({ roomId, sessionKey, userId }), [roomId, sessionKey, userId]);
   const [serviceChat, setServiceChat] = useState<ServiceChatRow | null>(null);
   const [paymentNowMs, setPaymentNowMs] = useState(() => Date.now());
   const [messages, setMessages] = useState<ChatMessageRow[]>([]);
+  const [hasOlderMessages, setHasOlderMessages] = useState(false);
+  const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
   const initialCounterpart = useMemo<Counterpart | null>(() => params.peerId || params.name || params.avatar || selectedHandoffRow ? ({
     id: params.peerId || selectedHandoffRow?.peerUserId || "",
     displayName: params.name || selectedHandoffRow?.peerName || selectedHandoffRow?.chatName || "Care chat",
@@ -4493,6 +4833,7 @@ export function NativeServiceChatScreen({
   const [pets, setPets] = useState<PetOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  const [activeServiceResolved, setActiveServiceResolved] = useState(false);
   const [composer, setComposer] = useState("");
   const [composerFocused, setComposerFocused] = useState(false);
   const [linkPreviews, setLinkPreviews] = useState<Record<string, NativeSocialLinkPreview>>({});
@@ -4510,18 +4851,22 @@ export function NativeServiceChatScreen({
   const [footerHeight, setFooterHeight] = useState(0);
   const scrollRef = useRef<ScrollView | null>(null);
   const nearBottomRef = useRef(true);
-  const midCareReminderNotifyRef = useRef(false);
+  const loadingOlderMessagesRef = useRef(false);
   const [activeSheet, setActiveSheet] = useState<ActiveSheet>(null);
   const [requestSheetMode, setRequestSheetMode] = useState<"current" | "new">("current");
   const [hasReviewed, setHasReviewed] = useState(false);
+  const reviewedServiceIdsRef = useRef<Set<string>>(new Set());
   const [hasReportedServiceDispute, setHasReportedServiceDispute] = useState(false);
   const [careUpdateStatus, setCareUpdateStatus] = useState<NativeCareUpdateStatus | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const menuAnchorRef = useRef<View | null>(null);
+  const [menuAnchorPosition, setMenuAnchorPosition] = useState({ top: huddleSpacing.x1, right: huddleSpacing.x3 });
+  const transitionNativeModal = useNativeModalTransition();
   const [reportOpen, setReportOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [sharedStartPin, setSharedStartPin] = useState("");
   const [carePopup, setCarePopup] = useState<{ title: string; body: string } | null>(null);
-  const [summaryCompletionWarningOpen, setSummaryCompletionWarningOpen] = useState(false);
+  const [confirmOwnerStartCareOpen, setConfirmOwnerStartCareOpen] = useState(false);
   const [careSaveToast, setCareSaveToast] = useState<string | null>(null);
   const careSaveToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const showCareSaveToast = useCallback((message: string) => {
@@ -4530,32 +4875,47 @@ export function NativeServiceChatScreen({
     careSaveToastTimer.current = setTimeout(() => setCareSaveToast(null), 2400);
   }, []);
   useEffect(() => () => { if (careSaveToastTimer.current) clearTimeout(careSaveToastTimer.current); }, []);
+  const markServiceReviewSubmitted = useCallback((serviceChatId: string | null | undefined) => {
+    const reviewedServiceChatId = clean(serviceChatId);
+    if (!reviewedServiceChatId) return;
+    reviewedServiceIdsRef.current.add(reviewedServiceChatId);
+    setHasReviewed(true);
+    if (userId) {
+      void AsyncStorage.setItem(serviceReviewSubmittedKey(userId, reviewedServiceChatId), "1").catch(() => undefined);
+    }
+  }, [userId]);
   const [blockState, setBlockState] = useState<"none" | "blocked_by_me" | "blocked_by_them">("none");
   const [confirmBlockOpen, setConfirmBlockOpen] = useState(false);
+  const [blockUnavailableNoticeOpen, setBlockUnavailableNoticeOpen] = useState(false);
   const [confirmWithdrawRequestOpen, setConfirmWithdrawRequestOpen] = useState(false);
+  const [confirmDeclineRequestOpen, setConfirmDeclineRequestOpen] = useState(false);
   const [confirmCancelBookingOpen, setConfirmCancelBookingOpen] = useState(false);
   // When Report Issue is opened from the cancel-booking modal, we tag the report with its
   // origin ("Cancel Booking: Issue with {name}") so Support sees the cancellation context.
   // Cleared whenever the report is opened from any other entry point.
   const [handoffReportContext, setHandoffReportContext] = useState<string | null>(null);
   const [serviceActionCollapsed, setServiceActionCollapsed] = useState(false);
+  const [handoffNowMs, setHandoffNowMs] = useState(() => Date.now());
   const [returnToPaymentAfterScopeEdit, setReturnToPaymentAfterScopeEdit] = useState(false);
   const [cancelBookingReason, setCancelBookingReason] = useState<(typeof CANCEL_BOOKING_ISSUES)[number]>("Plans changed");
   const [cancelBookingNote, setCancelBookingNote] = useState("");
   const [cancelIssueSelectOpen, setCancelIssueSelectOpen] = useState(false);
   const [cancelReasonFocused, setCancelReasonFocused] = useState(false);
   const [cancelSlideResetKey, setCancelSlideResetKey] = useState(0);
-  const [cancelEvidenceMedia, setCancelEvidenceMedia] = useState<NativeSocialComposerMedia | null>(null);
+  const [cancelEvidenceMedia, setCancelEvidenceMedia] = useState<NativeSocialComposerMedia[]>([]);
   const [cancelEvidenceUploading, setCancelEvidenceUploading] = useState(false);
-  const [confirmHandoffOpen, setConfirmHandoffOpen] = useState(false);
-  const [confirmEarlyStartOpen, setConfirmEarlyStartOpen] = useState(false);
   const [careHistoryOpen, setCareHistoryOpen] = useState(false);
   const [careAgreementOpen, setCareAgreementOpen] = useState(false);
   const [careAgreementPdfUrl, setCareAgreementPdfUrl] = useState("");
   const [careAgreementDownloading, setCareAgreementDownloading] = useState(false);
   const [careHistoryLoading, setCareHistoryLoading] = useState(false);
   const [careHistoryRows, setCareHistoryRows] = useState<ServiceChatRow[]>([]);
+  const [carePaymentMovementByServiceId, setCarePaymentMovementByServiceId] = useState<Record<string, NativeCarePaymentMovement[]>>({});
+  // History is loaded after opening the sheet. A close invalidates outstanding
+  // requests so a stalled network response cannot update the closed sheet.
+  const careHistoryLoadSequenceRef = useRef(0);
   const [careHistoryManuallyHidden, setCareHistoryManuallyHidden] = useState(false);
+  const [terminalHistoryDismissalHydrated, setTerminalHistoryDismissalHydrated] = useState(false);
   const [timelineCollapsed, setTimelineCollapsed] = useState(true);
   const [providerProfileOpen, setProviderProfileOpen] = useState(false);
   const [providerProfile, setProviderProfile] = useState<NativeServiceProvider | null>(null);
@@ -4591,8 +4951,10 @@ export function NativeServiceChatScreen({
   const activeRoomRef = useRef(roomId);
   const activeSessionKeyRef = useRef(sessionKey || null);
   const loadSeqRef = useRef(0);
+  const loadRef = useRef<(silent?: boolean) => Promise<void>>(async () => undefined);
   const serviceChatRef = useRef<ServiceChatRow | null>(null);
   const messagesRef = useRef<ChatMessageRow[]>([]);
+  const forceScrollToLatestRef = useRef(false);
   const linkPreviewRequestsRef = useRef<Set<string>>(new Set());
   const linkPreviewsRef = useRef<Record<string, NativeSocialLinkPreview>>({});
   const realtimeCareRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -4604,6 +4966,31 @@ export function NativeServiceChatScreen({
       hasUserId: Boolean(userId),
     });
   }, [roomId, userId]);
+
+  useEffect(() => {
+    if (params.room || !params.service || !userId) {
+      if (params.room) setResolvedServiceRoomId("");
+      return;
+    }
+    let cancelled = false;
+    void supabase
+      .from("service_chats")
+      .select("id,chat_id")
+      .eq("id", params.service)
+      .or(`requester_id.eq.${userId},provider_id.eq.${userId}`)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        const resolvedChatId = clean(data?.chat_id);
+        if (error || !resolvedChatId) {
+          setLoading(false);
+          setCarePopup({ title: "Care payment", body: "This care session could not be opened. Please try again." });
+          return;
+        }
+        setResolvedServiceRoomId(resolvedChatId);
+      });
+    return () => { cancelled = true; };
+  }, [params.room, params.service, userId]);
 
   useEffect(() => {
     if (!initialCounterpart) return;
@@ -4627,6 +5014,24 @@ export function NativeServiceChatScreen({
   }, [serviceChat]);
 
   useEffect(() => {
+    let cancelled = false;
+    const activeServiceChatId = clean(serviceChat?.id);
+    if (!userId || !activeServiceChatId) return () => { cancelled = true; };
+    if (reviewedServiceIdsRef.current.has(activeServiceChatId)) {
+      setHasReviewed(true);
+      return () => { cancelled = true; };
+    }
+    void AsyncStorage.getItem(serviceReviewSubmittedKey(userId, activeServiceChatId))
+      .then((value) => {
+        if (cancelled || value !== "1") return;
+        reviewedServiceIdsRef.current.add(activeServiceChatId);
+        if (clean(serviceChatRef.current?.id) === activeServiceChatId) setHasReviewed(true);
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [serviceChat?.id, userId]);
+
+  useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
 
@@ -4645,54 +5050,99 @@ export function NativeServiceChatScreen({
   useEffect(() => {
     let cancelled = false;
     setSharedStartPin("");
-    if (!userId || !roomId) return () => { cancelled = true; };
-    void readCachedStartPin(userId, roomId).then((pin) => {
-      if (!cancelled) setSharedStartPin(pin);
+    const activeServiceChatId = clean(serviceChat?.id);
+    if (!userId || !activeServiceChatId) return () => { cancelled = true; };
+    void readCachedStartPin(userId, activeServiceChatId).then((pin) => {
+      // SecureStore can resolve after the authoritative preparation RPC. An empty
+      // cache result must never erase a PIN that arrived while this read was pending.
+      if (!cancelled && pin) setSharedStartPin((current) => current || pin);
     });
     return () => { cancelled = true; };
-  }, [roomId, userId]);
+  }, [serviceChat?.id, userId]);
 
   useEffect(() => {
-    if (!userId || !roomId || !serviceChat?.care_status) return;
+    const activeServiceChatId = clean(serviceChat?.id);
+    if (!userId || !activeServiceChatId || !serviceChat?.care_status) return;
     if (!["awaiting_handoff", "pin_shared"].includes(serviceChat.care_status)) {
       setSharedStartPin("");
-      void purgeCachedStartPin(userId, roomId);
+      void purgeCachedStartPin(userId, activeServiceChatId);
     }
-  }, [roomId, serviceChat?.care_status, userId]);
+  }, [serviceChat?.care_status, serviceChat?.id, userId]);
 
   const isCurrentServiceChatRequest = useCallback((targetRoomId: string | null | undefined, requestSessionKey: string | null | undefined) => (
     Boolean(targetRoomId) && activeRoomRef.current === targetRoomId && (activeSessionKeyRef.current || null) === (requestSessionKey || null)
   ), []);
+  const scrollServiceMessagesToLatest = useCallback((animated = true) => {
+    requestAnimationFrame(() => {
+      scrollRef.current?.scrollToEnd({ animated });
+      setTimeout(() => scrollRef.current?.scrollToEnd({ animated }), 80);
+    });
+  }, []);
+  const hydrateServiceMessages = useCallback((
+    incoming: ChatMessageRow[],
+    options: { cacheRoomId?: string | null; cacheUserId?: string | null; replace?: boolean; source?: "cache" | "db" | "realtime"; sessionKey?: string | null } = {},
+  ) => {
+    setMessages((current) => {
+      const next = options.replace === true
+        ? mergeServiceMessageRows([], incoming)
+        : mergeServiceMessageRows(current, incoming);
+      messagesRef.current = next;
+      if (options.source !== "cache" && options.cacheUserId && options.cacheRoomId && next.length > 0) {
+        void writeCachedNativeChatMessages(
+          options.cacheUserId,
+          options.cacheRoomId,
+          next.map((message) => serviceRowToNativeChatMessage(message, options.cacheRoomId || "")),
+          { dbConfirmedAt: Date.now(), sessionKey: options.sessionKey || null, source: options.source || "db" },
+        );
+      }
+      return next;
+    });
+  }, []);
 
   const role: ServiceRole | null = useMemo(() => {
-    if (!serviceChat || !userId) return null;
-    if (serviceChat.requester_id === userId) return "requester";
-    if (serviceChat.provider_id === userId) return "provider";
+    if (!userId) return null;
+    // Once a booking becomes history, `serviceChat` is deliberately cleared. Keep
+    // the participant role from that terminal row so the owner returns to the
+    // same clean Start-a-quote state instead of a role-less pending screen.
+    const roleAnchor = serviceChat || careHistoryRows.find((row) => (
+      row.requester_id === userId || row.provider_id === userId
+    )) || null;
+    if (!roleAnchor) return null;
+    if (roleAnchor.requester_id === userId) return "requester";
+    if (roleAnchor.provider_id === userId) return "provider";
     return null;
-  }, [serviceChat, userId]);
-  const status = (serviceChat?.status || "pending") as ServiceStatus;
+  }, [careHistoryRows, serviceChat, userId]);
+  const rawStatus = (serviceChat?.status || "pending") as ServiceStatus;
   const isRequester = role === "requester";
   const isProvider = role === "provider";
   const hasRequest = Boolean(serviceChat?.request_card);
   const hasQuote = Boolean(serviceChat?.quote_card);
   const providerStripeReady = Boolean(counterpart?.stripePayoutStatus === "complete" && counterpart?.stripeAccountId);
-  const careStatus = serviceChat?.care_status || null;
+  const rawCareStatus = serviceChat?.care_status || null;
   const pendingRequestExpired = useMemo(() => isPendingRequestExpired(serviceChat), [serviceChat]);
-  const messageDisputeState = useMemo(() => {
-    for (let index = messages.length - 1; index >= 0; index -= 1) {
-      const kind = parseServiceMessage(messages[index]?.content || "").kind;
-      if (kind === "service_dispute_resolved" || kind === "service_completed") return "resolved";
-      if (kind === "service_disputed" || kind === "service_issue_reported") return "open";
-    }
-    return "none";
-  }, [messages]);
-  const disputeResolved = Boolean(isResolvedServiceDisputeStatus(serviceChat?.dispute_status) || messageDisputeState === "resolved");
-  const rowHasOpenDisputeSignal = Boolean(status === "disputed" || careStatus === "under_dispute" || careStatus === "handoff_issue_review" || careStatus === "handoff_expired_manual_refund_required" || serviceChat?.disputed_at || messageDisputeState === "open");
-  const rowResolved = Boolean(disputeResolved || (!rowHasOpenDisputeSignal && (status === "completed" || careStatus === "completed" || serviceChat?.completed_at)));
+  const disputeResolved = Boolean(isResolvedServiceDisputeStatus(serviceChat?.dispute_status));
+  const rowHasOpenDisputeSignal = Boolean(rawStatus === "disputed" || rawCareStatus === "under_dispute" || rawCareStatus === "handoff_issue_review" || rawCareStatus === "handoff_expired_manual_refund_required" || serviceChat?.disputed_at);
+  const rowResolved = Boolean(disputeResolved || (!rowHasOpenDisputeSignal && (rawStatus === "completed" || rawCareStatus === "completed" || serviceChat?.completed_at)));
   const rowUnderReview = Boolean(!disputeResolved && rowHasOpenDisputeSignal);
   const underReview = rowUnderReview;
+  // Terminal rows remain history, never active Care truth. The latest terminal row is
+  // presentation-only: it keeps a just-cancelled room visibly Cancelled until the owner
+  // sends a fresh request and create_service_chat supplies a new active row.
+  const latestTerminalServiceChat = useMemo(() => {
+    const terminalRows = careHistoryRows
+      .filter(isServiceChatHistoryMenuEligible)
+      .sort((a, b) => {
+        const bTerminalTime = Date.parse(serviceChatHistoryTerminalAt(b, b.provider_id === userId)) || serviceChatRowActivityTime(b);
+        const aTerminalTime = Date.parse(serviceChatHistoryTerminalAt(a, a.provider_id === userId)) || serviceChatRowActivityTime(a);
+        return bTerminalTime - aTerminalTime;
+      });
+    return terminalRows[0] || null;
+  }, [careHistoryRows, userId]);
+  const terminalCancelledServiceChat = !serviceChat && latestTerminalServiceChat && isCancelledServiceChatRow(latestTerminalServiceChat)
+    ? latestTerminalServiceChat
+    : null;
   const effectiveServiceChat = useMemo<ServiceChatRow | null>(() => {
-    if (!serviceChat) return null;
+    if (!serviceChat) return terminalCancelledServiceChat;
     if (!underReview) return serviceChat;
     if (serviceChat.care_status === "handoff_expired_manual_refund_required") {
       return {
@@ -4707,13 +5157,14 @@ export function NativeServiceChatScreen({
       care_status: "under_dispute",
       disputed_at: serviceChat.disputed_at || new Date().toISOString(),
     };
-  }, [serviceChat, underReview]);
-  const displayStatus = underReview ? "disputed" : rowResolved ? "completed" : status;
-  const displayStatusLabel = serviceChat?.care_status === "handoff_expired_manual_refund_required"
-    ? "Support review"
-    : displayStatus === "pending" && !hasRequest
-      ? "Pending Request"
-      : STATUS_LABEL[displayStatus];
+  }, [serviceChat, terminalCancelledServiceChat, underReview]);
+  const careConversationState = useMemo(
+    () => deriveActiveCareConversationState(serviceChat, underReview),
+    [serviceChat, underReview],
+  );
+  const status = careConversationState.status;
+  const careStatus = careConversationState.careStatus;
+  const terminalSystemNoStart = Boolean(terminalCancelledServiceChat?.cancellation_status === "system_no_start");
   const peerName = counterpart?.displayName || params.name || "Care chat";
   const peerAvatarCandidates = useMemo(() => Array.from(new Set([
     counterpart?.avatarUrl,
@@ -4726,9 +5177,15 @@ export function NativeServiceChatScreen({
   const serviceShellPending = Boolean(loading && !serviceChat && noMessagesYet);
   const canLeaveReview = Boolean(!underReview && status === "completed" && (isRequester || isProvider) && !hasReviewed);
   const showReviewComposerCta = canLeaveReview;
-  const canShowComposer = Boolean(hasRequest && !showReviewComposerCta && (status !== "completed" || underReview));
+  const canShowComposer = Boolean(careConversationState.kind === "scope_pending" && hasRequest && !showReviewComposerCta);
   const serviceComposerDisabled = sending || blockState !== "none";
-  const canBookCareFromMenu = Boolean(!underReview && isRequester && !canShowComposer);
+  const canBookCareFromMenu = Boolean(isRequester && (careConversationState.kind === "clean_slate" || careConversationState.kind === "completed"));
+  // Blocking would sever the shared Care evidence and resolution channel. Existing blocks
+  // may still be lifted; only a new block is held until the relationship is clean or complete.
+  const blockUnavailableForCare = Boolean(
+    blockState !== "blocked_by_me"
+    && !["clean_slate", "completed"].includes(careConversationState.kind),
+  );
   const visibleNotice = underReview ? SERVICE_UNDER_REVIEW_NOTICE : notice;
   const typedPreviewUrl = extractCompletedServicePreviewUrl(composer);
   const activePreviewUrl = lockedPreviewUrl || (typedPreviewUrl && !dismissedPreviewUrls.has(typedPreviewUrl) ? typedPreviewUrl : null);
@@ -4739,26 +5196,152 @@ export function NativeServiceChatScreen({
   // Booking available (menu + inline) all the way through pin_shared, since they haven't
   // committed to the booking with an actual check-in yet; it disappears for them only once they
   // start care (care_status leaves pin_shared for in_progress).
-  const canCancelPaidBooking = Boolean(serviceChat && status === "booked" && (
+  const scheduledStartMs = getServiceStartMs(serviceChat);
+  const handoffGraceEndMs = getServiceHandoffGraceEndMs(serviceChat);
+  const scheduledEndIso = serviceScheduledEndIso(serviceChat?.request_card, serviceChat?.booking_snapshot);
+  const scheduledEndMs = scheduledEndIso ? Date.parse(scheduledEndIso) : NaN;
+  const noStartPolicyActive = Boolean(clean(serviceChat?.booking_snapshot?.noStartPolicy?.version));
+  const handoffReady = Boolean(scheduledStartMs && handoffNowMs >= scheduledStartMs);
+  const handoffOverdue = Boolean(handoffGraceEndMs && handoffNowMs >= handoffGraceEndMs);
+  const noStartReportOpen = Boolean(noStartPolicyActive && handoffOverdue && Number.isFinite(scheduledEndMs) && handoffNowMs < scheduledEndMs);
+  const startWindowElapsed = Boolean(Number.isFinite(scheduledEndMs) && handoffNowMs >= scheduledEndMs);
+  const systemNoStartCancellationPending = Boolean(
+    serviceChat
+    && startWindowElapsed
+    && status === "booked"
+    && ["awaiting_handoff", "pin_shared"].includes(careStatus || "awaiting_handoff")
+  );
+  const displayStatus = terminalCancelledServiceChat
+    ? "cancelled"
+    : systemNoStartCancellationPending
+      ? "cancelling"
+      : careConversationState.status;
+  const displayStatusLabel = terminalCancelledServiceChat
+    ? "Cancelled"
+    : systemNoStartCancellationPending
+      ? "Cancelling…"
+      : careConversationState.statusLabel;
+  const ownerAuthorizedStart = careStatus === "pin_shared" || Boolean(clean(serviceChat?.early_start_allowed_at));
+  const carerCanStart = handoffReady || ownerAuthorizedStart;
+  const canCancelPaidBooking = Boolean(serviceChat && status === "booked" && !handoffReady && (
     (isRequester && careStatus === "awaiting_handoff")
     || (isProvider && ["awaiting_handoff", "pin_shared"].includes(careStatus || "awaiting_handoff"))
   ));
-  const canAllowEarlyStart = Boolean(serviceChat && isRequester && status === "booked" && ["awaiting_handoff", "pin_shared"].includes(careStatus || "awaiting_handoff") && isServiceBeforeScheduledDate(serviceChat) && !clean(serviceChat.early_start_allowed_at));
-  const canReportHandoffProblem = Boolean(serviceChat && isProvider && status === "booked" && ["awaiting_handoff", "pin_shared"].includes(careStatus || "awaiting_handoff"));
-  const canReportRequesterHandoffProblem = Boolean(serviceChat && isRequester && status === "booked" && ["awaiting_handoff", "pin_shared"].includes(careStatus || "awaiting_handoff"));
+  const canReportHandoffProblem = Boolean(serviceChat && isProvider && status === "booked" && ["awaiting_handoff", "pin_shared"].includes(careStatus || "awaiting_handoff") && (!noStartPolicyActive || !handoffOverdue));
+  const canReportRequesterHandoffProblem = Boolean(serviceChat && isRequester && status === "booked" && ["awaiting_handoff", "pin_shared"].includes(careStatus || "awaiting_handoff") && (!noStartPolicyActive || !handoffOverdue));
   const canRespondToHandoffProblem = Boolean(serviceChat && isRequester && careStatus === "handoff_issue_review");
+
+  useEffect(() => {
+    if (status !== "booked" || !["awaiting_handoff", "pin_shared"].includes(careStatus || "")) return undefined;
+    setHandoffNowMs(Date.now());
+    const timer = setInterval(() => setHandoffNowMs(Date.now()), 15000);
+    const deadlineDelayMs = scheduledEndMs - Date.now();
+    const deadlineTimer = Number.isFinite(deadlineDelayMs) && deadlineDelayMs >= 0 && deadlineDelayMs <= 2_147_483_647
+      ? setTimeout(() => setHandoffNowMs(Date.now()), deadlineDelayMs + 50)
+      : null;
+    return () => {
+      clearInterval(timer);
+      if (deadlineTimer) clearTimeout(deadlineTimer);
+    };
+  }, [careStatus, scheduledEndMs, status]);
+  useEffect(() => {
+    const activeServiceChatId = clean(serviceChat?.id);
+    if (!systemNoStartCancellationPending || !userId || !activeServiceChatId) return;
+    setSharedStartPin("");
+    void purgeCachedStartPin(userId, activeServiceChatId);
+  }, [serviceChat?.id, systemNoStartCancellationPending, userId]);
   const allCareHistoryRows = useMemo(() => {
     const byId = new Map<string, ServiceChatRow>();
     for (const row of careHistoryRows) byId.set(row.id, frozenHistoryServiceChatRow(row));
-    return Array.from(byId.values()).filter(isServiceChatHistoryMenuEligible);
-  }, [careHistoryRows]);
+    return Array.from(byId.values())
+      .filter(isServiceChatHistoryMenuEligible)
+      .sort((a, b) => {
+        const bTime = Date.parse(serviceChatHistoryTerminalAt(b, isProvider)) || serviceChatRowActivityTime(b);
+        const aTime = Date.parse(serviceChatHistoryTerminalAt(a, isProvider)) || serviceChatRowActivityTime(a);
+        return bTime - aTime;
+      });
+  }, [careHistoryRows, isProvider]);
+  useEffect(() => {
+    const ids = Array.from(new Set([
+      clean(serviceChat?.id),
+      clean(terminalCancelledServiceChat?.id),
+      ...allCareHistoryRows.map((row) => clean(row.id)),
+    ].filter(Boolean))).slice(0, 20);
+    if (!userId || ids.length === 0) {
+      setCarePaymentMovementByServiceId({});
+      return undefined;
+    }
+    let active = true;
+    const refresh = async () => {
+      try {
+        const movements = await getNativeCarePaymentStatuses(ids, accessToken);
+        if (!active) return;
+        const next: Record<string, NativeCarePaymentMovement[]> = {};
+        for (const movement of movements) {
+          if (!movement.serviceChatId) continue;
+          (next[movement.serviceChatId] ||= []).push(movement);
+        }
+        setCarePaymentMovementByServiceId(next);
+      } catch (error) {
+        console.warn("[native.care_payment_status] refresh_failed", {
+          message: error instanceof Error ? error.message : "unknown",
+        });
+      }
+    };
+    void refresh();
+    const timer = setInterval(() => void refresh(), 60_000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [
+    accessToken,
+    allCareHistoryRows,
+    serviceChat?.care_status,
+    serviceChat?.id,
+    serviceChat?.payout_released_at,
+    terminalCancelledServiceChat?.id,
+    userId,
+  ]);
+  const activeCarePaymentMovement = effectiveServiceChat?.id
+    ? carePaymentMovementByServiceId[effectiveServiceChat.id]?.[0] || null
+    : null;
+  const paymentSetupNeeded = Boolean(isProvider && activeCarePaymentMovement?.actionRequired);
+  const openPayoutAccount = useCallback(() => {
+    onNavigate("/carerprofile");
+  }, [onNavigate]);
   useEffect(() => {
     setPeerAvatarFailedUrls(new Set());
   }, [peerAvatarCandidatesKey]);
-  const canOpenCareHistory = Boolean(serviceChat && (isRequester || isProvider));
+  const canOpenCareHistory = Boolean((serviceChat && (isRequester || isProvider)) || careHistoryRows.length > 0);
   const canHideCurrentCareHistory = Boolean(effectiveServiceChat && isServiceChatHistoryMenuEligible(effectiveServiceChat));
+  const canInlineHideCurrentCareHistory = Boolean(canHideCurrentCareHistory && !terminalSystemNoStart);
   const careHistoryAutoHidden = Boolean(effectiveServiceChat && isServiceChatAutoHiddenInHistory(effectiveServiceChat, isProvider));
-  const careHistoryHiddenFromChat = Boolean((canHideCurrentCareHistory && careHistoryManuallyHidden) || careHistoryAutoHidden);
+  const careHistoryHiddenFromChat = Boolean(
+    (terminalCancelledServiceChat && !terminalHistoryDismissalHydrated)
+    || (canHideCurrentCareHistory && careHistoryManuallyHidden)
+    || careHistoryAutoHidden
+  );
+
+  useEffect(() => {
+    if (serviceChat || !userId || !terminalCancelledServiceChat?.id) {
+      setTerminalHistoryDismissalHydrated(true);
+      return;
+    }
+    let cancelled = false;
+    const terminalServiceChatId = terminalCancelledServiceChat.id;
+    setTerminalHistoryDismissalHydrated(false);
+    setCareHistoryManuallyHidden(false);
+    void AsyncStorage.getItem(serviceHistoryHiddenKey(userId, terminalServiceChatId))
+      .then((value) => {
+        if (!cancelled) setCareHistoryManuallyHidden(value === "1");
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) setTerminalHistoryDismissalHydrated(true);
+      });
+    return () => { cancelled = true; };
+  }, [serviceChat, terminalCancelledServiceChat?.id, userId]);
   const cancelPolicy = useMemo(() => getCancelPolicy(serviceChat, isProvider), [isProvider, serviceChat]);
   const cancelWithin24Hours = useMemo(() => {
     const startMs = getServiceStartMs(serviceChat);
@@ -4773,99 +5356,137 @@ export function NativeServiceChatScreen({
     if (direct) return direct;
     return requestCardPets(card)[0]?.petName || "";
   }, [serviceChat?.request_card]);
-  const hasQualifyingCareUpdate = useMemo(() => messages.some((message) => {
-    const parsed = parseServiceMessage(message.content);
-    if (parsed.kind !== "service_care_update" || !parsed.careUpdate) return false;
-    return careUpdateQualifies(careUpdateKind, parsed.careUpdate);
-  }), [careUpdateKind, messages]);
-  const qualifyingCareUpdateCount = useMemo(() => messages.reduce((count, message) => {
-    const parsed = parseServiceMessage(message.content);
-    if (parsed.kind !== "service_care_update" || !parsed.careUpdate) return count;
-    return careUpdateQualifies(careUpdateKind, parsed.careUpdate) ? count + 1 : count;
-  }, 0), [careUpdateKind, messages]);
+  const careUpdatePetNames = useMemo(() => {
+    const card = serviceChat?.request_card;
+    if (!card) return [];
+    const names = requestCardPets(card).map((pet) => clean(pet.petName)).filter(Boolean);
+    const direct = clean(card.petName);
+    return Array.from(new Set([direct, ...names].filter(Boolean)));
+  }, [serviceChat?.request_card]);
   const hasLocalCareUpdate = useMemo(() => messages.some((message) => parseServiceMessage(message.content).kind === "service_care_update"), [messages]);
-  const careUpdateRequirementMet = careUpdateStatus?.met === true || hasQualifyingCareUpdate;
+  const requestedCareUpdateCount = Math.max(1, getRequestedCareDayCount(serviceChat?.request_card));
+  const requiredCareUpdateCount = careUpdateIsRequested(careUpdateKind)
+    ? Math.max(1, Number(careUpdateStatus?.total_required_count ?? careUpdateStatus?.required_count ?? requestedCareUpdateCount) || 1)
+    : 0;
+  const statusSubmittedCareUpdateCount = typeof careUpdateStatus?.submitted_count === "number" ? careUpdateStatus.submitted_count : 0;
+  const activeCareUpdateServiceChatId = clean(serviceChat?.id);
+  const careUpdateStatusReady = !careUpdateIsRequested(careUpdateKind) || Boolean(
+    activeCareUpdateServiceChatId
+    && clean(careUpdateStatus?.service_chat_id) === activeCareUpdateServiceChatId,
+  );
+  const careUpdateRequirementMet = !careUpdateIsRequested(careUpdateKind) || (careUpdateStatusReady && careUpdateStatus?.met === true);
   const hasSentAnyCareUpdate = Boolean(careUpdateStatus?.latest_update_at) || hasLocalCareUpdate;
-  const careUpdateGateBlocking = Boolean(isProvider && careStatus === "in_progress" && careUpdateIsGated(careUpdateKind) && careUpdateKind !== "summary" && !careUpdateRequirementMet);
-  // Daily summary is never a hard block: the carer can always complete. When a
-  // required daily summary is missing, surface a persistent banner above the
-  // composer (Send summary / Complete anyway). Backend logs the miss.
-  const summaryUpdateMissed = Boolean(isProvider && careStatus === "in_progress" && careUpdateKind === "summary" && !careUpdateRequirementMet);
-  const missedSummaryCount = Math.max(1, getRequestedCareDayCount(serviceChat?.request_card) - qualifyingCareUpdateCount);
-  const careUpdateEntryVisible = Boolean(!underReview && isProvider && careStatus === "in_progress");
+  const careUpdateRequiredCtaSatisfied = careUpdateRequirementMet;
+  const careSessionInProgress = careStatus === "in_progress" || status === "in_progress";
+  const careUpdateEntryVisible = Boolean(!underReview && isProvider && careSessionInProgress);
+  const showCareUpdateStatusLoading = Boolean(careUpdateEntryVisible && careUpdateIsRequested(careUpdateKind) && !careUpdateStatusReady);
+  const showRequiredCareUpdateAction = Boolean(careUpdateEntryVisible && careUpdateStatusReady && !careUpdateRequiredCtaSatisfied);
+  const showShareMoreUpdateAction = Boolean(careUpdateEntryVisible && careUpdateStatusReady && careUpdateRequiredCtaSatisfied);
+  const requiredCareUpdateActionText = requiredCareUpdateActionLabel(careUpdateKind, statusSubmittedCareUpdateCount, requiredCareUpdateCount);
+  const [careUpdateSheetOptional, setCareUpdateSheetOptional] = useState(false);
+  const openRequiredCareUpdateSheet = useCallback(() => {
+    setCareUpdateSheetOptional(false);
+    setActiveSheet("careUpdate");
+  }, []);
+  const openOptionalCareUpdateSheet = useCallback(() => {
+    setCareUpdateSheetOptional(true);
+    setActiveSheet("careUpdate");
+  }, []);
+  const [completionCareUpdateAttempted, setCompletionCareUpdateAttempted] = useState(false);
+  useEffect(() => {
+    if (careUpdateRequirementMet || hasSentAnyCareUpdate || careStatus !== "in_progress") setCompletionCareUpdateAttempted(false);
+  }, [careStatus, careUpdateRequirementMet, hasSentAnyCareUpdate]);
   const handleStartCompletion = useCallback(async () => {
     if (!roomId) return;
-    if (isProvider && careStatus === "in_progress" && careUpdateIsGated(careUpdateKind)) {
+    setCompletionCareUpdateAttempted(false);
+    if (isProvider && careStatus === "in_progress" && careUpdateIsRequested(careUpdateKind)) {
       try {
-        const status = await getNativeCareUpdateStatus(roomId);
+        const activeServiceChatId = clean(serviceChatRef.current?.id);
+        if (!activeServiceChatId) throw new Error("service_chat_not_found");
+        const status = await getNativeCareUpdateStatus(activeServiceChatId);
         setCareUpdateStatus(status);
-        if (!status?.met && careUpdateKind === "summary") {
-          setSummaryCompletionWarningOpen(true);
-          return;
-        }
-        if (!status?.met) {
-          haptic.error();
-          setCarePopup({ title: "One more update", body: careUpdateCopy(careUpdateKind).gateMessage });
-          return;
+        const fetchedRequirementMet = status?.met === true;
+        if (!fetchedRequirementMet) {
+          setCompletionCareUpdateAttempted(true);
+          haptic.warning();
         }
       } catch {
-        haptic.error();
-        setCarePopup({ title: "One more update", body: "Unable to verify care updates right now. Please try again." });
-        return;
+        // Fail open: a temporary status lookup problem must never become a
+        // completion warning or gate. Only a confirmed missing update is shown.
       }
-    } else if (careUpdateGateBlocking) {
-      haptic.error();
-      setCarePopup({ title: "One more update", body: careUpdateCopy(careUpdateKind).gateMessage });
-      return;
     }
     setActiveSheet("completion");
-  }, [careStatus, careUpdateGateBlocking, careUpdateKind, isProvider, roomId]);
-  const showMidCareUpdatePrompt = Boolean(!underReview && isProvider && shouldShowMidCarePrompt(serviceChat, hasSentAnyCareUpdate));
+  }, [careStatus, careUpdateKind, isProvider, roomId]);
+  const [completionEntrySlideResetKey, setCompletionEntrySlideResetKey] = useState(0);
+  const handleCompletionEntrySlide = useCallback(async () => {
+    try {
+      await handleStartCompletion();
+    } finally {
+      // The entry control remains a real slider even though the confirmations live in
+      // the completion sheet. Always return it to its resting position after the sheet
+      // opens so a retry never leaves a spent slider. A missing update is a reminder,
+      // never a completion prerequisite.
+      setCompletionEntrySlideResetKey((key) => key + 1);
+    }
+  }, [handleStartCompletion]);
   useEffect(() => {
     if (!underReview) return;
     setActiveSheet(null);
     setCarePopup(null);
-    setConfirmHandoffOpen(false);
-    setConfirmEarlyStartOpen(false);
     setConfirmBlockOpen(false);
     setConfirmWithdrawRequestOpen(false);
     setMenuOpen(false);
     setReportOpen(false);
     setProviderProfileOpen(false);
   }, [underReview]);
-  useEffect(() => {
-    if (!showMidCareUpdatePrompt || !roomId || !userId || midCareReminderNotifyRef.current) return;
-    midCareReminderNotifyRef.current = true;
-    const cacheKey = careUpdateKind === "summary"
-      ? serviceDailyCareReminderNotificationKey(userId, roomId, localDateKey())
-      : serviceMidCareReminderNotificationKey(userId, roomId);
-    void AsyncStorage.getItem(cacheKey)
-      .then(async (value) => {
-        if (value === "sent") return;
-        const { error } = await supabase.rpc("notify_service_midcare_photo_reminder", { p_chat_id: roomId });
-        if (error) throw error;
-        await AsyncStorage.setItem(cacheKey, "sent");
-      })
-      .catch((error) => {
-        midCareReminderNotifyRef.current = false;
-        console.warn("[native.service_midcare_reminder] notification_failed", {
-          message: error instanceof Error ? error.message : "unknown",
-        });
-      });
-  }, [careUpdateKind, roomId, showMidCareUpdatePrompt, userId]);
   const messageStartPin = useMemo(() => {
+    const activeServiceChatId = clean(serviceChat?.id);
+    if (!activeServiceChatId) return "";
     for (let index = messages.length - 1; index >= 0; index -= 1) {
       const parsed = parseServiceMessage(messages[index]?.content || "");
-      if (parsed.kind === "service_pin_shared" && parsed.pin) return parsed.pin;
+      if (parsed.kind === "service_pin_shared" && parsed.serviceChatId === activeServiceChatId && parsed.pin) return parsed.pin;
     }
     return "";
-  }, [messages]);
+  }, [messages, serviceChat?.id]);
   const activeStartPin = messageStartPin || sharedStartPin;
   useEffect(() => {
-    if (!messageStartPin || !roomId || !userId) return;
+    const activeServiceChatId = clean(serviceChat?.id);
+    if (!isRequester || !userId || !activeServiceChatId || serviceChat?.status !== "booked") return undefined;
+    if (!["awaiting_handoff", "pin_shared"].includes(clean(serviceChat.care_status))) return undefined;
+
+    let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let showedError = false;
+    const preparePin = async () => {
+      try {
+        const { data, error } = await supabase.rpc("prepare_service_start_pin_by_service_id", { p_service_chat_id: activeServiceChatId });
+        if (error) throw error;
+        const pin = sanitizeStartPin((data as { pin?: unknown } | null)?.pin);
+        if (!pin) throw new Error("start_pin_not_prepared");
+        if (cancelled || clean(serviceChatRef.current?.id) !== activeServiceChatId) return;
+        setSharedStartPin(pin);
+        void writeCachedStartPin(userId, activeServiceChatId, pin);
+      } catch (error) {
+        if (cancelled || clean(serviceChatRef.current?.id) !== activeServiceChatId) return;
+        if (!activeStartPin && !showedError) {
+          showedError = true;
+          setCarePopup({ title: "Care Session PIN", body: safeCareErrorMessage(error, "Unable to prepare the Care Session PIN. Retrying automatically.") });
+        }
+        retryTimer = setTimeout(() => void preparePin(), 3000);
+      }
+    };
+    void preparePin();
+    return () => {
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+    };
+  }, [activeStartPin, isRequester, serviceChat?.care_status, serviceChat?.id, serviceChat?.status, userId]);
+  useEffect(() => {
+    const activeServiceChatId = clean(serviceChat?.id);
+    if (!messageStartPin || !activeServiceChatId || !userId) return;
     setSharedStartPin(messageStartPin);
-    void writeCachedStartPin(userId, roomId, messageStartPin);
-  }, [messageStartPin, roomId, userId]);
+    void writeCachedStartPin(userId, activeServiceChatId, messageStartPin);
+  }, [messageStartPin, serviceChat?.id, userId]);
   const requesterEditableRequestCard = useMemo(
     () => requestCardWithCareScopeUpdates(serviceChat?.request_card, serviceChat?.quote_card, serviceChat?.care_scope?.actorRole),
     [serviceChat?.care_scope?.actorRole, serviceChat?.quote_card, serviceChat?.request_card],
@@ -4884,10 +5505,10 @@ export function NativeServiceChatScreen({
     const timer = setInterval(() => setPaymentNowMs(Date.now()), 1000);
     return () => clearInterval(timer);
   }, [serviceChat?.care_scope, serviceChat?.care_scope?.paymentPendingExpiresAt, serviceChat?.care_scope?.paymentStatus]);
-  const requestSheetStartsFresh = requestSheetMode === "new" || Boolean(isRequester && status === "completed");
+  const requestSheetStartsFresh = requestSheetMode === "new" || careConversationState.kind === "clean_slate" || careConversationState.kind === "completed";
   const requestSheetInitialCard = requestSheetStartsFresh ? null : requesterEditableRequestCard;
   const requestSheetSubmitLabel: "Send" | "Update" = requestSheetStartsFresh || !serviceChat?.request_sent_at ? "Send" : "Update";
-  const currentBookingDetailsEditable = Boolean(status === "pending" && !underReview);
+  const currentBookingDetailsEditable = careConversationState.kind === "scope_pending";
   const requestSheetOpen = activeSheet === "request" && (requestSheetStartsFresh || currentBookingDetailsEditable);
   const quoteSheetOpen = activeSheet === "quote" && currentBookingDetailsEditable;
   useEffect(() => {
@@ -4904,12 +5525,147 @@ export function NativeServiceChatScreen({
     if (role === "provider" && serviceChat.provider_mark_finished) return false;
     return serviceChat.care_status === "in_progress" || serviceChat.status === "in_progress";
   }, [role, serviceChat, underReview]);
-  // "Slide to Complete" is the REAL slide-to-confirm inside CompletionSheet — it belongs
-  // there, where the actual gesture lives. The composer entry point is a tap button (same
-  // pattern as every other composer CTA: "Review & Sign", "Accept & pay") that opens that
-  // sheet, so it must not claim to be a slider.
+  const careSessionActiveForLockScreen = useMemo(() => {
+    if (underReview || !serviceChat || !role) return false;
+    if (serviceChat.requester_mark_finished && serviceChat.provider_mark_finished) return false;
+    return serviceChat.care_status === "in_progress" || serviceChat.status === "in_progress";
+  }, [role, serviceChat, underReview]);
+  // Name and avatar must come from the same pet in the same pass — computing
+  // them as two independently-deduped lists (as this used to) risks pairing
+  // pet A's name with pet B's photo once the Live Activity zips them by index.
+  const activeCarePetPayload = useMemo(() => {
+    const pets: { name: string; rawUrl: string | null }[] = [];
+    const seenNames = new Set<string>();
+    const requestCardHasPets = Boolean(serviceChat?.request_card && (requestCardPets(serviceChat.request_card).length > 0 || clean(serviceChat.request_card.petName)));
+    const quoteCardHasPets = Boolean(serviceChat?.quote_card && ((Array.isArray(serviceChat.quote_card.pets) && serviceChat.quote_card.pets.length > 0) || clean(serviceChat.quote_card.petName) || clean(serviceChat.quote_card.petId)));
+    const snapshotCard = serviceChat?.booking_snapshot ? serviceRequestCardFromBookingSnapshot(serviceChat.booking_snapshot) : null;
+    const snapshotHasPets = Boolean(snapshotCard && (requestCardPets(snapshotCard).length > 0 || clean(snapshotCard.petName)));
+    const scopedSource = snapshotHasPets
+      ? "booking_snapshot"
+      : requestCardHasPets
+        ? "request_card_fallback"
+        : quoteCardHasPets
+          ? "quote_card_fallback"
+          : "missing";
+    const scopedCard = snapshotHasPets
+      ? snapshotCard
+      : requestCardHasPets
+        ? serviceChat?.request_card
+        : quoteCardHasPets
+          ? serviceChat?.quote_card
+          : null;
+    const scopedPets = scopedCard?.pets;
+    if (scopedCard && scopedPets) {
+      for (const pet of scopedPets) {
+        const name = clean((pet as { petName?: unknown }).petName) || clean(scopedCard.petName);
+        const rawUrl = clean((pet as { petPhotoUrl?: unknown }).petPhotoUrl);
+        const dedupeKey = clean((pet as { petId?: unknown }).petId) || name || rawUrl || "";
+        if (!dedupeKey || seenNames.has(dedupeKey)) continue;
+        seenNames.add(dedupeKey);
+        pets.push({ name, rawUrl: rawUrl || null });
+      }
+      return { source: scopedSource, pets };
+    }
+    const direct = clean(scopedCard?.petName);
+    if (scopedCard && direct && !seenNames.has(direct)) {
+      seenNames.add(direct);
+      const rawUrl = clean("petPhotoUrl" in scopedCard ? scopedCard.petPhotoUrl : undefined);
+      pets.push({ name: direct, rawUrl: rawUrl || null });
+      return { source: scopedSource, pets };
+    }
+    return { source: scopedSource, pets };
+  }, [serviceChat?.booking_snapshot, serviceChat?.quote_card, serviceChat?.request_card]);
+  const activeCarePets = activeCarePetPayload.pets;
+  useEffect(() => {
+    if (!roomId || !serviceChat) return;
+    const activeServiceId = clean(serviceChat.id);
+    // Keep the same immutable clock precedence as cold hydration and the
+    // dispatcher. Chat writes mutate updated_at and must never reset progress.
+    const startedAt = serviceChat.in_progress_at || serviceChat.checkin_submitted_at || serviceChat.booked_at;
+    const currentUserMarkedFinished = (role === "requester" && serviceChat.requester_mark_finished) || (role === "provider" && serviceChat.provider_mark_finished);
+    const bothSidesMarkedFinished = serviceChat.requester_mark_finished && serviceChat.provider_mark_finished;
+    const noLongerInProgress = bothSidesMarkedFinished || serviceChat.care_status === "completed" || serviceChat.status === "completed" || serviceChat.status === "cancelled" || underReview;
+    if (noLongerInProgress) {
+      void endCareSessionActivity(activeServiceId || roomId, [roomId]);
+      return;
+    }
+    if (careSessionActiveForLockScreen && startedAt) {
+      void (async () => {
+        let canonicalPets = activeCarePets;
+        if (activeServiceId) {
+          const { data: servicePets, error: servicePetsError } = await supabase.rpc("get_service_care_pet_scope", {
+            p_service_id: activeServiceId,
+          });
+          if (!servicePetsError && Array.isArray(servicePets) && servicePets.length > 0) {
+            canonicalPets = servicePets.map((pet: { petName?: unknown; petPhotoUrl?: unknown }) => ({
+              name: clean(pet.petName) || "Pet",
+              rawUrl: clean(pet.petPhotoUrl) || null,
+            }));
+          } else if (servicePetsError) {
+            console.log("[HUDDLE_ACTIVE_SESSION_NATIVE]", {
+              event: "care_pet_scope_resolve_failed",
+              serviceId: activeServiceId,
+              message: servicePetsError.message,
+            });
+          }
+        }
+        const resolvedPets = await Promise.all(canonicalPets.map(async (pet) => ({
+          name: pet.name,
+          avatarUrl: await resolveNativePetImageUrlAsync(pet.rawUrl).catch((error) => {
+            console.log("[HUDDLE_ACTIVE_SESSION_NATIVE]", {
+              event: "care_pet_avatar_resolve_failed",
+              roomId,
+              rawKind: pet.rawUrl?.startsWith("http") ? "http" : pet.rawUrl ? "storage_path" : "missing",
+              message: error instanceof Error ? error.message : String(error || "unknown"),
+            });
+            return null;
+          }),
+        })));
+        console.log("[HUDDLE_ACTIVE_SESSION_NATIVE]", {
+          event: "care_pet_avatar_payload",
+          roomId,
+          serviceId: activeServiceId || null,
+          source: activeServiceId && canonicalPets !== activeCarePets ? "service_care_scope" : activeCarePetPayload.source,
+          pets: resolvedPets.map((pet) => ({
+            name: pet.name,
+            hasAvatar: Boolean(pet.avatarUrl),
+            avatarKind: pet.avatarUrl?.includes("/storage/v1/object/public/pets/") ? "public" : pet.avatarUrl?.includes("/storage/v1/object/sign/pets/") ? "signed" : pet.avatarUrl ? "other" : "missing",
+          })),
+        });
+        await updateCareSessionActivity({
+          chatId: roomId,
+          serviceId: activeServiceId || null,
+          startedAt,
+          expiresAt: serviceScheduledEndIso(serviceChat.request_card, serviceChat.booking_snapshot) || null,
+          pets: resolvedPets,
+          petsTotalCount: canonicalPets.length,
+          deepLink: `huddle:///service-chat?room=${encodeURIComponent(roomId)}&service=${encodeURIComponent(activeServiceId || roomId)}&sheet=completion`,
+          completionRole: role === "provider" ? "provider" : "requester",
+          showAction: !currentUserMarkedFinished,
+          awaitingText: currentUserMarkedFinished
+            ? role === "provider"
+              ? "Awaiting owner to confirm completion."
+              : "Awaiting carer to confirm completion."
+            : null,
+        });
+      })();
+      return;
+    }
+    if (careSessionActiveForLockScreen && !startedAt) {
+      console.log("[HUDDLE_ACTIVE_SESSION_NATIVE]", {
+        event: "care_started_at_missing",
+        roomId,
+        serviceId: activeServiceId || null,
+      });
+    }
+  }, [activeCarePetPayload.source, activeCarePets, careSessionActiveForLockScreen, role, roomId, serviceChat, underReview]);
+  useEffect(() => {
+    if (params.sheet !== "completion" || !canConfirmCompletion) return;
+    setActiveSheet("completion");
+  }, [canConfirmCompletion, params.sheet]);
+  // Completion is always entered through a real slide gesture. The sheet then captures the
+  // required completion confirmations before its final slide submits the database action.
   const completionCtaLabel = "Slide to Complete";
-  const completionComposerCtaLabel = "Complete Care Session";
   const canOpenPeerCarerProfile = Boolean(serviceChat?.provider_id && counterpart?.id === serviceChat.provider_id);
   const canOpenPeerPublicProfile = Boolean(counterpart?.id && counterpart.id !== serviceChat?.provider_id);
 
@@ -4974,20 +5730,35 @@ export function NativeServiceChatScreen({
   }, [careAgreementDownloading, careAgreementPdfUrl]);
 
   const loadCareHistoryRows = useCallback(async () => {
-    if (!serviceChat || !userId) {
-      setCareHistoryRows([]);
+    // A cancelled/completed conversation deliberately has no active serviceChat.
+    // History must still load the linked agreement snapshot for the same pair;
+    // otherwise it falls back to the flattened terminal row and loses the frozen
+    // Care Scope, terms and pet media.
+    const historyAnchor = serviceChat || careHistoryRows.find((row) => (
+      row.requester_id === userId || row.provider_id === userId
+    )) || null;
+    if (!historyAnchor || !userId) {
+      if (!userId) setCareHistoryRows([]);
       return;
     }
-    setCareHistoryLoading(true);
+    const requestSequence = ++careHistoryLoadSequenceRef.current;
+    const cachedHistory = await readCachedServiceChatHistory(userId, sessionKey || null, roomId);
+    if (requestSequence !== careHistoryLoadSequenceRef.current) return;
+    if (cachedHistory.length > 0) setCareHistoryRows(cachedHistory);
+    setCareHistoryLoading(cachedHistory.length === 0 && careHistoryRows.length === 0);
     try {
-      const { data: historyRowData, error: historyRowError } = await supabase
-        .from("service_chats")
-        .select(SERVICE_CHAT_SELECT_FIELDS)
-        .eq("requester_id", serviceChat.requester_id)
-        .eq("provider_id", serviceChat.provider_id)
-        .or("completed_at.not.is.null,status.eq.completed,care_status.eq.completed,disputed_at.not.is.null")
-        .order("completed_at", { ascending: false, nullsFirst: false })
-        .limit(20);
+      const { data: historyRowData, error: historyRowError } = await withTimeout(
+        supabase
+          .from("service_chats")
+          .select(SERVICE_CHAT_SELECT_FIELDS)
+          .eq("requester_id", historyAnchor.requester_id)
+          .eq("provider_id", historyAnchor.provider_id)
+          .or("completed_at.not.is.null,status.eq.completed,status.eq.cancelled,care_status.eq.completed,care_status.eq.cancelled,disputed_at.not.is.null")
+          .order("completed_at", { ascending: false, nullsFirst: false })
+          .limit(20),
+        12_000,
+        "care_history_load_timeout",
+      );
       if (historyRowError) throw historyRowError;
       const rawHistoryRows = (Array.isArray(historyRowData) ? historyRowData : []) as unknown as ServiceChatRow[];
       const historyIds = rawHistoryRows.map((item) => item.id).filter(Boolean);
@@ -4995,7 +5766,7 @@ export function NativeServiceChatScreen({
         { data: historyDisputeRows, error: historyDisputeError },
         { data: historyAgreementRows, error: historyAgreementError },
       ] = historyIds.length > 0
-        ? await Promise.all([
+        ? await withTimeout(Promise.all([
           supabase
             .from("service_disputes")
             .select("service_chat_id,status,final_provider_receives_amount,final_customer_refund_amount,executed_at,decision_at,updated_at")
@@ -5003,9 +5774,9 @@ export function NativeServiceChatScreen({
             .order("updated_at", { ascending: false }),
           supabase
             .from("service_care_agreements")
-            .select("service_chat_id,status,agreement_version,requester_signed_at,provider_signed_at,pdf_path,pdf_generated_at,scope_version_id,scope_hash,payment_intent_id,payment_status")
+            .select("service_chat_id,status,agreement_version,booking_snapshot,requester_signed_at,provider_signed_at,pdf_path,pdf_generated_at,scope_version_id,scope_hash,payment_intent_id,payment_status")
             .in("service_chat_id", historyIds),
-        ])
+        ]), 12_000, "care_history_details_timeout")
         : [
           { data: [], error: null },
           { data: [], error: null },
@@ -5023,19 +5794,37 @@ export function NativeServiceChatScreen({
         const parsed = serviceCareAgreementFromRow(agreement);
         if (serviceChatId && parsed) agreementByServiceChatId.set(serviceChatId, parsed);
       }
-      setCareHistoryRows(rawHistoryRows.map((item) => frozenHistoryServiceChatRow({
+      if (requestSequence !== careHistoryLoadSequenceRef.current) return;
+      const resolvedHistoryRows = rawHistoryRows.map((item) => frozenHistoryServiceChatRow({
         ...attachServiceDisputeResolution(item, disputeByServiceChatId.get(item.id) || null),
         care_agreement: agreementByServiceChatId.get(item.id) || null,
-      })));
+      }));
+      setCareHistoryRows(resolvedHistoryRows);
+      void writeCachedServiceChatHistory(userId, sessionKey || null, roomId, resolvedHistoryRows);
     } catch (error) {
       console.warn("[native.service_history] load_failed", {
         message: error instanceof Error ? error.message : "unknown",
       });
-      setCareHistoryRows([]);
+      // Keep the last confirmed local snapshot visible when reconciliation fails.
     } finally {
-      setCareHistoryLoading(false);
+      if (requestSequence === careHistoryLoadSequenceRef.current) setCareHistoryLoading(false);
     }
-  }, [serviceChat, userId]);
+  }, [careHistoryRows, roomId, serviceChat, sessionKey, userId]);
+
+  const closeCareHistory = useCallback(() => {
+    // Ignore any in-flight history query before unmounting the sheet.
+    careHistoryLoadSequenceRef.current += 1;
+    setCareHistoryLoading(false);
+    setCareHistoryOpen(false);
+  }, []);
+
+  const paymentHistoryDeepLinkHandledRef = useRef("");
+  useEffect(() => {
+    const exactServiceChatId = clean(params.historyService);
+    if (!exactServiceChatId || !activeServiceResolved || paymentHistoryDeepLinkHandledRef.current === exactServiceChatId) return;
+    paymentHistoryDeepLinkHandledRef.current = exactServiceChatId;
+    void loadCareHistoryRows().finally(() => setCareHistoryOpen(true));
+  }, [activeServiceResolved, loadCareHistoryRows, params.historyService]);
 
   const closeProviderProfile = useCallback(() => {
     providerDragY.setValue(0);
@@ -5075,39 +5864,61 @@ export function NativeServiceChatScreen({
     }
     const requestRoomId = roomId;
     const requestSessionKey = sessionKey || null;
+    const requestServiceId = params.service || null;
     const requestSeq = ++loadSeqRef.current;
+    if (!silent) setActiveServiceResolved(false);
     let paintedCachedMessages = false;
+    const messageSnapshotPromise = fetchNativeChatDialogueSnapshot({ roomId: requestRoomId, limit: SERVICE_MESSAGE_PAGE_SIZE + 1, accessToken });
     if (!silent) {
-      const cachedRow = await readCachedServiceChatRow(userId, requestSessionKey, requestRoomId);
+      const [cachedRow, cachedMessages] = await Promise.all([
+        readCachedServiceChatRow(userId, requestSessionKey, requestRoomId),
+        readCachedNativeChatMessages(userId, requestRoomId, { accessChecked: true, sessionKey: requestSessionKey }),
+      ]);
       let paintedCache = false;
-      if (cachedRow && isCurrentServiceChatRequest(requestRoomId, requestSessionKey) && requestSeq === loadSeqRef.current) {
-        setServiceChat(cachedRow);
-        paintedCache = true;
-        const cachedMessages = await readCachedNativeChatMessages(userId, requestRoomId, { accessChecked: true, sessionKey: requestSessionKey });
-        if (cachedMessages.length > 0 && isCurrentServiceChatRequest(requestRoomId, requestSessionKey) && requestSeq === loadSeqRef.current) {
-          setMessages(cachedMessages.map(nativeChatMessageToServiceRow));
-          paintedCachedMessages = true;
+      const cachedRowMatchesRoute = !requestServiceId || clean(cachedRow?.id) === requestServiceId;
+      if (cachedRow && cachedRowMatchesRoute && isCurrentServiceChatRequest(requestRoomId, requestSessionKey) && requestSeq === loadSeqRef.current) {
+        if (isActiveServiceChatRow(cachedRow)) {
+          setServiceChat(cachedRow);
           paintedCache = true;
+        } else {
+          setServiceChat(null);
+          await clearCachedServiceChatRow(userId, requestSessionKey, requestRoomId);
         }
+      }
+      if (cachedMessages.length > 0 && isCurrentServiceChatRequest(requestRoomId, requestSessionKey) && requestSeq === loadSeqRef.current) {
+        hydrateServiceMessages(cachedMessages.map(nativeChatMessageToServiceRow), { replace: true, source: "cache" });
+        paintedCachedMessages = true;
+        paintedCache = true;
       }
       const hasVisibleContent = Boolean(serviceChatRef.current) || messagesRef.current.length > 0;
       if (isCurrentServiceChatRequest(requestRoomId, requestSessionKey) && requestSeq === loadSeqRef.current) setLoading(!paintedCache && !hasVisibleContent);
     }
     try {
-      try {
-        const { error } = await supabase.rpc("refresh_service_chat_status", { p_chat_id: requestRoomId });
-        if (error) {
-          console.warn("[native.service] refresh_status_failed", {
-            code: error.code,
-            message: error.message,
-          });
-        }
-      } catch (error) {
-        console.warn("[native.service] refresh_status_failed", {
-          message: error instanceof Error ? error.message : "unknown",
-        });
-      }
       if (!isCurrentServiceChatRequest(requestRoomId, requestSessionKey) || requestSeq !== loadSeqRef.current) return;
+      void messageSnapshotPromise.then((messageSnapshot) => {
+        if (!isCurrentServiceChatRequest(requestRoomId, requestSessionKey) || requestSeq !== loadSeqRef.current) return;
+        const newestRows = messageSnapshot.messages.map(nativeChatMessageToServiceRow).filter(Boolean);
+        const nextMessages = newestRows.slice(Math.max(0, newestRows.length - SERVICE_MESSAGE_PAGE_SIZE));
+        setHasOlderMessages(newestRows.length > SERVICE_MESSAGE_PAGE_SIZE);
+        hydrateServiceMessages(nextMessages, {
+          cacheRoomId: requestRoomId,
+          cacheUserId: userId,
+          replace: !silent,
+          sessionKey: requestSessionKey,
+          source: "db",
+        });
+        if (nextMessages.length > 0 && (forceScrollToLatestRef.current || nearBottomRef.current || messagesRef.current.length === 0)) {
+          forceScrollToLatestRef.current = false;
+          nearBottomRef.current = true;
+          scrollServiceMessagesToLatest(false);
+        }
+        if (nextMessages.some((message) => message.sender_id !== userId)) {
+          void markNativeChatRoomRead({ roomId: requestRoomId, userId, accessToken, sessionKey: requestSessionKey })
+            .then(() => invalidateNativeChatReadCaches(userId))
+            .catch((error) => console.warn("[native.service] mark_room_read_failed", error));
+        }
+        setLoading(false);
+      }).catch((error) => console.warn("[native.service] initial_message_snapshot_failed", error));
       const { data: rowData, error: rowError } = await supabase
         .from("service_chats")
         .select(SERVICE_CHAT_SELECT_FIELDS)
@@ -5131,8 +5942,182 @@ export function NativeServiceChatScreen({
           .map((item) => clean((item as { service_chat_id?: unknown }).service_chat_id))
           .filter(Boolean),
       );
-      const row = selectActiveServiceChatRow(serviceRows, activeScopeServiceChatIds);
-      if (!row) throw new Error("service_chat_not_found");
+      const row = selectServiceChatRowForRoute(serviceRows, activeScopeServiceChatIds, requestServiceId);
+      if (!row) {
+        setServiceChat(null);
+        setActiveServiceResolved(true);
+        setCareUpdateStatus(null);
+        setHasReviewed(false);
+        setSharedStartPin("");
+        // With no active booking, every terminal card must still hydrate from
+        // its frozen Care Scope agreement. The service row's compact booking
+        // snapshot is intentionally not a history display source.
+        const terminalRows = serviceRows.filter(isServiceChatHistoryMenuEligible);
+        const terminalIds = terminalRows.map((item) => item.id).filter(Boolean);
+        // A clean-slate chat has no active scope, but Book Care still needs the
+        // current owner's pets and the carer's actual offered services. Previously
+        // this branch returned before either was loaded, so the request form fell
+        // back to the global service list and looked as though it was disconnected
+        // from the owner's pet profile.
+        const latestTerminalRow = terminalRows[0] || null;
+        const cleanSlateProviderId = clean(latestTerminalRow?.provider_id)
+          || clean(params.providerId || params.peerId);
+        const cleanSlateCounterpartId = latestTerminalRow
+          ? clean(latestTerminalRow.requester_id) === userId
+            ? clean(latestTerminalRow.provider_id)
+            : clean(latestTerminalRow.requester_id)
+          : clean(params.peerId || params.providerId || selectedHandoffRow?.peerUserId);
+        const [
+          { data: cleanSlatePetRows },
+          { data: cleanSlateCurrentProfileRow },
+          cleanSlatePublicProfile,
+          { data: cleanSlateProviderProfile },
+        ] = await Promise.all([
+          supabase
+            .from("pets")
+            .select("id,owner_id,name,species,breed,pet_size,gender,neutered_spayed,dob,weight,weight_unit,bio,routine,vet_contact,microchip_id,temperament,vet_visit_records,set_reminder,medications,photo_url,is_active,is_public,updated_at")
+            .eq("owner_id", userId)
+            .eq("is_active", true)
+            .order("created_at", { ascending: true }),
+          supabase
+            .from("profiles")
+            .select("display_name,location_country,phone,care_contact_number")
+            .eq("id", userId)
+            .maybeSingle(),
+          cleanSlateCounterpartId
+            ? fetchNativePublicProfile({
+              accessToken,
+              fallbackData: {
+                id: cleanSlateCounterpartId,
+                avatar_url: resolveRouteParamAvatarUrl(params.avatar),
+                display_name: params.name || null,
+              },
+              sessionKey,
+              profileUserId: cleanSlateCounterpartId,
+              viewerId: userId,
+            }).catch(() => null)
+            : Promise.resolve(null),
+          cleanSlateProviderId
+            ? supabase
+              .from("pet_care_profiles")
+              .select("stripe_payout_status,stripe_account_id,skills,rates,services_offered,location_styles,area_name,area_country,area_lat,area_lng,currency,preferred_meetup_areas")
+              .eq("user_id", cleanSlateProviderId)
+              .maybeSingle()
+            : Promise.resolve({ data: null }),
+        ]);
+        if (!isCurrentServiceChatRequest(requestRoomId, requestSessionKey) || requestSeq !== loadSeqRef.current) return;
+        setPets(((cleanSlatePetRows || []) as PetOption[]).filter(Boolean));
+        setCurrentDisplayName(clean((cleanSlateCurrentProfileRow as { display_name?: unknown } | null)?.display_name));
+        setCurrentUserPhone(clean((cleanSlateCurrentProfileRow as { care_contact_number?: unknown; phone?: unknown } | null)?.care_contact_number) || clean((cleanSlateCurrentProfileRow as { phone?: unknown } | null)?.phone));
+        setCurrentUserCountry(clean((cleanSlateCurrentProfileRow as { location_country?: unknown } | null)?.location_country) || null);
+        const cleanSlateProviderRecord = cleanSlateProviderProfile as Record<string, unknown> | null;
+        const cleanSlateRateRows = parseProviderRateRows(cleanSlateProviderRecord?.rates);
+        const hasExplicitCleanSlateRates = cleanSlateRateRows.length > 0;
+        let cleanSlateProviderServices = parseProviderRateServices(cleanSlateRateRows, cleanSlateProviderRecord?.services_offered);
+        const cleanSlateMeetupAreas = normalizeCareLocationAreas(cleanSlateProviderRecord?.preferred_meetup_areas);
+        let cleanSlateServiceCurrencies = nativeCarerServiceCurrencies(
+          clean(cleanSlateProviderRecord?.area_country),
+          cleanSlateMeetupAreas.map((area) => area.country),
+        );
+        const asCoordinate = (value: unknown) => {
+          const coordinate = Number(value);
+          return Number.isFinite(coordinate) && coordinate !== 0 ? coordinate : null;
+        };
+        let cleanSlateServiceAreas: NativeCareServiceArea[] = [
+          ...(clean(cleanSlateProviderRecord?.area_country) || asCoordinate(cleanSlateProviderRecord?.area_lat)
+            ? [{
+              country: clean(cleanSlateProviderRecord?.area_country),
+              lat: asCoordinate(cleanSlateProviderRecord?.area_lat),
+              lng: asCoordinate(cleanSlateProviderRecord?.area_lng),
+            }]
+            : []),
+          ...cleanSlateMeetupAreas.map((area) => ({ country: area.country, lat: area.lat, lng: area.lng })),
+        ];
+        if (cleanSlateProviderServices.length === 0 && cleanSlateProviderId && accessToken) {
+          const providerDetail = await fetchNativeServiceProviderDetail({
+            accessToken,
+            cacheWriteGuard: () => isCurrentServiceChatRequest(requestRoomId, requestSessionKey) && requestSeq === loadSeqRef.current,
+            providerUserId: cleanSlateProviderId,
+            sessionKey: requestSessionKey,
+            userId,
+          }).catch(() => null);
+          if (!isCurrentServiceChatRequest(requestRoomId, requestSessionKey) || requestSeq !== loadSeqRef.current) return;
+          if (providerDetail?.servicesOffered?.length) cleanSlateProviderServices = providerDetail.servicesOffered.map(clean).filter(Boolean);
+          if (cleanSlateServiceCurrencies.length === 0 && providerDetail) {
+            cleanSlateServiceCurrencies = nativeCarerServiceCurrencies(
+              providerDetail.areaCountry,
+              providerDetail.preferredMeetupAreas.map((area) => area.country),
+            );
+          }
+          if (cleanSlateServiceAreas.length === 0 && providerDetail) {
+            cleanSlateServiceAreas = [
+              ...(clean(providerDetail.areaCountry) || asCoordinate((providerDetail as { areaLat?: unknown }).areaLat)
+                ? [{
+                  country: clean(providerDetail.areaCountry),
+                  lat: asCoordinate((providerDetail as { areaLat?: unknown }).areaLat),
+                  lng: asCoordinate((providerDetail as { areaLng?: unknown }).areaLng),
+                }]
+                : []),
+              ...providerDetail.preferredMeetupAreas.map((area) => ({ country: area.country, lat: area.lat, lng: area.lng })),
+            ];
+          }
+        }
+        if (cleanSlateCounterpartId) {
+          setCounterpart({
+            id: cleanSlateCounterpartId,
+            displayName: clean(cleanSlatePublicProfile?.displayName) || clean(params.name) || "Care chat",
+            avatarUrl: cleanSlatePublicProfile?.resolvedPhotoUrls.cover || resolveRouteParamAvatarUrl(params.avatar),
+            updatedAt: clean(cleanSlatePublicProfile?.updatedAt) || null,
+            stripePayoutStatus: clean(cleanSlateProviderRecord?.stripe_payout_status) || null,
+            stripeAccountId: clean(cleanSlateProviderRecord?.stripe_account_id) || null,
+            skills: normalizeServiceSkillLabels(cleanSlateProviderRecord?.skills),
+            providerServices: cleanSlateProviderServices,
+            providerLocationStyles: Array.isArray(cleanSlateProviderRecord?.location_styles) ? (cleanSlateProviderRecord.location_styles as string[]).map(clean).filter(Boolean) : [],
+            providerAreaName: clean(cleanSlateProviderRecord?.area_name),
+            providerCurrency: clean(cleanSlateProviderRecord?.currency),
+            providerHasPaidRates: hasExplicitCleanSlateRates ? hasPaidNativeRateRows(cleanSlateRateRows) : true,
+            providerHasVoluntaryRates: hasExplicitCleanSlateRates ? hasVoluntaryNativeRateRows(cleanSlateRateRows) : false,
+            providerVolunteerOnly: hasExplicitCleanSlateRates ? isVolunteerOnlyNativeRateRows(cleanSlateRateRows) : false,
+            providerCountry: clean(cleanSlatePublicProfile?.locationName) || null,
+            providerServiceSearchCountry: clean(cleanSlateProviderRecord?.area_country) || clean(cleanSlatePublicProfile?.locationCountry) || null,
+            providerAreaCountry: clean(cleanSlateProviderRecord?.area_country) || null,
+            providerProfileCountry: clean(cleanSlatePublicProfile?.locationCountry) || null,
+            providerServiceCurrencies: cleanSlateServiceCurrencies,
+            providerServiceAreas: cleanSlateServiceAreas,
+          });
+        }
+        const { data: terminalAgreementRows, error: terminalAgreementError } = terminalIds.length > 0
+          ? await withTimeout(
+            supabase
+              .from("service_care_agreements")
+              .select("service_chat_id,status,agreement_version,booking_snapshot,requester_signed_at,provider_signed_at,pdf_path,pdf_generated_at,scope_version_id,scope_hash,payment_intent_id,payment_status")
+              .in("service_chat_id", terminalIds),
+            12_000,
+            "care_history_agreements_timeout",
+          )
+          : { data: [], error: null };
+        if (!isCurrentServiceChatRequest(requestRoomId, requestSessionKey) || requestSeq !== loadSeqRef.current) return;
+        if (terminalAgreementError) throw terminalAgreementError;
+        const terminalAgreementByServiceId = new Map<string, ServiceCareAgreementRecord>();
+        for (const agreement of Array.isArray(terminalAgreementRows) ? terminalAgreementRows : []) {
+          const serviceChatId = clean((agreement as { service_chat_id?: unknown }).service_chat_id);
+          const parsed = serviceCareAgreementFromRow(agreement);
+          if (serviceChatId && parsed) terminalAgreementByServiceId.set(serviceChatId, parsed);
+        }
+        const resolvedTerminalRows = terminalRows.map((item) => frozenHistoryServiceChatRow({
+          ...item,
+          care_agreement: terminalAgreementByServiceId.get(item.id) || null,
+        }));
+        setCareHistoryRows(resolvedTerminalRows);
+        void writeCachedServiceChatHistory(userId, requestSessionKey, requestRoomId, resolvedTerminalRows);
+        await clearCachedServiceChatRow(userId, requestSessionKey, requestRoomId);
+        const messageSnapshot = await messageSnapshotPromise;
+        if (!isCurrentServiceChatRequest(requestRoomId, requestSessionKey) || requestSeq !== loadSeqRef.current) return;
+        const newestRows = messageSnapshot.messages.map(nativeChatMessageToServiceRow).filter(Boolean);
+        setHasOlderMessages(newestRows.length > SERVICE_MESSAGE_PAGE_SIZE);
+        setLoading(false);
+        return;
+      }
       const [{ data: disputeRows }, { data: agreementRow }, { data: careScopeSummary }, { data: currentCareScopeVersion }] = await Promise.all([
         supabase
         .from("service_disputes")
@@ -5142,7 +6127,7 @@ export function NativeServiceChatScreen({
           .limit(10),
         supabase
           .from("service_care_agreements")
-          .select("status,agreement_version,requester_signed_at,provider_signed_at,pdf_path,pdf_generated_at,scope_version_id,scope_hash,payment_intent_id,payment_status")
+          .select("status,agreement_version,booking_snapshot,requester_signed_at,provider_signed_at,pdf_path,pdf_generated_at,scope_version_id,scope_hash,payment_intent_id,payment_status")
           .eq("service_chat_id", row.id)
           .maybeSingle(),
         supabase.rpc("current_care_scope_summary", { p_service_chat_id: row.id }),
@@ -5166,33 +6151,32 @@ export function NativeServiceChatScreen({
           : null,
       };
       setServiceChat(resolvedRow);
-      if (resolvedRow.care_status !== "pin_shared") setSharedStartPin("");
+      setActiveServiceResolved(true);
+      // A prepared owner PIN exists before the owner authorizes Start Care.
+      // Keep it through both handoff states; only a terminal/in-progress row
+      // may clear this booking-scoped display value.
+      if (!["awaiting_handoff", "pin_shared"].includes(clean(resolvedRow.care_status))) setSharedStartPin("");
       void writeCachedServiceChatRow(userId, requestSessionKey, resolvedRow);
       if (!silent && !paintedCachedMessages) {
         const cachedMessages = await readCachedNativeChatMessages(userId, requestRoomId, { accessChecked: true, sessionKey: requestSessionKey });
         if (cachedMessages.length > 0 && isCurrentServiceChatRequest(requestRoomId, requestSessionKey) && requestSeq === loadSeqRef.current) {
-          setMessages(cachedMessages.map(nativeChatMessageToServiceRow));
+          hydrateServiceMessages(cachedMessages.map(nativeChatMessageToServiceRow), { replace: true, source: "cache" });
           setLoading(false);
         }
       }
-      const [{ data: messageRows }, { data: petRows }, { data: reviewRow }, { data: currentProfileRow }, { data: careUpdateStatusData }, fallbackLocation] = await Promise.all([
-        supabase.from("chat_messages").select("id,sender_id,content,created_at").eq("chat_id", requestRoomId).order("created_at", { ascending: true }).limit(100),
-        supabase.from("pets").select("id,owner_id,name,species,breed,gender,neutered_spayed,dob,weight,weight_unit,bio,routine,vet_contact,microchip_id,temperament,vet_visit_records,set_reminder,medications,photo_url,is_active,is_public,updated_at").eq("owner_id", userId).eq("is_active", true).order("created_at", { ascending: true }),
+      const [messageSnapshot, { data: petRows }, { data: reviewRow }, { data: currentProfileRow }, { data: careUpdateStatusData }, fallbackLocation] = await Promise.all([
+        messageSnapshotPromise,
+        supabase.from("pets").select("id,owner_id,name,species,breed,pet_size,gender,neutered_spayed,dob,weight,weight_unit,bio,routine,vet_contact,microchip_id,temperament,vet_visit_records,set_reminder,medications,photo_url,is_active,is_public,updated_at").eq("owner_id", userId).eq("is_active", true).order("created_at", { ascending: true }),
         resolvedRow.status === "completed" && (resolvedRow.requester_id === userId || resolvedRow.provider_id === userId)
           ? supabase.from("service_reviews").select("id").eq("service_chat_id", row.id).eq("reviewer_id", userId).maybeSingle()
           : Promise.resolve({ data: null }),
         supabase.from("profiles").select("display_name,location_country,phone,care_contact_number").eq("id", userId).maybeSingle(),
-        supabase.rpc("get_service_care_update_status", { p_chat_id: requestRoomId }),
+        supabase.rpc("get_service_care_update_status_by_service_id", { p_service_chat_id: row.id }),
         nativeExactTokenRpc<Record<string, unknown>>("get_app_location_fallback", {}, accessToken).catch(() => ({ data: null, error: null })),
       ]);
       if (!isCurrentServiceChatRequest(requestRoomId, requestSessionKey) || requestSeq !== loadSeqRef.current) return;
-      const nextMessages = ((messageRows || []) as ChatMessageRow[]).filter(Boolean);
-      setMessages(nextMessages);
-      if (nextMessages.some((message) => message.sender_id !== userId)) {
-        void markNativeChatRoomRead({ roomId: requestRoomId, userId, accessToken, sessionKey: requestSessionKey })
-          .then(() => invalidateNativeChatReadCaches(userId))
-          .catch((error) => console.warn("[native.service] mark_room_read_failed", error));
-      }
+      const newestRows = messageSnapshot.messages.map(nativeChatMessageToServiceRow).filter(Boolean);
+      const nextMessages = newestRows.slice(Math.max(0, newestRows.length - SERVICE_MESSAGE_PAGE_SIZE));
       setCareUpdateStatus(careUpdateStatusData && typeof careUpdateStatusData === "object" ? careUpdateStatusData as NativeCareUpdateStatus : null);
       const previewUrls = Array.from(new Set(nextMessages
         .map((message) => {
@@ -5212,11 +6196,8 @@ export function NativeServiceChatScreen({
             previewUrls.forEach((url) => linkPreviewRequestsRef.current.delete(url));
           });
       }
-      if (nextMessages.length > 0) {
-        void writeCachedNativeChatMessages(userId, requestRoomId, nextMessages.map((message) => serviceRowToNativeChatMessage(message, requestRoomId)), { dbConfirmedAt: Date.now(), sessionKey: requestSessionKey, source: "db" });
-      }
       setPets(((petRows || []) as PetOption[]).filter(Boolean));
-      setHasReviewed(Boolean((reviewRow as { id?: string } | null)?.id));
+      setHasReviewed(reviewedServiceIdsRef.current.has(clean(row.id)) || Boolean((reviewRow as { id?: string } | null)?.id));
       setCurrentDisplayName(clean((currentProfileRow as { display_name?: unknown } | null)?.display_name));
       setCurrentUserPhone(clean((currentProfileRow as { care_contact_number?: unknown; phone?: unknown } | null)?.care_contact_number) || clean((currentProfileRow as { phone?: unknown } | null)?.phone));
       setCurrentUserCountry(clean(fallbackLocation.data?.country) || clean((currentProfileRow as { location_country?: unknown } | null)?.location_country) || null);
@@ -5332,7 +6313,11 @@ export function NativeServiceChatScreen({
       if (raw.includes("service_chat_not_found") && providerId && providerId !== userId && accessToken) {
         try {
           const nextChatId = await createNativeServiceChat(providerId, { accessToken, sessionKey, userId });
-          onNavigate(`/service-chat?room=${encodeURIComponent(nextChatId)}&request=1&returnTo=${encodeURIComponent(params.returnTo || "/chats?tab=service")}`);
+          if (nextChatId !== requestRoomId) {
+            onNavigate(`/service-chat?room=${encodeURIComponent(nextChatId)}&request=1&returnTo=${encodeURIComponent(params.returnTo || "/chats?tab=service")}`);
+            return;
+          }
+          await loadRef.current(false);
           return;
         } catch {
           // Fall through to the public-safe popup below.
@@ -5342,7 +6327,44 @@ export function NativeServiceChatScreen({
     } finally {
       if (!silent && isCurrentServiceChatRequest(requestRoomId, requestSessionKey) && requestSeq === loadSeqRef.current) setLoading(false);
     }
-  }, [accessToken, isCurrentServiceChatRequest, onNavigate, params.avatar, params.name, params.peerId, params.providerId, params.returnTo, roomId, sessionKey, userId]);
+  }, [accessToken, hydrateServiceMessages, isCurrentServiceChatRequest, onNavigate, params.avatar, params.name, params.peerId, params.providerId, params.returnTo, params.service, roomId, scrollServiceMessagesToLatest, selectedHandoffRow?.peerUserId, sessionKey, userId]);
+  loadRef.current = load;
+
+  const loadOlderServiceMessages = useCallback(async () => {
+    if (!roomId || !hasOlderMessages || loadingOlderMessagesRef.current) return;
+    const oldestMessage = messagesRef.current[0];
+    if (!oldestMessage?.created_at) return;
+    const requestRoomId = roomId;
+    const requestSessionKey = sessionKey || null;
+    loadingOlderMessagesRef.current = true;
+    setLoadingOlderMessages(true);
+    try {
+      const snapshot = await fetchNativeChatDialogueSnapshot({
+        accessToken,
+        beforeCreatedAt: oldestMessage.created_at,
+        limit: SERVICE_MESSAGE_PAGE_SIZE + 1,
+        roomId: requestRoomId,
+      });
+      if (!isCurrentServiceChatRequest(requestRoomId, requestSessionKey)) return;
+      const olderRows = snapshot.messages.map(nativeChatMessageToServiceRow).filter(Boolean);
+      setHasOlderMessages(olderRows.length > SERVICE_MESSAGE_PAGE_SIZE);
+      const olderMessages = olderRows.slice(Math.max(0, olderRows.length - SERVICE_MESSAGE_PAGE_SIZE));
+      if (olderMessages.length > 0) {
+        hydrateServiceMessages(olderMessages, {
+          cacheRoomId: requestRoomId,
+          cacheUserId: userId,
+          sessionKey: requestSessionKey,
+          source: "db",
+        });
+      }
+    } catch (error) {
+      console.warn("[native.service] load_older_messages_failed", error);
+      if (isCurrentServiceChatRequest(requestRoomId, requestSessionKey)) setNotice("Unable to load older messages.");
+    } finally {
+      loadingOlderMessagesRef.current = false;
+      setLoadingOlderMessages(false);
+    }
+  }, [accessToken, hasOlderMessages, hydrateServiceMessages, isCurrentServiceChatRequest, roomId, sessionKey, userId]);
 
   const scheduleRealtimeCareRefresh = useCallback((targetRoomId: string, targetSessionKey: string | null, reason: string) => {
     if (!userId || !isCurrentServiceChatRequest(targetRoomId, targetSessionKey)) return;
@@ -5352,7 +6374,8 @@ export function NativeServiceChatScreen({
       if (!isCurrentServiceChatRequest(targetRoomId, targetSessionKey)) return;
       if (__DEV__) console.debug("[native.service_chat] realtime_refresh", { reason, roomId: targetRoomId });
       void invalidateNativeChatReadCaches(userId);
-      void clearCachedServiceChatRow(userId, targetSessionKey, targetRoomId);
+      // Reconcile silently over the visible/cache-backed model. Clearing first
+      // creates a blank cold reopen if this validation is slow or offline.
       void load(true);
     }, 250);
   }, [isCurrentServiceChatRequest, load, userId]);
@@ -5371,12 +6394,11 @@ export function NativeServiceChatScreen({
   const confirmServicePayment = useCallback(async (checkoutSessionId: string, source: string) => {
     const freshAccessToken = await getFreshNativeAccessToken(accessToken);
     const activeServiceChatId = clean(serviceChatRef.current?.id);
-    if (!roomId || !activeServiceChatId || !freshAccessToken || !userId || !checkoutSessionId) return false;
+    if (!activeServiceChatId || !freshAccessToken || !userId || !checkoutSessionId) return false;
     const { data, error } = await withTimeout(supabase.functions.invoke("confirm-service-payment", {
       headers: await createFreshNativeFunctionHeaders(freshAccessToken),
       body: {
         service_chat_id: activeServiceChatId,
-        chat_id: roomId,
         checkout_session_id: checkoutSessionId,
       },
     }), SERVICE_PAYMENT_TIMEOUT_MS, "confirm_service_payment_timeout");
@@ -5460,14 +6482,14 @@ export function NativeServiceChatScreen({
       void AsyncStorage.removeItem(pendingServicePaymentKey(userId, roomId, serviceChat?.id)).catch(() => undefined);
       void AsyncStorage.removeItem(legacyPendingServicePaymentKey(userId, roomId)).catch(() => undefined);
     }
-  }, [roomId, serviceChat?.quote_card, userId]);
+  }, [roomId, serviceChat, userId]);
 
   useEffect(() => {
     if (status !== "pending" && roomId && userId) {
       void AsyncStorage.removeItem(pendingServicePaymentKey(userId, roomId, serviceChat?.id)).catch(() => undefined);
       void AsyncStorage.removeItem(legacyPendingServicePaymentKey(userId, roomId)).catch(() => undefined);
     }
-  }, [roomId, status, userId]);
+  }, [roomId, serviceChat?.id, status, userId]);
 
   useEffect(() => {
     if (!roomId || !userId) return;
@@ -5509,7 +6531,6 @@ export function NativeServiceChatScreen({
       (channel) => channel.on("postgres_changes", { event: "*", schema: "public", table: "chat_messages", filter: `chat_id=eq.${subscriptionRoomId}` }, (payload) => {
           if (!isCurrentRealtimeSubscription()) return;
           if (payload.eventType !== "INSERT") {
-            void clearCachedNativeChatMessages(userId, subscriptionRoomId, { sessionKey: subscriptionSessionKey });
             scheduleRealtimeCareRefresh(subscriptionRoomId, subscriptionSessionKey, "message_mutation");
             return;
           }
@@ -5524,39 +6545,31 @@ export function NativeServiceChatScreen({
           const kind = parseServiceMessage(mapped.content).kind;
           if (kind === "service_dispute_resolved" || kind === "service_completed") {
             void invalidateNativeChatReadCaches(userId);
-            void clearCachedServiceChatRow(userId, subscriptionSessionKey, subscriptionRoomId);
-            void clearCachedNativeChatMessages(userId, subscriptionRoomId, { sessionKey: subscriptionSessionKey });
-            setServiceChat((current) => current ? {
-              ...current,
-              status: "completed",
-              care_status: "completed",
-              completed_at: current.completed_at || new Date().toISOString(),
-            } : current);
             scheduleRealtimeCareRefresh(subscriptionRoomId, subscriptionSessionKey, kind);
           } else if (kind === "service_disputed" || kind === "service_issue_reported") {
             void invalidateNativeChatReadCaches(userId);
+            scheduleRealtimeCareRefresh(subscriptionRoomId, subscriptionSessionKey, kind);
+          } else if (kind === "service_no_start_cancelled" || kind === "service_booking_cancelled") {
+            // The terminal service row is authoritative. Clear the active mirror and
+            // validate immediately so a cached Booked/PIN surface cannot outlive it.
+            void invalidateNativeChatReadCaches(userId);
             void clearCachedServiceChatRow(userId, subscriptionSessionKey, subscriptionRoomId);
-            void clearCachedNativeChatMessages(userId, subscriptionRoomId, { sessionKey: subscriptionSessionKey });
-            setHasReportedServiceDispute((current) => current || mapped.sender_id === userId);
-            setServiceChat((current) => current ? {
-              ...current,
-              status: "disputed",
-              care_status: "under_dispute",
-              disputed_at: current.disputed_at || new Date().toISOString(),
-            } : current);
+            setSharedStartPin("");
             scheduleRealtimeCareRefresh(subscriptionRoomId, subscriptionSessionKey, kind);
           }
-          setMessages((current) => {
-            if (!isCurrentRealtimeSubscription() || current.some((message) => message.id === mapped.id)) return current;
-            const next = mergeServiceMessageRows(current, [mapped]);
-            void writeCachedNativeChatMessages(userId, subscriptionRoomId, next.map((message) => serviceRowToNativeChatMessage(message, subscriptionRoomId)), { dbConfirmedAt: Date.now(), sessionKey: subscriptionSessionKey, source: "realtime" });
-            if (nearBottomRef.current) {
-              setTimeout(() => {
-                if (isCurrentRealtimeSubscription()) scrollRef.current?.scrollToEnd({ animated: true });
-              }, 80);
-            }
-            return next;
+          if (messagesRef.current.some((message) => message.id === mapped.id)) return;
+          hydrateServiceMessages([mapped], {
+            cacheRoomId: subscriptionRoomId,
+            cacheUserId: userId,
+            sessionKey: subscriptionSessionKey,
+            source: "realtime",
           });
+          if (nearBottomRef.current || forceScrollToLatestRef.current) {
+            forceScrollToLatestRef.current = false;
+            setTimeout(() => {
+              if (isCurrentRealtimeSubscription()) scrollServiceMessagesToLatest(true);
+            }, 80);
+          }
         }),
       (status, error) => {
         if (__DEV__) console.debug("[native.service_chat] realtime_messages_status", { status, roomId: subscriptionRoomId, error: error ? String(error) : null });
@@ -5565,7 +6578,7 @@ export function NativeServiceChatScreen({
     return () => {
       void messageHandle.dispose();
     };
-  }, [isCurrentServiceChatRequest, roomId, scheduleRealtimeCareRefresh, sessionKey, userId]);
+  }, [hydrateServiceMessages, isCurrentServiceChatRequest, roomId, scheduleRealtimeCareRefresh, scrollServiceMessagesToLatest, sessionKey, userId]);
 
   useEffect(() => {
     if (!roomId || !userId) return;
@@ -5598,7 +6611,6 @@ export function NativeServiceChatScreen({
       `native-service-chat-disputes:${subscriptionServiceChatId}`,
       (channel) => channel.on("postgres_changes", { event: "*", schema: "public", table: "service_disputes", filter: `service_chat_id=eq.${subscriptionServiceChatId}` }, () => {
         if (isCurrentRealtimeSubscription()) {
-          void clearCachedNativeChatMessages(userId, subscriptionRoomId, { sessionKey: subscriptionSessionKey });
           scheduleRealtimeCareRefresh(subscriptionRoomId, subscriptionSessionKey, "service_disputes");
         }
       }),
@@ -5698,9 +6710,9 @@ export function NativeServiceChatScreen({
     haptic.primaryConfirm();
     setSending(true);
     try {
-      const hasActiveScope = Boolean(serviceChatRef.current?.care_scope?.scopeVersionId);
-      const { error } = hasActiveScope
-        ? await supabase.rpc("create_care_scope_counterproposal", { p_service_chat_id: serviceChatRef.current?.id, p_request_card: card })
+      const activeServiceChatId = clean(serviceChatRef.current?.id);
+      const { error } = activeServiceChatId
+        ? await supabase.rpc("create_care_scope_counterproposal", { p_service_chat_id: activeServiceChatId, p_request_card: card })
         : await supabase.rpc("send_service_request", { p_chat_id: roomId, p_request_card: card });
       if (error) throw error;
     } catch (error) {
@@ -5715,14 +6727,17 @@ export function NativeServiceChatScreen({
     if (!requestSheetStartsFresh) {
       return sendRequest(card);
     }
-    if (!serviceChat?.provider_id || !accessToken || !userId) {
+    // Clean slate intentionally has no active service row. The pair's hydrated
+    // carer context is the authoritative provider for creating the next row.
+    const newBookingProviderId = clean(serviceChat?.provider_id) || clean(counterpart?.id);
+    if (!newBookingProviderId || !accessToken || !userId) {
       setCarePopup({ title: "huddle Care", body: "Unable to start a new booking from this chat. Please try again from the carer profile." });
       throw new Error("new_booking_missing_provider_or_session");
     }
     haptic.primaryConfirm();
     setSending(true);
     try {
-      const nextChatId = await createNativeServiceChat(serviceChat.provider_id, { accessToken, sessionKey, userId });
+      const nextChatId = await createNativeServiceChat(newBookingProviderId, { accessToken, sessionKey, userId });
       const { error } = await supabase.rpc("send_service_request", { p_chat_id: nextChatId, p_request_card: card });
       if (error) throw error;
       await markNativeServiceTabHasDialogues(userId);
@@ -5730,14 +6745,18 @@ export function NativeServiceChatScreen({
       await invalidateNativeServiceProviderCaches(userId);
       setActiveSheet(null);
       setRequestSheetMode("current");
-      onNavigate(`/service-chat?room=${encodeURIComponent(nextChatId)}&returnTo=${encodeURIComponent(params.returnTo || "/chats?tab=service")}`);
+      if (nextChatId !== roomId) {
+        onNavigate(`/service-chat?room=${encodeURIComponent(nextChatId)}&returnTo=${encodeURIComponent(params.returnTo || "/chats?tab=service")}`);
+        return;
+      }
+      await load(true);
     } catch (error) {
       setCarePopup({ title: "huddle Care", body: safeCareErrorMessage(error, "Unable to start a new booking.") });
       throw error;
     } finally {
       setSending(false);
     }
-  }, [accessToken, onNavigate, params.returnTo, requestSheetStartsFresh, sendRequest, serviceChat?.provider_id, sessionKey, userId]);
+  }, [accessToken, counterpart?.id, load, onNavigate, params.returnTo, requestSheetStartsFresh, roomId, sendRequest, serviceChat?.provider_id, sessionKey, userId]);
   const sendQuote = useCallback((card: ServiceQuoteCard) => {
     if (status !== "pending") {
       setCarePopup({ title: "huddle Care", body: "This booking is confirmed, so the care details are now read-only." });
@@ -5757,21 +6776,31 @@ export function NativeServiceChatScreen({
     return rpcVoid("update_service_care_instruction", { p_service_chat_id: serviceChat.id, p_care_details: careDetails }, "Unable to update care instruction.");
   }, [rpcVoid, serviceChat?.id, status]);
   const withdrawRequest = useCallback(() => {
+    const activeServiceChatId = clean(serviceChatRef.current?.id);
+    if (!activeServiceChatId) return Promise.reject(new Error("service_chat_missing"));
     haptic.destructive();
-    return rpcVoid("withdraw_service_request", { p_chat_id: roomId }, "Unable to withdraw request.");
-  }, [roomId, rpcVoid]);
+    return rpcVoid("withdraw_service_request_by_service_id", { p_service_chat_id: activeServiceChatId }, "Unable to withdraw request.");
+  }, [rpcVoid]);
+  const declineCareRequest = useCallback(async () => {
+    const activeServiceChatId = clean(serviceChatRef.current?.id);
+    if (!activeServiceChatId) return Promise.reject(new Error("service_chat_missing"));
+    haptic.destructive();
+    await rpcVoid("decline_service_care_request", { p_service_chat_id: activeServiceChatId }, "Unable to decline this care request.");
+    dismissQuoteAutoOpen();
+    setActiveSheet(null);
+  }, [dismissQuoteAutoOpen, rpcVoid]);
   const performShareStartPin = useCallback(async () => {
-    if (!roomId) return;
+    const activeServiceChatId = clean(serviceChatRef.current?.id);
+    if (!activeServiceChatId) return;
     haptic.primaryConfirm();
-    setConfirmHandoffOpen(false);
     setSending(true);
     try {
-      const { data, error } = await supabase.rpc("share_service_start_pin", { p_chat_id: roomId, p_requester_confirmed: true });
+      const { data, error } = await supabase.rpc("share_service_start_pin_by_service_id", { p_service_chat_id: activeServiceChatId, p_requester_confirmed: true });
       if (error) throw error;
       const pin = sanitizeStartPin((data as { pin?: unknown } | null)?.pin);
       if (pin && userId) {
         setSharedStartPin(pin);
-        void writeCachedStartPin(userId, roomId, pin);
+        void writeCachedStartPin(userId, activeServiceChatId, pin);
       }
       setNotice(null);
       await load(true);
@@ -5781,28 +6810,8 @@ export function NativeServiceChatScreen({
     } finally {
       setSending(false);
     }
-  }, [load, roomId, userId]);
-  const shareStartPin = useCallback(() => {
-    setConfirmHandoffOpen(true);
-  }, []);
-  const allowEarlyStart = useCallback(async () => {
-    if (!roomId) return;
-    haptic.primaryConfirm();
-    setConfirmEarlyStartOpen(false);
-    setSending(true);
-    try {
-      const { error } = await supabase.rpc("allow_service_early_start", { p_chat_id: roomId, p_requester_confirmed: true });
-      if (error) throw error;
-      await load(true);
-    } catch (error) {
-      haptic.error();
-      setCarePopup({ title: "Allow early start", body: safeCareErrorMessage(error, "Unable to allow early start right now.") });
-    } finally {
-      setSending(false);
-    }
-  }, [load, roomId]);
+  }, [load, userId]);
   const openStartCareFromHandoff = useCallback(() => {
-    if (!activeStartPin) return;
     if (!canServiceStartNow(serviceChatRef.current)) {
       haptic.warning();
       setCarePopup({
@@ -5812,37 +6821,61 @@ export function NativeServiceChatScreen({
       return;
     }
     setActiveSheet("startCare");
-  }, [activeStartPin]);
-  const pickCancelEvidence = useCallback(async () => {
-    let asset: ImagePicker.ImagePickerAsset;
-    try {
-      // Best-effort request; PHPicker presents regardless, so never hard-block.
-      try { await ImagePicker.requestMediaLibraryPermissionsAsync(); } catch { /* picker still works */ }
-      const result = await ImagePicker.launchImageLibraryAsync({
-        allowsMultipleSelection: false,
-        mediaTypes: ["images"],
-        preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
-        quality: 0.86,
-        selectionLimit: 1,
-      });
-      if (result.canceled || !result.assets[0]) return;
-      asset = result.assets[0];
-    } catch (error) {
-      setCarePopup({ title: "Cancel booking", body: nativeSafeErrorCopy(error, "Couldn't open your photo library. Try again.") });
+  }, []);
+  const handledNotificationActionRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (params.notificationAction !== "start_care" || !activeServiceResolved || !serviceChat?.id || !role) return;
+    const actionKey = `${serviceChat.id}:${role}:start_care`;
+    if (handledNotificationActionRef.current === actionKey) return;
+    handledNotificationActionRef.current = actionKey;
+    if (role === "requester") {
+      if (serviceChat.status !== "booked" || !["awaiting_handoff", "pin_shared"].includes(serviceChat.care_status || "awaiting_handoff")) {
+        setCarePopup({ title: "Care is not ready to start", body: "This Care Session is no longer waiting for handoff." });
+        return;
+      }
+      setConfirmOwnerStartCareOpen(true);
       return;
     }
-    setCancelEvidenceMedia({ durationSeconds: typeof asset.duration === "number" ? asset.duration / 1000 : null, height: asset.height, kind: "image", mimeType: asset.mimeType, name: asset.fileName, size: asset.fileSize, uri: asset.uri, width: asset.width });
-  }, []);
+    openStartCareFromHandoff();
+  }, [activeServiceResolved, openStartCareFromHandoff, params.notificationAction, role, serviceChat?.care_status, serviceChat?.id, serviceChat?.status]);
+  const pickCancelEvidence = useCallback(async () => {
+    if (cancelEvidenceMedia.length >= MAX_CARE_REPORT_EVIDENCE) return;
+    try {
+      // Best-effort request; PHPicker presents regardless, so never hard-block.
+      const result = await launchNativeImageLibraryAsync({
+        allowsMultipleSelection: true,
+        mediaTypes: ["images"],
+        orderedSelection: true,
+        preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
+        quality: 0.86,
+        selectionLimit: MAX_CARE_REPORT_EVIDENCE - cancelEvidenceMedia.length,
+      });
+      if (result.canceled || result.assets.length === 0) return;
+      const selected = result.assets.map((asset) => ({ durationSeconds: typeof asset.duration === "number" ? asset.duration / 1000 : null, height: asset.height, kind: "image" as const, mimeType: asset.mimeType, name: asset.fileName, size: asset.fileSize, uri: asset.uri, width: asset.width }));
+      setCancelEvidenceMedia((current) => [...current, ...selected].slice(0, MAX_CARE_REPORT_EVIDENCE));
+    } catch (error) {
+      setCarePopup({ title: "Cancel booking", body: nativeSafeErrorCopy(error, "Couldn't open your photo library. Try again.") });
+    }
+  }, [cancelEvidenceMedia.length]);
   const cancelPaidBooking = useCallback(async () => {
     if (!roomId || !userId) return;
     haptic.destructive();
     setSending(true);
     try {
-      const evidenceUrls = cancelEvidenceMedia && serviceChat?.id
+      const evidenceUrls = cancelEvidenceMedia.length > 0 && serviceChat?.id
         ? await (async () => {
           setCancelEvidenceUploading(true);
           try {
-            return [await uploadNativeServiceCareEvidenceImage({ accessToken, media: cancelEvidenceMedia, scope: "cancellation", serviceChatId: serviceChat.id, sessionKey, userId })];
+            const uploaded = new Array<string>(cancelEvidenceMedia.length);
+            let nextIndex = 0;
+            await Promise.all(Array.from({ length: Math.min(2, cancelEvidenceMedia.length) }, async () => {
+              while (nextIndex < cancelEvidenceMedia.length) {
+                const index = nextIndex;
+                nextIndex += 1;
+                uploaded[index] = await uploadNativeServiceCareEvidenceImage({ accessToken, media: cancelEvidenceMedia[index], scope: "cancellation", serviceChatId: serviceChat.id, sessionKey, userId });
+              }
+            }));
+            return uploaded;
           } finally {
             setCancelEvidenceUploading(false);
           }
@@ -5859,16 +6892,15 @@ export function NativeServiceChatScreen({
           cancellation_reason: cancelBookingReason || null,
           evidence_urls: evidenceUrls,
           service_chat_id: activeServiceChatId,
-          chat_id: roomId,
         },
       });
       if (error) throw error;
       setConfirmCancelBookingOpen(false);
       setCancelBookingNote("");
       setCancelBookingReason("Plans changed");
-      setCancelEvidenceMedia(null);
+      setCancelEvidenceMedia([]);
       setSharedStartPin("");
-      await purgeCachedStartPin(userId, roomId);
+      await purgeCachedStartPin(userId, activeServiceChatId);
       await clearCachedServiceChatRow(userId, sessionKey || null, roomId);
       await invalidateNativeChatReadCaches(userId);
       await load(true);
@@ -5880,7 +6912,12 @@ export function NativeServiceChatScreen({
     }
   }, [accessToken, cancelBookingNote, cancelBookingReason, cancelEvidenceMedia, load, roomId, serviceChat?.id, sessionKey, userId]);
   const submitCompletion = useCallback(async (note: string, providerChecks?: { confirmedCompleted: boolean; noUnresolvedSafetyConcerns: boolean; understandsReview: boolean }, requesterChecks?: { confirmedCompleted: boolean; understandsPayoutReview: boolean }) => {
-    if (!roomId || !serviceChat) return;
+    const activeServiceChatId = clean(serviceChatRef.current?.id) || clean(serviceChat?.id);
+    if (!serviceChat || !activeServiceChatId) {
+      haptic.error();
+      setCarePopup({ title: "huddle Care", body: "Unable to find this booking. Close and reopen the chat, then try again." });
+      return;
+    }
     if (!isCareOfficiallyStarted(serviceChat)) {
       setCarePopup({ title: "huddle Care", body: "Completion is available after the provider has started care with a valid PIN check-in." });
       return;
@@ -5888,8 +6925,8 @@ export function NativeServiceChatScreen({
     setSending(true);
     try {
       if (isProvider) {
-        const { error } = await supabase.rpc("submit_provider_completion", {
-          p_chat_id: roomId,
+        const { error } = await supabase.rpc("submit_provider_completion_by_service_id", {
+          p_service_chat_id: activeServiceChatId,
           p_confirmed_completed: providerChecks?.confirmedCompleted === true,
           p_no_unresolved_safety_concerns: providerChecks?.noUnresolvedSafetyConcerns === true,
           p_understands_review: providerChecks?.understandsReview === true,
@@ -5899,15 +6936,15 @@ export function NativeServiceChatScreen({
         if (error) throw error;
       } else if (isRequester) {
         const isNoChargeVoluntaryBooking = isNoChargeServiceChat(serviceChat);
-        const { error } = await supabase.rpc("submit_requester_completion", {
-          p_chat_id: roomId,
+        const { error } = await supabase.rpc("submit_requester_completion_by_service_id", {
+          p_service_chat_id: activeServiceChatId,
           p_confirmed_completed: requesterChecks?.confirmedCompleted === true,
           p_understands_payout_review: isNoChargeVoluntaryBooking || requesterChecks?.understandsPayoutReview === true,
           p_note: note.trim() || null,
         });
         if (error) throw error;
       }
-      await supabase.rpc("complete_service_if_both_confirmed", { p_chat_id: roomId });
+      await supabase.rpc("complete_service_if_both_confirmed_by_service_id", { p_service_chat_id: activeServiceChatId });
       haptic.success();
       setActiveSheet(null);
       setNotice(null);
@@ -5918,19 +6955,20 @@ export function NativeServiceChatScreen({
     } finally {
       setSending(false);
     }
-  }, [isProvider, isRequester, load, roomId, serviceChat]);
+  }, [isProvider, isRequester, load, serviceChat]);
   const submitCheckin = useCallback(async (startPin: string, photoUrl: string, evidence?: StartCareEvidence): Promise<StartCareResult> => {
-    if (!roomId) return { ok: false, error: "Unable to find this care chat. Please reopen the booking and try again." };
+    const activeServiceChatId = clean(serviceChatRef.current?.id);
+    if (!activeServiceChatId) return { ok: false, error: "Unable to find this booking. Close and reopen the chat, then try again." };
     setSending(true);
     try {
-      const { data, error } = await supabase.rpc("submit_service_checkin", {
+      const { data, error } = await supabase.rpc("submit_service_checkin_by_service_id", {
         p_checkin_captured_at: evidence?.capturedAt || null,
         p_checkin_location_accuracy_m: evidence?.locationAccuracyM ?? null,
         p_checkin_location_lat: evidence?.locationLat ?? null,
         p_checkin_location_lng: evidence?.locationLng ?? null,
         p_checkin_location_permission_denied: evidence?.locationPermissionDenied === true,
         p_checkin_note: evidence?.note?.trim() || null,
-        p_chat_id: roomId,
+        p_service_chat_id: activeServiceChatId,
         p_photo_url: photoUrl,
         p_provider_confirmed: true,
         p_start_pin: startPin,
@@ -5961,23 +6999,25 @@ export function NativeServiceChatScreen({
     } finally {
       setSending(false);
     }
-  }, [load, roomId]);
+  }, [load]);
   const verifyStartPin = useCallback(async (startPin: string): Promise<{ valid: boolean | null }> => {
     // valid: true/false is a confirmed answer; null means the check itself failed (network,
     // etc) -- callers must treat null as "unknown", never as a false negative, since this is
     // only a heads-up ahead of the authoritative check at actual submit time.
-    if (!roomId) return { valid: null };
+    const activeServiceChatId = clean(serviceChatRef.current?.id);
+    if (!activeServiceChatId) return { valid: null };
     try {
-      const { data, error } = await supabase.rpc("verify_service_start_pin", { p_chat_id: roomId, p_start_pin: startPin });
+      const { data, error } = await supabase.rpc("verify_service_start_pin_by_service_id", { p_service_chat_id: activeServiceChatId, p_start_pin: startPin });
       if (error) throw error;
       const result = (data || {}) as { valid?: boolean };
       return { valid: result.valid === true };
     } catch {
       return { valid: null };
     }
-  }, [roomId]);
+  }, []);
   const submitIssueReport = useCallback(async (reason: string, note: string, evidenceUrls: string[]) => {
-    if (!roomId) return;
+    const activeServiceChatId = clean(serviceChatRef.current?.id);
+    if (!activeServiceChatId) return;
     const currentCareStatus = clean(serviceChatRef.current?.care_status || "awaiting_handoff");
     if (["awaiting_handoff", "pin_shared"].includes(currentCareStatus)) {
       setActiveSheet(null);
@@ -5985,15 +7025,15 @@ export function NativeServiceChatScreen({
       else setActiveSheet("handoffRequesterProblem");
       setCarePopup({
         title: "Handoff or cancellation",
-        body: "Before care starts, use the handoff or cancellation path. If something serious has happened, send the case to Support so we can hold payment while we review it.",
+        body: "Before care starts, use the handoff or cancellation path. If something serious has happened, send the case to Support; huddle may hold payment while reviewing it.",
       });
       return;
     }
     haptic.warning();
     setSending(true);
     try {
-      const { error } = await supabase.rpc("submit_service_issue_report", {
-        p_chat_id: roomId,
+      const { error } = await supabase.rpc("submit_service_issue_report_by_service_id", {
+        p_service_chat_id: activeServiceChatId,
         p_reason: reason,
         p_note: note,
         p_acknowledged_review: true,
@@ -6001,19 +7041,13 @@ export function NativeServiceChatScreen({
       });
       if (error) throw error;
       setActiveSheet(null);
-      setNotice(SERVICE_UNDER_REVIEW_NOTICE);
-      setServiceChat((current) => current ? {
-        ...current,
-        status: "disputed",
-        care_status: "under_dispute",
-        disputed_at: current.disputed_at || new Date().toISOString(),
-      } : current);
-      setHasReportedServiceDispute(true);
       if (userId) {
         await invalidateNativeChatReadCaches(userId);
         await clearCachedServiceChatRow(userId, sessionKey || null, roomId);
       }
       await load(true);
+      setHasReportedServiceDispute(true);
+      setNotice(SERVICE_UNDER_REVIEW_NOTICE);
     } catch (error) {
       haptic.error();
       setCarePopup({ title: "huddle Care", body: safeCareErrorMessage(error, "Unable to submit issue report.") });
@@ -6022,12 +7056,13 @@ export function NativeServiceChatScreen({
     }
   }, [isProvider, load, roomId, sessionKey, userId]);
   const submitHandoffProblem = useCallback(async (reason: string, note: string, evidenceUrls: string[] = []) => {
-    if (!roomId) return;
+    const activeServiceChatId = clean(serviceChatRef.current?.id);
+    if (!activeServiceChatId) return;
     haptic.warning();
     setSending(true);
     try {
-      const { error } = await supabase.rpc("submit_handoff_problem", {
-        p_chat_id: roomId,
+      const { error } = await supabase.rpc("submit_handoff_problem_by_service_id", {
+        p_service_chat_id: activeServiceChatId,
         p_reason: reason,
         p_note: note,
         p_evidence_urls: evidenceUrls,
@@ -6043,14 +7078,38 @@ export function NativeServiceChatScreen({
     } finally {
       setSending(false);
     }
-  }, [load, roomId]);
-  const submitRequesterHandoffResponse = useCallback(async (note: string, evidenceUrls: string[] = []) => {
-    if (!roomId) return;
+  }, [load]);
+  const submitNoStartReport = useCallback(async (reason: string, note: string, evidenceUrls: string[] = []) => {
+    const activeServiceChatId = clean(serviceChatRef.current?.id);
+    if (!activeServiceChatId) return;
     haptic.warning();
     setSending(true);
     try {
-      const { error } = await supabase.rpc("submit_requester_handoff_response", {
-        p_chat_id: roomId,
+      const { error } = await supabase.rpc("submit_service_no_start_report_by_service_id", {
+        p_service_chat_id: activeServiceChatId,
+        p_reason: reason,
+        p_note: note || null,
+        p_evidence_urls: evidenceUrls,
+      });
+      if (error) throw error;
+      setActiveSheet(null);
+      setCarePopup({ title: "Report received", body: "Your report was saved for the automatic no-start review at the scheduled end time." });
+      await load(true);
+    } catch (error) {
+      haptic.error();
+      setCarePopup({ title: "No-start report", body: safeCareErrorMessage(error, "Unable to submit this no-start report.") });
+    } finally {
+      setSending(false);
+    }
+  }, [load]);
+  const submitRequesterHandoffResponse = useCallback(async (note: string, evidenceUrls: string[] = []) => {
+    const activeServiceChatId = clean(serviceChatRef.current?.id);
+    if (!activeServiceChatId) return;
+    haptic.warning();
+    setSending(true);
+    try {
+      const { error } = await supabase.rpc("submit_requester_handoff_response_by_service_id", {
+        p_service_chat_id: activeServiceChatId,
         p_evidence_urls: evidenceUrls,
         p_note: note,
       });
@@ -6064,18 +7123,37 @@ export function NativeServiceChatScreen({
     } finally {
       setSending(false);
     }
-  }, [load, roomId]);
+  }, [load]);
   const submitReview = useCallback(async (rating: number, tags: string[], text: string, mediaUrls: string[], safetyIncidentReported: boolean) => {
+    const completedServiceChatId = serviceChatRef.current?.id;
+    if (!completedServiceChatId) {
+      setCarePopup({ title: "huddle Care", body: "We couldn't find this booking. Close and reopen the chat, then try again." });
+      return "failed";
+    }
     haptic.primaryConfirm();
-    await rpcVoid("submit_service_review_v2", {
-      p_chat_id: roomId,
-      p_media_urls: mediaUrls || [],
-      p_rating: rating,
-      p_review_text: text.trim(),
-      p_safety_incident_reported: safetyIncidentReported,
-      p_tags: tags || [],
-    }, "Unable to submit review.");
-    setHasReviewed(true);
+    setSending(true);
+    try {
+      const { error } = await supabase.rpc("submit_service_review_v2", {
+        p_service_chat_id: completedServiceChatId,
+        p_media_urls: mediaUrls || [],
+        p_rating: rating,
+        p_review_text: text.trim(),
+        p_safety_incident_reported: safetyIncidentReported,
+        p_tags: tags || [],
+      });
+      if (error) throw error;
+    } catch (error) {
+      if (isAlreadyReviewedError(error)) {
+        markServiceReviewSubmitted(completedServiceChatId);
+        void load(true);
+        return "alreadyReviewed";
+      }
+      setCarePopup({ title: "huddle Care", body: safeCareErrorMessage(error, "Unable to submit review.") });
+      throw error;
+    } finally {
+      setSending(false);
+    }
+    markServiceReviewSubmitted(completedServiceChatId);
     if (safetyIncidentReported) {
       setHasReportedServiceDispute(true);
       if (userId) await invalidateNativeChatReadCaches(userId);
@@ -6093,7 +7171,9 @@ export function NativeServiceChatScreen({
         void recordAppReviewNegativeSignal(userId);
       }
     }
-  }, [roomId, rpcVoid, userId]);
+    void load(true);
+    return "submitted";
+  }, [load, markServiceReviewSubmitted, userId]);
 
   const toggleBlock = useCallback(async () => {
     const freshAccessToken = await getFreshNativeAccessToken(accessToken);
@@ -6113,7 +7193,6 @@ export function NativeServiceChatScreen({
   const openProviderProfile = useCallback(async () => {
     const providerId = serviceChat?.provider_id;
     if (!providerId || !userId) return;
-    setMenuOpen(false);
     setProviderProfileOpen(true);
     setProviderProfileLoading(true);
     setProviderProfileError("");
@@ -6151,7 +7230,7 @@ export function NativeServiceChatScreen({
     try {
       const { data, error } = await supabase
         .from("pets")
-        .select("id,owner_id,name,species,breed,gender,neutered_spayed,dob,weight,weight_unit,bio,routine,vet_contact,microchip_id,temperament,vet_visit_records,set_reminder,medications,photo_url,is_active,is_public,updated_at")
+        .select("id,owner_id,name,species,breed,pet_size,gender,neutered_spayed,dob,weight,weight_unit,bio,routine,vet_contact,microchip_id,temperament,vet_visit_records,set_reminder,medications,photo_url,is_active,is_public,updated_at")
         .eq("id", petIdToOpen)
         .maybeSingle();
       if (error) throw error;
@@ -6185,24 +7264,33 @@ export function NativeServiceChatScreen({
       setLockedPreviewUrl(null);
       setDismissedPreviewUrls(new Set());
       setUploads([]);
-      setMessages((current) => [...current, pendingMessage]);
+      hydrateServiceMessages([pendingMessage]);
+      forceScrollToLatestRef.current = true;
+      nearBottomRef.current = true;
+      scrollServiceMessagesToLatest(true);
       const sent = await sendNativeChatMessage({ roomId, senderId: session.userId, content, accessToken, sessionKey });
       const confirmed = nativeChatMessageToServiceRow(sent);
       setMessages((current) => {
         const next = replacePendingServiceMessage(current, pendingId, confirmed);
+        messagesRef.current = next;
         void writeCachedNativeChatMessages(session.userId, roomId, next.map((message) => serviceRowToNativeChatMessage(message, roomId)), { dbConfirmedAt: Date.now(), sessionKey, source: "db" });
         return next;
       });
+      scrollServiceMessagesToLatest(true);
     } catch {
       setComposer(previousText);
       setLockedPreviewUrl(previousPreviewUrl);
       setUploads(previousUploads);
-      setMessages((current) => current.map((message) => message.id === pendingId ? { ...message, localStatus: "failed" } : message));
+      setMessages((current) => {
+        const next = current.map((message) => message.id === pendingId ? { ...message, localStatus: "failed" as const } : message);
+        messagesRef.current = next;
+        return next;
+      });
       setCarePopup({ title: "huddle Care", body: "Unable to send message." });
     } finally {
       setSending(false);
     }
-  }, [accessToken, activePreviewUrl, composer, lockedPreviewUrl, roomId, serviceComposerDisabled, sessionKey, uploads, userId]);
+  }, [accessToken, activePreviewUrl, composer, hydrateServiceMessages, lockedPreviewUrl, roomId, scrollServiceMessagesToLatest, serviceComposerDisabled, sessionKey, uploads, userId]);
 
   useEffect(() => {
     if (!activePreviewUrl || linkPreviews[activePreviewUrl]) return;
@@ -6230,8 +7318,7 @@ export function NativeServiceChatScreen({
     let result: Awaited<ReturnType<typeof ImagePicker.launchImageLibraryAsync>>;
     try {
       // Best-effort request; PHPicker presents regardless, so never hard-block.
-      try { await ImagePicker.requestMediaLibraryPermissionsAsync(); } catch { /* picker still works */ }
-      result = await ImagePicker.launchImageLibraryAsync({
+      result = await launchNativeImageLibraryAsync({
         allowsMultipleSelection: true,
         mediaTypes: ["images"],
         orderedSelection: true,
@@ -6266,7 +7353,7 @@ export function NativeServiceChatScreen({
         )));
       }, 450);
       const uploadGroupId = `client-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      void uploadNativeServiceChatAttachmentImage({ accessToken, media: item, serviceChatId: roomId, sessionKey, uploadGroupId, userId })
+      void uploadNativeServiceChatAttachmentImage({ accessToken, chatRoomId: roomId, media: item, sessionKey, uploadGroupId, userId })
         .then((attachmentRef) => {
           setUploads((current) => current.map((entry) => entry.uri === item.uri ? { ...entry, attachmentRef, progress: 100, status: "uploaded" } : entry));
         })
@@ -6285,7 +7372,7 @@ export function NativeServiceChatScreen({
     const activeServiceChat = serviceChatRef.current;
     const hasPaymentAmount = serviceChatHasPositivePayment(activeServiceChat);
     const activeServiceChatId = clean(activeServiceChat?.id);
-    if (!roomId || !activeServiceChatId || !hasPaymentAmount) {
+    if (!activeServiceChatId || !hasPaymentAmount) {
       console.warn("[native.service_payment] blocked_before_function_call", {
         hasRoomId: Boolean(roomId),
         hasServiceChatId: Boolean(activeServiceChatId),
@@ -6314,7 +7401,6 @@ export function NativeServiceChatScreen({
         headers: await createFreshNativeFunctionHeaders(await getFreshNativeAccessToken(accessToken)),
         body: {
           service_chat_id: activeServiceChatId,
-          chat_id: roomId,
           booking_snapshot: bookingSnapshot,
           success_url: `https://huddle.pet/service-chat?room=${encodeURIComponent(roomId)}&paid=1&checkout_session_id={CHECKOUT_SESSION_ID}`,
           cancel_url: `https://huddle.pet/service-chat?room=${encodeURIComponent(roomId)}&paid=0`,
@@ -6383,7 +7469,7 @@ export function NativeServiceChatScreen({
     trace("confirm-voluntary-service-booking request started", { hasBookingSnapshot: Boolean(bookingSnapshot), traceId });
     const activeServiceChat = serviceChatRef.current;
     const activeServiceChatId = clean(activeServiceChat?.id);
-    if (!roomId || !activeServiceChat || !activeServiceChatId || serviceChatHasPositivePayment(activeServiceChat)) {
+    if (!activeServiceChat || !activeServiceChatId || serviceChatHasPositivePayment(activeServiceChat)) {
       return { ok: false, error: PAYMENT_BLOCKERS.missingPaymentDetails };
     }
     setSending(true);
@@ -6392,7 +7478,6 @@ export function NativeServiceChatScreen({
         headers: await createFreshNativeFunctionHeaders(await getFreshNativeAccessToken(accessToken)),
         body: {
           service_chat_id: activeServiceChatId,
-          chat_id: roomId,
           booking_snapshot: bookingSnapshot,
         },
       }), SERVICE_PAYMENT_TIMEOUT_MS, "confirm_voluntary_service_booking_timeout");
@@ -6408,7 +7493,7 @@ export function NativeServiceChatScreen({
     } finally {
       setSending(false);
     }
-  }, [accessToken, load, roomId]);
+  }, [accessToken, load]);
 
   const proceedPaymentDirect = useCallback(async () => {
     const snapshot = paymentSnapshotFromAgreedChat(serviceChatRef.current);
@@ -6429,9 +7514,11 @@ export function NativeServiceChatScreen({
   }, [load, pay]);
 
   const actionPrimary = useMemo(() => {
-    if (underReview) return null;
-    if (!serviceChat) return null;
-    if (status === "pending") {
+    if (careConversationState.kind === "clean_slate") {
+      return isRequester ? { label: "Start a quote", onPress: openNewRequestSheet, disabled: false } : null;
+    }
+    if (!serviceChat || careConversationState.kind === "under_review") return null;
+    if (careConversationState.kind === "scope_pending" || careConversationState.kind === "agreement_signed") {
       const scope = serviceChat.care_scope;
       const mutuallyAgreed = hasCurrentCareScopeAgreement(serviceChat);
       const paymentInProgress = isCarePaymentPendingActive(scope, paymentNowMs);
@@ -6491,22 +7578,23 @@ export function NativeServiceChatScreen({
         return { label, onPress: () => setActiveSheet("payment"), disabled: false };
       }
     }
-    if (status === "booked") {
+    if (careConversationState.kind === "handoff_waiting" || careConversationState.kind === "pin_shared") {
       return null;
     }
-    if (status === "in_progress" || careStatus === "in_progress") {
+    if (careConversationState.kind === "care_in_progress") {
       if (!canConfirmCompletion) return null;
-      return { label: completionComposerCtaLabel, onPress: handleStartCompletion, disabled: false };
+      return { label: completionCtaLabel, onPress: handleCompletionEntrySlide, disabled: false };
     }
     if (canLeaveReview) return { label: "Leave a Review", onPress: () => setActiveSheet("review"), disabled: false };
-    if (isRequester && status === "completed") return { label: "Book Care", onPress: openNewRequestSheet, disabled: false };
+    if (isRequester && careConversationState.kind === "completed") return { label: "Start a quote", onPress: openNewRequestSheet, disabled: false };
     return null;
-  }, [canConfirmCompletion, canLeaveReview, careStatus, completionComposerCtaLabel, handleStartCompletion, hasQuote, hasRequest, isProvider, isRequester, openCurrentRequestSheet, openNewRequestSheet, paymentNowMs, pendingRequestExpired, proceedPaymentDirect, providerStripeReady, serviceChat, status, underReview]);
+  }, [canConfirmCompletion, canLeaveReview, careConversationState.kind, completionCtaLabel, handleCompletionEntrySlide, hasQuote, hasRequest, isProvider, isRequester, openCurrentRequestSheet, openNewRequestSheet, paymentNowMs, pendingRequestExpired, proceedPaymentDirect, providerStripeReady, serviceChat]);
+  const completionPrimaryActionIsSlider = Boolean(actionPrimary && careConversationState.kind === "care_in_progress");
 
   // Agree-stage guidance shown as a banner ABOVE the composer CTA (not inside the sheet),
   // so each side always knows whose turn it is and that they've already agreed.
   const careStageBanner = useMemo<{ title: string; body: string } | null>(() => {
-    if (underReview || status !== "pending") return null;
+    if (careConversationState.kind !== "scope_pending" && careConversationState.kind !== "agreement_signed") return null;
     if (pendingRequestExpired) return null;
     const scope = serviceChat?.care_scope;
     if (!scope) return null;
@@ -6537,28 +7625,47 @@ export function NativeServiceChatScreen({
       return null;
     }
     return null;
-  }, [isProvider, isRequester, paymentNowMs, peerName, pendingRequestExpired, serviceChat, status, underReview]);
+  }, [careConversationState.kind, isProvider, isRequester, paymentNowMs, peerName, pendingRequestExpired, serviceChat]);
+
+  const completionStageBanner = useMemo<{ title: string; body: string; awaitingPeer: boolean } | null>(() => {
+    if (careConversationState.kind !== "care_in_progress" || !serviceChat || !role) return null;
+    const currentUserMarkedFinished = role === "provider"
+      ? serviceChat.provider_mark_finished === true
+      : serviceChat.requester_mark_finished === true;
+    const peerMarkedFinished = role === "provider"
+      ? serviceChat.requester_mark_finished === true
+      : serviceChat.provider_mark_finished === true;
+    if (currentUserMarkedFinished && !peerMarkedFinished) {
+      return {
+        title: `Waiting for ${clean(peerName) || (isProvider ? "the owner" : "the carer")} to confirm completion`,
+        body: "",
+        awaitingPeer: true,
+      };
+    }
+    if (!currentUserMarkedFinished && peerMarkedFinished) {
+      return {
+        title: `${clean(peerName) || (isProvider ? "The owner" : "The carer")} marked care complete`,
+        body: "Please confirm once care is complete and the pet is safely returned.",
+        awaitingPeer: false,
+      };
+    }
+    return null;
+  }, [careConversationState.kind, isProvider, peerName, role, serviceChat]);
 
   // Care in progress auto-completes ~48h after the scheduled end (backend safety valve —
   // see process_service_payout_releases) if nobody confirms or reports an issue first. This
   // mirrors that same window client-side so the countdown is never a surprise: silence is
   // informed consent, not a trap. Applies to voluntary ($0) bookings too — they now also
   // auto-complete, just with no payout to release.
-  const scheduledEndAtMain = useMemo(() => {
-    const bookingEnd = clean(serviceChat?.booking_snapshot?.endAt);
-    if (bookingEnd) return bookingEnd;
-    const bounds = getServicePeriodBounds(serviceChat?.request_card);
-    return bounds ? new Date(bounds.endAt).toISOString() : "";
-  }, [serviceChat?.booking_snapshot?.endAt, serviceChat?.request_card]);
+  const scheduledEndAtMain = useMemo(() => serviceScheduledEndIso(serviceChat?.request_card, serviceChat?.booking_snapshot), [serviceChat?.booking_snapshot, serviceChat?.request_card]);
   const autoCompleteAtMain = useMemo(() => addHoursIso(scheduledEndAtMain, PAYOUT_AUTO_RELEASE_HOURS), [scheduledEndAtMain]);
   const showCompletionCountdown = Boolean(
-    !underReview
-    && (careStatus === "in_progress" || status === "in_progress")
-    && status !== "completed"
-    && status !== "disputed"
-    && serviceChat?.care_status !== "completed"
+    careConversationState.kind === "care_in_progress"
     && canConfirmCompletion
-    && autoCompleteAtMain,
+    && autoCompleteAtMain
+    && scheduledEndAtMain
+    && Date.now() >= new Date(scheduledEndAtMain).getTime()
+    && activeServiceResolved
   );
   const [completionCountdownNowMs, setCompletionCountdownNowMs] = useState(() => Date.now());
   useEffect(() => {
@@ -6607,44 +7714,74 @@ export function NativeServiceChatScreen({
   // both open the exact same issueReport-mode HandoffProblemSheet, so there's no reason for two
   // separate closures to drift out of sync with each other.
   const openIssueReportSheet = useCallback(() => {
-    setMenuOpen(false);
-    setActiveSheet(null);
-    setActiveSheet("issue");
-  }, []);
+    transitionNativeModal(
+      () => setMenuOpen(false),
+      () => setActiveSheet("issue"),
+    );
+  }, [transitionNativeModal]);
+  const openBlockAction = useCallback(() => {
+    transitionNativeModal(
+      () => setMenuOpen(false),
+      () => {
+        if (blockUnavailableForCare) setBlockUnavailableNoticeOpen(true);
+        else setConfirmBlockOpen(true);
+      },
+    );
+  }, [blockUnavailableForCare, transitionNativeModal]);
   const menuItems = useMemo<AppActionMenuItem[]>(() => {
     const items: AppActionMenuItem[] = [
-      { label: "See Carer Profile", icon: "user", onPress: () => { void openProviderProfile(); } },
+      { label: "See Carer Profile", icon: "user", onPress: () => transitionNativeModal(() => setMenuOpen(false), () => { void openProviderProfile(); }) },
     ];
     if (canBookCareFromMenu) {
-      items.push({ label: "Book Care", icon: "file-text", onPress: () => { setMenuOpen(false); (status === "completed" ? openNewRequestSheet : openCurrentRequestSheet)(); } });
+      items.push({ label: "Start a quote", icon: "file-text", onPress: () => transitionNativeModal(() => setMenuOpen(false), () => { (!serviceChat || status === "completed" ? openNewRequestSheet : openCurrentRequestSheet)(); }) });
     }
     if (canLeaveReview) {
-      items.push({ label: "Leave a Review", icon: "star", onPress: () => { setMenuOpen(false); setActiveSheet("review"); } });
+      items.push({ label: "Leave a Review", icon: "star", onPress: () => transitionNativeModal(() => setMenuOpen(false), () => setActiveSheet("review")) });
     }
     if (canOpenCareHistory) {
-      items.push({ label: "Care History", icon: "clock", onPress: () => { setMenuOpen(false); setCareHistoryOpen(true); void loadCareHistoryRows(); } });
+      items.push({ label: "Care History", icon: "clock", onPress: () => { void loadCareHistoryRows(); transitionNativeModal(() => setMenuOpen(false), () => setCareHistoryOpen(true)); } });
     }
     if (canCancelPaidBooking) {
-      items.push({ label: "Cancel Booking", icon: "x-circle", destructive: true, onPress: () => { setMenuOpen(false); setConfirmCancelBookingOpen(true); } });
+      items.push({ label: "Cancel Booking", icon: "x-circle", destructive: true, onPress: () => transitionNativeModal(() => setMenuOpen(false), () => setConfirmCancelBookingOpen(true)) });
     }
     if (canReportHandoffProblem) {
-      items.push({ label: "Report Handoff Problem", icon: "alert-circle", destructive: true, onPress: () => { setMenuOpen(false); setHandoffReportContext(null); setActiveSheet("handoffProblem"); } });
+      items.push({ label: "Report Handoff Problem", icon: "alert-circle", destructive: true, onPress: () => transitionNativeModal(() => setMenuOpen(false), () => { setHandoffReportContext(null); setActiveSheet("handoffProblem"); }) });
     }
     if (canReportRequesterHandoffProblem) {
-      items.push({ label: "Report Handoff Problem", icon: "alert-circle", destructive: true, onPress: () => { setMenuOpen(false); setHandoffReportContext(null); setActiveSheet("handoffRequesterProblem"); } });
+      items.push({ label: "Report Handoff Problem", icon: "alert-circle", destructive: true, onPress: () => transitionNativeModal(() => setMenuOpen(false), () => { setHandoffReportContext(null); setActiveSheet("handoffRequesterProblem"); }) });
     }
     if (canRespondToHandoffProblem) {
-      items.push({ label: "Respond to Handoff Review", icon: "message-circle", onPress: () => { setMenuOpen(false); setActiveSheet("handoffResponse"); } });
+      items.push({ label: "Respond to Handoff Review", icon: "message-circle", onPress: () => transitionNativeModal(() => setMenuOpen(false), () => setActiveSheet("handoffResponse")) });
     }
     if (canReportBookingIssue) {
       items.push({ label: "Report Issue", icon: "alert-triangle", destructive: true, onPress: openIssueReportSheet });
     }
     items.push(
-      { label: "Report User", icon: "flag", onPress: () => { setMenuOpen(false); setReportOpen(true); } },
-      { label: blockState === "blocked_by_me" ? "Unblock User" : "Block User", icon: "slash", destructive: blockState !== "blocked_by_me", onPress: () => { setMenuOpen(false); setConfirmBlockOpen(true); } },
+      { label: "Report User", icon: "flag", onPress: () => transitionNativeModal(() => setMenuOpen(false), () => setReportOpen(true)) },
+      {
+        label: blockState === "blocked_by_me" ? "Unblock User" : "Block User",
+        icon: "slash",
+        destructive: blockState !== "blocked_by_me" && !blockUnavailableForCare,
+        muted: blockUnavailableForCare,
+        onPress: openBlockAction,
+      },
     );
     return items;
-  }, [blockState, canBookCareFromMenu, canCancelPaidBooking, canLeaveReview, canOpenCareHistory, canReportBookingIssue, canReportHandoffProblem, canReportRequesterHandoffProblem, canRespondToHandoffProblem, loadCareHistoryRows, openCurrentRequestSheet, openIssueReportSheet, openNewRequestSheet, openProviderProfile, status]);
+  }, [blockState, blockUnavailableForCare, canBookCareFromMenu, canCancelPaidBooking, canLeaveReview, canOpenCareHistory, canReportBookingIssue, canReportHandoffProblem, canReportRequesterHandoffProblem, canRespondToHandoffProblem, loadCareHistoryRows, openBlockAction, openCurrentRequestSheet, openIssueReportSheet, openNewRequestSheet, openProviderProfile, serviceChat, status, transitionNativeModal]);
+
+  const openHeaderActionMenu = useCallback(() => {
+    if (!menuAnchorRef.current) {
+      setMenuOpen(true);
+      return;
+    }
+    menuAnchorRef.current?.measureInWindow((x, y, width, height) => {
+      setMenuAnchorPosition({
+        top: y + height + huddleSpacing.x1,
+        right: Math.max(huddleSpacing.x3, windowWidth - x - width),
+      });
+      setMenuOpen(true);
+    });
+  }, [windowWidth]);
 
   if (loading && !roomId && !initialCounterpart) {
     return <NativeLoadingState style={styles.loadingFill} />;
@@ -6691,32 +7828,48 @@ export function NativeServiceChatScreen({
             displayStatus === "booked" || displayStatus === "in_progress" ? styles.statusBookedActive : null,
             displayStatus === "completed" ? styles.statusCompleted : null,
             displayStatus === "disputed" ? styles.statusDisputed : null,
+            displayStatus === "cancelled" || displayStatus === "cancelling" ? styles.statusCancelled : null,
           ]}
         >
           {displayStatusLabel}
         </Text>
         {!underReview || canOpenCareHistory ? (
-          <Pressable accessibilityLabel="service-chat-more-button" hitSlop={huddleSpacing.x2} onPress={() => setMenuOpen(true)} style={styles.headerBack}>
+          <Pressable
+            accessibilityLabel="service-chat-more-button"
+            hitSlop={huddleSpacing.x2}
+            onPress={openHeaderActionMenu}
+            ref={menuAnchorRef}
+            style={styles.headerBack}
+          >
             <Feather color={huddleColors.iconMuted} name="more-horizontal" size={20} />
           </Pressable>
         ) : (
           <View style={styles.headerBack} />
         )}
       </View>
+      <View style={styles.chatBody}>
+      {visibleNotice ? (
+        visibleNotice === "Confirming payment..." && !underReview ? (
+          <NativeToast message={visibleNotice} />
+        ) : (
+          <View style={styles.notice}><Feather color={huddleColors.blue} name="info" size={16} /><Text style={styles.noticeText}>{visibleNotice}</Text></View>
+        )
+      ) : null}
       {effectiveServiceChat && !careHistoryHiddenFromChat ? (
         <View style={styles.timelineBannerWrap}>
           <BookingTimelineCard
             chat={effectiveServiceChat}
             collapsed={timelineCollapsed}
-            canHide={canHideCurrentCareHistory}
+            canHide={canInlineHideCurrentCareHistory}
             isProvider={isProvider}
+            paymentMovement={activeCarePaymentMovement}
             underReview={underReview}
             onHide={hideCurrentCareHistory}
             onToggle={() => setTimelineCollapsed((value) => !value)}
           />
           <BookingCards
             chat={effectiveServiceChat}
-            canHide={canHideCurrentCareHistory}
+            canHide={canInlineHideCurrentCareHistory}
             currencyCountries={careCurrencyCountries}
             providerCurrency={counterpart?.providerCurrency}
             isProvider={isProvider}
@@ -6735,8 +7888,6 @@ export function NativeServiceChatScreen({
           />
         </View>
       ) : null}
-
-      {visibleNotice ? <View style={styles.notice}><Feather color={huddleColors.blue} name="info" size={16} /><Text style={styles.noticeText}>{visibleNotice}</Text></View> : null}
       <ScrollView
         ref={scrollRef}
         contentContainerStyle={[
@@ -6747,18 +7898,23 @@ export function NativeServiceChatScreen({
           { paddingBottom: footerHeight + huddleSpacing.x2 },
         ]}
         keyboardShouldPersistTaps="handled"
+        maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
         onContentSizeChange={() => {
           if (nearBottomRef.current) scrollRef.current?.scrollToEnd({ animated: false });
         }}
         onScroll={(event) => {
           const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
           nearBottomRef.current = contentSize.height - contentOffset.y - layoutMeasurement.height <= 120;
+          if (contentOffset.y < 56) void loadOlderServiceMessages();
         }}
         scrollEventThrottle={80}
         showsVerticalScrollIndicator={false}
         style={styles.messagesScroll}
       >
         {serviceShellPending ? (
+          <NativeLoadingState style={styles.loadingInline} />
+        ) : null}
+        {loadingOlderMessages ? (
           <NativeLoadingState style={styles.loadingInline} />
         ) : null}
 
@@ -6779,7 +7935,7 @@ export function NativeServiceChatScreen({
             const parsed = parseServiceMessage(message.content);
             const previous = index > 0 ? messages[index - 1] : null;
             const divider = !previous || formatDividerLabel(previous.created_at) !== formatDividerLabel(message.created_at) ? formatDividerLabel(message.created_at) : "";
-            if (parsed.kind === "service_care_update" && parsed.careUpdate) {
+            if (["service_care_update", "service_check_in"].includes(parsed.kind) && parsed.careUpdate) {
               const mine = message.sender_id === userId;
               const fresh = mine && Number.isFinite(Date.parse(message.created_at || "")) && Date.now() - Date.parse(message.created_at || "") < 12000;
               return (
@@ -6791,6 +7947,7 @@ export function NativeServiceChatScreen({
                     capturedAt={parsed.careUpdate.capturedAt || message.created_at}
                     note={parsed.careUpdate.note}
                     onSaved={showCareSaveToast}
+                    ownerName={isRequester ? currentDisplayName || "Owner" : peerName || "Owner"}
                     petName={parsed.careUpdate.petName}
                     photoDescriptor={parsed.careUpdate.photoUrl}
                   />
@@ -6817,8 +7974,8 @@ export function NativeServiceChatScreen({
                     <Pressable
                       accessibilityRole="link"
                       onPress={() => {
-                        const url = parsed.share?.appUrl || parsed.share?.canonicalUrl;
-                        if (url) void Linking.openURL(url);
+                        const path = parsed.share ? nativePathForSharedContent(parsed.share) : null;
+                        if (path) onNavigate(path);
                       }}
                       style={[styles.chatShareCard, me ? styles.chatShareCardMine : styles.chatShareCardTheirs]}
                     >
@@ -6863,7 +8020,7 @@ export function NativeServiceChatScreen({
                     {previewUrl ? (
                       <NativeSocialExternalLinkPreview
                         linkPreview={linkPreviews[previewUrl] || null}
-                        onOpen={(url) => void Linking.openURL(url)}
+                        onOpen={(url) => { if (!navigateNativeHuddleLink(url, onNavigate)) void Linking.openURL(url); }}
                         url={previewUrl}
                       />
                     ) : null}
@@ -6881,37 +8038,77 @@ export function NativeServiceChatScreen({
 
       <View
         onLayout={(event) => setFooterHeight(event.nativeEvent.layout.height)}
-        style={styles.dialogueFooterSurface}
+        style={[styles.dialogueFooterSurface, keyboardVisible ? styles.dialogueFooterSurfaceKeyboard : null]}
       >
         <View style={styles.serviceActionLayer}>
-          {!underReview && status === "booked" && (isRequester || isProvider) && ["awaiting_handoff", "pin_shared"].includes(careStatus || "awaiting_handoff") && !showReviewComposerCta ? (
+          {paymentSetupNeeded ? (
             <ServiceActionCard
-              body={isRequester
-                ? "Share the 4-digit PIN after handing over your pet or giving access to the care location."
-                : "Collect 4-digit PIN, then take a timestamped photo of the pet to start care."}
-              collapsed={serviceActionCollapsed}
-              headerRight={isRequester && activeStartPin ? <StartPinDetailCard digits={sanitizeStartPin(activeStartPin).split("")} /> : null}
-              icon={<SvgXml color={huddleColors.blue} height={18} width={18} xml={PASSCODE_LOCK_ICON_SVG} />}
-              locked={isRequester && careStatus === "pin_shared"}
-              onToggle={() => setServiceActionCollapsed((value) => !value)}
-              title={isRequester ? (careStatus === "pin_shared" ? "Share Care Session PIN" : "Your Care Session PIN") : "Enter PIN and 📸"}
+              body="Stripe couldn’t complete this payout. Review your payout account details."
+              collapsed={false}
+              onToggle={() => undefined}
+              staticCard
+              title="Payment setup needed"
             >
-              <AppModalButton
-                disabled={sending || (isProvider && !activeStartPin)}
-                onPress={isRequester ? () => void shareStartPin() : openStartCareFromHandoff}
-              >
-                Start Care
-              </AppModalButton>
-              {canAllowEarlyStart ? (
-                <Pressable accessibilityRole="button" onPress={() => setConfirmEarlyStartOpen(true)} style={styles.cancelBookingTextButton}>
-                  <Text style={styles.cancelBookingTextButtonLabel}>Allow Early Start</Text>
-                </Pressable>
+              <AppModalButton disabled={sending} onPress={openPayoutAccount}>Review payout account</AppModalButton>
+            </ServiceActionCard>
+          ) : (careConversationState.kind === "handoff_waiting" || careConversationState.kind === "pin_shared") && (isRequester || isProvider) && !showReviewComposerCta ? (
+            <ServiceActionCard
+              body={systemNoStartCancellationPending
+                ? "The scheduled end time has passed. This booking is being cancelled under the no-start policy."
+                : handoffOverdue
+                ? (isRequester
+                  ? (noStartPolicyActive
+                    ? "If the carer is a no-show, you must report it before the scheduled end time. Otherwise, the booking will automatically cancel under the no-start policy. A refund is not guaranteed."
+                    : "Care has not started. This booking will automatically cancel at the scheduled end time.")
+                  : (noStartPolicyActive
+                    ? "Please start care immediately or report any issue before the scheduled end time. Otherwise, the booking will automatically cancel under the no-start policy. Payout is not guaranteed."
+                    : "Please start care immediately. Otherwise, the booking will automatically cancel at the scheduled end time."))
+                : (isRequester
+                  ? "Share the 4-digit PIN after handing over your pet or giving access to the care location."
+                  : "Collect 4-digit PIN, then take a timestamped photo of the pet to start care.")}
+              collapsed={systemNoStartCancellationPending ? false : serviceActionCollapsed}
+              headerRight={!systemNoStartCancellationPending && isRequester ? (
+                activeStartPin
+                  ? <StartPinDetailCard digits={sanitizeStartPin(activeStartPin).split("")} />
+                  : <Text accessibilityLiveRegion="polite" style={styles.startPinPreparingText}>Preparing PIN…</Text>
+              ) : null}
+              icon={<SvgXml color={huddleColors.blue} height={18} width={18} xml={PASSCODE_LOCK_ICON_SVG} />}
+              locked={isRequester && ownerAuthorizedStart && !handoffReady}
+              onToggle={() => { if (!systemNoStartCancellationPending) setServiceActionCollapsed((value) => !value); }}
+              staticCard={systemNoStartCancellationPending}
+              title={systemNoStartCancellationPending ? "Cancelling…" : isRequester ? "Your Care Session PIN" : "Enter PIN and 📸"}
+              warningBody={handoffOverdue}
+            >
+              {isRequester && !handoffReady ? (
+                <AppModalButton disabled={sending || ownerAuthorizedStart} onPress={() => setConfirmOwnerStartCareOpen(true)}>
+                  Start Care
+                </AppModalButton>
+              ) : null}
+              {isProvider && !startWindowElapsed ? (
+                <AppModalButton disabled={sending || !carerCanStart} onPress={openStartCareFromHandoff}>
+                  Start Care
+                </AppModalButton>
               ) : null}
               {canCancelPaidBooking ? (
                 <Pressable accessibilityRole="button" onPress={() => setConfirmCancelBookingOpen(true)} style={styles.cancelBookingTextButton}>
                   <Text style={styles.cancelBookingTextButtonLabel}>Cancel Booking</Text>
                 </Pressable>
               ) : null}
+              {noStartReportOpen ? (
+                <Pressable accessibilityRole="button" onPress={() => { haptic.toggleControl(); setActiveSheet("noStartReport"); }} style={styles.cancelBookingTextButton}>
+                  <Text style={styles.cancelBookingTextButtonLabel}>Report no-start issue</Text>
+                </Pressable>
+              ) : null}
+            </ServiceActionCard>
+          ) : terminalSystemNoStart && isRequester && !careHistoryHiddenFromChat ? (
+            <ServiceActionCard
+              body="Care did not start before the scheduled end time. This booking was cancelled under the no-start policy."
+              collapsed={false}
+              onToggle={() => undefined}
+              staticCard
+              title="Care session cancelled"
+            >
+              <AppModalButton disabled={sending} onPress={hideCurrentCareHistory} variant="secondary">Close</AppModalButton>
             </ServiceActionCard>
           ) : careStageBanner && !showReviewComposerCta ? (
             <ServiceActionCard
@@ -6925,13 +8122,68 @@ export function NativeServiceChatScreen({
                 <AppModalButton disabled={sending || actionPrimary.disabled} onPress={actionPrimary.onPress}>{actionPrimary.label}</AppModalButton>
               ) : null}
             </ServiceActionCard>
+          ) : completionStageBanner && !showReviewComposerCta ? (
+            <ServiceActionCard
+              body={completionStageBanner.body}
+              collapsed={false}
+              onToggle={() => undefined}
+              staticCard
+              title={completionStageBanner.title}
+            >
+              {!completionStageBanner.awaitingPeer && actionPrimary && !actionPrimary.disabled ? (
+                <>
+                  <View style={styles.completionActionStack}>
+                    {completionPrimaryActionIsSlider
+                      ? <SlideToConfirm busy={sending} label={completionCtaLabel} onCommit={actionPrimary.onPress} resetKey={completionEntrySlideResetKey} />
+                      : <AppModalButton disabled={sending} onPress={actionPrimary.onPress}>{actionPrimary.label}</AppModalButton>}
+                    {showCareUpdateStatusLoading ? (
+                      <View accessibilityLabel="Checking requested updates" accessibilityRole="progressbar" style={styles.careUpdateStatusLoadingButton}>
+                        <Text style={styles.careUpdateStatusLoadingText}>Checking requested updates…</Text>
+                      </View>
+                    ) : showRequiredCareUpdateAction ? (
+                      <Pressable accessibilityRole="button" disabled={sending} onPress={openRequiredCareUpdateSheet} style={({ pressed }) => [styles.requiredCareUpdateButton, sending ? styles.disabledAction : null, pressed ? nativeModalStyles.pressed : null]}>
+                        <Text style={styles.requiredCareUpdateButtonText}>{requiredCareUpdateActionText}</Text>
+                      </Pressable>
+                    ) : showShareMoreUpdateAction ? (
+                      <Pressable accessibilityRole="button" disabled={sending} onPress={openOptionalCareUpdateSheet} style={({ pressed }) => [styles.shareMoreUpdateBanner, pressed ? nativeModalStyles.pressed : null]}>
+                        <Text style={styles.shareMoreUpdateBannerText}>Share more update</Text>
+                      </Pressable>
+                    ) : null}
+                  </View>
+                  {canReportBookingIssue ? (
+                    <Pressable accessibilityRole="button" hitSlop={huddleSpacing.x2} onPress={openIssueReportSheet} style={styles.completionCountdownReportLink}>
+                      <Text style={styles.completionCountdownReportLinkText}>Report issue</Text>
+                    </Pressable>
+                  ) : null}
+                </>
+              ) : null}
+            </ServiceActionCard>
           ) : showCompletionCountdown && actionPrimary && !showReviewComposerCta ? (
             <ServiceActionCard
               collapsed={serviceActionCollapsed}
               onToggle={() => setServiceActionCollapsed((value) => !value)}
               title={`Auto-completes in ${completionCountdownLabel}`}
             >
-              {!actionPrimary.disabled ? <AppModalButton disabled={sending} onPress={actionPrimary.onPress}>{actionPrimary.label}</AppModalButton> : null}
+              <View style={styles.completionActionStack}>
+                {!actionPrimary.disabled ? (
+                  completionPrimaryActionIsSlider
+                    ? <SlideToConfirm busy={sending} label={completionCtaLabel} onCommit={actionPrimary.onPress} resetKey={completionEntrySlideResetKey} />
+                    : <AppModalButton disabled={sending} onPress={actionPrimary.onPress}>{actionPrimary.label}</AppModalButton>
+                ) : null}
+                {showCareUpdateStatusLoading ? (
+                  <View accessibilityLabel="Checking requested updates" accessibilityRole="progressbar" style={styles.careUpdateStatusLoadingButton}>
+                    <Text style={styles.careUpdateStatusLoadingText}>Checking requested updates…</Text>
+                  </View>
+                ) : showRequiredCareUpdateAction ? (
+                  <Pressable accessibilityRole="button" disabled={sending} onPress={openRequiredCareUpdateSheet} style={({ pressed }) => [styles.requiredCareUpdateButton, sending ? styles.disabledAction : null, pressed ? nativeModalStyles.pressed : null]}>
+                    <Text style={styles.requiredCareUpdateButtonText}>{requiredCareUpdateActionText}</Text>
+                  </Pressable>
+                ) : showShareMoreUpdateAction ? (
+                  <Pressable accessibilityRole="button" disabled={sending} onPress={openOptionalCareUpdateSheet} style={({ pressed }) => [styles.shareMoreUpdateBanner, pressed ? nativeModalStyles.pressed : null]}>
+                    <Text style={styles.shareMoreUpdateBannerText}>Share more update</Text>
+                  </Pressable>
+                ) : null}
+              </View>
               {canReportBookingIssue ? (
                 <Pressable accessibilityRole="button" hitSlop={huddleSpacing.x2} onPress={openIssueReportSheet} style={styles.completionCountdownReportLink}>
                   <Text style={styles.completionCountdownReportLinkText}>Report issue</Text>
@@ -6940,21 +8192,27 @@ export function NativeServiceChatScreen({
             </ServiceActionCard>
           ) : actionPrimary && !showReviewComposerCta ? (
             <View style={styles.primaryActionWrap}>
-              {!actionPrimary.disabled ? <AppModalButton disabled={sending} onPress={actionPrimary.onPress}>{actionPrimary.label}</AppModalButton> : null}
-            </View>
-          ) : null}
-          {canShowComposer && summaryUpdateMissed ? (
-            <ServiceActionCard
-              body={`This booking asked for one summary per care day. You missed ${missedSummaryCount} ${missedSummaryCount === 1 ? "day" : "days"}. You can send the missing summary now or complete anyway.`}
-              collapsed={serviceActionCollapsed}
-              onToggle={() => setServiceActionCollapsed((value) => !value)}
-              title="You missed a daily summary."
-            >
-              <View style={styles.summaryMissActions}>
-                <AppModalButton disabled={sending} onPress={() => setActiveSheet("careUpdate")}>Send summary</AppModalButton>
-                <AppModalButton disabled={sending} variant="secondary" onPress={() => setActiveSheet("completion")}>Complete anyway</AppModalButton>
+              <View style={styles.completionActionStack}>
+                {!actionPrimary.disabled ? (
+                  completionPrimaryActionIsSlider
+                    ? <SlideToConfirm busy={sending} label={completionCtaLabel} onCommit={actionPrimary.onPress} resetKey={completionEntrySlideResetKey} />
+                    : <AppModalButton disabled={sending} onPress={actionPrimary.onPress}>{actionPrimary.label}</AppModalButton>
+                ) : null}
+                {showCareUpdateStatusLoading ? (
+                  <View accessibilityLabel="Checking requested updates" accessibilityRole="progressbar" style={styles.careUpdateStatusLoadingButton}>
+                    <Text style={styles.careUpdateStatusLoadingText}>Checking requested updates…</Text>
+                  </View>
+                ) : showRequiredCareUpdateAction ? (
+                  <Pressable accessibilityRole="button" disabled={sending} onPress={openRequiredCareUpdateSheet} style={({ pressed }) => [styles.requiredCareUpdateButton, sending ? styles.disabledAction : null, pressed ? nativeModalStyles.pressed : null]}>
+                    <Text style={styles.requiredCareUpdateButtonText}>{requiredCareUpdateActionText}</Text>
+                  </Pressable>
+                ) : showShareMoreUpdateAction ? (
+                  <Pressable accessibilityRole="button" disabled={sending} onPress={openOptionalCareUpdateSheet} style={({ pressed }) => [styles.shareMoreUpdateBanner, pressed ? nativeModalStyles.pressed : null]}>
+                    <Text style={styles.shareMoreUpdateBannerText}>Share more update</Text>
+                  </Pressable>
+                ) : null}
               </View>
-            </ServiceActionCard>
+            </View>
           ) : null}
         </View>
         <View
@@ -6998,27 +8256,10 @@ export function NativeServiceChatScreen({
         ) : null}
         {canShowComposer ? (
           <View style={styles.composerStack}>
-            {careUpdateEntryVisible && !hasSentAnyCareUpdate && !summaryUpdateMissed ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Send a care update"
-                onPress={() => setActiveSheet("careUpdate")}
-                style={({ pressed }) => [
-                  styles.careUpdatePill,
-                  careUpdateGateBlocking || showMidCareUpdatePrompt ? styles.careUpdatePillUrgent : styles.careUpdatePillSubtle,
-                  pressed ? nativeModalStyles.pressed : null,
-                ]}
-              >
-                <Feather color={careUpdateGateBlocking || showMidCareUpdatePrompt ? huddleColors.onPrimary : huddleColors.blue} name="camera" size={17} />
-                <Text style={[styles.careUpdatePillText, careUpdateGateBlocking || showMidCareUpdatePrompt ? styles.careUpdatePillTextUrgent : null]}>
-                  {careUpdateGateBlocking || showMidCareUpdatePrompt ? careUpdateCopy(careUpdateKind).nudgeTitle : "Send care update"}
-                </Text>
-              </Pressable>
-            ) : null}
             {activePreviewUrl ? (
               <NativeSocialExternalLinkPreview
                 linkPreview={linkPreviews[activePreviewUrl] || null}
-                onOpen={(url) => void Linking.openURL(url)}
+                onOpen={(url) => { if (!navigateNativeHuddleLink(url, onNavigate)) void Linking.openURL(url); }}
                 onRemove={() => {
                   setComposer((current) => stripNativeSocialExternalUrlFromText(current, activePreviewUrl));
                   setDismissedPreviewUrls((current) => new Set([...current, activePreviewUrl]));
@@ -7029,15 +8270,9 @@ export function NativeServiceChatScreen({
             ) : null}
             <View style={styles.composerRow}>
               <View style={[nativeModalStyles.appModalComposerTray, composerFocused ? nativeModalStyles.appModalComposerTrayFocused : null]}>
-                {careUpdateEntryVisible ? (
-                  <Pressable accessibilityLabel="Send a care update" onPress={() => setActiveSheet("careUpdate")} style={styles.attachButton}>
-                    <Feather color={huddleColors.blue} name="edit-3" size={16} />
-                  </Pressable>
-                ) : (
-                  <Pressable accessibilityLabel={hasRequest && !serviceComposerDisabled ? "Add images" : "Conversation locked"} disabled={!hasRequest || serviceComposerDisabled} onPress={pickChatMedia} style={styles.attachButton}>
-                    <Feather color={huddleColors.mutedText} name={hasRequest ? "image" : "lock"} size={16} />
-                  </Pressable>
-                )}
+                <Pressable accessibilityLabel={hasRequest && !serviceComposerDisabled ? "Add images" : "Conversation locked"} disabled={!hasRequest || serviceComposerDisabled} onPress={pickChatMedia} style={styles.attachButton}>
+                  <Feather color={huddleColors.mutedText} name={hasRequest ? "image" : "lock"} size={16} />
+                </Pressable>
                 <AppModalField
                   accessibilityLabel="native-service-chat-composer-input"
                   editable={hasRequest && !serviceComposerDisabled}
@@ -7060,12 +8295,7 @@ export function NativeServiceChatScreen({
         ) : null}
         </View>
         {careSaveToast ? (
-          <View pointerEvents="none" style={styles.careSaveToastWrap}>
-            <View style={styles.careSaveToast}>
-              <Feather color={huddleColors.onPrimary} name="check" size={15} />
-              <Text style={styles.careSaveToastText}>{careSaveToast}</Text>
-            </View>
-          </View>
+          <NativeToast icon="check" message={careSaveToast} />
         ) : null}
       </View>
 
@@ -7109,6 +8339,7 @@ export function NativeServiceChatScreen({
         currentUserId={userId}
         initialCard={serviceChat?.quote_card}
         onClose={() => { dismissQuoteAutoOpen(); setActiveSheet(null); }}
+        onDecline={() => setConfirmDeclineRequestOpen(true)}
         onError={(body) => setCarePopup({ title: "Care Scope", body })}
         onOpenPet={(petId) => void openPetProfile(petId)}
         onSigned={() => void load(true)}
@@ -7138,6 +8369,7 @@ export function NativeServiceChatScreen({
           setRequestSheetMode("current");
           requestAnimationFrame(() => setActiveSheet("request"));
         }}
+        onOpenPet={(petId) => void openPetProfile(petId)}
         onOpenSupport={() => {
           setActiveSheet(null);
           onNavigate("/support");
@@ -7184,16 +8416,36 @@ export function NativeServiceChatScreen({
       /> : null}
       {activeSheet === "careUpdate" ? <NativeCareUpdateSheet
         accessToken={accessToken}
-        chatId={roomId || null}
         currentUserId={userId}
-        onClose={() => setActiveSheet(null)}
+        onClose={() => { setCareUpdateSheetOptional(false); setActiveSheet(null); }}
         onError={(body) => setCarePopup({ title: "huddle Care", body })}
-        onSent={() => { void load(true); }}
+        onSent={(result) => {
+          if (result.message && roomId && userId) {
+            const confirmed: ChatMessageRow = {
+              id: result.message.id,
+              sender_id: result.message.sender_id,
+              content: result.message.content,
+              created_at: result.message.created_at,
+            };
+            hydrateServiceMessages([confirmed], {
+              cacheRoomId: roomId,
+              cacheUserId: userId,
+              sessionKey,
+              source: "db",
+            });
+            nearBottomRef.current = true;
+            forceScrollToLatestRef.current = true;
+            scrollServiceMessagesToLatest(true);
+          }
+          return load(true);
+        }}
         open={activeSheet === "careUpdate"}
+        ownerName={isRequester ? currentDisplayName || "Owner" : peerName || "Owner"}
         petName={careUpdatePetName}
+        petNames={careUpdatePetNames}
         serviceChatId={serviceChat?.id || null}
         sessionKey={sessionKey}
-        updateKind={careUpdateKind}
+        updateKind={careUpdateSheetOptional ? "optional" : careUpdateKind}
       /> : null}
       {activeSheet === "completion" ? <CompletionSheet
         canReportIssue={canReportBookingIssue}
@@ -7201,8 +8453,13 @@ export function NativeServiceChatScreen({
         isProvider={isProvider}
         isRequester={isRequester}
         isVoluntary={isNoChargeServiceChat(serviceChat)}
+        missingCareUpdateKind={isProvider && completionCareUpdateAttempted ? careUpdateKind : null}
         onClose={() => setActiveSheet(null)}
         onReportIssue={openIssueReportSheet}
+        onSendUpdateFirst={() => {
+          setCareUpdateSheetOptional(false);
+          setActiveSheet("careUpdate");
+        }}
         onSubmit={submitCompletion}
         open={activeSheet === "completion"}
         sending={sending}
@@ -7260,30 +8517,59 @@ export function NativeServiceChatScreen({
         serviceChatId={serviceChat?.id || null}
         sessionKey={sessionKey}
       /> : null}
+      {activeSheet === "noStartReport" ? <HandoffProblemSheet
+        accessToken={accessToken}
+        currentUserId={userId}
+        isRequester={isRequester}
+        mode={isRequester ? "ownerNoStart" : "carerNoStart"}
+        onClose={() => setActiveSheet(null)}
+        onError={(body) => setCarePopup({ title: "No-start report", body })}
+        onSubmit={submitNoStartReport}
+        open={activeSheet === "noStartReport"}
+        sending={sending}
+        serviceChatId={serviceChat?.id || null}
+        sessionKey={sessionKey}
+      /> : null}
       {activeSheet === "review" ? <ReviewSheet accessToken={accessToken} currentUserId={userId} hasReportedServiceDispute={hasReportedServiceDispute} isRequester={isRequester} isVoluntary={isNoChargeServiceChat(serviceChat)} open={activeSheet === "review"} onClose={() => setActiveSheet(null)} onSubmit={submitReview} serviceChatId={serviceChat?.id || null} sessionKey={sessionKey} /> : null}
       <CareHistorySheet
         currentUserId={userId}
+        focusServiceChatId={params.historyService || null}
         loading={careHistoryLoading}
+        paymentMovementByServiceId={carePaymentMovementByServiceId}
         rows={allCareHistoryRows}
-        onClose={() => setCareHistoryOpen(false)}
+        onClose={closeCareHistory}
         onOpenCareAgreement={(chat) => void openCareAgreementPdf(chat, "history")}
         onOpenPet={openPetProfile}
         open={careHistoryOpen}
         ownerName={isRequester ? currentDisplayName || "Owner" : peerName || "Owner"}
         providerName={isProvider ? currentDisplayName || "Provider" : peerName || "Provider"}
       />
-      <Modal presentationStyle="overFullScreen" transparent visible={menuOpen} animationType="fade" onRequestClose={() => setMenuOpen(false)}>
-        <Pressable style={[nativeModalStyles.appModalBackdrop, nativeModalStyles.appModalMenuSafeArea]} onPress={() => setMenuOpen(false)}>
-          <AppActionMenu items={menuItems} />
-        </Pressable>
-      </Modal>
+      {menuOpen ? (
+        <Modal animationType="fade" onRequestClose={() => setMenuOpen(false)} presentationStyle="overFullScreen" statusBarTranslucent transparent visible>
+          <Pressable style={[styles.inlineSheetLayer, nativeModalStyles.appModalBackdrop]} onPress={() => setMenuOpen(false)}>
+            <Pressable
+              onPress={(event) => event.stopPropagation()}
+              style={[styles.headerActionMenuAnchor, menuAnchorPosition]}
+            >
+              <AppActionMenu items={menuItems} />
+            </Pressable>
+          </Pressable>
+        </Modal>
+      ) : null}
       <AppDestructiveSlideConfirm
         body={blockState === "blocked_by_me" ? "Allow this user to send you messages again?" : "You will no longer see their posts or alerts, and they won't be able to interact with you directly in Chats."}
         onClose={() => setConfirmBlockOpen(false)}
         onConfirm={() => void toggleBlock()}
         open={confirmBlockOpen}
+        presentation="inline"
         slideLabel={`Slide to ${blockState === "blocked_by_me" ? "Unblock" : "Block"}`}
         title={blockState === "blocked_by_me" ? `Unblock ${peerName}?` : `Block ${peerName}?`}
+      />
+      <AppNoticeModal
+        body="You can block this user after the care session and any open case are resolved. You can still report an issue or contact Support now."
+        onClose={() => setBlockUnavailableNoticeOpen(false)}
+        open={blockUnavailableNoticeOpen}
+        title="Blocking unavailable"
       />
       <AppDestructiveSlideConfirm
         body={`This will cancel your inquiry for ${clean(serviceChat?.request_card?.serviceType) || "care"} with ${peerName}. You can send a new request if your plans change.`}
@@ -7293,18 +8579,30 @@ export function NativeServiceChatScreen({
           void withdrawRequest();
         }}
         open={confirmWithdrawRequestOpen}
+        presentation="inline"
         slideLabel="Slide to Withdraw"
         title="Withdraw this request?"
       />
+      <AppDestructiveSlideConfirm
+        body={`This will decline ${clean(serviceChat?.request_card?.serviceType) || "this care request"} and return this chat to a new quote state. The owner can send a new request later.`}
+        onClose={() => setConfirmDeclineRequestOpen(false)}
+        onConfirm={() => {
+          setConfirmDeclineRequestOpen(false);
+          void declineCareRequest();
+        }}
+        open={confirmDeclineRequestOpen}
+        presentation="inline"
+        slideLabel="Slide to Decline"
+        title="Decline this care request?"
+      />
       {confirmCancelBookingOpen ? (
       <View pointerEvents="box-none" style={styles.inlineSheetLayer}>
-        <KeyboardAvoidingView behavior="padding" keyboardVerticalOffset={0} pointerEvents="box-none" style={nativeModalStyles.appModalBottomSafeArea}>
+        <Pressable accessibilityLabel="Close cancel booking sheet" accessibilityRole="button" onPress={() => { if (!sending) setConfirmCancelBookingOpen(false); }} style={nativeModalStyles.appModalBackdrop} />
+        <KeyboardAvoidingView behavior="padding" keyboardVerticalOffset={0} pointerEvents="box-none" style={[nativeModalStyles.appModalBottomSafeArea, nativeModalStyles.appBottomSheetEventBoundary]}>
           <AppBottomSheet mode="large" onClose={() => { if (!sending) setConfirmCancelBookingOpen(false); }}>
             <AppBottomSheetHeader>
               <Text style={nativeModalStyles.appModalSheetTitle}>{isProvider ? "Cancel Care Booking" : "Cancel booking"}</Text>
-              <AppModalIconButton accessibilityLabel="Close Cancel booking" disabled={sending} onPress={() => setConfirmCancelBookingOpen(false)}>
-                <Feather color={huddleColors.text} name="x" size={24} />
-              </AppModalIconButton>
+              <AppModalCloseButton onPress={sending ? () => undefined : () => setConfirmCancelBookingOpen(false)} />
             </AppBottomSheetHeader>
             <AppBottomSheetScroll contentContainerStyle={styles.paymentBody}>
               {isRequester ? (
@@ -7325,13 +8623,22 @@ export function NativeServiceChatScreen({
               </View>
               {isProvider ? (
                 <View style={nativeModalStyles.appModalFieldBlock}>
-                  <AppModalButton onPress={pickCancelEvidence}>
+                  <AppModalButton disabled={cancelEvidenceMedia.length >= MAX_CARE_REPORT_EVIDENCE} onPress={pickCancelEvidence}>
                     <View style={styles.evidenceButtonRow}>
                       <Feather color={huddleColors.onPrimary} name="camera" size={18} />
-                      <Text style={nativeModalStyles.appModalButtonText}>{cancelEvidenceMedia ? "Change Supporting Photo" : "Add Supporting Information"}</Text>
+                      <Text style={nativeModalStyles.appModalButtonText}>{cancelEvidenceMedia.length > 0 ? `Add Photos (${cancelEvidenceMedia.length}/10)` : "Add Supporting Photos"}</Text>
                     </View>
                   </AppModalButton>
-                  {cancelEvidenceMedia ? <ExpoImage contentFit="cover" key={nativeFreshImageKey(cancelEvidenceMedia.uri, cancelEvidenceMedia.uri)} source={{ uri: nativeFreshImageUri(cancelEvidenceMedia.uri, cancelEvidenceMedia.uri) }} style={styles.evidencePreviewThumb} /> : null}
+                  {cancelEvidenceMedia.length > 0 ? (
+                    <ScrollView bounces={false} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.reviewMediaThumbRow} style={styles.reviewMediaRailViewport}>
+                      {cancelEvidenceMedia.map((item, index) => (
+                        <View key={`${item.uri}-${index}`} style={[styles.reviewMediaThumbWrap, { aspectRatio: 1 }]}>
+                          <ExpoImage contentFit="cover" key={nativeFreshImageKey(item.uri, item.uri)} source={{ uri: nativeFreshImageUri(item.uri, item.uri) }} style={styles.reviewMediaThumb} />
+                          <Pressable accessibilityLabel={`Remove supporting photo ${index + 1}`} accessibilityRole="button" onPress={() => setCancelEvidenceMedia((current) => current.filter((_, itemIndex) => itemIndex !== index))} style={styles.reviewMediaRemoveButton}><Feather color={huddleColors.onPrimary} name="x" size={14} /></Pressable>
+                        </View>
+                      ))}
+                    </ScrollView>
+                  ) : null}
                 </View>
               ) : null}
               <View style={styles.paymentInfoBox}>
@@ -7351,23 +8658,19 @@ export function NativeServiceChatScreen({
         </KeyboardAvoidingView>
       </View>
       ) : null}
-      <AppSlideConfirm
-        body="Share this PIN only after handing over your pet or giving access to the care location."
-        busy={sending}
-        onClose={() => setConfirmHandoffOpen(false)}
-        onConfirm={() => void performShareStartPin()}
-        open={confirmHandoffOpen}
-        slideLabel="Share Care Session PIN"
-        title="Your Care Session PIN"
-      />
-      <AppSlideConfirm
-        body="This lets the carer start care before the scheduled service date using the shared PIN and timestamped check-in photo."
-        busy={sending}
-        onClose={() => setConfirmEarlyStartOpen(false)}
-        onConfirm={() => void allowEarlyStart()}
-        open={confirmEarlyStartOpen}
-        slideLabel="Allow Early Start"
-        title="Allow early start?"
+      <AppConfirmModal
+        body="Only continue after your pet has been handed over or the carer has access to the care location. This shares the 4-digit Start PIN with your carer."
+        cancelLabel="Not yet"
+        confirmLabel="Start Care"
+        loading={sending}
+        onCancel={() => setConfirmOwnerStartCareOpen(false)}
+        onConfirm={() => {
+          setConfirmOwnerStartCareOpen(false);
+          void performShareStartPin();
+        }}
+        open={confirmOwnerStartCareOpen}
+        presentation="modal"
+        title="Start Care?"
       />
       <AppConfirmModal
         body={carePopup?.body || ""}
@@ -7376,22 +8679,8 @@ export function NativeServiceChatScreen({
         onCancel={() => setCarePopup(null)}
         onConfirm={() => setCarePopup(null)}
         open={Boolean(carePopup)}
+        presentation="modal"
         title={carePopup?.title || "huddle Care"}
-      />
-      <AppConfirmModal
-        body={`This booking asked for one summary per care day. You missed ${missedSummaryCount} ${missedSummaryCount === 1 ? "day" : "days"}.`}
-        cancelLabel="Send summary"
-        confirmLabel="Complete anyway"
-        onCancel={() => {
-          setSummaryCompletionWarningOpen(false);
-          setActiveSheet("careUpdate");
-        }}
-        onConfirm={() => {
-          setSummaryCompletionWarningOpen(false);
-          setActiveSheet("completion");
-        }}
-        open={summaryCompletionWarningOpen}
-        title="Daily summary missing"
       />
       <NativeSocialReportModal
         accessToken={accessToken}
@@ -7423,28 +8712,24 @@ export function NativeServiceChatScreen({
         sessionKey={sessionKey ?? null}
         profileUserId={profileSheetUserId}
       />
-      <Modal animationType="slide" presentationStyle="overFullScreen" transparent visible={providerProfileOpen} onRequestClose={closeProviderProfile}>
-        <View style={[nativeModalStyles.appModalBackdrop, nativeModalStyles.appModalSafeArea, styles.profileModalSafeArea, { paddingTop: insets.top + huddleSpacing.x6, paddingBottom: insets.bottom }]}>
+      {providerProfileOpen ? (
+        <View style={[styles.inlineSheetLayer, nativeModalStyles.appModalBackdrop, nativeModalStyles.appModalSafeArea, styles.profileModalSafeArea, { paddingTop: huddleSpacing.x4, paddingBottom: insets.bottom }]}>
           <Pressable accessibilityLabel="Close provider profile" accessibilityRole="button" onPress={closeProviderProfile} style={StyleSheet.absoluteFill} />
           <Animated.View style={[styles.profileModalCard, providerDragStyle]}>
-            <View collapsable={false} style={styles.profileModalHeader} {...providerPullDownResponder.panHandlers}>
-              <View style={styles.headerCopy}>
-                <Text adjustsFontSizeToFit minimumFontScale={0.78} numberOfLines={1} style={styles.detailTitle}>Pet Carer Profile</Text>
-              </View>
-              <View style={styles.headerActions}>
-                <AppModalIconButton accessibilityLabel="Close provider profile" onPress={closeProviderProfile}>
-                  <Feather color={huddleColors.text} name="x" size={24} />
-                </AppModalIconButton>
-              </View>
+            <View collapsable={false} {...providerPullDownResponder.panHandlers}>
+              <AppBottomSheetHeader>
+                <Text numberOfLines={1} style={nativeModalStyles.appModalSheetTitle}>Pet Carer Profile</Text>
+                <AppModalCloseButton onPress={closeProviderProfile} />
+              </AppBottomSheetHeader>
             </View>
             <ScrollView bounces={false} contentContainerStyle={styles.profileModalScrollContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} style={styles.profileModalScroll}>
               {providerProfileError ? <View style={styles.detailState}><Text style={styles.waitText}>{providerProfileError}</Text></View> : providerProfile ? <NativeCarerProfileContent provider={providerProfile} accessToken={accessToken} /> : providerProfileLoading ? <View style={styles.detailState}><NativeLoadingState variant="inline" /></View> : null}
             </ScrollView>
           </Animated.View>
         </View>
-      </Modal>
-      <Modal animationType="fade" onRequestClose={() => setCareAgreementOpen(false)} transparent visible={careAgreementOpen}>
-        <View style={[nativeModalStyles.appModalBackdrop, nativeModalStyles.appModalSafeArea]}>
+      ) : null}
+      {careAgreementOpen ? (
+        <View style={[styles.inlineSheetLayer, nativeModalStyles.appModalBackdrop, nativeModalStyles.appModalSafeArea]}>
           <Pressable accessibilityLabel="Close Care Agreement" accessibilityRole="button" onPress={() => setCareAgreementOpen(false)} style={StyleSheet.absoluteFill} />
           <View style={styles.termsModalBoundary}>
             <View style={styles.termsModalCard}>
@@ -7469,14 +8754,14 @@ export function NativeServiceChatScreen({
                 <Text style={styles.termsLegalTitle}>Parties &amp; platform role</Text>
                 <Text style={styles.termsSheetText}>This Care Agreement is a direct agreement between the owner and the carer. Huddle operates the platform — booking, payments, messaging, and safety tooling — and is not the care provider, not an employer or agent of the carer, and not a party to the care itself. The carer acts as an independent party responsible for the care delivered. To the fullest extent permitted by law, Huddle is not liable for the acts, omissions, or outcomes of the care arranged through the platform.</Text>
                 <Text style={styles.termsLegalTitle}>Confirmed Care Scope</Text>
-                <PaymentCareScopeSummary bookingSnapshot={serviceChat?.booking_snapshot || null} careDetails={serviceChat?.care_scope?.careDetails || null} careScope={serviceChat?.care_scope || null} carerContact={carerContactFromCareDetails(serviceChat?.care_scope?.careDetails || null)} quoteCard={serviceChat?.quote_card || null} requestCard={serviceChat?.request_card || null} showCarerContact={bookingHasConfirmed(serviceChat)} showPaymentLine viewerRole={isProvider ? "provider" : "requester"} />
+                <PaymentCareScopeSummary bookingSnapshot={serviceChat?.booking_snapshot || null} careDetails={serviceChat?.care_scope?.careDetails || null} careScope={serviceChat?.care_scope || null} carerContact={carerContactFromCareDetails(serviceChat?.care_scope?.careDetails || null)} onOpenPet={(petId) => void openPetProfile(petId)} paymentMovement={serviceChat?.id ? carePaymentMovementByServiceId[serviceChat.id]?.[0] || null : null} quoteCard={serviceChat?.quote_card || null} requestCard={serviceChat?.request_card || null} showCarerContact={bookingHasConfirmed(serviceChat)} showPaymentLine viewerRole={isProvider ? "provider" : "requester"} />
                 {!isNoChargeServiceChat(serviceChat) ? (
                   <>
                     <Text style={styles.termsLegalTitle}>{isProvider ? "Cancellation Policy" : "Cancellation & refunds"}</Text>
                     <Text style={styles.termsSheetText}>
                       {isProvider
                         ? "More than 24 hours before care — cancellation is recorded and may affect how often your profile appears. Within 24 hours — Care access may be restricted while huddle reviews. Confirmed no-shows or serious reliability issues may suspend Care access."
-                        : "More than 72 hours before care starts — full refund. 24 to 72 hours before — 50% refund; the remaining 50% is paid to the carer for the time reserved. Less than 24 hours before — the booking is final and non-refundable; the full amount is paid to the carer unless huddle confirms a safety or handoff issue."}
+                        : "More than 72 hours before care starts — full refund. 24 to 72 hours before — 50% refund; huddle retains the remaining 50%. Less than 24 hours before — the booking is final and non-refundable."}
                     </Text>
                   </>
                 ) : null}
@@ -7495,7 +8780,8 @@ export function NativeServiceChatScreen({
             </View>
           </View>
         </View>
-      </Modal>
+      ) : null}
+      </View>
     </KeyboardAvoidingView>
   );
 }
@@ -7590,7 +8876,11 @@ function BookingCards({
   const scopeTasks = normalizeCareTaskList(visibleScopeCard?.scopeTasks).length ? normalizeCareTaskList(visibleScopeCard?.scopeTasks) : normalizeCareTaskList(quoteCard?.scopeTasks);
   const scopeFrequency = clean(visibleScopeCard?.scopeFrequency) || clean(quoteCard?.scopeFrequency);
   const otherTasks = clean(visibleScopeCard?.otherTasks) || clean(quoteCard?.otherTasks);
-  const agreedAt = clean(chat.booking_snapshot?.agreedAt);
+  const updatePreferenceLabel = normalizeUpdatePreference(visibleScopeCard?.updatePreference);
+  // History is rendered from the agreement snapshot. Some older payment snapshots
+  // predate `agreedAt`; the two recorded signatures are the legal fallback.
+  const agreedAt = clean(chat.booking_snapshot?.agreedAt)
+    || latestIso(chat.care_agreement?.requesterSignedAt, chat.care_agreement?.providerSignedAt);
   const collapsedShortDate = formatShortDateRange(visibleScopeCard?.requestedDates, visibleScopeCard?.requestedDate);
   const collapsedWhereLine = [collapsedShortDate || null, locationArea || null].filter(Boolean).join(" · ");
   const requestExpired = isPendingRequestExpired(chat);
@@ -7601,7 +8891,8 @@ function BookingCards({
   // longer a live, actionable agreement -- hide the PDF entirely rather than let it
   // imply the booking is still upcoming.
   const careScheduleHasPassed = hasServicePeriodPassed(visibleScopeCard);
-  const careAgreementReady = (allowAgreementPdfFromAgreement
+  const cancelledHistoryRow = isCancelledServiceChatRow(chat);
+  const careAgreementReady = !cancelledHistoryRow && (allowAgreementPdfFromAgreement
     ? careAgreementHasPdf(chat.care_agreement)
     : !careScheduleHasPassed && Boolean(
       careAgreementHasSignedParties(chat.care_agreement)
@@ -7645,7 +8936,7 @@ function BookingCards({
           >
             <View style={styles.scopeHeadlineBlock}>
               <View style={styles.scopeHeaderTopRow}>
-                <View style={styles.scopeHeadlineCopy}>
+                <View style={[styles.scopeHeadlineCopy, styles.paymentScopeHeadlineCopy]}>
                   <Text numberOfLines={1} style={styles.timelineCurrentLabel}>{serviceLabel || "Care Scope"} with </Text>
                   <PetAvatarStack pets={scopePets} size={22} />
                 </View>
@@ -7668,19 +8959,9 @@ function BookingCards({
                   <Feather color={huddleColors.iconMuted} name={expanded ? "chevron-up" : "chevron-down"} size={18} />
                 </View>
               </View>
-              <View style={styles.scopeHeaderBottomRow}>
-                <View style={styles.scopeSubtitleAndHideRow}>
-                  {collapsedWhereLine ? (
-                    <View style={styles.scopeSubtitleRow}>
-                      <Text numberOfLines={1} style={[styles.scopeSubtitle, requestExpired ? { color: huddleColors.validationRed } : null]}>{collapsedWhereLine}</Text>
-                    </View>
-                  ) : <View style={styles.scopeSubtitleRow} />}
-                  {careAgreementReady ? (
-                    <Pressable accessibilityRole="button" onPress={(event) => { event.stopPropagation(); onOpenCareAgreement?.(); }} style={({ pressed }) => [styles.careAgreementBadge, styles.careAgreementBadgeCompact, pressed ? nativeModalStyles.pressed : null]}>
-                      <Feather color={huddleColors.onPrimary} name="file-text" size={12} />
-                      <Text style={styles.careAgreementBadgeText}>See Agreement</Text>
-                    </Pressable>
-                  ) : null}
+              {collapsedWhereLine || cancelledHistoryRow || careAgreementReady || (canHide && onHide) ? <View style={styles.scopeHeaderBottomRow}>
+                {collapsedWhereLine ? <Text numberOfLines={1} style={[styles.scopeSubtitle, requestExpired ? { color: huddleColors.validationRed } : null]}>{collapsedWhereLine}</Text> : <View style={styles.scopeHeaderBottomSpacer} />}
+                <View style={styles.scopeUtilityActions}>
                   {canHide && onHide ? (
                     <Pressable
                       accessibilityLabel="Hide care scope from chat"
@@ -7694,8 +8975,19 @@ function BookingCards({
                       <Text style={styles.inlineHideText}>Hide</Text>
                     </Pressable>
                   ) : null}
+                  {cancelledHistoryRow ? (
+                    <View style={[styles.careAgreementBadge, styles.careAgreementBadgeCompact, styles.cancelledCareBadge]}>
+                      <Feather color={huddleColors.onPrimary} name="x-circle" size={12} />
+                      <Text style={styles.careAgreementBadgeText}>Cancelled</Text>
+                    </View>
+                  ) : careAgreementReady ? (
+                    <Pressable accessibilityRole="button" onPress={(event) => { event.stopPropagation(); onOpenCareAgreement?.(); }} style={({ pressed }) => [styles.careAgreementBadge, styles.careAgreementBadgeCompact, pressed ? nativeModalStyles.pressed : null]}>
+                      <Feather color={huddleColors.onPrimary} name="file-text" size={12} />
+                      <Text style={styles.careAgreementBadgeText}>See Agreement</Text>
+                    </Pressable>
+                  ) : null}
                 </View>
-              </View>
+              </View> : null}
               {requestExpired ? <Text style={styles.errorText}>{expiryHelperText}</Text> : null}
             </View>
           </Pressable>
@@ -7742,15 +9034,13 @@ function BookingCards({
                     <ScopeDetailRow label="Time">
                       {visibleScopeCard.startTime || "—"} – {visibleScopeCard.endTime || "—"}
                     </ScopeDetailRow>
-                    {locationStyleLabel ? (
-                      <ScopeDetailRow label="Setting">{locationStyleLabel}{locationArea ? ` — ${locationArea}` : ""}</ScopeDetailRow>
+                    {formatCareScopeSetting(locationStyles, locationArea) ? (
+                      <ScopeDetailRow label="Setting">{formatCareScopeSetting(locationStyles, locationArea)}</ScopeDetailRow>
                     ) : null}
                     {[scopeTasks.join(", "), otherTasks].filter(Boolean).join(", ") ? (
                       <ScopeDetailRow label="Care tasks">{[scopeTasks.join(", "), otherTasks].filter(Boolean).join(", ")}</ScopeDetailRow>
                     ) : null}
-                    {visibleScopeCard.updatePreference && normalizeUpdatePreference(visibleScopeCard.updatePreference) !== UPDATE_PREFERENCE_DEFAULT ? (
-                      <ScopeDetailRow label="Updates preference">{normalizeUpdatePreference(visibleScopeCard.updatePreference)}</ScopeDetailRow>
-                    ) : null}
+                    <ScopeDetailRow label="Updates preference">{updatePreferenceLabel}</ScopeDetailRow>
                     {scopeFrequency ? (
                       <ScopeDetailRow label="Walks per day">{scopeFrequency}</ScopeDetailRow>
                     ) : null}
@@ -7872,6 +9162,7 @@ function ServiceActionCard({
   onToggle,
   staticCard = false,
   title,
+  warningBody = false,
 }: {
   body?: string;
   children?: ReactNode;
@@ -7884,6 +9175,7 @@ function ServiceActionCard({
   // are just "header" or "header + button" — nothing to collapse.
   staticCard?: boolean;
   title: string;
+  warningBody?: boolean;
 }) {
   const isCollapsed = staticCard ? false : (locked || collapsed);
   return (
@@ -7902,7 +9194,7 @@ function ServiceActionCard({
       </View>
       {!isCollapsed ? (
         <>
-          {body ? <Text style={styles.paymentInfoText}>{body}</Text> : null}
+          {body ? <Text style={[styles.paymentInfoText, warningBody ? styles.errorText : null]}>{body}</Text> : null}
           {children}
         </>
       ) : null}
@@ -7988,9 +9280,8 @@ function CareScopeAgreementPaymentDetails({
 
 function CareSignoffCancellationPolicy({ isNoChargeVoluntary, viewerRole }: { isNoChargeVoluntary: boolean; viewerRole: ServiceRole }) {
   if (viewerRole === "provider") {
-    // The owner's-late-cancellation payout protection ("you keep 50%/the full amount") only
-    // means something when money is actually held -- on a $0 voluntary booking there's nothing
-    // to keep, so that bullet must not be shown; only the commitment/trust bullets apply.
+    // A no-payment booking has no money to refund or pay. Paid owner cancellations use
+    // Huddle's disclosed retention policy; this copy must not promise the carer a payout.
     if (isNoChargeVoluntary) {
       return (
         <View style={styles.paymentInfoBox}>
@@ -8004,7 +9295,7 @@ function CareSignoffCancellationPolicy({ isNoChargeVoluntary, viewerRole }: { is
     return (
       <View style={styles.paymentInfoBox}>
         <Text style={styles.paymentInfoTitle}>Cancellation Policy</Text>
-        <View style={styles.cancellationBulletRow}><Text style={styles.cancellationBullet}>•</Text><Text style={styles.cancellationBulletText}>You're protected: if the owner cancels 24-72 hours before care, you keep 50%. Under 24 hours, you keep the full amount.</Text></View>
+        <View style={styles.cancellationBulletRow}><Text style={styles.cancellationBullet}>•</Text><Text style={styles.cancellationBulletText}>If the owner cancels 24-72 hours before care, they receive a 50% refund and huddle retains 50%; no carer cancellation payout is released. Under 24 hours, the booking is non-refundable and any payout follows the booking record.</Text></View>
         <View style={styles.cancellationBulletRow}><Text style={styles.cancellationBullet}>•</Text><Text style={styles.cancellationBulletText}>Owners rely on your commitment once you sign off.</Text></View>
         <View style={styles.cancellationBulletRow}><Text style={styles.cancellationBullet}>•</Text><Text style={styles.cancellationBulletText}>Late cancellations, no-shows, or serious trust issues may restrict your Care access while huddle reviews.</Text></View>
       </View>
@@ -8023,20 +9314,41 @@ function CareSignoffCancellationPolicy({ isNoChargeVoluntary, viewerRole }: { is
     <View style={styles.paymentInfoBox}>
       <Text style={styles.paymentInfoTitle}>Cancellation</Text>
       <View style={styles.cancellationBulletRow}><Text style={styles.cancellationBullet}>•</Text><Text style={styles.cancellationBulletText}>72+ hours before care: full refund.</Text></View>
-      <View style={styles.cancellationBulletRow}><Text style={styles.cancellationBullet}>•</Text><Text style={styles.cancellationBulletText}>24-72 hours before care: 50% refund.</Text></View>
+      <View style={styles.cancellationBulletRow}><Text style={styles.cancellationBullet}>•</Text><Text style={styles.cancellationBulletText}>24-72 hours before care: 50% refund; huddle retains 50%.</Text></View>
       <View style={styles.cancellationBulletRow}><Text style={styles.cancellationBullet}>•</Text><Text style={styles.cancellationBulletText}>Under 24 hours: final and non-refundable.</Text></View>
     </View>
   );
 }
 
 const careScopeAcknowledgementCopy = (viewerRole: ServiceRole, isNoChargeVoluntary: boolean) => {
-  if (viewerRole === "provider") return "I understand that last-minute cancellations, confirmed no-shows, or serious trust violations may restrict my ability to provide Care on huddle.";
-  if (isNoChargeVoluntary) return "I understand that confirmed Care bookings are a commitment, even when no payment is involved.";
-  return "I understand the cancellation policy for this Care booking.";
+  if (viewerRole === "provider") return "I have read and agree to the cancellation and no-start policy (including automatic cancellation at the scheduled end time). I understand that last-minute cancellations, confirmed no-shows, or serious trust violations may restrict my ability to provide Care on HUDDLE.";
+  if (isNoChargeVoluntary) return "I have read and agree to the cancellation and no-start policy (including automatic cancellation at the scheduled end time).";
+  return "I have read and agree to the cancellation and no-start policy (including automatic cancellation at the scheduled end time and the applicable 50% retained amount).";
 };
 
-const careScopeTermsAcknowledgementCopy = (_viewerRole: ServiceRole) =>
-  "I have read the terms, and understand the Care Scope & Instructions, payment details, and handoff process.";
+const careScopeTermsAcknowledgementCopy = (viewerRole: ServiceRole) =>
+  viewerRole === "provider"
+    ? "I have read the Care Service Carer Agreement, and understand the Care Scope & Instructions, payout details, and handoff process."
+    : "I have read the Care Service Booking Terms, and understand the Care Scope & Instructions, payment details, and handoff process.";
+
+const carePaymentMovementCopy = (movement: NativeCarePaymentMovement | null | undefined) => {
+  if (!movement) return null;
+  if (movement.movementKind === "owner_refund") {
+    if (movement.status === "succeeded") {
+      return movement.refundReference
+        ? { label: "Refund processed", detail: formatCarePaymentDate(movement.processedAt), referenceLabel: movement.refundReferenceType === "acquirer_reference_number" ? "ARN" : "Refund reference", referenceValue: movement.refundReference }
+        : { label: "Refund on the way", detail: movement.estimatedArrivalAt ? `Est. ${formatCarePaymentDate(movement.estimatedArrivalAt)}${movement.isDelayed ? " (Delayed)" : ""}` : movement.isDelayed ? "Delayed" : "Processing with your bank" };
+    }
+    if (movement.isDelayed) return { label: "Refund on the way", detail: movement.estimatedArrivalAt ? `Est. ${formatCarePaymentDate(movement.estimatedArrivalAt)} (Delayed)` : "Delayed" };
+    return { label: "Refund processing", detail: movement.estimatedArrivalAt ? `Est. ${formatCarePaymentDate(movement.estimatedArrivalAt)}` : "Submitted to the payment provider" };
+  }
+  if (movement.status === "paid") {
+    return { label: "Payment released", detail: formatCarePaymentDate(movement.paidAt || movement.estimatedArrivalAt), referenceLabel: movement.payoutTraceId ? "Trace ID" : undefined, referenceValue: movement.payoutTraceId || undefined };
+  }
+  if (["failed", "canceled", "requires_review"].includes(movement.status)) return { label: "Payment on the way", detail: "Status updating" };
+  if (movement.estimatedArrivalAt) return { label: "Payment on the way", detail: `Est. ${formatCarePaymentDate(movement.estimatedArrivalAt)}` };
+  return { label: "Payment released", detail: "Processing to your payout account" };
+};
 
 function PaymentCareScopeSummary({
   bookingSnapshot,
@@ -8044,7 +9356,10 @@ function PaymentCareScopeSummary({
   careScope,
   carerContact,
   disabledEdit,
+  onDecline,
   onEdit,
+  onOpenPet,
+  paymentMovement,
   providerCurrency,
   quoteCard,
   requestCard,
@@ -8057,7 +9372,10 @@ function PaymentCareScopeSummary({
   careScope?: CareScopeSummary | null;
   carerContact?: string | null;
   disabledEdit?: boolean;
+  onDecline?: () => void;
   onEdit?: () => void;
+  onOpenPet?: (petId: string) => void;
+  paymentMovement?: NativeCarePaymentMovement | null;
   providerCurrency?: string;
   quoteCard: ServiceQuoteCard | null;
   requestCard: ServiceRequestCard | null;
@@ -8066,6 +9384,7 @@ function PaymentCareScopeSummary({
   viewerRole?: ServiceRole;
 }) {
   const [summaryPage, setSummaryPage] = useState<"scope" | "instruction">("scope");
+  const [paymentReferenceExpanded, setPaymentReferenceExpanded] = useState(false);
   const hasCareInstruction = hasCareInstructionDetails(careDetails);
   useEffect(() => {
     if (!hasCareInstruction && summaryPage === "instruction") setSummaryPage("scope");
@@ -8085,6 +9404,16 @@ function PaymentCareScopeSummary({
     }),
     [hasCareInstruction],
   );
+  const paymentMovementCopy = carePaymentMovementCopy(paymentMovement);
+  const paymentReferenceLabel = paymentMovementCopy?.referenceLabel;
+  const paymentReferenceValue = paymentMovementCopy?.referenceValue;
+  const paymentReferenceCanCollapse = paymentReferenceLabel === "Trace ID" && Boolean(paymentReferenceValue && paymentReferenceValue.length > 10);
+  const paymentReferenceDisplay = paymentReferenceValue
+    ? !paymentReferenceCanCollapse || paymentReferenceExpanded
+      ? paymentReferenceValue
+      : `${paymentReferenceValue.slice(0, 10)}…`
+    : "";
+  useEffect(() => setPaymentReferenceExpanded(false), [paymentReferenceValue]);
   if (!requestCard && !quoteCard) return null;
   const visibleScopeCard = requestCardWithCareScopeUpdates(requestCard, quoteCard, careScope?.actorRole);
   const serviceLabel = Array.isArray(visibleScopeCard?.serviceTypes) && visibleScopeCard?.serviceTypes.length ? visibleScopeCard.serviceTypes.join("・") : clean(visibleScopeCard?.serviceType) || "Care Scope";
@@ -8098,34 +9427,40 @@ function PaymentCareScopeSummary({
   const scopeTasks = normalizeCareTaskList(visibleScopeCard?.scopeTasks);
   const scopeFrequency = clean(visibleScopeCard?.scopeFrequency);
   const otherTasks = clean(visibleScopeCard?.otherTasks);
+  const updatePreferenceLabel = normalizeUpdatePreference(visibleScopeCard?.updatePreference);
   const agreedAt = clean(bookingSnapshot?.agreedAt);
   const quoteIsNoChargeVoluntary = isNoChargeVisibleScope(visibleScopeCard, quoteCard, careScope?.actorRole);
   const quoteCurrency = careCurrencyFromScopeOnly(null, visibleScopeCard) || providerCurrency || "";
   const { requesterTotal, providerPayout } = frozenOrLiveCarePayment(bookingSnapshot, null, visibleScopeCard, quoteIsNoChargeVoluntary);
   const scopePets = visibleScopeCard ? requestCardPets(visibleScopeCard) : [];
+  const scopeDateLocation = [formatShortDateRange(sourceDates, sourceDate), locationArea].filter(Boolean).join(" · ");
   return (
     <View style={styles.paymentCareScopeCard}>
       <View style={[styles.phaseStrip, { backgroundColor: huddleColors.blueLight }]} pointerEvents="none" />
       <View style={styles.paymentCareScopeInner} {...summaryPagePanResponder.panHandlers}>
         <View style={styles.scopeHeadlineBlock}>
-          <View style={styles.scopeHeaderTopRow}>
-            <View style={styles.scopeHeadlineCopy}>
-              <Text numberOfLines={1} style={styles.timelineCurrentLabel}>{serviceLabel} with </Text>
-              <PetAvatarStack pets={scopePets} size={22} />
+          <View style={[styles.scopeHeaderTopRow, styles.paymentScopeHeaderTopRow]}>
+            <View style={styles.paymentScopeHeadlineMain}>
+              <View style={[styles.scopeHeadlineCopy, styles.paymentScopeHeadlineCopy]}>
+                <Text numberOfLines={1} style={styles.timelineCurrentLabel}>{serviceLabel} with </Text>
+                <PetAvatarStack pets={scopePets} size={22} />
+              </View>
+              {scopeDateLocation ? <Text numberOfLines={1} style={styles.scopeSubtitle}>{scopeDateLocation}</Text> : null}
             </View>
-            {onEdit ? (
-              <Pressable accessibilityRole="button" disabled={disabledEdit} hitSlop={huddleSpacing.x2} onPress={onEdit} style={({ pressed }) => [styles.scopeActionButton, disabledEdit ? styles.disabledAction : null, pressed ? nativeModalStyles.pressed : null]}>
-                <Feather color={huddleColors.blue} name="edit-2" size={14} />
-                <Text style={styles.scopeActionText}>Edit</Text>
-              </Pressable>
+            {onEdit || onDecline ? (
+              <View style={styles.scopeHeaderActions}>
+                {onEdit ? (
+                  <Pressable accessibilityLabel="Edit care scope" accessibilityRole="button" disabled={disabledEdit} hitSlop={huddleSpacing.x2} onPress={onEdit} style={({ pressed }) => [styles.scopeIconAction, disabledEdit ? styles.disabledAction : null, pressed ? nativeModalStyles.pressed : null]}>
+                    <Feather color={huddleColors.blue} name="edit-2" size={18} />
+                  </Pressable>
+                ) : null}
+                {onDecline ? (
+                  <Pressable accessibilityLabel="Reject care scope" accessibilityRole="button" disabled={disabledEdit} hitSlop={huddleSpacing.x2} onPress={onDecline} style={({ pressed }) => [styles.scopeIconAction, disabledEdit ? styles.disabledAction : null, pressed ? nativeModalStyles.pressed : null]}>
+                    <Feather color={huddleColors.validationRed} name="x" size={18} />
+                  </Pressable>
+                ) : null}
+              </View>
             ) : null}
-          </View>
-          <View style={styles.scopeHeaderBottomRow}>
-            <View style={styles.scopeSubtitleRow}>
-              {[formatShortDateRange(sourceDates, sourceDate), locationArea].filter(Boolean).join(" · ") ? (
-                <Text numberOfLines={1} style={styles.scopeSubtitle}>{[formatShortDateRange(sourceDates, sourceDate), locationArea].filter(Boolean).join(" · ")}</Text>
-              ) : null}
-            </View>
           </View>
         </View>
 
@@ -8144,18 +9479,53 @@ function PaymentCareScopeSummary({
           <>
             <View style={styles.scopeHairline} />
 
-            {visibleScopeCard ? <SelectedPetPolaroid requestCard={visibleScopeCard} /> : null}
+            {visibleScopeCard ? <SelectedPetPolaroid onOpenPet={onOpenPet} requestCard={visibleScopeCard} /> : null}
 
             <View style={styles.scopeDetailGrid}>
               <ScopeDetailRow label="Time">{startTime} – {endTime}</ScopeDetailRow>
-              {locationStyleLabel ? <ScopeDetailRow label="Setting">{locationStyleLabel}{locationArea ? ` — ${locationArea}` : ""}</ScopeDetailRow> : null}
+              {formatCareScopeSetting(locationStyles, locationArea) ? <ScopeDetailRow label="Setting">{formatCareScopeSetting(locationStyles, locationArea)}</ScopeDetailRow> : null}
               {[scopeTasks.join(", "), otherTasks].filter(Boolean).join(", ") ? <ScopeDetailRow label="Care tasks">{[scopeTasks.join(", "), otherTasks].filter(Boolean).join(", ")}</ScopeDetailRow> : null}
+              <ScopeDetailRow label="Updates preference">{updatePreferenceLabel}</ScopeDetailRow>
               {scopeFrequency ? <ScopeDetailRow label="Walks per day">{scopeFrequency}</ScopeDetailRow> : null}
               {agreedAt ? <ScopeDetailRow label="Booking terms">Agreed - {formatTimelineStepDate(agreedAt)}</ScopeDetailRow> : null}
               {showPaymentLine && !quoteIsNoChargeVoluntary && (quoteCard || visibleScopeCard?.suggestedPrice) ? (
                 <ScopeDetailRow label={viewerRole === "provider" ? "Payout" : "Payment"}>
                   {viewerRole === "provider" ? formatMoney(quoteCurrency, providerPayout) : formatMoney(quoteCurrency, requesterTotal)}
                 </ScopeDetailRow>
+              ) : null}
+              {paymentMovementCopy ? (
+                <ScopeDetailRow label={paymentMovementCopy.label}>{paymentMovementCopy.detail || "—"}</ScopeDetailRow>
+              ) : null}
+              {paymentReferenceLabel && paymentReferenceValue ? (
+                <View style={styles.scopeDetailRow}>
+                  <Text style={styles.scopeDetailLabel}>{paymentReferenceLabel}</Text>
+                  <View style={styles.scopePaymentReferenceValue}>
+                    <Pressable
+                      accessibilityLabel={paymentReferenceCanCollapse ? `${paymentReferenceExpanded ? "Collapse" : "Expand"} ${paymentReferenceLabel}` : paymentReferenceLabel}
+                      accessibilityRole="button"
+                      disabled={!paymentReferenceCanCollapse}
+                      onPress={() => {
+                        haptic.toggleControl();
+                        setPaymentReferenceExpanded((value) => !value);
+                      }}
+                      style={({ pressed }) => [styles.timelineReferenceValueButton, pressed ? nativeModalStyles.pressed : null]}
+                    >
+                      <Text selectable={paymentReferenceExpanded || !paymentReferenceCanCollapse} style={styles.scopeDetailValue}>{paymentReferenceDisplay}</Text>
+                    </Pressable>
+                    <Pressable
+                      accessibilityLabel={`Copy ${paymentReferenceLabel}`}
+                      accessibilityRole="button"
+                      hitSlop={huddleSpacing.x2}
+                      onPress={() => {
+                        void Clipboard.setStringAsync(paymentReferenceValue);
+                        haptic.toggleControl();
+                      }}
+                      style={({ pressed }) => [styles.timelineReferenceCopyButton, pressed ? nativeModalStyles.pressed : null]}
+                    >
+                      <Feather color={huddleColors.blue} name="copy" size={15} />
+                    </Pressable>
+                  </View>
+                </View>
               ) : null}
             </View>
             {hasCareInstruction ? (
@@ -8229,37 +9599,44 @@ function PetAvatarStack({ pets, size = 24 }: { pets: ServiceRequestPet[]; size?:
 }
 
 type BookingTimelineItem = {
+  cancelled?: boolean;
   dateLabel?: string;
   detail?: string;
   done: boolean;
   label: string;
+  reference?: { label: string; value: string };
   skipped?: boolean;
 };
 
-const buildBookingTimelineState = (chat: ServiceChatRow, isProvider: boolean, underReviewOverride?: boolean) => {
+const buildBookingTimelineState = (
+  chat: ServiceChatRow,
+  isProvider: boolean,
+  underReviewOverride?: boolean,
+  paymentMovement?: NativeCarePaymentMovement | null,
+) => {
   const noChargeVoluntaryBooking = isNoChargeServiceChat(chat);
+  const cancelled = isCancelledServiceChatRow(chat);
+  const systemNoStart = cancelled && chat.cancellation_status === "system_no_start";
   const disputeResolved = isResolvedServiceDisputeStatus(chat.dispute_status);
   const checkInDone = Boolean(chat.checkin_submitted_at && (chat.checkin_photo_url || chat.care_status === "in_progress" || chat.care_status === "completed"));
   const completionDone = Boolean(chat.care_status === "completed" || chat.status === "completed" || chat.completed_at);
-  const terminalDone = Boolean(completionDone || disputeResolved);
-  const providerPayoutSkipped = Boolean(isProvider && serviceDisputeNoProviderPayout(chat));
+  const terminalDone = Boolean(cancelled || completionDone || disputeResolved);
+  const providerPayoutSkipped = Boolean(isProvider && ((systemNoStart && Number(chat.cancellation_provider_payout_cents || 0) <= 0) || serviceDisputeNoProviderPayout(chat)));
   const manualRefundRequired = chat.care_status === "handoff_expired_manual_refund_required";
   const underReview = Boolean(!terminalDone && (underReviewOverride || chat.status === "disputed" || chat.care_status === "under_dispute" || chat.care_status === "handoff_issue_review" || manualRefundRequired));
   const oneSideComplete = !completionDone && (chat.requester_mark_finished || chat.provider_mark_finished);
   const currentUserMarkedComplete = isProvider ? chat.provider_mark_finished : chat.requester_mark_finished;
-  const scheduledEndAt = clean(chat.booking_snapshot?.endAt) || (() => {
-    const bounds = getServicePeriodBounds(chat.request_card);
-    return bounds ? new Date(bounds.endAt).toISOString() : "";
-  })();
+  const scheduledEndAt = serviceScheduledEndIso(chat.request_card, chat.booking_snapshot);
   const autoReleaseAt = addHoursIso(scheduledEndAt, PAYOUT_AUTO_RELEASE_HOURS);
   const waitingCompletionLabel = currentUserMarkedComplete
     ? isProvider
       ? "Completed. Wait for Pet Owner's confirmation"
       : "Completed. Wait for Carer's confirmation"
     : "Awaiting confirmation to finish";
-  const careInProgressDone = Boolean(terminalDone || oneSideComplete);
+  const careInProgressDone = Boolean(completionDone || oneSideComplete);
   const careInProgressActive = Boolean(!careInProgressDone && (chat.care_status === "in_progress" || chat.status === "in_progress"));
-  const completionDate = chat.dispute_resolved_at || chat.completed_at;
+  const cancellationDate = chat.updated_at || chat.booked_at || chat.quote_sent_at || chat.request_sent_at;
+  const completionDate = cancelled ? cancellationDate : chat.dispute_resolved_at || chat.completed_at;
   const visibleScopeCard = visibleCareScopeCardForChat(chat);
   const scopeTasks = normalizeCareTaskList(visibleScopeCard?.scopeTasks);
   const careTaskDetail = [
@@ -8268,7 +9645,8 @@ const buildBookingTimelineState = (chat: ServiceChatRow, isProvider: boolean, un
   ].filter(Boolean).join(", ");
   const scopeFrequency = clean(visibleScopeCard?.scopeFrequency);
   const scopeDetail = [careTaskDetail, scopeFrequency ? `Walks per day: ${scopeFrequency}` : ""].filter(Boolean).join(" - ");
-  const bookingConfirmedDone = Boolean(chat.booked_at || chat.status === "booked" || chat.status === "in_progress" || terminalDone);
+  const paymentCopy = carePaymentMovementCopy(paymentMovement);
+  const bookingConfirmedDone = Boolean(chat.booked_at || chat.status === "booked" || chat.status === "in_progress");
   const agreementSignedAt = latestIso(chat.care_agreement?.requesterSignedAt, chat.care_agreement?.providerSignedAt, chat.booking_snapshot?.agreedAt);
   // Withdrawing a request clears request_card/quote_card and deactivates the scope version,
   // but the old service_care_agreements row (from a prior withdrawn round) is left on file for
@@ -8283,7 +9661,7 @@ const buildBookingTimelineState = (chat: ServiceChatRow, isProvider: boolean, un
       : chat.care_scope?.carerSigned
         ? "Carer signed — waiting for the owner"
         : undefined;
-  const items: BookingTimelineItem[] = [
+  const coreItems: BookingTimelineItem[] = [
     { label: "Request sent", dateLabel: formatTimelineStepDate(chat.request_sent_at), done: Boolean(chat.request_sent_at || chat.request_card) },
     { label: "Care scope proposed", dateLabel: formatTimelineStepDate(chat.quote_sent_at || chat.request_sent_at || chat.booked_at), done: Boolean(visibleScopeCard) },
     { label: "Agreement signed", dateLabel: formatTimelineStepDate(agreementSignedAt), detail: agreementSignedDetail, done: agreementSignedDone },
@@ -8296,28 +9674,71 @@ const buildBookingTimelineState = (chat: ServiceChatRow, isProvider: boolean, un
       detail: !noChargeVoluntaryBooking && !terminalDone && (oneSideComplete || careInProgressActive) && autoReleaseAt
         ? `Payment auto-releases on ${formatTimelineStepDate(autoReleaseAt)} unless an issue is reported.`
         : undefined,
-      done: terminalDone,
+      done: Boolean(completionDone || disputeResolved),
     },
   ];
+  const lastReachedCoreIndex = [...coreItems].map((item, index) => item.done ? index : -1).filter((index) => index >= 0).pop() ?? -1;
+  const noStartRefundCents = Number(chat.no_start_refund_cents || 0);
+  const noStartRetainedCents = Number(chat.no_start_retained_cents || 0);
+  const noStartTotalCents = Number(chat.booking_snapshot?.price?.requesterTotal || 0);
+  const noStartIsHalfRetained = noStartTotalCents > 0
+    && noStartRefundCents > 0
+    && noStartRetainedCents > 0
+    && Math.abs((noStartRefundCents + noStartRetainedCents) - noStartTotalCents) <= 1
+    && Math.abs((noStartRetainedCents * 2) - noStartTotalCents) <= 1;
+  const noStartChargeDetail = systemNoStart && !isProvider && !noChargeVoluntaryBooking && noStartIsHalfRetained
+    ? `(50% Platform charge: ${formatNativeCareCurrencySymbol(chat.booking_snapshot?.price?.currency)}${fromStripeMinorUnitAmount(noStartRetainedCents, clean(chat.booking_snapshot?.price?.currency)).toFixed(2)})`
+    : undefined;
+  const items: BookingTimelineItem[] = systemNoStart
+    ? [
+      ...coreItems.slice(0, 4),
+      { ...coreItems[4], skipped: true, done: false },
+      { label: "Care in Progress — Cancelled", dateLabel: formatTimelineStepDate(chat.no_start_resolved_at || cancellationDate), detail: noStartChargeDetail, done: false, cancelled: true },
+      ...coreItems.slice(6).map((item) => ({ ...item, skipped: true, done: false })),
+    ]
+    : cancelled
+    ? [
+      ...coreItems.slice(0, lastReachedCoreIndex + 1),
+      { label: "Booking Cancellation", dateLabel: formatTimelineStepDate(cancellationDate), done: false, cancelled: true },
+      ...coreItems.slice(lastReachedCoreIndex + 1).map((item) => ({ ...item, skipped: true, done: false })),
+    ]
+    : coreItems;
+  if (!isProvider && paymentMovement?.movementKind === "owner_refund" && paymentCopy) {
+    items.push({
+      label: paymentCopy.label,
+      dateLabel: paymentMovement.status === "succeeded" ? formatTimelineStepDate(paymentMovement.processedAt) : undefined,
+      detail: paymentCopy.detail,
+      done: paymentMovement.status === "succeeded",
+      reference: paymentCopy.referenceLabel && paymentCopy.referenceValue
+        ? { label: paymentCopy.referenceLabel, value: paymentCopy.referenceValue }
+        : undefined,
+    });
+  }
   if (isProvider && !noChargeVoluntaryBooking) {
     items.push({
-      label: "Payment released",
-      dateLabel: formatTimelineStepDate(chat.payout_released_at),
-      done: Boolean(chat.payout_released_at),
+      label: paymentCopy?.label || "Payment released",
+      dateLabel: paymentMovement?.status === "paid" ? formatTimelineStepDate(paymentMovement.paidAt || paymentMovement.estimatedArrivalAt) : formatTimelineStepDate(chat.payout_released_at),
+      detail: paymentCopy?.detail,
+      done: paymentMovement ? paymentMovement.status === "paid" : Boolean(chat.payout_released_at),
+      reference: paymentCopy?.referenceLabel && paymentCopy.referenceValue
+        ? { label: paymentCopy.referenceLabel, value: paymentCopy.referenceValue }
+        : undefined,
       skipped: providerPayoutSkipped,
     });
   }
-  const currentIndex = items.findIndex((item) => !item.done && !("skipped" in item && item.skipped));
+  const currentIndex = items.findIndex((item) => item.cancelled || (!item.done && !("skipped" in item && item.skipped)));
   const disputeIndex = currentIndex >= 0 ? currentIndex : Math.max(0, items.length - 1);
   const lastCompletedItem = [...items].reverse().find((item) => item.done && !item.skipped);
-  const currentLabel = lastCompletedItem?.label || items[0].label;
+  const currentLabel = systemNoStart ? "Care in Progress — Cancelled" : cancelled ? "Booking Cancellation" : lastCompletedItem?.label || items[0].label;
   const phaseColor = (() => {
+    if (cancelled) return huddleColors.validationRed;
     if (underReview) return huddleColors.validationRed;
     if (terminalDone) return huddleColors.success;
     if (careInProgressDone || checkInDone) return huddleColors.blue;
     return huddleColors.primarySoftFill;
   })();
   return {
+    cancelled,
     careInProgressActive,
     careInProgressDone,
     checkInDone,
@@ -8336,12 +9757,15 @@ const isServiceChatHistoryMenuEligible = (chat: ServiceChatRow) => (
   Boolean(
     chat.completed_at ||
     chat.status === "completed" ||
+    chat.status === "cancelled" ||
     chat.care_status === "completed" ||
+    chat.care_status === "cancelled" ||
     isResolvedServiceDisputeStatus(chat.dispute_status),
   )
 );
 
 const serviceChatHistoryTerminalAt = (chat: ServiceChatRow, isProvider: boolean) => {
+  if (isCancelledServiceChatRow(chat)) return chat.no_start_resolved_at || chat.updated_at || chat.booked_at || chat.quote_sent_at || chat.request_sent_at || "";
   const state = buildBookingTimelineState(chat, isProvider);
   if (!state.terminalDone || state.underReview) return "";
   if (isProvider) {
@@ -8366,6 +9790,7 @@ function BookingTimelineExpandedList({
   currentIndex,
   disputeIndex,
   items,
+  lastUpdatedAt,
   noTopBorder = false,
   showAllDates = false,
   terminalDone,
@@ -8375,22 +9800,34 @@ function BookingTimelineExpandedList({
   currentIndex: number;
   disputeIndex: number;
   items: BookingTimelineItem[];
+  lastUpdatedAt?: string | null;
   noTopBorder?: boolean;
   showAllDates?: boolean;
   terminalDone: boolean;
   underReview: boolean;
 }) {
+  const [expandedReferenceKey, setExpandedReferenceKey] = useState<string | null>(null);
   return (
     <View style={[styles.timelineExpandedList, noTopBorder ? styles.timelineExpandedListNoBorder : null]}>
       {items.map((item, index) => {
-        const isCurrent = underReview ? index === disputeIndex : !item.done && !item.skipped && index === currentIndex;
+        const isCancellation = item.cancelled === true;
+        const isCurrent = isCancellation || (underReview ? index === disputeIndex : !item.done && !item.skipped && index === currentIndex);
         const isSkipped = "skipped" in item && item.skipped;
-        const shouldShowDate = Boolean(item.dateLabel && (showAllDates || item.label === "Payment released"));
+        const shouldShowDate = Boolean(item.dateLabel && (showAllDates || item.label === "Payment released" || item.label === "Refund processed"));
+        const referenceKey = item.reference ? `${index}:${item.reference.value}` : null;
+        const referenceExpanded = Boolean(referenceKey && expandedReferenceKey === referenceKey);
+        const referenceCanCollapse = item.reference?.label === "Trace ID" && item.reference.value.length > 10;
+        const referenceDisplay = item.reference
+          ? !referenceCanCollapse || referenceExpanded
+            ? item.reference.value
+            : `${item.reference.value.slice(0, 10)}…`
+          : "";
         return (
           <View key={`row-${item.label}-${index}`} style={styles.timelineItem}>
-            <Animated.View style={[styles.timelineDot, item.done ? styles.timelineDotDone : null, item.done && terminalDone ? styles.timelineDotDoneTerminal : null, isSkipped ? styles.timelineDotSkipped : null, isCurrent ? styles.timelineDotCurrent : null, isCurrent && underReview ? styles.timelineDotCurrentDisputed : null, isCurrent && !terminalDone && !isSkipped && activeDotPulseStyle ? activeDotPulseStyle : null]}>
+            <Animated.View style={[styles.timelineDot, item.done ? styles.timelineDotDone : null, item.done && terminalDone ? styles.timelineDotDoneTerminal : null, isSkipped ? styles.timelineDotSkipped : null, isCurrent ? styles.timelineDotCurrent : null, isCancellation ? styles.timelineDotCurrentDisputed : null, isCurrent && underReview ? styles.timelineDotCurrentDisputed : null, isCurrent && !terminalDone && !isSkipped && !isCancellation && activeDotPulseStyle ? activeDotPulseStyle : null]}>
               {item.done && !isCurrent ? <Feather color={huddleColors.onPrimary} name="check" size={11} /> : null}
               {isSkipped ? <Feather color={huddleColors.mutedText} name="x" size={11} /> : null}
+              {isCancellation ? <Feather color={huddleColors.onPrimary} name="x" size={11} /> : null}
             </Animated.View>
             <View style={styles.timelineTextBlock}>
               <Text
@@ -8400,16 +9837,47 @@ function BookingTimelineExpandedList({
                   item.done && terminalDone ? styles.timelineLabelDoneTerminal : null,
                   isSkipped ? styles.timelineLabelSkipped : null,
                   isCurrent ? styles.timelineLabelCurrent : null,
+                  isCancellation ? { color: huddleColors.validationRed } : null,
+                  isSkipped ? { textDecorationLine: "line-through" } : null,
                 ]}
               >
                 {item.label}
                 {shouldShowDate ? <Text style={styles.timelineLabelDate}> - {item.dateLabel}</Text> : null}
               </Text>
               {item.detail ? <Text style={styles.timelineDetailText}>{item.detail}</Text> : null}
+              {item.reference ? (
+                <View style={styles.timelineReferenceRow}>
+                  <Pressable
+                    accessibilityLabel={referenceCanCollapse ? `${referenceExpanded ? "Collapse" : "Expand"} ${item.reference.label}` : item.reference.label}
+                    accessibilityRole="button"
+                    disabled={!referenceCanCollapse}
+                    onPress={() => {
+                      haptic.toggleControl();
+                      setExpandedReferenceKey(referenceExpanded ? null : referenceKey);
+                    }}
+                    style={({ pressed }) => [styles.timelineReferenceValueButton, pressed ? nativeModalStyles.pressed : null]}
+                  >
+                    <Text selectable={referenceExpanded} style={styles.timelineReferenceText}>{item.reference.label}: {referenceDisplay}</Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityLabel={`Copy ${item.reference.label}`}
+                    accessibilityRole="button"
+                    hitSlop={huddleSpacing.x2}
+                    onPress={() => {
+                      void Clipboard.setStringAsync(item.reference?.value || "");
+                      haptic.toggleControl();
+                    }}
+                    style={({ pressed }) => [styles.timelineReferenceCopyButton, pressed ? nativeModalStyles.pressed : null]}
+                  >
+                    <Feather color={huddleColors.blue} name="copy" size={15} />
+                  </Pressable>
+                </View>
+              ) : null}
             </View>
           </View>
         );
       })}
+      {lastUpdatedAt ? <Text style={styles.timelineLastUpdated}>{formatCarePaymentLastUpdated(lastUpdatedAt)}</Text> : null}
     </View>
   );
 }
@@ -8421,6 +9889,7 @@ function BookingTimelineCard({
   isProvider,
   onHide,
   onToggle,
+  paymentMovement,
   underReview: underReviewOverride,
 }: {
   canHide?: boolean;
@@ -8429,9 +9898,10 @@ function BookingTimelineCard({
   isProvider: boolean;
   onHide?: () => void;
   onToggle: () => void;
+  paymentMovement?: NativeCarePaymentMovement | null;
   underReview?: boolean;
 }) {
-  const { currentIndex, currentLabel, disputeIndex, items, phaseColor, providerPayoutSkipped, terminalDone, underReview } = buildBookingTimelineState(chat, isProvider, underReviewOverride);
+  const { cancelled, currentIndex, currentLabel, disputeIndex, items, phaseColor, providerPayoutSkipped, terminalDone, underReview } = buildBookingTimelineState(chat, isProvider, underReviewOverride, paymentMovement);
   const activeDotPulse = useRef(new Animated.Value(0)).current;
   const activeDotPulseStyle = {
     opacity: activeDotPulse.interpolate({ inputRange: [0, 1], outputRange: [0.55, 1] }),
@@ -8469,15 +9939,23 @@ function BookingTimelineCard({
         style={({ pressed }) => [styles.glassCardInner, collapsed ? styles.timelineCollapsedHeader : null, pressed ? nativeModalStyles.pressed : null]}
       >
         <View style={styles.timelineTitleRow}>
-          <Text numberOfLines={1} style={[styles.timelineCurrentLabel, terminalDone ? styles.timelineCurrentLabelTerminal : null]}>{currentLabel}</Text>
+          <Text numberOfLines={1} style={[styles.timelineCurrentLabel, terminalDone && !cancelled ? styles.timelineCurrentLabelTerminal : null, cancelled ? styles.timelineCurrentLabelCancelled : null]}>{currentLabel}</Text>
           <Feather color={huddleColors.iconMuted} name={collapsed ? "chevron-down" : "chevron-up"} size={18} />
         </View>
         <View style={styles.timelineTopRow}>
           <View style={styles.timelineProgressAndHideRow}>
             <View style={styles.stitchedRibbon}>
               {items.map((item, index) => {
+                const isCancellation = item.cancelled === true;
                 const isCurrent = underReview ? index === disputeIndex : !item.done && !item.skipped && index === currentIndex;
                 const isSkipped = "skipped" in item && item.skipped;
+                if (isCancellation) {
+                  return (
+                    <View key={`cancelled-${index}`} style={styles.ribbonCancelled}>
+                      <Feather color={huddleColors.onPrimary} name="x" size={10} strokeWidth={2.8} />
+                    </View>
+                  );
+                }
                 if (isCurrent) {
                   return (
                     <Animated.View
@@ -8518,10 +9996,12 @@ function BookingTimelineCard({
             currentIndex={currentIndex}
             disputeIndex={disputeIndex}
             items={items}
+            lastUpdatedAt={paymentMovement?.lastSyncedAt}
             terminalDone={terminalDone}
             underReview={underReview}
           />
         ) : null}
+        {collapsed && paymentMovement?.lastSyncedAt ? <Text style={styles.timelineLastUpdated}>{formatCarePaymentLastUpdated(paymentMovement.lastSyncedAt)}</Text> : null}
       </Pressable>
     </View>
   );
@@ -8529,43 +10009,48 @@ function BookingTimelineCard({
 
 function CareHistorySheet({
   currentUserId,
+  focusServiceChatId,
   loading,
   onClose,
   onOpenCareAgreement,
   onOpenPet,
   open,
   ownerName,
+  paymentMovementByServiceId,
   providerName,
   rows,
 }: {
   currentUserId: string | null;
+  focusServiceChatId?: string | null;
   loading: boolean;
   onClose: () => void;
   onOpenCareAgreement?: (chat: ServiceChatRow) => void;
   onOpenPet?: (petId: string) => void;
   open: boolean;
   ownerName: string;
+  paymentMovementByServiceId: Record<string, NativeCarePaymentMovement[]>;
   providerName: string;
   rows: ServiceChatRow[];
 }) {
   const historyRows = useMemo(() => {
     const sorted = [...rows].sort((a, b) => {
+      if (focusServiceChatId && a.id === focusServiceChatId && b.id !== focusServiceChatId) return -1;
+      if (focusServiceChatId && b.id === focusServiceChatId && a.id !== focusServiceChatId) return 1;
       const aTime = Date.parse(serviceChatHistoryTerminalAt(a, a.provider_id === currentUserId) || a.completed_at || a.dispute_resolved_at || a.booked_at || "");
       const bTime = Date.parse(serviceChatHistoryTerminalAt(b, b.provider_id === currentUserId) || b.completed_at || b.dispute_resolved_at || b.booked_at || "");
       return (Number.isFinite(bTime) ? bTime : 0) - (Number.isFinite(aTime) ? aTime : 0);
     });
     return sorted;
-  }, [currentUserId, rows]);
+  }, [currentUserId, focusServiceChatId, rows]);
   if (!open) return null;
   return (
     <View pointerEvents="box-none" style={styles.inlineSheetLayer}>
-        <View style={nativeModalStyles.appModalBottomSafeArea} pointerEvents="box-none">
+        <Pressable accessibilityLabel="Close care history sheet" accessibilityRole="button" onPress={onClose} style={nativeModalStyles.appModalBackdrop} />
+        <View style={[nativeModalStyles.appModalBottomSafeArea, nativeModalStyles.appBottomSheetEventBoundary]} pointerEvents="box-none">
           <AppBottomSheet mode="large" onClose={onClose} style={styles.careHistorySheet}>
             <AppBottomSheetHeader>
               <Text numberOfLines={1} style={nativeModalStyles.appModalSheetTitle}>Care History</Text>
-              <AppModalIconButton accessibilityLabel="Close care history" onPress={onClose}>
-                <Feather color={huddleColors.text} name="x" size={24} />
-              </AppModalIconButton>
+              <AppModalCloseButton onPress={onClose} />
             </AppBottomSheetHeader>
             <AppBottomSheetScroll contentContainerStyle={styles.careHistoryContent} fill>
               {loading && historyRows.length === 0 ? (
@@ -8574,7 +10059,7 @@ function CareHistorySheet({
                 historyRows.map((chat) => {
                   const rowIsProvider = chat.provider_id === currentUserId;
                   const rowIsRequester = chat.requester_id === currentUserId;
-                  const timelineState = buildBookingTimelineState(chat, rowIsProvider);
+                  const timelineState = buildBookingTimelineState(chat, rowIsProvider, undefined, paymentMovementByServiceId[chat.id]?.[0] || null);
                   return (
                     <BookingCards
                       allowAgreementPdfFromAgreement
@@ -8588,6 +10073,7 @@ function CareHistorySheet({
                             currentIndex={timelineState.currentIndex}
                             disputeIndex={timelineState.disputeIndex}
                             items={timelineState.items}
+                            lastUpdatedAt={paymentMovementByServiceId[chat.id]?.[0]?.lastSyncedAt}
                             noTopBorder
                             showAllDates
                             terminalDone={timelineState.terminalDone}
@@ -8624,8 +10110,10 @@ function CompletionSheet({
   isProvider,
   isRequester,
   isVoluntary,
+  missingCareUpdateKind,
   onClose,
   onReportIssue,
+  onSendUpdateFirst,
   onSubmit,
   open,
   sending,
@@ -8635,8 +10123,10 @@ function CompletionSheet({
   isProvider: boolean;
   isRequester: boolean;
   isVoluntary: boolean;
+  missingCareUpdateKind: CareUpdateKind | null;
   onClose: () => void;
   onReportIssue: () => void;
+  onSendUpdateFirst: () => void;
   onSubmit: (note: string, providerChecks?: { confirmedCompleted: boolean; noUnresolvedSafetyConcerns: boolean; understandsReview: boolean }, requesterChecks?: { confirmedCompleted: boolean; understandsPayoutReview: boolean }) => Promise<void>;
   open: boolean;
   sending: boolean;
@@ -8665,6 +10155,13 @@ function CompletionSheet({
   const canSubmit = isProvider
     ? confirmedCompleted && noUnresolvedSafetyConcerns && understandsReview
     : isRequester && confirmedCompleted && (isVoluntary || understandsPayoutReview);
+  const missingCareUpdateLabel = missingCareUpdateKind === "photo"
+    ? "photo"
+    : missingCareUpdateKind === "summary"
+    ? "summary"
+    : missingCareUpdateKind === "photo_note"
+    ? "photo and summary"
+    : null;
   const submit = () => {
     setAttempted(true);
     if (!canSubmit) {
@@ -8681,15 +10178,23 @@ function CompletionSheet({
 
   return (
     <View pointerEvents="box-none" style={styles.inlineSheetLayer}>
-      <KeyboardAvoidingView behavior="padding" keyboardVerticalOffset={0} pointerEvents="box-none" style={nativeModalStyles.appModalBottomSafeArea}>
+      <Pressable accessibilityLabel="Close complete care sheet" accessibilityRole="button" onPress={sending ? () => undefined : onClose} style={nativeModalStyles.appModalBackdrop} />
+      <KeyboardAvoidingView behavior="padding" keyboardVerticalOffset={0} pointerEvents="box-none" style={[nativeModalStyles.appModalBottomSafeArea, nativeModalStyles.appBottomSheetEventBoundary]}>
         <AppBottomSheet mode="content" onClose={onClose}>
           <AppBottomSheetHeader>
             <Text style={nativeModalStyles.appModalSheetTitle}>Complete Care Session</Text>
-            <AppModalIconButton accessibilityLabel="Close complete care sheet" disabled={sending} onPress={onClose}>
-              <Feather color={huddleColors.text} name="x" size={24} />
-            </AppModalIconButton>
+            <AppModalCloseButton onPress={sending ? () => undefined : onClose} />
           </AppBottomSheetHeader>
           <AppBottomSheetScroll contentContainerStyle={styles.paymentBody}>
+            {isProvider && missingCareUpdateLabel ? (
+              <View accessibilityRole="alert" style={styles.completionCareUpdateNotice}>
+                <Feather color={huddleColors.blue} name="info" size={18} />
+                <View style={styles.completionCareUpdateNoticeCopy}>
+                  <Text style={styles.completionCareUpdateNoticeTitle}>Care update not sent</Text>
+                  <Text style={styles.completionCareUpdateNoticeBody}>You haven’t sent the requested {missingCareUpdateLabel}. You can still confirm completion.</Text>
+                </View>
+              </View>
+            ) : null}
             <CompletionCheckbox
               attempted={attempted}
               checked={confirmedCompleted}
@@ -8714,6 +10219,16 @@ function CompletionSheet({
             ) : null}
           </AppBottomSheetScroll>
           <AppBottomSheetFooter>
+            {isProvider && missingCareUpdateLabel ? (
+              <Pressable
+                accessibilityRole="button"
+                disabled={sending}
+                onPress={onSendUpdateFirst}
+                style={({ pressed }) => [styles.completionSendUpdateFirst, pressed ? nativeModalStyles.pressed : null]}
+              >
+                <Text style={styles.completionSendUpdateFirstText}>Send update first</Text>
+              </Pressable>
+            ) : null}
             <SlideToConfirm busy={sending} label={ctaLabel || "Complete Care Session"} onCommit={submit} resetKey={slideResetKey} />
           </AppBottomSheetFooter>
         </AppBottomSheet>
@@ -8741,6 +10256,7 @@ function PaymentSheet({
   onClose,
   onConfirmVolunteer,
   onEditCareScope,
+  onOpenPet,
   onOpenSupport,
   onUpdateCareDetails,
   onSigned,
@@ -8767,6 +10283,7 @@ function PaymentSheet({
   onClose: () => void;
   onConfirmVolunteer: (snapshot: CareBookingSnapshot, traceId: string, trace: ServicePaymentTrace) => Promise<ServicePaymentResult>;
   onEditCareScope: () => void;
+  onOpenPet?: (petId: string) => void;
   onOpenSupport: () => void;
   onUpdateCareDetails: (careDetails: CareScopeCareDetails) => Promise<void>;
   onSigned?: () => Promise<void> | void;
@@ -8832,7 +10349,7 @@ function PaymentSheet({
   const rawEndAtMs = Date.parse(rawEndAt);
   const endAtMs = Number.isFinite(startAtMs) && Number.isFinite(rawEndAtMs) && rawEndAtMs <= startAtMs ? rawEndAtMs + 24 * 60 * 60 * 1000 : rawEndAtMs;
   const endAt = Number.isFinite(endAtMs) ? new Date(endAtMs).toISOString() : rawEndAt;
-  const invalidBookingDuration = !Number.isFinite(startAtMs) || !Number.isFinite(endAtMs) || endAtMs <= startAtMs;
+  const invalidBookingDuration = !Number.isFinite(startAtMs) || !Number.isFinite(endAtMs) || endAtMs - startAtMs < 60 * 60 * 1000;
   const defaultHandoff = [clean(requestCard?.locationStyles?.join(" / ")), clean(requestCard?.locationArea)].filter(Boolean).join(" - ");
   const phoneCountryCode = useMemo(() => resolveNativeCountryCodeFromLabel(requesterCountry), [requesterCountry]);
   const [handoffMethod, setHandoffMethod] = useState(defaultHandoff);
@@ -8880,6 +10397,7 @@ function PaymentSheet({
   const scrollRef = useRef<ScrollView | null>(null);
   const paymentFieldOffsetsRef = useRef<Record<string, number>>({});
   const paymentTraceIdRef = useRef("");
+  const validationStageRef = useRef<"sign" | "confirm" | null>(null);
   const bookingTermsPage = useMemo(() => getNativeLegalPage("/booking-terms"), []);
   const draftKey = useMemo(() => paymentDraftKey(requesterId, providerId, selectedPetIds, serviceType), [providerId, requesterId, selectedPetIds, serviceType]);
   const activeScopeVersionId = careScope?.scopeVersionId || `${serviceChatId || "service"}:unversioned`;
@@ -9116,6 +10634,18 @@ function PaymentSheet({
   const currentMutualSignatures = hasCurrentAgreement === true || careScope?.mutualSigned === true;
   const paymentInProgress = isCarePaymentPendingActive(careScope);
   const canSignCareScope = !currentMutualSignatures && !ownerAlreadySigned && (carerAlreadySigned || careScope?.actorRole === "carer") && !paymentInProgress;
+  useEffect(() => {
+    if (!open) {
+      validationStageRef.current = null;
+      return;
+    }
+    const nextStage = canSignCareScope ? "sign" : "confirm";
+    if (validationStageRef.current === nextStage) return;
+    validationStageRef.current = nextStage;
+    setAttempted(false);
+    setSubmitError(null);
+    setFocusedField(null);
+  }, [canSignCareScope, open]);
   const paymentLockedByScopeChange = !canSignCareScope && Boolean(openedScopeVersionId && activeScopeVersionId && openedScopeVersionId !== activeScopeVersionId);
   // Terms consent is captured once, at the signature step. A requester who has
   // already agreed/signed never re-confirms the agreement just to pay.
@@ -9173,6 +10703,9 @@ function PaymentSheet({
     startAt,
   ]);
   const getFirstInvalidPaymentField = useCallback(() => {
+    if (canSignCareScope && missingTermsAcknowledgement) return "terms";
+    if (canSignCareScope && missingPolicyAcknowledgement) return "policy";
+    if (canSignCareScope && missingSignature) return "signature";
     if (missingContact) return "contact";
     if (missingEmergency) return "emergency";
     if (missingHandoffLocation) return "handoffLocation";
@@ -9180,7 +10713,7 @@ function PaymentSheet({
     if (missingVetAuthChoice) return "vetAuth";
     if (missingVetAuthCap) return "vetAuthCap";
     return "";
-  }, [missingContact, missingEmergency, missingHandoffLocation, missingMedication, missingVetAuthCap, missingVetAuthChoice]);
+  }, [canSignCareScope, missingContact, missingEmergency, missingHandoffLocation, missingMedication, missingPolicyAcknowledgement, missingSignature, missingTermsAcknowledgement, missingVetAuthCap, missingVetAuthChoice]);
   const appendPaymentTrace = useCallback((traceId: string, step: string, details: Record<string, unknown> = {}) => {
     const normalizedStep = clean(step);
     if (!normalizedStep) return;
@@ -9394,6 +10927,7 @@ function PaymentSheet({
         uploadedOwnerSignaturePath = ownerSignatureImage.path;
         const { error: ownerScopeSignatureError } = await supabase.rpc("record_service_care_scope_signature", {
           p_acknowledged_terms: true,
+          p_acknowledged_no_start_policy: policyAccepted,
           p_service_chat_id: serviceChatId,
           p_signature: {
             ...requesterSignature,
@@ -9460,6 +10994,7 @@ function PaymentSheet({
         petName: visiblePetName,
         petSpecies: clean(quoteCard?.petSpecies) || clean(requestCard?.petSpecies) || clean(quoteCard?.petType) || clean(requestCard?.petType),
         petBreed: clean(quoteCard?.petBreed) || clean(requestCard?.petBreed),
+        dogSize: clean(requestCard?.pets?.[0]?.dogSize) || clean(quoteCard?.pets?.[0]?.dogSize) || clean(requestCard?.dogSize) || clean(quoteCard?.dogSize),
         startAt,
         endAt,
         handoffMethod: handoffMethod.trim() || defaultHandoff,
@@ -9528,13 +11063,12 @@ function PaymentSheet({
   };
   return (
     <View pointerEvents="box-none" style={styles.inlineSheetLayer}>
-      <KeyboardAvoidingView behavior="padding" keyboardVerticalOffset={0} pointerEvents="box-none" style={nativeModalStyles.appModalBottomSafeArea}>
-        <AppBottomSheet disableSwipeToClose mode="large" onClose={closePaymentSheet}>
+      <Pressable accessibilityLabel="Close payment sheet" accessibilityRole="button" onPress={closePaymentSheet} style={nativeModalStyles.appModalBackdrop} />
+      <KeyboardAvoidingView behavior="padding" keyboardVerticalOffset={0} pointerEvents="box-none" style={[nativeModalStyles.appModalBottomSafeArea, nativeModalStyles.appBottomSheetEventBoundary]}>
+        <AppBottomSheet mode="large" onClose={closePaymentSheet}>
           <AppBottomSheetHeader>
             <Text style={nativeModalStyles.appModalSheetTitle}>{canSignCareScope ? "Review & Sign Care Scope" : isNoChargeVoluntary ? "Confirm care" : "Booking Payment"}</Text>
-            <AppModalIconButton accessibilityLabel={isNoChargeVoluntary ? "Close confirm care" : "Close confirm booking"} onPress={closePaymentSheet}>
-              <Feather color={huddleColors.text} name="x" size={24} />
-            </AppModalIconButton>
+            <AppModalCloseButton onPress={closePaymentSheet} />
           </AppBottomSheetHeader>
           <AppBottomSheetScroll contentContainerStyle={styles.paymentBody} scrollEnabled={!signatureSigning} scrollRef={scrollRef}>
             {canSignCareScope ? null : currentMutualSignatures ? (
@@ -9543,7 +11077,7 @@ function PaymentSheet({
                 <Text style={styles.paymentInfoText}>{isNoChargeVoluntary ? "Care Scope is agreed. Review the booking safety details before confirming." : "Care Scope is agreed. Review the booking safety details before payment."}</Text>
               </View>
             ) : null}
-            <PaymentCareScopeSummary careDetails={careScope?.careDetails || null} careScope={careScope || null} disabledEdit={paymentAttempting || sending} onEdit={canSignCareScope ? onEditCareScope : undefined} providerCurrency={curr} quoteCard={quoteCard} requestCard={requestCard} showPaymentLine={!isNoChargeVoluntary} viewerRole="requester" />
+            <PaymentCareScopeSummary careDetails={careScope?.careDetails || null} careScope={careScope || null} disabledEdit={paymentAttempting || sending} onEdit={canSignCareScope ? onEditCareScope : undefined} onOpenPet={onOpenPet} providerCurrency={curr} quoteCard={quoteCard} requestCard={requestCard} showPaymentLine={!isNoChargeVoluntary} viewerRole="requester" />
             <CareScopeAgreementPaymentDetails hideWhenFree={!canSignCareScope} providerCurrency={curr} quoteCard={quoteCard} requestCard={requestCard} viewerRole="requester" />
 
             {paymentLockedByScopeChange ? (
@@ -9660,9 +11194,9 @@ function PaymentSheet({
                   <View style={styles.paymentInfoBox}>
                     <Text style={styles.paymentInfoTitle}>Cancellation</Text>
                     <View style={styles.cancellationBulletRow}><Text style={styles.cancellationBullet}>•</Text><Text style={styles.cancellationBulletText}>72+ hours before care: full refund.</Text></View>
-                    <View style={styles.cancellationBulletRow}><Text style={styles.cancellationBullet}>•</Text><Text style={styles.cancellationBulletText}>24-72 hours before care: 50% refund.</Text></View>
+                    <View style={styles.cancellationBulletRow}><Text style={styles.cancellationBullet}>•</Text><Text style={styles.cancellationBulletText}>24-72 hours before care: 50% refund; huddle retains 50%.</Text></View>
                     <View style={styles.cancellationBulletRow}><Text style={styles.cancellationBullet}>•</Text><Text style={styles.cancellationBulletText}>Under 24 hours: final and non-refundable.</Text></View>
-                    <View style={styles.cancellationBulletRow}><Text style={styles.cancellationBullet}>•</Text><Text style={styles.cancellationBulletText}>No-show, handoff, or safety issue? Send evidence to <Text onPress={onOpenSupport} style={styles.checkboxLinkText}>Support</Text>. We'll hold payment during review.</Text></View>
+                    <View style={styles.cancellationBulletRow}><Text style={styles.cancellationBullet}>•</Text><Text style={styles.cancellationBulletText}>No-show, handoff, or safety issue? Send evidence to <Text onPress={onOpenSupport} style={styles.checkboxLinkText}>Support</Text>. huddle may hold payment during review.</Text></View>
                   </View>
                 ) : null}
               </>
@@ -9673,20 +11207,22 @@ function PaymentSheet({
             ) : null}
             {canSignCareScope ? (
               <>
-                <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: termsAccepted }} onPress={termsAccepted ? () => setTermsAccepted(false) : openTermsSheet} style={styles.checkboxRowTop}>
+                <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: termsAccepted }} onLayout={registerPaymentField("terms")} onPress={termsAccepted ? () => setTermsAccepted(false) : openTermsSheet} style={styles.checkboxRowTop}>
                   <View style={[styles.checkbox, attempted && missingTermsAcknowledgement ? styles.checkboxError : null, termsAccepted ? styles.checkboxActive : null]}>{termsAccepted ? <Feather color={huddleColors.onPrimary} name="check" size={14} /> : null}</View>
-                  <Text style={styles.checkboxText}>{careScopeTermsAcknowledgementCopy("requester")}</Text>
+                  <NativeLegalText style={styles.checkboxText}>{careScopeTermsAcknowledgementCopy("requester")}</NativeLegalText>
                 </Pressable>
-                {attempted && missingTermsAcknowledgement ? <Text style={styles.errorText}>Booking terms acknowledgement is required before sign off.</Text> : null}
-                <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: policyAccepted }} onPress={() => setPolicyAccepted((value) => !value)} style={styles.checkboxRowTop}>
+                {attempted && missingTermsAcknowledgement ? <Text style={styles.errorText}>Care Service Booking Terms acknowledgement is required before sign off.</Text> : null}
+                <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: policyAccepted }} onLayout={registerPaymentField("policy")} onPress={() => setPolicyAccepted((value) => !value)} style={styles.checkboxRowTop}>
                   <View style={[styles.checkbox, attempted && missingPolicyAcknowledgement ? styles.checkboxError : null, policyAccepted ? styles.checkboxActive : null]}>{policyAccepted ? <Feather color={huddleColors.onPrimary} name="check" size={14} /> : null}</View>
-                  <Text style={styles.checkboxText}>{careScopeAcknowledgementCopy("requester", isNoChargeVoluntary)}</Text>
+                  <NativeLegalText style={styles.checkboxText}>{careScopeAcknowledgementCopy("requester", isNoChargeVoluntary)}</NativeLegalText>
                 </Pressable>
                 {attempted && missingPolicyAcknowledgement ? <Text style={styles.errorText}>Cancellation policy acknowledgement is required before sign off.</Text> : null}
               </>
             ) : null}
             {canSignCareScope ? (
-              <NativeSignaturePad attempted={attempted} captureViewRef={signatureCaptureRef} onChange={setRequesterSignature} onSigningChange={setSignatureSigning} />
+              <View onLayout={registerPaymentField("signature")}>
+                <NativeSignaturePad attempted={attempted} captureViewRef={signatureCaptureRef} onChange={setRequesterSignature} onSigningChange={setSignatureSigning} />
+              </View>
             ) : null}
             {paymentInProgress ? (
               <View style={styles.paymentInfoBox}>
@@ -9752,14 +11288,15 @@ function PaymentSheet({
           onCancel={closePetRefill}
           onConfirm={() => void savePetRefill()}
           open={Boolean(petRefillTarget)}
+          presentation="inline"
           title={petRefillTarget?.field === "vet" ? "Add vet contact" : "Add medication"}
         />
-        <Modal animationType="fade" onRequestClose={() => setTermsSheetVisible(false)} transparent visible={termsSheetVisible}>
-          <View style={[nativeModalStyles.appModalBackdrop, nativeModalStyles.appModalSafeArea]}>
+        {termsSheetVisible ? (
+          <View style={[styles.inlineSheetLayer, nativeModalStyles.appModalBackdrop, nativeModalStyles.appModalSafeArea]}>
             <Pressable accessibilityLabel="Close booking terms" accessibilityRole="button" onPress={() => setTermsSheetVisible(false)} style={StyleSheet.absoluteFill} />
-            <View {...termsSheetPanResponder.panHandlers} style={styles.termsModalBoundary}>
+            <View style={styles.termsModalBoundary}>
               <View style={styles.termsModalCard}>
-                <View style={styles.termsModalHeader}>
+                <View {...termsSheetPanResponder.panHandlers} style={styles.termsModalHeader}>
                   <Text style={styles.termsModalTitle}>Care Service Booking Terms</Text>
                   <AppModalIconButton accessibilityLabel="Close booking terms" onPress={() => setTermsSheetVisible(false)}>
                     <Feather color={huddleColors.text} name="x" size={24} />
@@ -9781,17 +11318,23 @@ function PaymentSheet({
                   {bookingTermsPage ? (
                     <>
                       {bookingTermsPage.intro.map((paragraph, index) => (
-                        <Text key={`booking-intro-${index}`} style={styles.termsSheetText}>{paragraph}</Text>
+                        <NativeLegalText key={`booking-intro-${index}`} style={styles.termsSheetText}>{paragraph}</NativeLegalText>
                       ))}
                       {bookingTermsPage.sections.map((section) => (
                         <View key={section.title} style={styles.termsLegalSection}>
                           <Text style={styles.termsLegalTitle}>{section.title}</Text>
                           {section.body.map((paragraph, index) => (
-                            <Text key={`${section.title}-${index}`} style={styles.termsSheetText}>{paragraph}</Text>
+                            <NativeLegalText key={`${section.title}-${index}`} style={styles.termsSheetText}>{paragraph}</NativeLegalText>
+                          ))}
+                          {section.bullets?.map((bullet, index) => (
+                            <View key={`${section.title}-bullet-${index}`} style={styles.termsBulletRow}>
+                              <Text style={styles.termsBulletDot}>•</Text>
+                              <NativeLegalText style={styles.termsBulletText}>{bullet}</NativeLegalText>
+                            </View>
                           ))}
                         </View>
                       ))}
-                      <Text style={styles.termsSheetText}>{bookingTermsPage.effectiveDate}</Text>
+                      <Text style={styles.termsSheetText}>Updated: {bookingTermsPage.effectiveDate}</Text>
                     </>
                   ) : null}
                 </ScrollView>
@@ -9806,7 +11349,7 @@ function PaymentSheet({
               </View>
             </View>
           </View>
-        </Modal>
+        ) : null}
       </KeyboardAvoidingView>
     </View>
   );
@@ -9942,12 +11485,12 @@ function StartCareSheet({
   const takePhoto = useCallback(async () => {
     let asset: ImagePicker.ImagePickerAsset;
     try {
-      const permission = await ImagePicker.requestCameraPermissionsAsync();
-      if (!permission.granted) {
+      const permission = await requestNativeCameraPermissionDetail();
+      if (permission.state !== "granted") {
         onError("Camera access is needed to capture a check-in photo.");
         return;
       }
-      const result = await ImagePicker.launchCameraAsync({
+      const result = await launchNativeCameraAsync({
         allowsMultipleSelection: false,
         mediaTypes: ["images"],
         preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
@@ -10038,8 +11581,8 @@ function StartCareSheet({
       }
       let evidence: StartCareEvidence = { capturedAt: capturedAt?.toISOString() || null, locationPermissionDenied: false, note: note.trim() || null };
       try {
-        const permission = await Location.requestForegroundPermissionsAsync();
-        if (permission.status === Location.PermissionStatus.GRANTED) {
+        const permission = await requestNativeForegroundLocationPermissionDetail();
+        if (permission.state === "granted") {
           const position = await Promise.race([
             Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
             new Promise<null>((resolve) => setTimeout(() => resolve(null), 3500)),
@@ -10099,17 +11642,16 @@ function StartCareSheet({
   }, [accessToken, capturedAt, currentUserId, media, note, onClose, onError, onSubmit, photoAspectRatio, pin, pinVerified, serviceChatId, sessionKey]);
   return (
     <View pointerEvents="box-none" style={styles.inlineSheetLayer}>
-      <KeyboardAvoidingView behavior="padding" keyboardVerticalOffset={0} pointerEvents="box-none" style={nativeModalStyles.appModalBottomSafeArea}>
+      <Pressable accessibilityLabel="Close start care sheet" accessibilityRole="button" onPress={onClose} style={nativeModalStyles.appModalBackdrop} />
+      <KeyboardAvoidingView behavior="padding" keyboardVerticalOffset={0} pointerEvents="box-none" style={[nativeModalStyles.appModalBottomSafeArea, nativeModalStyles.appBottomSheetEventBoundary]}>
           <AppBottomSheet mode="content" onClose={onClose}>
-          <View style={styles.startCareSheetHeader}>
+          <AppBottomSheetHeader>
             <View style={styles.sheetTitleBlock}>
               <Text style={[nativeModalStyles.appModalSheetTitle, styles.startCareSheetTitle]}>Start Care</Text>
               <Text style={styles.sheetSubtitle}>Enter the PIN and take a timestamped photo of the pet to begin care.</Text>
             </View>
-            <AppModalIconButton accessibilityLabel="Close start care sheet" onPress={onClose}>
-              <Feather color={huddleColors.text} name="x" size={24} />
-            </AppModalIconButton>
-          </View>
+            <AppModalCloseButton onPress={onClose} />
+          </AppBottomSheetHeader>
           <AppBottomSheetScroll contentContainerStyle={styles.paymentBody}>
             <View style={styles.startCareInputStack}>
               <Pressable accessibilityRole="button" onPress={takePhoto} style={[styles.checkinPhotoButton, styles.checkinPhotoButtonStacked, attempted && !media ? styles.checkinPhotoButtonError : null]}>
@@ -10200,7 +11742,7 @@ function HandoffProblemSheet({
   currentUserId: string | null;
   isRequester?: boolean;
   isVoluntary?: boolean;
-  mode: "provider" | "requesterReport" | "requesterResponse" | "issueReport";
+  mode: "provider" | "requesterReport" | "requesterResponse" | "issueReport" | "ownerNoStart" | "carerNoStart";
   open: boolean;
   onClose: () => void;
   onError: (message: string) => void;
@@ -10213,10 +11755,18 @@ function HandoffProblemSheet({
     () => (isRequester ? OWNER_SERVICE_ISSUE_REASONS : CARER_SERVICE_ISSUE_REASONS).filter((item) => !(isVoluntary && item === "Payment or communication issue")),
     [isRequester, isVoluntary],
   );
-  const reasonOptions = mode === "issueReport" ? issueReasons : mode === "requesterResponse" ? REQUESTER_HANDOFF_PROBLEM_REASONS : REPORT_ISSUE_REASONS;
+  const reasonOptions = mode === "ownerNoStart"
+    ? OWNER_NO_START_REASONS
+    : mode === "carerNoStart"
+      ? CARER_NO_START_REASONS
+      : mode === "issueReport"
+        ? issueReasons
+        : mode === "requesterResponse"
+          ? REQUESTER_HANDOFF_PROBLEM_REASONS
+          : REPORT_ISSUE_REASONS;
   const [reason, setReason] = useState(reasonOptions[0]);
   const [note, setNote] = useState("");
-  const [media, setMedia] = useState<NativeSocialComposerMedia | null>(null);
+  const [media, setMedia] = useState<NativeSocialComposerMedia[]>([]);
   const [noteFocused, setNoteFocused] = useState(false);
   const [acknowledged, setAcknowledged] = useState(false);
   const [attempted, setAttempted] = useState(false);
@@ -10230,6 +11780,8 @@ function HandoffProblemSheet({
   // with different backend RPCs.
   const title = mode === "requesterResponse"
     ? "Respond to Handoff Review"
+    : mode === "ownerNoStart" || mode === "carerNoStart"
+      ? "Report No-start Issue"
     : mode === "issueReport"
       ? "Report Issue"
       : "Report Handoff Problem";
@@ -10249,32 +11801,31 @@ function HandoffProblemSheet({
     if (!open) return;
     setReason(reasonOptions[0]);
     setNote("");
-    setMedia(null);
+    setMedia([]);
     setNoteFocused(false);
     setAcknowledged(false);
     setAttempted(false);
     setSlideResetKey((key) => key + 1);
   }, [open, reasonOptions]);
   const pickEvidence = useCallback(async () => {
-    let asset: ImagePicker.ImagePickerAsset;
+    if (media.length >= MAX_CARE_REPORT_EVIDENCE) return;
     try {
       // Best-effort request; PHPicker presents regardless, so never hard-block.
-      try { await ImagePicker.requestMediaLibraryPermissionsAsync(); } catch { /* picker still works */ }
-      const result = await ImagePicker.launchImageLibraryAsync({
-        allowsMultipleSelection: false,
+      const result = await launchNativeImageLibraryAsync({
+        allowsMultipleSelection: true,
         mediaTypes: ["images"],
+        orderedSelection: true,
         preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
         quality: 0.86,
-        selectionLimit: 1,
+        selectionLimit: MAX_CARE_REPORT_EVIDENCE - media.length,
       });
-      if (result.canceled || !result.assets[0]) return;
-      asset = result.assets[0];
+      if (result.canceled || result.assets.length === 0) return;
+      const selected = result.assets.map((asset) => ({ durationSeconds: typeof asset.duration === "number" ? asset.duration / 1000 : null, height: asset.height, kind: "image" as const, mimeType: asset.mimeType, name: asset.fileName, size: asset.fileSize, uri: asset.uri, width: asset.width }));
+      setMedia((current) => [...current, ...selected].slice(0, MAX_CARE_REPORT_EVIDENCE));
     } catch (error) {
       onError(nativeSafeErrorCopy(error, "Couldn't open your photo library. Try again."));
-      return;
     }
-    setMedia({ durationSeconds: typeof asset.duration === "number" ? asset.duration / 1000 : null, height: asset.height, kind: "image", mimeType: asset.mimeType, name: asset.fileName, size: asset.fileSize, uri: asset.uri, width: asset.width });
-  }, [onError]);
+  }, [media.length, onError]);
   const focusReportNote = useCallback(() => {
     setNoteFocused(true);
     const scroll = () => {
@@ -10292,9 +11843,12 @@ function HandoffProblemSheet({
     // both mandatory (evidence stays optional). Every other mode is pre-handoff triage, where
     // evidence is optional-but-encouraged: a written note OR an attached photo is enough (never
     // a fully empty report), so a carer who uploads proof isn't forced to also type.
+    const isNoStartReport = mode === "ownerNoStart" || mode === "carerNoStart";
     const invalid = mode === "issueReport"
       ? (!reason.trim() || !note.trim() || !acknowledged)
-      : ((!note.trim() && !media) || (mode !== "requesterResponse" && !reason.trim()));
+      : isNoStartReport
+        ? !reason.trim()
+        : ((!note.trim() && media.length === 0) || (mode !== "requesterResponse" && !reason.trim()));
     if (invalid) {
       haptic.error();
       setSlideResetKey((key) => key + 1);
@@ -10302,9 +11856,17 @@ function HandoffProblemSheet({
     }
     setUploading(true);
     try {
-      const evidenceUrls = media && currentUserId && serviceChatId
-        ? [await uploadNativeServiceCareEvidenceImage({ accessToken, media, scope: mode === "issueReport" ? "issue" : "handoff", serviceChatId, sessionKey, userId: currentUserId })]
-        : [];
+      const evidenceUrls = new Array<string>(media.length);
+      if (media.length > 0 && currentUserId && serviceChatId) {
+        let nextIndex = 0;
+        await Promise.all(Array.from({ length: Math.min(2, media.length) }, async () => {
+          while (nextIndex < media.length) {
+            const index = nextIndex;
+            nextIndex += 1;
+            evidenceUrls[index] = await uploadNativeServiceCareEvidenceImage({ accessToken, media: media[index], scope: mode === "issueReport" ? "issue" : "handoff", serviceChatId, sessionKey, userId: currentUserId });
+          }
+        }));
+      }
       const context = clean(contextPrefill);
       const composedNote = context ? [context, note.trim()].filter(Boolean).join("\n\n") : note.trim();
       await onSubmit(mode === "requesterResponse" ? "Requester response" : reason, composedNote, evidenceUrls);
@@ -10316,7 +11878,8 @@ function HandoffProblemSheet({
   }, [accessToken, acknowledged, contextPrefill, currentUserId, media, mode, note, onError, onSubmit, reason, serviceChatId, sessionKey]);
   return (
     <View pointerEvents="box-none" style={styles.inlineSheetLayer}>
-      <KeyboardAvoidingView behavior="padding" keyboardVerticalOffset={0} pointerEvents="box-none" style={nativeModalStyles.appModalBottomSafeArea}>
+      <Pressable accessibilityLabel="Close care report sheet" accessibilityRole="button" onPress={sending ? () => undefined : onClose} style={nativeModalStyles.appModalBackdrop} />
+      <KeyboardAvoidingView behavior="padding" keyboardVerticalOffset={0} pointerEvents="box-none" style={[nativeModalStyles.appModalBottomSafeArea, nativeModalStyles.appBottomSheetEventBoundary]}>
         <AppBottomSheet mode="large" onClose={onClose}>
           <AppBottomSheetHeader>
             <View style={styles.reportHeaderTitleWrap}>
@@ -10324,9 +11887,7 @@ function HandoffProblemSheet({
               {subheadline ? <Text numberOfLines={1} style={styles.reportHeaderSubtitle}>{subheadline}</Text> : null}
               {mode === "requesterResponse" ? <Text style={styles.sheetSubtitle}>{requesterResponseSubtitle}</Text> : null}
             </View>
-            <AppModalIconButton accessibilityLabel={`Close ${title}`} disabled={sending} onPress={onClose}>
-              <Feather color={huddleColors.text} name="x" size={24} />
-            </AppModalIconButton>
+            <AppModalCloseButton onPress={sending ? () => undefined : onClose} />
           </AppBottomSheetHeader>
           <AppBottomSheetScroll contentContainerStyle={styles.paymentBody} scrollRef={reportScrollRef}>
             {mode !== "requesterResponse" ? (
@@ -10337,18 +11898,27 @@ function HandoffProblemSheet({
             ) : null}
             <View onLayout={(event) => { reportNoteOffsetRef.current = event.nativeEvent.layout.y; }}>
               <Text style={styles.fieldLabel}>Short note</Text>
-              <AppModalField error={mode === "issueReport" ? (attempted && !note.trim()) : (attempted && !note.trim() && !media)} focused={noteFocused} multiline onBlur={() => setNoteFocused(false)} onChangeText={setNote} onFocus={focusReportNote} placeholder="Describe what happened" style={styles.completionNoteField} value={note} />
+              <AppModalField error={mode === "issueReport" ? (attempted && !note.trim()) : ((mode !== "ownerNoStart" && mode !== "carerNoStart") && attempted && !note.trim() && media.length === 0)} focused={noteFocused} multiline onBlur={() => setNoteFocused(false)} onChangeText={setNote} onFocus={focusReportNote} placeholder={mode === "ownerNoStart" || mode === "carerNoStart" ? "Add details (optional)" : "Describe what happened"} style={styles.completionNoteField} value={note} />
               {mode === "issueReport"
                 ? (attempted && !note.trim() ? <Text style={styles.errorText}>Add a short note before reporting.</Text> : null)
-                : (attempted && !note.trim() && !media ? <Text style={styles.errorText}>Add a note or a supporting photo before continuing.</Text> : null)}
+                : ((mode !== "ownerNoStart" && mode !== "carerNoStart") && attempted && !note.trim() && media.length === 0 ? <Text style={styles.errorText}>Add a note or supporting photos before continuing.</Text> : null)}
             </View>
-            <AppModalButton onPress={pickEvidence}>
+            <AppModalButton disabled={media.length >= MAX_CARE_REPORT_EVIDENCE} onPress={pickEvidence}>
               <View style={styles.evidenceButtonRow}>
                 <Feather color={huddleColors.onPrimary} name="camera" size={18} />
-                <Text style={nativeModalStyles.appModalButtonText}>{media ? "Change Supporting Photo" : "Add Supporting Information"}</Text>
+                <Text style={nativeModalStyles.appModalButtonText}>{media.length > 0 ? `Add Photos (${media.length}/10)` : "Add Supporting Photos"}</Text>
               </View>
             </AppModalButton>
-            {media ? <ExpoImage contentFit="cover" key={nativeFreshImageKey(media.uri, media.uri)} source={{ uri: nativeFreshImageUri(media.uri, media.uri) }} style={styles.evidencePreviewThumb} /> : null}
+            {media.length > 0 ? (
+              <ScrollView bounces={false} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.reviewMediaThumbRow} style={styles.reviewMediaRailViewport}>
+                {media.map((item, index) => (
+                  <View key={`${item.uri}-${index}`} style={[styles.reviewMediaThumbWrap, { aspectRatio: 1 }]}>
+                    <ExpoImage contentFit="cover" key={nativeFreshImageKey(item.uri, item.uri)} source={{ uri: nativeFreshImageUri(item.uri, item.uri) }} style={styles.reviewMediaThumb} />
+                    <Pressable accessibilityLabel={`Remove supporting photo ${index + 1}`} accessibilityRole="button" onPress={() => setMedia((current) => current.filter((_, itemIndex) => itemIndex !== index))} style={styles.reviewMediaRemoveButton}><Feather color={huddleColors.onPrimary} name="x" size={14} /></Pressable>
+                  </View>
+                ))}
+              </ScrollView>
+            ) : null}
             {mode === "issueReport" ? (
               <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: acknowledged }} onPress={() => setAcknowledged((value) => !value)} style={styles.checkboxRowTop}>
                 <View style={[styles.checkbox, attempted && !acknowledged ? styles.checkboxError : null, acknowledged ? styles.checkboxActive : null]}>{acknowledged ? <Feather color={huddleColors.onPrimary} name="check" size={14} /> : null}</View>
@@ -10384,7 +11954,7 @@ function ReviewSheet({
   isVoluntary: boolean;
   open: boolean;
   onClose: () => void;
-  onSubmit: (rating: number, tags: string[], text: string, mediaUrls: string[], safetyIncidentReported: boolean) => Promise<void>;
+  onSubmit: (rating: number, tags: string[], text: string, mediaUrls: string[], safetyIncidentReported: boolean) => Promise<"submitted" | "alreadyReviewed" | "failed" | void>;
   serviceChatId: string | null;
   sessionKey?: string | null;
 }) {
@@ -10397,7 +11967,7 @@ function ReviewSheet({
   const [submitResult, setSubmitResult] = useState<ReviewSubmitResult | null>(null);
   const [sliderResetKey, setSliderResetKey] = useState(0);
   const [validationErrors, setValidationErrors] = useState<{ media?: boolean; rating?: boolean; text?: boolean }>({});
-  const [shakeAnim, triggerShake] = useShakeAnimation();
+  const { shake: triggerShake, shakeStyle } = useErrorShake();
   const [animatedRating, setAnimatedRating] = useState(0);
   const starScalesRef = useRef([1, 2, 3, 4, 5].map(() => new Animated.Value(1)));
   const starFillTimersRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
@@ -10425,11 +11995,11 @@ function ReviewSheet({
     ? "We’re stepping in."
     : submitResult === "negative"
       ? "We’re on it."
-      : "SUCCESS!";
+      : "Thanks for your feedback";
   const successBody = submitResult === "reported"
     ? isVoluntary
       ? "Our Trust & Safety team will review the situation and related conversation activity."
-      : "We’ve temporarily paused the booking payout while our Trust & Safety team reviews the situation and related conversation activity."
+      : "Payment may be paused while huddle reviews the situation and related conversation activity."
     : submitResult === "negative"
       ? "Sorry things didn’t go smoothly. We’ll review this carefully to help keep huddle safe and trustworthy."
       : "Thanks for your feedback. People like you make this community better for everyone.";
@@ -10491,6 +12061,12 @@ function ReviewSheet({
   }, [hasReportedServiceDispute, isRequester, lowRating]);
 
   useEffect(() => {
+    if (!submitResult) return undefined;
+    const timer = setTimeout(onClose, 5000);
+    return () => clearTimeout(timer);
+  }, [onClose, submitResult]);
+
+  useEffect(() => {
     if (!safetyIncidentReported || text.trim()) {
       setValidationErrors((current) => ({ ...current, text: false }));
     }
@@ -10505,8 +12081,7 @@ function ReviewSheet({
     let result: Awaited<ReturnType<typeof ImagePicker.launchImageLibraryAsync>>;
     try {
       // Best-effort request; PHPicker presents regardless, so never hard-block.
-      try { await ImagePicker.requestMediaLibraryPermissionsAsync(); } catch { /* picker still works */ }
-      result = await ImagePicker.launchImageLibraryAsync({
+      result = await launchNativeImageLibraryAsync({
         allowsMultipleSelection: true,
         mediaTypes: ["images"],
         orderedSelection: true,
@@ -10574,7 +12149,6 @@ function ReviewSheet({
     };
     setValidationErrors(nextErrors);
     if (nextErrors.rating || nextErrors.media || nextErrors.text) {
-      haptic.error();
       triggerShake();
       setSliderResetKey((current) => current + 1);
       return;
@@ -10584,7 +12158,15 @@ function ReviewSheet({
       const mediaUrls = media.map((item) => item.uploadedUrl).filter(Boolean) as string[];
       const reported = lowRating && safetyIncidentReported && !hasReportedServiceDispute;
       const result: ReviewSubmitResult = reported ? "reported" : lowRating ? "negative" : "positive";
-      await onSubmit(rating, selectedTags, text, mediaUrls, reported);
+      const submitOutcome = await onSubmit(rating, selectedTags, text, mediaUrls, reported);
+      if (submitOutcome === "alreadyReviewed") {
+        onClose();
+        return;
+      }
+      if (submitOutcome === "failed") {
+        setSliderResetKey((current) => current + 1);
+        return;
+      }
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       setSubmitResult(result);
       setTimeout(() => haptic.swipeReturn(), 220);
@@ -10593,25 +12175,37 @@ function ReviewSheet({
     }
   };
 
+  if (submitResult) {
+    return (
+      <View pointerEvents="box-none" style={styles.inlineSheetLayer}>
+        <Pressable accessibilityLabel="Close review success notice" accessibilityRole="button" onPress={onClose} style={[nativeModalStyles.appModalBackdrop, nativeModalStyles.appModalSafeArea]}>
+          <Pressable onPress={(event) => event.stopPropagation()} style={styles.reviewSuccessPopupBoundary}>
+            <View style={nativeModalStyles.appConfirmCard}>
+              <View style={styles.reviewSuccessPopupHeader}>
+                <Text style={[nativeModalStyles.appConfirmTitle, styles.reviewSuccessPopupTitle]}>{successTitle}</Text>
+                <AppModalIconButton accessibilityLabel="Close review success notice" onPress={onClose}>
+                  <Feather color={huddleColors.text} name="x" size={22} />
+                </AppModalIconButton>
+              </View>
+              <Text style={nativeModalStyles.appConfirmBody}>{successBody}</Text>
+            </View>
+          </Pressable>
+        </Pressable>
+      </View>
+    );
+  }
+
   return (
     <View pointerEvents="box-none" style={styles.inlineSheetLayer}>
-      <KeyboardAvoidingView behavior="padding" keyboardVerticalOffset={0} pointerEvents="box-none" style={nativeModalStyles.appModalBottomSafeArea}>
-        <AppBottomSheet mode="autoMax" onClose={onClose} style={submitResult ? styles.reviewSuccessSheet : null}>
+      <Pressable accessibilityLabel="Close review sheet" accessibilityRole="button" onPress={onClose} style={nativeModalStyles.appModalBackdrop} />
+      <KeyboardAvoidingView behavior="padding" keyboardVerticalOffset={0} pointerEvents="box-none" style={[nativeModalStyles.appModalBottomSafeArea, nativeModalStyles.appBottomSheetEventBoundary]}>
+        <AppBottomSheet mode="autoMax" onClose={onClose}>
           <AppBottomSheetHeader>
             <View style={styles.reviewHeaderTitleWrap}>
-              <Text style={nativeModalStyles.appModalSheetTitle}>{submitResult ? "" : "Leave a review"}</Text>
+              <Text style={nativeModalStyles.appModalSheetTitle}>Leave a review</Text>
             </View>
-            <AppModalIconButton accessibilityLabel="Close review sheet" onPress={onClose}>
-              <Feather color={huddleColors.text} name="x" size={24} />
-            </AppModalIconButton>
+            <AppModalCloseButton onPress={onClose} />
           </AppBottomSheetHeader>
-          {submitResult ? (
-            <View style={styles.reviewSuccessContent}>
-              <Text style={styles.reviewSuccessTitle}>{successTitle}</Text>
-              <Text style={styles.reviewSuccessBody}>{successBody}</Text>
-            </View>
-          ) : (
-          <>
           <AppBottomSheetScroll scrollRef={reviewScrollRef}>
             <View style={styles.reviewRatingBlock}>
               <View style={styles.ratingRow}>
@@ -10681,9 +12275,9 @@ function ReviewSheet({
           <AppBottomSheetFooter>
             <View style={styles.reviewFooterRow}>
               <Pressable accessibilityLabel="Add review images" accessibilityRole="button" disabled={!currentUserId || media.length >= MAX_REVIEW_MEDIA} onPress={pickMedia} style={({ pressed }) => [styles.reviewFooterImageButton, (!currentUserId || media.length >= MAX_REVIEW_MEDIA) ? styles.disabledAction : null, pressed ? nativeModalStyles.pressed : null]}>
-                <Feather color={huddleColors.mutedText} name="camera" size={20} />
+                <Feather color={huddleColors.blue} name="camera" size={20} />
               </Pressable>
-              <Animated.View style={{ flex: 1, transform: [{ translateX: shakeAnim }] }}>
+              <Animated.View style={[{ flex: 1 }, shakeStyle]}>
                 <SlideToConfirm
                   busy={submitting}
                   label="Slide to Submit"
@@ -10693,8 +12287,6 @@ function ReviewSheet({
               </Animated.View>
             </View>
           </AppBottomSheetFooter>
-          </>
-          )}
         </AppBottomSheet>
       </KeyboardAvoidingView>
     </View>
@@ -10703,24 +12295,32 @@ function ReviewSheet({
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: huddleColors.canvas },
+  chatBody: { position: "relative", flex: 1, minHeight: 0 },
   inlineSheetLayer: { ...StyleSheet.absoluteFillObject, zIndex: 20 },
   inlineSheetCenterLayer: { backgroundColor: "transparent" },
   loadingFill: { flex: 1 },
   loadingInline: { minHeight: 220 },
   header: { minHeight: 56, flexDirection: "row", alignItems: "center", gap: huddleSpacing.x2, borderBottomWidth: 1, borderBottomColor: huddleColors.divider, paddingHorizontal: huddleSpacing.x3, paddingVertical: huddleSpacing.x2, backgroundColor: huddleColors.glassOverlay },
   headerBack: { width: 36, height: 36, alignItems: "center", justifyContent: "center", borderRadius: huddleRadii.pill },
+  headerActionMenuAnchor: { position: "absolute", alignItems: "flex-end" },
   peerAvatarButton: { width: 40, height: 40, alignItems: "center", justifyContent: "center", overflow: "hidden", borderRadius: huddleRadii.pill, backgroundColor: huddleColors.canvas },
   peerAvatar: { width: 40, height: 40, borderRadius: huddleRadii.pill, borderWidth: 1, borderColor: huddleColors.fieldBorderSoft, backgroundColor: huddleColors.canvas },
   identityText: { flex: 1, minWidth: 0 },
   headerTitle: { fontFamily: "Urbanist-700", fontSize: huddleType.label, lineHeight: huddleType.labelLine, color: huddleColors.text },
   headerSubtitle: { fontFamily: "Urbanist-500", fontSize: huddleType.helper, lineHeight: huddleType.helperLine, color: huddleColors.mutedText },
   statusPill: { overflow: "hidden", borderRadius: huddleRadii.pill, paddingHorizontal: huddleSpacing.x3, paddingVertical: huddleSpacing.x1, backgroundColor: huddleColors.mutedCanvas, fontFamily: "Urbanist-700", fontSize: huddleType.meta, lineHeight: huddleType.metaLine, color: huddleColors.mutedText },
-  statusBookedActive: { backgroundColor: huddleColors.blueSoft, color: huddleColors.blue },
+  statusBookedActive: { backgroundColor: huddleColors.glassControl, color: huddleColors.blue },
   statusCompleted: { backgroundColor: huddleColors.successSoft, color: huddleColors.success },
   statusDisputed: { backgroundColor: huddleColors.validationSoft, color: huddleColors.coral },
+  statusCancelled: { backgroundColor: huddleColors.validationSoft, color: huddleColors.validationRed },
   // Always compact now — the expanded detail opens as a modal bottom sheet, so the card
   // never grows in-flow and can't affect the message list or the composer.
-  timelineBannerWrap: { width: "100%", zIndex: 1 },
+  timelineBannerWrap: {
+    alignSelf: "stretch",
+    flexShrink: 0,
+    zIndex: 6,
+    backgroundColor: huddleColors.canvas,
+  },
   content: { flexGrow: 1, gap: huddleSpacing.x3, paddingHorizontal: huddleSpacing.x4, paddingTop: huddleSpacing.x3, paddingBottom: huddleSpacing.x6 },
   contentKeyboard: { paddingBottom: huddleSpacing.x2 },
   messagesScroll: { flex: 1 },
@@ -10764,9 +12364,11 @@ const styles = StyleSheet.create({
   ribbonSkipped: { width: 16, height: 16, alignItems: "center", justifyContent: "center", borderRadius: huddleRadii.pill, borderWidth: 1, borderColor: huddleColors.fieldBorderStrong, backgroundColor: huddleColors.mutedCanvas },
   ribbonCurrent: { width: 10, height: 10, borderRadius: 5, backgroundColor: huddleColors.blue, shadowColor: huddleColors.blue, shadowOpacity: 0.45, shadowRadius: 6, shadowOffset: { width: 0, height: 0 } },
   ribbonCurrentDisputed: { backgroundColor: huddleColors.validationRed, shadowColor: huddleColors.validationRed },
+  ribbonCancelled: { width: 16, height: 16, alignItems: "center", justifyContent: "center", borderRadius: huddleRadii.pill, backgroundColor: huddleColors.validationRed },
   ribbonAhead: { width: 4, height: 4, borderRadius: 2, backgroundColor: huddleColors.fieldBorderStrong },
   timelineCurrentLabel: { fontFamily: "Urbanist-800", fontSize: huddleType.body, lineHeight: huddleType.body * huddleType.lineSnug, color: huddleColors.text, fontVariant: ["tabular-nums"] },
   timelineCurrentLabelTerminal: { color: huddleColors.success },
+  timelineCurrentLabelCancelled: { color: huddleColors.validationRed },
   timelineExpandedList: { marginTop: huddleSpacing.x2, paddingTop: huddleSpacing.x2, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: huddleColors.sectionDividerStrong, gap: huddleSpacing.x2 },
   timelineExpandedListNoBorder: { marginTop: 0, paddingTop: 0, borderTopWidth: 0 },
   timelineDotCurrent: { borderColor: huddleColors.blue, backgroundColor: huddleColors.canvas, borderWidth: 2 },
@@ -10774,13 +12376,18 @@ const styles = StyleSheet.create({
   timelineLabelCurrent: { color: huddleColors.text, fontFamily: "Urbanist-700" },
   timelineLabelDate: { fontFamily: "Urbanist-600", color: huddleColors.mutedText },
   // --- Care Scope (editorial layout) ---
-  scopeHeadlineBlock: { gap: 2 },
+  scopeHeadlineBlock: { gap: 4 },
   scopeHeaderTopRow: { minHeight: 30, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: huddleSpacing.x3 },
+  paymentScopeHeaderTopRow: { alignItems: "flex-start" },
+  paymentScopeHeadlineMain: { flex: 1, minWidth: 0, gap: 4 },
+  paymentScopeHeadlineCopy: { flex: 0 },
   // Bare shortcut icons (Update date / Review & sign / Withdraw) + the expand chevron, sitting
   // together at the end of the header row — no borders, no circles, just the icons.
   scopeHeaderActions: { flexShrink: 0, flexDirection: "row", alignItems: "center", gap: huddleSpacing.x2 },
-  scopeIconAction: { alignItems: "center", justifyContent: "center" },
+  scopeIconAction: { minWidth: 28, minHeight: 28, alignItems: "center", justifyContent: "center" },
   scopeHeaderBottomRow: { minHeight: 28, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: huddleSpacing.x3 },
+  scopeHeaderBottomSpacer: { flex: 1, minWidth: 0 },
+  scopeUtilityActions: { flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: huddleSpacing.x2 },
   scopeSubtitleAndHideRow: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: huddleSpacing.x3 },
   scopeHeadlineCopy: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: huddleSpacing.x1 },
   scopeHeadlineMuted: { fontFamily: "Urbanist-500", fontSize: huddleType.body, lineHeight: huddleType.body * huddleType.lineSnug, color: huddleColors.mutedText },
@@ -10790,6 +12397,7 @@ const styles = StyleSheet.create({
   scopeHairline: { height: StyleSheet.hairlineWidth, backgroundColor: huddleColors.sectionDividerStrong },
   careAgreementBadge: { alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: huddleSpacing.x1, minHeight: 34, borderRadius: huddleRadii.pill, backgroundColor: huddleColors.blue, paddingHorizontal: huddleSpacing.x3 },
   careAgreementBadgeCompact: { minHeight: 28, paddingHorizontal: huddleSpacing.x2 },
+  cancelledCareBadge: { backgroundColor: huddleColors.validationRed },
   careAgreementBadgeText: { fontFamily: "Urbanist-800", fontSize: huddleType.helper, lineHeight: huddleType.helperLine, color: huddleColors.onPrimary },
   // Positioning context for the card (header + expanded detail render together, in-flow, in
   // this same subtree — one accent strip spans all of it, no separate overlay layer).
@@ -10800,17 +12408,21 @@ const styles = StyleSheet.create({
   scopeDetailRow: { flexDirection: "row", alignItems: "flex-start", gap: huddleSpacing.x3 },
   scopeDetailLabel: { width: 104, fontFamily: "Urbanist-700", fontSize: huddleType.meta, lineHeight: huddleType.metaLine + 4, letterSpacing: 0.8, color: huddleColors.mutedText, textTransform: "uppercase" },
   scopeDetailValue: { flex: 1, fontFamily: "Urbanist-600", fontSize: huddleType.label, lineHeight: huddleType.labelLine, color: huddleColors.text, fontVariant: ["tabular-nums"] },
+  scopePaymentReferenceValue: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: huddleSpacing.x2 },
   startPinDetailCard: { flexShrink: 0, alignItems: "center" },
   startPinDetailLabel: { fontFamily: "Urbanist-800", fontSize: huddleType.meta, lineHeight: huddleType.metaLine + 4, letterSpacing: 0.8, color: huddleColors.blue, textTransform: "uppercase" },
   startPinDetailDigits: { flexDirection: "row", alignItems: "center", gap: 0 },
-  startPinDetailDigitBox: { width: 20, height: 24, alignItems: "center", justifyContent: "center", borderRadius: 8, borderWidth: 1, borderColor: huddleColors.fieldFocusBorder, backgroundColor: huddleColors.blueSoft },
+  startPinDetailDigitBox: { ...huddleGlassControls.surface, width: 20, height: 24, alignItems: "center", justifyContent: "center", borderRadius: 8, borderColor: huddleColors.fieldFocusBorder },
   startPinDetailDigitText: { fontFamily: "Urbanist-800", fontSize: huddleType.helper, lineHeight: huddleType.helperLine, color: huddleColors.blue, fontVariant: ["tabular-nums"] },
+  startPinPreparingText: { fontFamily: "Urbanist-700", fontSize: huddleType.helper, lineHeight: huddleType.helperLine, color: huddleColors.mutedText },
   // note block (full-width body)
   scopeEyebrowText: { fontFamily: "Urbanist-700", fontSize: huddleType.meta, lineHeight: huddleType.metaLine + 4, letterSpacing: 0.8, color: huddleColors.mutedText, textTransform: "uppercase" },
   scopeNoteBlock: { gap: huddleSpacing.x1 + 2 },
   scopeNoteText: { fontFamily: "Urbanist-500", fontSize: huddleType.label, lineHeight: huddleType.label * huddleType.lineNormal, color: huddleColors.text },
   // actions
   scopeActionButton: { flexDirection: "row", alignItems: "center", gap: huddleSpacing.x1, minHeight: 32, paddingHorizontal: huddleSpacing.x3, borderRadius: huddleRadii.pill, borderWidth: 1, borderColor: huddleColors.primarySoftFill, backgroundColor: huddleColors.canvas },
+  scopeDeclineAction: { flexDirection: "row", alignItems: "center", gap: huddleSpacing.x1, minHeight: 28, paddingHorizontal: huddleSpacing.x1 },
+  scopeDeclineActionText: { fontFamily: "Urbanist-800", fontSize: huddleType.helper, lineHeight: huddleType.helperLine, color: huddleColors.validationRed },
   scopeEditSelfStart: { alignSelf: "flex-start", marginTop: huddleSpacing.x1 },
   scopeActionText: { fontFamily: "Urbanist-700", fontSize: huddleType.helper, lineHeight: huddleType.helperLine, color: huddleColors.blue },
   // Centered row (minHeight + alignItems center) with the divider as its top border and NO
@@ -10833,6 +12445,11 @@ const styles = StyleSheet.create({
   timelineTextBlock: { flex: 1, minWidth: 0, gap: 2 },
   timelineLabel: { fontFamily: "Urbanist-600", fontSize: huddleType.helper, lineHeight: huddleType.helperLine, color: huddleColors.mutedText },
   timelineDetailText: { fontFamily: "Urbanist-500", fontSize: huddleType.helper, lineHeight: huddleType.helperLine, color: huddleColors.mutedText },
+  timelineLastUpdated: { alignSelf: "flex-end", marginTop: huddleSpacing.x1, fontFamily: "Urbanist-500", fontSize: huddleType.helper, lineHeight: huddleType.helperLine, color: huddleColors.mutedText, textAlign: "right" },
+  timelineReferenceRow: { flexDirection: "row", alignItems: "center", gap: huddleSpacing.x2, marginTop: huddleSpacing.x1 },
+  timelineReferenceValueButton: { minWidth: 0, flexShrink: 1, borderRadius: huddleRadii.button },
+  timelineReferenceText: { fontFamily: "Urbanist-600", fontSize: huddleType.helper, lineHeight: huddleType.helperLine, color: huddleColors.text },
+  timelineReferenceCopyButton: { width: 28, height: 28, borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: huddleColors.fieldBorderSoft, backgroundColor: huddleColors.canvas },
   timelineLabelDone: { color: huddleColors.text },
   timelineLabelDoneTerminal: { color: huddleColors.success },
   timelineLabelSkipped: { color: huddleColors.mutedText, textDecorationLine: "line-through" },
@@ -10858,17 +12475,9 @@ const styles = StyleSheet.create({
   emptyText: { fontFamily: "Urbanist-500", fontSize: huddleType.label, lineHeight: huddleType.labelLine, color: huddleColors.mutedText, textAlign: "center" },
   emptyName: { fontFamily: "Urbanist-700", color: huddleColors.text },
   noMessagesText: { paddingVertical: huddleSpacing.x7, textAlign: "center", fontFamily: "Urbanist-500", fontSize: huddleType.label, lineHeight: huddleType.labelLine, color: huddleColors.mutedText },
-  notice: { flexDirection: "row", gap: huddleSpacing.x2, margin: huddleSpacing.x3, padding: huddleSpacing.x3, borderRadius: huddleRadii.card, borderWidth: 1, borderColor: huddleColors.blue, backgroundColor: huddleColors.blueSoft },
-  noticeText: { flex: 1, fontFamily: "Urbanist-600", fontSize: huddleType.helper, lineHeight: huddleType.helperLine, color: huddleColors.text },
-  handoffBanner: { gap: huddleSpacing.x3, marginHorizontal: huddleSpacing.x3, marginBottom: huddleSpacing.x2, padding: huddleSpacing.x3, borderRadius: huddleRadii.card, borderWidth: 1, borderColor: huddleColors.blue, backgroundColor: huddleColors.blueSoft },
-  careUpdatePill: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: huddleSpacing.x2, alignSelf: "stretch", marginBottom: huddleSpacing.x2, paddingVertical: 10, paddingHorizontal: huddleSpacing.x4, borderRadius: huddleRadii.pill },
-  careUpdatePillUrgent: { backgroundColor: huddleColors.blue },
-  careUpdatePillSubtle: { backgroundColor: huddleColors.primarySoftFill },
-  careUpdatePillText: { fontFamily: "Urbanist-700", fontSize: huddleType.label, lineHeight: huddleType.labelLine, color: huddleColors.blue },
-  careUpdatePillTextUrgent: { color: huddleColors.onPrimary },
-  careSaveToastWrap: { position: "absolute", left: 0, right: 0, bottom: 96, alignItems: "center" },
-  careSaveToast: { flexDirection: "row", alignItems: "center", gap: huddleSpacing.x2, paddingVertical: 10, paddingHorizontal: huddleSpacing.x4, borderRadius: huddleRadii.pill, backgroundColor: huddleColors.text, shadowColor: "#000", shadowOpacity: 0.18, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 6 },
-  careSaveToastText: { fontFamily: "Urbanist-600", fontSize: huddleType.label, lineHeight: huddleType.labelLine, color: huddleColors.onPrimary },
+  notice: { ...huddleGlassControls.surface, flexDirection: "row", gap: huddleSpacing.x2, margin: huddleSpacing.x3, padding: huddleSpacing.x3, borderRadius: huddleRadii.card },
+  noticeText: { flex: 1, fontFamily: "Urbanist-600", fontSize: huddleType.helper, lineHeight: huddleType.helperLine, color: huddleColors.blue },
+  handoffBanner: { ...huddleGlassControls.surface, gap: huddleSpacing.x3, marginHorizontal: huddleSpacing.x3, marginBottom: huddleSpacing.x2, padding: huddleSpacing.x3, borderRadius: huddleRadii.card },
   handoffBannerCopy: { gap: huddleSpacing.x1 },
   handoffBannerTitleRow: { flexDirection: "row", alignItems: "center", gap: huddleSpacing.x1 },
   handoffBannerTitle: { fontFamily: "Urbanist-800", fontSize: huddleType.label, lineHeight: huddleType.labelLine, color: huddleColors.blue },
@@ -10882,7 +12491,7 @@ const styles = StyleSheet.create({
   messageBlock: { marginVertical: huddleSpacing.x1 },
   systemPill: { alignSelf: "center", maxWidth: "86%", marginVertical: huddleSpacing.x2, overflow: "hidden", borderRadius: huddleRadii.pill, paddingHorizontal: huddleSpacing.x3, paddingVertical: huddleSpacing.x1, backgroundColor: huddleColors.mutedCanvas, fontFamily: "Urbanist-500", fontSize: 12, lineHeight: 16, color: huddleColors.text, textAlign: "center" },
   systemPillMuted: { backgroundColor: huddleColors.mutedCanvas, color: huddleColors.mutedText },
-  systemPillInfo: { backgroundColor: huddleColors.primarySoftFill, color: huddleColors.blue },
+  systemPillInfo: { backgroundColor: huddleColors.glassControl, color: huddleColors.blue },
   systemPillSuccess: { backgroundColor: huddleColors.successSoft, color: huddleColors.success },
   systemPillWarning: { backgroundColor: huddleColors.validationSoft, color: huddleColors.validationRed },
   dayDivider: { alignSelf: "center", marginVertical: huddleSpacing.x2, paddingHorizontal: 10, paddingVertical: 2, borderRadius: huddleRadii.pill, overflow: "hidden", backgroundColor: huddleColors.toggleOff, fontFamily: "Urbanist-500", fontSize: 11, lineHeight: 14, color: huddleColors.mutedText },
@@ -10913,7 +12522,7 @@ const styles = StyleSheet.create({
   shareTextOnBubble: { color: huddleColors.onPrimary },
   shareDescriptionOnBubble: { color: "rgba(255,255,255,0.82)" },
   chatAttachmentRail: { gap: huddleSpacing.x1 },
-  chatAttachmentFrame: { width: 220, height: 180, overflow: "hidden", borderRadius: huddleRadii.card, backgroundColor: huddleColors.primarySoftFill },
+  chatAttachmentFrame: { width: 220, height: 180, overflow: "hidden", borderRadius: huddleRadii.card, backgroundColor: huddleColors.glassControl },
   chatAttachmentImage: { width: "100%", height: "100%" },
   uploadRail: { gap: huddleSpacing.x2, paddingRight: huddleSpacing.x6, paddingBottom: huddleSpacing.x1 },
   uploadThumb: { width: huddleSpacing.x9, height: huddleSpacing.x9, alignItems: "center", justifyContent: "center", overflow: "hidden", borderRadius: huddleRadii.button, borderWidth: 1, borderColor: huddleColors.fieldBorderSoft, backgroundColor: huddleColors.mutedCanvas },
@@ -10926,12 +12535,63 @@ const styles = StyleSheet.create({
   // it's always one intact stack at the bottom, and the scroll reserves its measured height as
   // bottom padding (see contentContainerStyle) so nothing hides behind it.
   dialogueFooterSurface: { position: "absolute", left: 0, right: 0, bottom: 0, width: "100%", backgroundColor: huddleColors.canvas, zIndex: 6 },
+  dialogueFooterSurfaceKeyboard: { position: "relative", left: undefined, right: undefined, bottom: undefined },
   serviceActionLayer: { width: "100%", flexShrink: 0, paddingHorizontal: huddleSpacing.x3, paddingTop: huddleSpacing.x2, paddingBottom: huddleSpacing.x3, backgroundColor: huddleColors.canvas },
   // Same canvas background as serviceActionLayer above it, so a thin/light divider is easy to
   // miss — use a solid 2px line at real contrast so the CTA reads as pinned above, not fused.
   dialogueComposerSurface: { flexShrink: 0, gap: huddleSpacing.x2, paddingTop: huddleSpacing.x2, backgroundColor: huddleColors.canvas, borderTopWidth: 2, borderTopColor: huddleColors.divider },
   actionRow: { width: "100%", flexDirection: "row", alignItems: "stretch", gap: huddleSpacing.x2 },
   primaryActionWrap: { flex: 1, minWidth: 0, ...huddleShadows.glassElevation1 },
+  completionActionStack: { gap: huddleSpacing.x1 },
+  requiredCareUpdateButton: {
+    ...huddleButtons.base,
+    minHeight: huddleButtons.base.minHeight,
+    borderRadius: huddleButtons.base.borderRadius,
+    backgroundColor: huddleColors.success,
+  },
+  requiredCareUpdateButtonText: {
+    ...huddleButtons.label,
+    color: huddleColors.onPrimary,
+  },
+  careUpdateStatusLoadingButton: {
+    ...huddleButtons.base,
+    minHeight: huddleButtons.base.minHeight,
+    borderRadius: huddleButtons.base.borderRadius,
+    borderWidth: 1,
+    borderColor: huddleColors.fieldBorderSoft,
+    backgroundColor: huddleColors.mutedCanvas,
+  },
+  careUpdateStatusLoadingText: {
+    ...huddleButtons.label,
+    color: huddleColors.mutedText,
+  },
+  completionCareUpdateNotice: {
+    ...huddleGlassControls.surface,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: huddleSpacing.x2,
+    borderLeftWidth: 4,
+    borderLeftColor: huddleColors.blue,
+    borderRadius: huddleRadii.card,
+    padding: huddleSpacing.x3,
+  },
+  completionCareUpdateNoticeCopy: { flex: 1, minWidth: 0, gap: huddleSpacing.x1 },
+  completionCareUpdateNoticeTitle: { fontFamily: "Urbanist-800", fontSize: huddleType.label, lineHeight: huddleType.labelLine, color: huddleColors.blue },
+  completionCareUpdateNoticeBody: { fontFamily: "Urbanist-600", fontSize: huddleType.helper, lineHeight: huddleType.helperLine, color: huddleColors.text },
+  completionSendUpdateFirst: { alignSelf: "center", minHeight: 32, justifyContent: "center", paddingHorizontal: huddleSpacing.x2 },
+  completionSendUpdateFirstText: { fontFamily: "Urbanist-700", fontSize: huddleType.helper, lineHeight: huddleType.helperLine, color: huddleColors.blue },
+  shareMoreUpdateBanner: {
+    ...huddleButtons.base,
+    minHeight: huddleButtons.base.minHeight,
+    borderRadius: huddleButtons.base.borderRadius,
+    borderWidth: 1,
+    borderColor: huddleColors.blue,
+    backgroundColor: huddleColors.canvas,
+  },
+  shareMoreUpdateBannerText: {
+    ...huddleButtons.label,
+    color: huddleColors.blue,
+  },
   completedReviewCtaWrap: { width: "100%" },
   composerRow: { flexDirection: "row", alignItems: "center", gap: huddleSpacing.x1 },
   composerStack: { gap: huddleSpacing.x2 },
@@ -10980,7 +12640,7 @@ const styles = StyleSheet.create({
   requestCalendarGrid: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
   requestCalendarCell: { width: "12.42%", height: 36, alignItems: "center", justifyContent: "center", borderRadius: huddleRadii.pill },
   requestCalendarCellRest: { backgroundColor: huddleColors.mutedCanvas },
-  requestCalendarCellToday: { backgroundColor: huddleColors.primarySoftFill },
+  requestCalendarCellToday: { backgroundColor: huddleColors.glassControl },
   requestCalendarCellActive: { backgroundColor: huddleColors.blue },
   requestCalendarCellDisabled: { opacity: 0.46 },
   requestCalendarCellText: { fontFamily: "Urbanist-500", fontSize: huddleType.label, color: huddleColors.text },
@@ -10996,16 +12656,15 @@ const styles = StyleSheet.create({
   chipText: { fontFamily: "Urbanist-700", fontSize: huddleType.helper, lineHeight: huddleType.helperLine, color: huddleColors.text },
   chipTextActive: { color: huddleColors.onPrimary },
   reviewHeaderTitleWrap: { flex: 1, minHeight: 40, justifyContent: "center" },
-  reviewSuccessSheet: { maxHeight: 330 },
-  reviewSuccessContent: { gap: huddleSpacing.x3, paddingHorizontal: huddleSpacing.x6, paddingTop: huddleSpacing.x3, paddingBottom: huddleSpacing.x8 },
-  reviewSuccessTitle: { fontFamily: "Urbanist-800", fontSize: huddleType.h2, lineHeight: huddleType.h2Line, color: huddleColors.text },
-  reviewSuccessBody: { fontFamily: "Urbanist-500", fontSize: huddleType.body, lineHeight: huddleType.body * huddleType.lineNormal, color: huddleColors.subtext },
+  reviewSuccessPopupBoundary: { width: "100%", maxWidth: 420 },
+  reviewSuccessPopupHeader: { minHeight: 40, flexDirection: "row", alignItems: "center", gap: huddleSpacing.x3 },
+  reviewSuccessPopupTitle: { flex: 1, minWidth: 0 },
   reviewChipStack: { flexDirection: "row", flexWrap: "wrap", justifyContent: "center", gap: huddleSpacing.x2, marginBottom: huddleSpacing.x4, marginTop: huddleSpacing.x2, paddingVertical: huddleSpacing.x1 },
   reviewChip: { minHeight: 32, justifyContent: "center", alignItems: "center", borderRadius: huddleRadii.pill, borderWidth: 1, borderColor: huddleColors.fieldBorderSoft, backgroundColor: huddleColors.canvas, paddingHorizontal: huddleSpacing.x3, paddingVertical: huddleSpacing.x1 },
   reviewChipText: { fontFamily: "Urbanist-700", fontSize: huddleType.helper, lineHeight: huddleType.helperLine, color: huddleColors.text, textAlign: "center" },
   errorText: { marginTop: huddleSpacing.x1, fontFamily: "Urbanist-600", fontSize: huddleType.helper, lineHeight: huddleType.helperLine, color: huddleColors.validationRed },
   helperText: { marginTop: huddleSpacing.x1, fontFamily: "Urbanist-600", fontSize: huddleType.helper, lineHeight: huddleType.helperLine, color: huddleColors.mutedText },
-  locationOutOfAreaText: { marginTop: huddleSpacing.x1, fontFamily: "Urbanist-600", fontSize: huddleType.helper, lineHeight: huddleType.helperLine, color: "#B45309" },
+  locationOutOfAreaText: { marginTop: huddleSpacing.x1, fontFamily: "Urbanist-600", fontSize: huddleType.helper, lineHeight: huddleType.helperLine, color: huddleColors.mutedText },
   twoColumn: { flexDirection: "row", gap: huddleSpacing.x2 },
   threeColumn: { gap: huddleSpacing.x2 },
   flexField: { flex: 1 },
@@ -11043,9 +12702,12 @@ const styles = StyleSheet.create({
   termsSheetScroll: { width: "100%", maxHeight: 520 },
   termsSheetContent: { width: "100%", gap: huddleSpacing.x3, paddingLeft: huddleSpacing.x4, paddingRight: huddleSpacing.x4 + 6, paddingVertical: huddleSpacing.x4 },
   termsSheetText: { width: "100%", flexShrink: 1, fontFamily: "Urbanist-500", fontSize: huddleType.label, lineHeight: huddleType.label * huddleType.lineNormal, color: huddleColors.text },
+  termsBulletRow: { flexDirection: "row", alignItems: "flex-start", gap: huddleSpacing.x2 },
+  termsBulletDot: { width: 14, fontFamily: "Urbanist-700", fontSize: huddleType.label, lineHeight: huddleType.label * huddleType.lineNormal, color: huddleColors.text },
+  termsBulletText: { flex: 1, fontFamily: "Urbanist-500", fontSize: huddleType.label, lineHeight: huddleType.label * huddleType.lineNormal, color: huddleColors.text },
   termsLegalSection: { gap: huddleSpacing.x2, paddingTop: huddleSpacing.x1 },
   termsLegalTitle: { fontFamily: "Urbanist-800", fontSize: huddleType.body, lineHeight: huddleType.body * huddleType.lineNormal, color: huddleColors.text },
-  agreementPendingNote: { flexDirection: "row", alignItems: "center", gap: huddleSpacing.x2, borderRadius: huddleRadii.field, backgroundColor: huddleColors.blueSoft, paddingHorizontal: huddleSpacing.x3, paddingVertical: huddleSpacing.x2 },
+  agreementPendingNote: { ...huddleGlassControls.surface, flexDirection: "row", alignItems: "center", gap: huddleSpacing.x2, borderRadius: huddleRadii.field, paddingHorizontal: huddleSpacing.x3, paddingVertical: huddleSpacing.x2 },
   agreementPendingText: { flex: 1, minWidth: 0, fontFamily: "Urbanist-600", fontSize: huddleType.label, lineHeight: huddleType.label * huddleType.lineNormal, color: huddleColors.blue },
   agreementSignRow: { flexDirection: "row", alignItems: "center", gap: huddleSpacing.x2 },
   termsModalFooter: { paddingHorizontal: huddleSpacing.x4, paddingTop: huddleSpacing.x2, paddingBottom: huddleSpacing.x4, borderTopWidth: 1, borderTopColor: huddleColors.divider, backgroundColor: huddleColors.canvas, borderBottomLeftRadius: huddleRadii.sheet, borderBottomRightRadius: huddleRadii.sheet },
@@ -11058,12 +12720,12 @@ const styles = StyleSheet.create({
   petSelectTileError: { borderRadius: huddleRadii.card, ...huddleFieldStates.error },
   petSelectCircle: { position: "absolute", top: huddleSpacing.x2, right: huddleSpacing.x2, width: 26, height: 26, alignItems: "center", justifyContent: "center", borderRadius: huddleRadii.pill, borderWidth: 2, borderColor: huddleColors.blue, backgroundColor: huddleColors.canvas },
   petSelectCircleActive: { backgroundColor: huddleColors.blue },
-  petAddTile: { width: "100%", aspectRatio: huddlePolaroid.frame.aspectRatio, alignItems: "center", justifyContent: "center", gap: huddleSpacing.x1, borderRadius: huddlePolaroid.frame.radius, borderWidth: 1.5, borderStyle: "dashed", borderColor: huddleColors.blue, backgroundColor: huddleColors.blueSoft },
-  petAddTileText: { maxWidth: "82%", textAlign: "center", fontFamily: "Urbanist-700", fontSize: huddleType.label, color: huddleColors.blue },
+  petAddTile: { width: "100%", aspectRatio: huddlePolaroid.frame.aspectRatio, alignItems: "center", justifyContent: "center", gap: huddleSpacing.x1, borderRadius: huddlePolaroid.frame.radius, borderWidth: 1, borderColor: huddleColors.glassBorder, backgroundColor: huddleColors.glassChrome, ...huddleShadows.glassElevation1 },
+  petAddTileText: { maxWidth: "82%", textAlign: "center", fontFamily: "Urbanist-700", fontSize: huddleType.label, color: huddleColors.text },
   summaryPetBlock: { gap: huddleSpacing.x2 },
   summaryPetRail: { gap: huddleSpacing.x2, paddingVertical: huddleSpacing.x1 },
   summaryPetTile: { width: 116, marginVertical: huddleSpacing.x1 },
-  summaryPetInitialPhoto: { backgroundColor: huddleColors.blueSoft },
+  summaryPetInitialPhoto: { backgroundColor: huddleColors.glassControl },
   summaryPetInitial: { fontFamily: "Urbanist-800", fontSize: huddleType.h2, lineHeight: huddleType.h2Line, color: huddleColors.blue },
   petInputStack: { gap: huddleSpacing.x3 },
   manualPetFieldStack: { gap: huddleSpacing.x4 },
@@ -11077,7 +12739,6 @@ const styles = StyleSheet.create({
   manualPetSelectValueRow: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: huddleSpacing.x2 },
   manualPetEmoji: { fontSize: 17, lineHeight: 20 },
   sheetFooter: { paddingHorizontal: huddleSpacing.x4, paddingTop: huddleSpacing.x2, paddingBottom: huddleSpacing.x4, borderTopWidth: 1, borderTopColor: huddleColors.divider },
-  startCareSheetHeader: { minHeight: 98, flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: huddleSpacing.x2, paddingHorizontal: huddleSpacing.x4, paddingTop: huddleSpacing.x6, paddingBottom: huddleSpacing.x3 },
   startCareSheetTitle: { flex: 0 },
   sheetTitleBlock: { flex: 1, minWidth: 0, gap: huddleSpacing.x1 },
   sheetSubtitle: { fontFamily: "Urbanist-500", fontSize: huddleType.helper, lineHeight: huddleType.helperLine, color: huddleColors.mutedText },
@@ -11088,6 +12749,8 @@ const styles = StyleSheet.create({
   paymentBody: { gap: huddleSpacing.x2, paddingHorizontal: huddleSpacing.x4, paddingVertical: huddleSpacing.x3 },
   cancelReportIssueButton: { alignSelf: "center", minHeight: 36, justifyContent: "center", paddingHorizontal: huddleSpacing.x2 },
   cancelReportIssueText: { fontFamily: "Urbanist-800", fontSize: huddleType.helper, lineHeight: huddleType.helperLine, color: huddleColors.blue },
+  quoteDeclineButton: { alignSelf: "center", minHeight: 42, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: huddleSpacing.x1, borderRadius: huddleRadii.pill, borderWidth: 1, borderColor: huddleColors.validationRed, paddingHorizontal: huddleSpacing.x3 },
+  quoteDeclineActionText: { fontFamily: "Urbanist-800", fontSize: huddleType.helper, lineHeight: huddleType.helperLine, color: huddleColors.validationRed },
   paymentServiceType: { fontFamily: "Urbanist-600", fontSize: huddleType.label, lineHeight: huddleType.labelLine, color: huddleColors.text },
   paymentRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: huddleSpacing.x3 },
   paymentLabel: { flex: 1, fontFamily: "Urbanist-500", fontSize: huddleType.label, lineHeight: huddleType.labelLine, color: huddleColors.text },
@@ -11117,10 +12780,10 @@ const styles = StyleSheet.create({
   petChoiceText: { fontFamily: "Urbanist-700", fontSize: huddleType.label, lineHeight: huddleType.labelLine, color: huddleColors.text },
   petChoiceTextActive: { color: huddleColors.onPrimary },
   completionNoteField: { minHeight: 96, textAlignVertical: "top" },
-  reportIssueButton: { minHeight: 40, flexDirection: "row", alignItems: "center", gap: huddleSpacing.x2, alignSelf: "flex-start", borderRadius: huddleRadii.pill, paddingHorizontal: huddleSpacing.x3 },
+  reportIssueButton: { minHeight: 40, flexDirection: "row", alignItems: "center", gap: huddleSpacing.x2, alignSelf: "flex-start", borderRadius: huddleRadii.button, paddingHorizontal: huddleSpacing.x3 },
   reportIssueText: { fontFamily: "Urbanist-700", fontSize: huddleType.helper, lineHeight: huddleType.helperLine, color: huddleColors.validationRed },
   startCareInputStack: { gap: 0 },
-  checkinPhotoButton: { minHeight: 156, alignItems: "center", justifyContent: "center", gap: huddleSpacing.x2, overflow: "hidden", borderRadius: huddleRadii.card, borderWidth: 1, borderColor: huddleColors.fieldBorderSoft, backgroundColor: huddleColors.blueSoft },
+  checkinPhotoButton: { ...huddleGlassControls.surface, minHeight: 156, alignItems: "center", justifyContent: "center", gap: huddleSpacing.x2, overflow: "hidden", borderRadius: huddleRadii.card, borderColor: huddleColors.fieldBorderSoft },
   checkinPhotoButtonStacked: { borderBottomLeftRadius: 0, borderBottomRightRadius: 0 },
   checkinPhotoButtonError: { ...huddleFieldStates.error },
   evidenceButtonRow: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: huddleSpacing.x2 },
@@ -11139,14 +12802,14 @@ const styles = StyleSheet.create({
   startPinInputShell: { position: "relative", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: huddleSpacing.x2, minHeight: 58, borderRadius: huddleRadii.field, borderWidth: 1, borderColor: huddleColors.fieldBorderSoft, backgroundColor: huddleColors.canvas, paddingHorizontal: huddleSpacing.x3, paddingVertical: huddleSpacing.x2 },
   startPinInputShellStacked: { borderTopWidth: 0, borderTopLeftRadius: 0, borderTopRightRadius: 0 },
   startPinInputShellError: { ...huddleFieldStates.error },
-  startPinInputBox: { width: 42, height: 42, alignItems: "center", justifyContent: "center", borderRadius: huddleRadii.button, borderWidth: 1, borderColor: huddleColors.fieldFocusBorder, backgroundColor: huddleColors.primarySoftFill },
+  startPinInputBox: { ...huddleGlassControls.surface, width: 42, height: 42, alignItems: "center", justifyContent: "center", borderRadius: huddleRadii.button, borderColor: huddleColors.fieldFocusBorder },
   startPinInputBoxError: { borderColor: huddleColors.validationRed, backgroundColor: huddleColors.validationSoft },
   startPinInputDigit: { fontFamily: "Urbanist-800", fontSize: huddleType.h3, lineHeight: huddleType.h3Line, color: huddleColors.blue, fontVariant: ["tabular-nums"] },
   startPinInputDigitEmpty: { color: huddleColors.mutedText },
   startPinHiddenInput: { ...StyleSheet.absoluteFillObject, color: "transparent", opacity: 0.02 },
   startPinFeedbackAction: { alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: huddleSpacing.x1, minHeight: 32 },
   startPinFeedbackActionText: { fontFamily: "Urbanist-800", fontSize: huddleType.helper, lineHeight: huddleType.helperLine, color: huddleColors.validationRed },
-  checkinWarningText: { marginLeft: 28 + huddleSpacing.x2, fontFamily: "Urbanist-800", fontSize: huddleType.label, lineHeight: huddleType.labelLine, color: huddleColors.text },
+  checkinWarningText: { alignSelf: "stretch", textAlign: "left", fontFamily: "Urbanist-800", fontSize: huddleType.label, lineHeight: huddleType.labelLine, color: huddleColors.text },
   reviewRatingBlock: { alignItems: "center", gap: huddleSpacing.x1, paddingTop: huddleSpacing.x2, paddingBottom: huddleSpacing.x5, borderRadius: huddleRadii.field },
   ratingRow: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: huddleSpacing.x3 },
   reviewRatingLabel: { minHeight: 24, fontFamily: "Urbanist-800", fontSize: huddleType.body, lineHeight: huddleType.body * huddleType.lineNormal },
@@ -11170,13 +12833,10 @@ const styles = StyleSheet.create({
   reviewMediaUploadingText: { color: huddleColors.onPrimary, fontFamily: "Urbanist-700", fontSize: huddleType.helper, lineHeight: huddleType.helperLine },
   reviewMediaRemoveButton: { alignItems: "center", backgroundColor: huddleColors.backdrop, borderRadius: huddleRadii.pill, height: 28, justifyContent: "center", position: "absolute", right: huddleSpacing.x2, top: huddleSpacing.x2, width: 28 },
   reviewFooterRow: { alignItems: "center", flexDirection: "row", gap: huddleSpacing.x3, paddingBottom: huddleSpacing.x1 },
-  reviewFooterImageButton: { alignItems: "center", backgroundColor: huddleColors.divider, borderColor: huddleColors.fieldBorder, borderRadius: huddleRadii.pill, borderWidth: 1, height: 48, justifyContent: "center", width: 48 },
+  reviewFooterImageButton: { ...huddleGlassControls.borderlessSurface, alignItems: "center", borderRadius: huddleRadii.pill, height: 48, justifyContent: "center", width: 48 },
   profileModalSafeArea: { alignItems: "center", paddingHorizontal: 0 },
   profileModalCard: { width: "100%", height: "100%", maxHeight: "100%", flexShrink: 1, overflow: "hidden", borderWidth: 1.5, borderColor: huddleColors.glassBorder, borderRadius: huddleRadii.glass, backgroundColor: huddleColors.canvas, ...huddleShadows.glassElevation2 },
-  profileModalHeader: { minHeight: 70, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: huddleSpacing.x1, paddingHorizontal: huddleSpacing.x4, paddingTop: huddleSpacing.x4, paddingBottom: huddleSpacing.x3 },
-  headerCopy: { flex: 1, minWidth: 0, gap: 2 },
   headerActions: { flexShrink: 0, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: huddleSpacing.x1 },
-  detailTitle: { flexShrink: 1, maxWidth: "86%", fontFamily: "Urbanist-700", fontSize: huddleType.body, lineHeight: huddleType.labelLine, color: huddleColors.text },
   profileModalScroll: { flex: 1, minHeight: 0 },
   profileModalScrollContent: { paddingBottom: huddleSpacing.x6 },
   detailState: { minHeight: 320, alignItems: "center", justifyContent: "center" },
