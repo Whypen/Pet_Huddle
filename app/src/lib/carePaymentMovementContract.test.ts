@@ -16,6 +16,8 @@ const webhook = read("supabase/functions/stripe-webhook/index.ts");
 const releasePayout = read("supabase/functions/release-service-payout/index.ts");
 const releaseCancellationPayout = read("supabase/functions/release-service-cancellation-payout/index.ts");
 const nativePayments = read("app/src/lib/nativeCarePayments.ts");
+const paymentParser = read("app/src/lib/carePaymentMovementParser.ts");
+const paymentPresentation = read("app/src/lib/carePaymentPresentation.ts");
 const screen = read("app/src/screens/NativeServiceChatScreen.tsx");
 const admin = read("src/pages/admin/AdminSafety.tsx");
 
@@ -58,20 +60,22 @@ describe("Care payment movement contract", () => {
     expect(migration).toContain("sc.requester_id = v_uid and m.movement_kind = 'owner_refund'");
     expect(migration).toContain("sc.provider_id = v_uid and m.movement_kind = 'carer_payout'");
     expect(nativePayments).toContain("get_my_service_care_payment_statuses");
-    expect(nativePayments).toContain("serviceChatId: clean(row.service_chat_id)");
+    expect(paymentParser).toContain("serviceChatId: clean(row.service_chat_id)");
     expect(reconciliation).toContain("'last_synced_at', m.last_synced_at");
     expect(reconciliation).toContain("'action_required'");
   });
 
   it("renders live arrival and trace details without claiming estimated money has arrived", () => {
-    expect(screen).toContain('label: "Refund on the way"');
-    expect(screen).toContain('label: "Refund processed"');
-    expect(screen).toContain('label: "Payment on the way"');
-    expect(screen).toContain('label: "Payment released"');
-    expect(screen).toContain('label: "Payment pending"');
-    expect(screen).toContain('fallbackPayoutReleased ? "Payment released" : "Payment pending"');
+    expect(paymentPresentation).toContain('label: "Refund on the way"');
+    expect(paymentPresentation).toContain('label: "Refund processed"');
+    expect(paymentPresentation).toContain('label: "Payment on the way"');
+    expect(paymentPresentation).toContain('label: "Payment released"');
+    expect(paymentPresentation).toContain('label: "Payment pending"');
+    expect(screen).toContain("presentCarePaymentMovement");
+    expect(screen).toContain("presentMissingCarePayment");
+    expect(paymentPresentation).toContain('movement.status === "paid"');
+    expect(paymentPresentation).toContain('payoutReleasedAt');
     expect(screen).not.toContain('paymentCopy?.label || "Payment released"');
-    expect(screen).toContain('label: "Refund processing"');
     expect(screen).not.toContain('label: "Payment on the way", detail: "Status updating"');
     expect(screen).toContain("Clipboard.setStringAsync");
     expect(screen).toContain("paymentMovementByServiceId");

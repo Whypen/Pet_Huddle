@@ -81,6 +81,7 @@ import { formatMedicationSummary, mapPetRow, type MedicationRecord, type NativeP
 import { nativeModalStyles } from "../components/nativeModalPrimitives.styles";
 import { getNativeLegalPage } from "../content/nativeLegalPages";
 import { getNativeCarePaymentStatuses, type NativeCarePaymentMovement } from "../lib/nativeCarePayments";
+import { presentCarePaymentMovement, presentMissingCarePayment } from "../lib/carePaymentPresentation";
 import { createSingleRealtimeChannel } from "../lib/realtimeChannelManager";
 import { invalidateNativeBlockCascade } from "../lib/nativeBlockCascade";
 import { fetchNativeChatDialogueSnapshot, invalidateNativeChatReadCaches, markNativeChatRoomRead, markNativeServiceTabHasDialogues, readCachedNativeChatMessages, sendNativeChatMessage, writeCachedNativeChatMessages, clearCachedNativeChatMessages, type NativeChatMessage } from "../lib/nativeChat";
@@ -9333,24 +9334,8 @@ const careScopeTermsAcknowledgementCopy = (viewerRole: ServiceRole) =>
     ? "I have read the Care Service Carer Agreement, and understand the Care Scope & Instructions, payout details, and handoff process."
     : "I have read the Care Service Booking Terms, and understand the Care Scope & Instructions, payment details, and handoff process.";
 
-const carePaymentMovementCopy = (movement: NativeCarePaymentMovement | null | undefined) => {
-  if (!movement) return null;
-  if (movement.movementKind === "owner_refund") {
-    if (movement.status === "succeeded") {
-      return movement.refundReference
-        ? { label: "Refund processed", detail: formatCarePaymentDate(movement.processedAt), referenceLabel: movement.refundReferenceType === "acquirer_reference_number" ? "ARN" : "Refund reference", referenceValue: movement.refundReference }
-        : { label: "Refund on the way", detail: movement.estimatedArrivalAt ? `Est. ${formatCarePaymentDate(movement.estimatedArrivalAt)}${movement.isDelayed ? " (Delayed)" : ""}` : movement.isDelayed ? "Delayed" : "Processing with your bank" };
-    }
-    if (movement.isDelayed) return { label: "Refund on the way", detail: movement.estimatedArrivalAt ? `Est. ${formatCarePaymentDate(movement.estimatedArrivalAt)} (Delayed)` : "Delayed" };
-    return { label: "Refund processing", detail: movement.estimatedArrivalAt ? `Est. ${formatCarePaymentDate(movement.estimatedArrivalAt)}` : "Submitted to the payment provider" };
-  }
-  if (movement.status === "paid") {
-    return { label: "Payment released", detail: formatCarePaymentDate(movement.paidAt || movement.estimatedArrivalAt), referenceLabel: movement.payoutTraceId ? "Trace ID" : undefined, referenceValue: movement.payoutTraceId || undefined };
-  }
-  if (["failed", "canceled", "requires_review"].includes(movement.status)) return { label: "Payment pending", detail: undefined };
-  if (movement.estimatedArrivalAt) return { label: "Payment on the way", detail: `Est. ${formatCarePaymentDate(movement.estimatedArrivalAt)}` };
-  return { label: "Payment pending", detail: "Processing to your payout account" };
-};
+const carePaymentMovementCopy = (movement: NativeCarePaymentMovement | null | undefined) =>
+  presentCarePaymentMovement(movement, formatCarePaymentDate);
 
 function PaymentCareScopeSummary({
   bookingSnapshot,
@@ -9715,20 +9700,21 @@ const buildBookingTimelineState = (
         ? { label: paymentCopy.referenceLabel, value: paymentCopy.referenceValue }
         : undefined,
     });
-  } else if (!isProvider && !paymentMovement && clean(chat.stripe_refund_id)) {
-    items.push({
-      label: "Refund processing",
-      detail: "Checking the latest refund status",
+  } else if (!isProvider && !paymentMovement) {
+    const missingPaymentCopy = presentMissingCarePayment({ isProvider, stripeRefundId: chat.stripe_refund_id });
+    if (missingPaymentCopy) items.push({
+      label: missingPaymentCopy.label,
+      detail: missingPaymentCopy.detail,
       done: false,
     });
   }
   if (isProvider && !noChargeVoluntaryBooking) {
-    const fallbackPayoutReleased = Boolean(chat.payout_released_at);
+    const missingPaymentCopy = presentMissingCarePayment({ isProvider, payoutReleasedAt: chat.payout_released_at });
     items.push({
-      label: paymentCopy?.label || (fallbackPayoutReleased ? "Payment released" : "Payment pending"),
+      label: paymentCopy?.label || missingPaymentCopy?.label || "Payment pending",
       dateLabel: paymentMovement?.status === "paid" ? formatTimelineStepDate(paymentMovement.paidAt || paymentMovement.estimatedArrivalAt) : formatTimelineStepDate(chat.payout_released_at),
-      detail: paymentCopy?.detail || (!fallbackPayoutReleased ? "Checking the latest payment status" : undefined),
-      done: paymentMovement ? paymentMovement.status === "paid" : fallbackPayoutReleased,
+      detail: paymentCopy?.detail || missingPaymentCopy?.detail,
+      done: paymentMovement ? paymentMovement.status === "paid" : Boolean(chat.payout_released_at),
       reference: paymentCopy?.referenceLabel && paymentCopy.referenceValue
         ? { label: paymentCopy.referenceLabel, value: paymentCopy.referenceValue }
         : undefined,
