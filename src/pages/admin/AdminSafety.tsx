@@ -187,6 +187,8 @@ type CarePaymentMovementRow = {
   failure_code: string | null;
   failure_message_safe: string | null;
   last_synced_at: string | null;
+  next_sync_at: string | null;
+  reconciliation_attention_at: string | null;
 };
 type ServiceChatRow = Database["public"]["Tables"]["service_chats"]["Row"];
 type ServiceChatMeta = {
@@ -684,6 +686,7 @@ const AdminSafety = () => {
   const [disputeCasefile, setDisputeCasefile] = useState<ServiceDisputeRow | null>(null);
   const [careCasePacket, setCareCasePacket] = useState<CareCasePacket | null>(null);
   const [carePaymentMovements, setCarePaymentMovements] = useState<CarePaymentMovementRow[]>([]);
+  const [careMovementRefreshId, setCareMovementRefreshId] = useState<string | null>(null);
   const [serviceChatPreview, setServiceChatPreview] = useState<ServiceChatPreviewData | null>(null);
   const [serviceChatPreviewOpen, setServiceChatPreviewOpen] = useState(false);
   const [profilePreviewUserId, setProfilePreviewUserId] = useState<string | null>(null);
@@ -1284,6 +1287,27 @@ const AdminSafety = () => {
       { p_service_chat_id: serviceChatId } as never,
     );
     setCarePaymentMovements(movementResult.error ? [] : (movementResult.data as unknown as CarePaymentMovementRow[]) ?? []);
+  };
+
+  const refreshCarePaymentMovement = async (movementId: string) => {
+    if (careMovementRefreshId) return;
+    setCareMovementRefreshId(movementId);
+    setActionError(null);
+    setActionSuccess(null);
+    const { error } = await supabase.rpc(
+      "admin_request_care_payment_movement_refresh" as never,
+      { p_movement_id: movementId } as never,
+    );
+    if (error) {
+      setActionError(error.message || "Unable to refresh this payment movement.");
+      setCareMovementRefreshId(null);
+      return;
+    }
+    setActionSuccess("Payment status refresh queued.");
+    window.setTimeout(() => {
+      if (caseSelection?.type === "dispute") void loadDisputeCasefile(caseSelection.disputeId);
+      setCareMovementRefreshId(null);
+    }, 1800);
   };
 
   const loadTeamHuddleCorrespondence = async (recipientUserId: string | null) => {
@@ -3142,6 +3166,16 @@ const AdminSafety = () => {
                           <span className={badgeClasses}>{movement.movement_kind === "owner_refund" ? "Owner refund" : "Carer payout"}</span>
                           <span className={badgeClasses}>{movement.status}</span>
                           <span className="text-xs text-muted-foreground">{movement.movement_reason}</span>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="ml-auto h-7"
+                            disabled={careMovementRefreshId !== null}
+                            onClick={() => void refreshCarePaymentMovement(movement.id)}
+                          >
+                            {careMovementRefreshId === movement.id ? "Refreshing…" : "Refresh Stripe status"}
+                          </Button>
                         </div>
                         <div className="grid gap-1 sm:grid-cols-2">
                           <div>Amount: {movement.amount_minor == null ? "-" : `${movement.currency ?? ""} ${(movement.amount_minor / 100).toFixed(2)}`}</div>
@@ -3150,7 +3184,13 @@ const AdminSafety = () => {
                           <div>Est. arrival: {formatDateTime(movement.estimated_arrival_at)}</div>
                           <div>Paid: {formatDateTime(movement.paid_at)}</div>
                           <div>Last Stripe sync: {formatDateTime(movement.last_synced_at)}</div>
+                          <div>Next recovery check: {formatDateTime(movement.next_sync_at)}</div>
                         </div>
+                        {movement.reconciliation_attention_at ? (
+                          <div className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800">
+                            Automatic retries paused after repeated failures. Review the evidence, then refresh this movement.
+                          </div>
+                        ) : null}
                         {stripeObjectId ? (
                           <div className="flex items-center gap-2 font-mono text-xs break-all">
                             <span>Stripe ID: {stripeObjectId}</span>
