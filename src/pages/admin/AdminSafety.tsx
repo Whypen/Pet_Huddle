@@ -162,6 +162,32 @@ type CareCasePacket = {
   payment?: Record<string, unknown> | null;
   decision_history?: unknown[] | null;
 };
+type CarePaymentMovementRow = {
+  id: string;
+  movement_kind: "owner_refund" | "carer_payout";
+  movement_reason: string;
+  amount_minor: number | null;
+  currency: string | null;
+  status: string;
+  stripe_refund_id: string | null;
+  stripe_transfer_id: string | null;
+  stripe_connected_account_id: string | null;
+  stripe_destination_payment_id: string | null;
+  stripe_connected_balance_transaction_id: string | null;
+  stripe_payout_id: string | null;
+  requested_at: string | null;
+  processed_at: string | null;
+  estimated_arrival_at: string | null;
+  paid_at: string | null;
+  refund_reference_value: string | null;
+  refund_reference_status: string | null;
+  refund_reference_type: string | null;
+  payout_trace_value: string | null;
+  payout_trace_status: string | null;
+  failure_code: string | null;
+  failure_message_safe: string | null;
+  last_synced_at: string | null;
+};
 type ServiceChatRow = Database["public"]["Tables"]["service_chats"]["Row"];
 type ServiceChatMeta = {
   serviceLabel: string;
@@ -657,6 +683,7 @@ const AdminSafety = () => {
   const [reportCasefile, setReportCasefile] = useState<ReportCasefileRow[]>([]);
   const [disputeCasefile, setDisputeCasefile] = useState<ServiceDisputeRow | null>(null);
   const [careCasePacket, setCareCasePacket] = useState<CareCasePacket | null>(null);
+  const [carePaymentMovements, setCarePaymentMovements] = useState<CarePaymentMovementRow[]>([]);
   const [serviceChatPreview, setServiceChatPreview] = useState<ServiceChatPreviewData | null>(null);
   const [serviceChatPreviewOpen, setServiceChatPreviewOpen] = useState(false);
   const [profilePreviewUserId, setProfilePreviewUserId] = useState<string | null>(null);
@@ -1234,6 +1261,7 @@ const AdminSafety = () => {
     if (!disputeId) {
       setDisputeCasefile(null);
       setCareCasePacket(null);
+      setCarePaymentMovements([]);
       setServiceChatPreview(null);
       setServiceChatPreviewOpen(false);
       return;
@@ -1246,6 +1274,16 @@ const AdminSafety = () => {
 
     setDisputeCasefile((caseResult.data as ServiceDisputeRow | null) ?? null);
     setCareCasePacket(packetResult.error ? null : (packetResult.data as CareCasePacket | null));
+    const serviceChatId = (caseResult.data as { service_chat_id?: string | null } | null)?.service_chat_id;
+    if (!serviceChatId) {
+      setCarePaymentMovements([]);
+      return;
+    }
+    const movementResult = await supabase.rpc(
+      "admin_get_service_care_payment_movements" as never,
+      { p_service_chat_id: serviceChatId } as never,
+    );
+    setCarePaymentMovements(movementResult.error ? [] : (movementResult.data as unknown as CarePaymentMovementRow[]) ?? []);
   };
 
   const loadTeamHuddleCorrespondence = async (recipientUserId: string | null) => {
@@ -3085,6 +3123,54 @@ const AdminSafety = () => {
                   <div className="font-mono text-xs">Service transfer: {disputeHeader?.service_stripe_transfer_id ?? "-"}</div>
                   <div className="font-mono text-xs">Dispute refund: {disputeHeader?.dispute_stripe_refund_id ?? "-"}</div>
                   <div className="font-mono text-xs">Dispute transfer: {disputeHeader?.dispute_stripe_transfer_id ?? "-"}</div>
+                </section>
+
+                <section className="rounded-lg border p-3 space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="font-semibold">Money movements</h3>
+                    <span className={badgeClasses}>{carePaymentMovements.length}</span>
+                  </div>
+                  {carePaymentMovements.length === 0 ? (
+                    <p className="text-muted-foreground">No refund or payout movement has been recorded for this booking.</p>
+                  ) : carePaymentMovements.map((movement) => {
+                    const referenceLabel = movement.movement_kind === "owner_refund" ? "Refund reference" : "Payout trace ID";
+                    const referenceValue = movement.movement_kind === "owner_refund" ? movement.refund_reference_value : movement.payout_trace_value;
+                    const stripeObjectId = movement.stripe_refund_id || movement.stripe_payout_id || movement.stripe_transfer_id;
+                    return (
+                      <div key={movement.id} className="rounded-md border bg-muted/20 p-3 space-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className={badgeClasses}>{movement.movement_kind === "owner_refund" ? "Owner refund" : "Carer payout"}</span>
+                          <span className={badgeClasses}>{movement.status}</span>
+                          <span className="text-xs text-muted-foreground">{movement.movement_reason}</span>
+                        </div>
+                        <div className="grid gap-1 sm:grid-cols-2">
+                          <div>Amount: {movement.amount_minor == null ? "-" : `${movement.currency ?? ""} ${(movement.amount_minor / 100).toFixed(2)}`}</div>
+                          <div>Requested: {formatDateTime(movement.requested_at)}</div>
+                          <div>Processed: {formatDateTime(movement.processed_at)}</div>
+                          <div>Est. arrival: {formatDateTime(movement.estimated_arrival_at)}</div>
+                          <div>Paid: {formatDateTime(movement.paid_at)}</div>
+                          <div>Last Stripe sync: {formatDateTime(movement.last_synced_at)}</div>
+                        </div>
+                        {stripeObjectId ? (
+                          <div className="flex items-center gap-2 font-mono text-xs break-all">
+                            <span>Stripe ID: {stripeObjectId}</span>
+                            <Button type="button" size="sm" variant="ghost" className="h-7 px-2" onClick={() => void navigator.clipboard.writeText(stripeObjectId)}>Copy</Button>
+                          </div>
+                        ) : null}
+                        {referenceValue ? (
+                          <div className="flex items-center gap-2 font-mono text-xs break-all">
+                            <span>{referenceLabel}: {referenceValue}</span>
+                            <Button type="button" size="sm" variant="ghost" className="h-7 px-2" onClick={() => void navigator.clipboard.writeText(referenceValue)}>Copy</Button>
+                          </div>
+                        ) : null}
+                        {movement.failure_code || movement.failure_message_safe ? (
+                          <div className="rounded-md border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700">
+                            {movement.failure_code ?? "sync_error"}: {movement.failure_message_safe ?? "Payment movement needs review."}
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
                 </section>
 
                 <section className="rounded-lg border p-3 space-y-2">
