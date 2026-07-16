@@ -9345,7 +9345,7 @@ const carePaymentMovementCopy = (movement: NativeCarePaymentMovement | null | un
   if (movement.status === "paid") {
     return { label: "Payment released", detail: formatCarePaymentDate(movement.paidAt || movement.estimatedArrivalAt), referenceLabel: movement.payoutTraceId ? "Trace ID" : undefined, referenceValue: movement.payoutTraceId || undefined };
   }
-  if (["failed", "canceled", "requires_review"].includes(movement.status)) return { label: "Payment on the way", detail: "Status updating" };
+  if (["failed", "canceled", "requires_review"].includes(movement.status)) return { label: "Payment pending", detail: undefined };
   if (movement.estimatedArrivalAt) return { label: "Payment on the way", detail: `Est. ${formatCarePaymentDate(movement.estimatedArrivalAt)}` };
   return { label: "Payment released", detail: "Processing to your payout account" };
 };

@@ -62,11 +62,18 @@ describe("Care payment movement contract", () => {
     expect(screen).toContain('label: "Refund processed"');
     expect(screen).toContain('label: "Payment on the way"');
     expect(screen).toContain('label: "Payment released"');
+    expect(screen).toContain('label: "Payment pending"');
+    expect(screen).not.toContain('label: "Payment on the way", detail: "Status updating"');
     expect(screen).toContain("Clipboard.setStringAsync");
     expect(screen).toContain("paymentMovementByServiceId");
     expect(screen).toContain("Last updated at ${time} on ${date}");
     expect(screen).toContain("Payment setup needed");
     expect(screen).toContain("Review payout account");
+    expect(sync).toContain("const arrivalAt = payout ? iso(payout.arrival_date) : null");
+    expect(sync).toContain("estimated_arrival_at: arrivalAt");
+    expect(sync).toContain('paid_at: status === "paid" ? arrivalAt : null');
+    expect(sync).toContain("estimated_arrival_at: status === \"succeeded\" ? addBusinessDays(stripeCreatedAt, 10) : null");
+    expect(sync).toContain("last_synced_at: new Date().toISOString()");
   });
 
   it("sends only the approved transition notifications and removes premature release copy", () => {
