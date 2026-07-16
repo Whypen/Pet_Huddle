@@ -297,7 +297,9 @@ type ServiceChatRow = {
   checkin_photo_url?: string | null;
   completed_at: string | null;
   disputed_at?: string | null;
+  payout_release_requested_at?: string | null;
   payout_released_at?: string | null;
+  stripe_refund_id?: string | null;
   cancellation_status?: string | null;
   cancellation_provider_payout_cents?: number | null;
   no_start_resolved_at?: string | null;
@@ -312,7 +314,7 @@ type ServiceChatRow = {
   dispute_resolved_at?: string | null;
 };
 
-const SERVICE_CHAT_SELECT_FIELDS = "id,chat_id,requester_id,provider_id,status,care_status,booking_snapshot,request_card,quote_card,request_sent_at,quote_sent_at,booked_at,updated_at,early_start_allowed_at,early_start_allowed_by,in_progress_at,pin_shared_at,checkin_submitted_at,checkin_photo_url,completed_at,disputed_at,payout_released_at,cancellation_status,cancellation_provider_payout_cents,no_start_resolved_at,no_start_refund_cents,no_start_retained_cents,no_start_resolution_status,requester_mark_finished,provider_mark_finished";
+const SERVICE_CHAT_SELECT_FIELDS = "id,chat_id,requester_id,provider_id,status,care_status,booking_snapshot,request_card,quote_card,request_sent_at,quote_sent_at,booked_at,updated_at,early_start_allowed_at,early_start_allowed_by,in_progress_at,pin_shared_at,checkin_submitted_at,checkin_photo_url,completed_at,disputed_at,payout_release_requested_at,payout_released_at,stripe_refund_id,cancellation_status,cancellation_provider_payout_cents,no_start_resolved_at,no_start_refund_cents,no_start_retained_cents,no_start_resolution_status,requester_mark_finished,provider_mark_finished";
 
 const serviceChatRowActivityTime = (row: ServiceChatRow) => {
   const candidates = [
@@ -9347,7 +9349,7 @@ const carePaymentMovementCopy = (movement: NativeCarePaymentMovement | null | un
   }
   if (["failed", "canceled", "requires_review"].includes(movement.status)) return { label: "Payment pending", detail: undefined };
   if (movement.estimatedArrivalAt) return { label: "Payment on the way", detail: `Est. ${formatCarePaymentDate(movement.estimatedArrivalAt)}` };
-  return { label: "Payment released", detail: "Processing to your payout account" };
+  return { label: "Payment pending", detail: "Processing to your payout account" };
 };
 
 function PaymentCareScopeSummary({
@@ -9713,13 +9715,20 @@ const buildBookingTimelineState = (
         ? { label: paymentCopy.referenceLabel, value: paymentCopy.referenceValue }
         : undefined,
     });
+  } else if (!isProvider && !paymentMovement && clean(chat.stripe_refund_id)) {
+    items.push({
+      label: "Refund processing",
+      detail: "Checking the latest refund status",
+      done: false,
+    });
   }
   if (isProvider && !noChargeVoluntaryBooking) {
+    const fallbackPayoutReleased = Boolean(chat.payout_released_at);
     items.push({
-      label: paymentCopy?.label || "Payment released",
+      label: paymentCopy?.label || (fallbackPayoutReleased ? "Payment released" : "Payment pending"),
       dateLabel: paymentMovement?.status === "paid" ? formatTimelineStepDate(paymentMovement.paidAt || paymentMovement.estimatedArrivalAt) : formatTimelineStepDate(chat.payout_released_at),
-      detail: paymentCopy?.detail,
-      done: paymentMovement ? paymentMovement.status === "paid" : Boolean(chat.payout_released_at),
+      detail: paymentCopy?.detail || (!fallbackPayoutReleased ? "Checking the latest payment status" : undefined),
+      done: paymentMovement ? paymentMovement.status === "paid" : fallbackPayoutReleased,
       reference: paymentCopy?.referenceLabel && paymentCopy.referenceValue
         ? { label: paymentCopy.referenceLabel, value: paymentCopy.referenceValue }
         : undefined,

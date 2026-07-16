@@ -69,6 +69,9 @@ describe("Care payment movement contract", () => {
     expect(screen).toContain('label: "Payment on the way"');
     expect(screen).toContain('label: "Payment released"');
     expect(screen).toContain('label: "Payment pending"');
+    expect(screen).toContain('fallbackPayoutReleased ? "Payment released" : "Payment pending"');
+    expect(screen).not.toContain('paymentCopy?.label || "Payment released"');
+    expect(screen).toContain('label: "Refund processing"');
     expect(screen).not.toContain('label: "Payment on the way", detail: "Status updating"');
     expect(screen).toContain("Clipboard.setStringAsync");
     expect(screen).toContain("paymentMovementByServiceId");

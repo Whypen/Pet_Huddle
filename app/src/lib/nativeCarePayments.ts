@@ -106,6 +106,7 @@ export async function getNativeCarePaymentStatus(
   if (!Array.isArray(payload?.movements)) return [];
   return payload.movements.map((row) => parseMovement({ ...row, service_chat_id: exactServiceChatId })).filter((item): item is NativeCarePaymentMovement => Boolean(item));
 }
+
 export async function getNativeCarePaymentStatuses(
   serviceChatIds: string[],
   accessToken?: string | null,
