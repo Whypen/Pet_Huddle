@@ -1,11 +1,17 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { isNativeVerifiedProfile } from "./nativeVerificationGate";
 import * as FileSystem from "expo-file-system/legacy";
+import { manipulateAsync, SaveFormat } from "expo-image-manipulator";
 import { buildShareModel, serializeChatShareMessage } from "./shareModel";
 import { nativeExactTokenRpc } from "./nativeExactTokenRequest";
+import { fetchNativeEngagementTiers, type NativeEngagementSummary } from "./nativeEngagement";
+import { getFreshNativeAccessToken } from "./nativeFunctionClient";
 import { supabaseAnonKey, supabaseUrl } from "./supabase";
+import { readNativeLocalMediaFile } from "./nativeLocalMediaUpload";
 import { registerNativeMediaAsset } from "./nativeMediaAssets";
+import { normalizeNativeSocialShareTargetsForDisplay } from "./nativeSocialShareTargets";
 import { createNativeProtectedActionError, requestNativeStorageCleanupResult, type NativeProtectedActionCleanupResult } from "./nativeStorageCleanup";
+import { requireCurrentNativeSession } from "./nativeSessionGuard";
 import { resolveNativeProfileImageUrlAsync } from "./nativeStorageUrlCache";
 import type { NativeViewerScope } from "./nativeViewerScope";
 
@@ -30,6 +36,7 @@ export type NativeSocialAuthor = {
   locationCountry: string | null;
   isVerified: boolean;
   nonSocial: boolean;
+  engagement?: NativeEngagementSummary | null;
 };
 
 export type NativeSocialMentionEntry = {
@@ -44,6 +51,7 @@ export type NativeSocialMentionSuggestion = {
   socialId: string;
   displayName: string | null;
   avatarUrl: string | null;
+  updatedAt?: string | null;
 };
 
 export type NativeSocialLinkPreview = {
@@ -79,6 +87,7 @@ export type NativeSocialThread = {
   hashtags: string[];
   mentions: NativeSocialMentionEntry[];
   images: string[];
+  imageMetadata: NativeSocialImageMetadata[];
   createdAt: string;
   updatedAt: string | null;
   userId: string;
@@ -99,8 +108,20 @@ export type NativeSocialThread = {
   videoPreviewUrl: string | null;
   videoDurationSeconds: number | null;
   videoStatus: string | null;
+  postCountry: string | null;
+  postCity: string | null;
+  postDistrict: string | null;
+  postLanguage: string | null;
+  postLocationSource: string | null;
   author: NativeSocialAuthor;
   localStatus?: "pending" | "failed";
+};
+
+export type NativeSocialImageMetadata = {
+  aspectRatio: number | null;
+  height: number | null;
+  url: string;
+  width: number | null;
 };
 
 export type NativeSocialComposerMedia = {
@@ -120,6 +141,7 @@ export type NativeSocialComment = {
   parentCommentId: string | null;
   content: string;
   images: string[];
+  imageMetadata: NativeSocialImageMetadata[];
   createdAt: string;
   updatedAt: string | null;
   userId: string;
@@ -163,7 +185,7 @@ export type NativeSocialPostPreference = {
   pinnedAt: string | null;
 };
 
-const PAGE_LIMIT = 20;
+const DEFAULT_SOCIAL_FEED_PAGE_LIMIT = 20;
 const SOCIAL_PINS_STORAGE_PREFIX = "huddle_social_pins";
 const SOCIAL_SAVES_STORAGE_PREFIX = "huddle_social_saves";
 const LINK_PREVIEW_STORAGE_KEY = "noticeboard_link_preview_lru_v1";
@@ -171,7 +193,52 @@ const LINK_PREVIEW_TTL_MS = 24 * 60 * 60 * 1000;
 const LINK_PREVIEW_LRU_LIMIT = 120;
 const LINK_PREVIEW_QUEUE_LIMIT = 3;
 const LINK_PREVIEW_TIMEOUT_MS = 7000;
+const nativeSocialLinkPreviewInFlight = new Map<string, Promise<NativeSocialLinkPreview>>();
 const URL_PATTERN = /(https?:\/\/[^\s<>"')\]]+)/i;
+const BARE_DOMAIN_PATTERN = /(?:^|[\s(])((?:www\.)?(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}(?:\/[^\s<>"')\]]*)?)/i;
+
+const toPositiveNumber = (value: unknown) => {
+  const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
+
+export const buildNativeSocialImageMetadata = (items: Array<{ height?: number | null; uri?: string | null; uploadedUrl?: string | null; width?: number | null }>): NativeSocialImageMetadata[] => (
+  items
+    .map((item) => {
+      const url = cleanString(item.uploadedUrl) || cleanString(item.uri);
+      if (!url) return null;
+      const width = toPositiveNumber(item.width);
+      const height = toPositiveNumber(item.height);
+      return {
+        aspectRatio: width && height ? width / height : null,
+        height,
+        url,
+        width,
+      };
+    })
+    .filter((item): item is NativeSocialImageMetadata => Boolean(item))
+);
+
+const parseNativeSocialImageMetadata = (value: unknown, fallbackImages: string[] = []): NativeSocialImageMetadata[] => {
+  const entries = Array.isArray(value) ? value : [];
+  const parsed = entries
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") return null;
+      const record = entry as Record<string, unknown>;
+      const url = cleanString(record.url ?? record.uri ?? record.src);
+      if (!url) return null;
+      const width = toPositiveNumber(record.width);
+      const height = toPositiveNumber(record.height);
+      const aspectRatio = toPositiveNumber(record.aspectRatio ?? record.aspect_ratio) ?? (width && height ? width / height : null);
+      return { aspectRatio, height, url, width };
+    })
+    .filter((item): item is NativeSocialImageMetadata => Boolean(item));
+  if (parsed.length > 0) return parsed;
+  return fallbackImages.map((url) => ({ aspectRatio: null, height: null, url, width: null }));
+};
+const HUDDLE_PREVIEW_IMAGE = "https://huddle.pet/brandweb/og-card.png";
+const HUDDLE_PREVIEW_TITLE = "huddle — Pet safety, community & care";
+const HUDDLE_PREVIEW_DESCRIPTION = "One app for lost pets, trusted carers, local pet community, and organised pet records. No pet left behind.";
 const SOCIAL_VIDEO_MAX_SECONDS = 15;
 
 const base64ToUint8Array = (base64: string) => {
@@ -192,11 +259,17 @@ const toNumber = (value: unknown, fallback = 0) => {
 
 const cleanString = (value: unknown) => (typeof value === "string" ? value.trim() : "");
 
-const requireNativeSocialAccessToken = (accessToken?: string | null) => {
-  const token = cleanString(accessToken);
-  if (!token) throw new Error("missing_access_token");
-  return token;
+type NativeSocialSessionOptions = {
+  accessToken?: string | null;
+  sessionKey?: string | null;
+  userId?: string | null;
 };
+
+const requireNativeSocialSession = (options: NativeSocialSessionOptions) => requireCurrentNativeSession({
+  accessToken: options.accessToken,
+  expectedUserId: options.userId,
+  sessionKey: options.sessionKey,
+});
 
 const parseJsonSafely = (raw: string): unknown => {
   if (!raw) return null;
@@ -212,7 +285,7 @@ const nativeSocialRpc = async <T = unknown>(
   params: Record<string, unknown>,
   accessToken?: string | null,
 ) => {
-  const { data, error } = await nativeExactTokenRpc<T>(fn, params, requireNativeSocialAccessToken(accessToken));
+  const { data, error } = await nativeExactTokenRpc<T>(fn, params, accessToken);
   if (error) throw error;
   return data as T;
 };
@@ -222,7 +295,8 @@ const nativeSocialFunctionRequest = async <T = unknown>(
   body: Record<string, unknown>,
   accessToken?: string | null,
 ) => {
-  const token = requireNativeSocialAccessToken(accessToken);
+  const token = await getFreshNativeAccessToken(accessToken);
+  if (!token) throw new Error("auth_required");
   const response = await fetch(`${supabaseUrl}/functions/v1/${functionName}`, {
     method: "POST",
     headers: {
@@ -235,8 +309,8 @@ const nativeSocialFunctionRequest = async <T = unknown>(
   const raw = await response.text();
   const parsed = parseJsonSafely(raw);
   if (!response.ok) {
-    const message = parsed && typeof parsed === "object" && "message" in parsed
-      ? String((parsed as { message?: unknown }).message || response.statusText)
+    const message = parsed && typeof parsed === "object"
+      ? String((parsed as { message?: unknown; error?: unknown }).message || (parsed as { error?: unknown }).error || response.statusText)
       : response.statusText;
     throw new Error(message || "request_failed");
   }
@@ -256,17 +330,54 @@ export const nativeSocialSavesStorageKey = (userId: string | null | undefined) =
 
 export const extractNativeSocialFirstHttpUrl = (value: string) => {
   const match = String(value || "").match(URL_PATTERN);
-  return match?.[1]?.replace(/[|.,!?;:)\]]+$/g, "") || null;
+  if (match?.[1]) return match[1].replace(/[|.,!?;:)\]]+$/g, "");
+  const bareDomainMatch = String(value || "").match(BARE_DOMAIN_PATTERN);
+  const bareDomainUrl = bareDomainMatch?.[1]?.replace(/[|.,!?;:)\]]+$/g, "");
+  if (!bareDomainUrl) return null;
+  return `https://${bareDomainUrl}`;
 };
 
 export const stripNativeSocialExternalUrlFromText = (value: string, url: string | null | undefined) => {
   if (!url) return value;
-  return String(value || "")
-    .replace(url, "")
+  return nativeSocialUrlTextCandidates(url)
+    .reduce((next, candidate) => next.replace(candidate, ""), String(value || ""))
     .replace(/[ \t]{2,}/g, " ")
     .replace(/\s+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+};
+
+export const nativeSocialUrlTextCandidates = (url: string | null | undefined) => {
+  const cleanUrl = cleanString(url);
+  if (!cleanUrl) return [];
+  const candidates = [cleanUrl];
+  try {
+    const parsed = new URL(cleanUrl);
+    const path = parsed.pathname === "/" ? "" : parsed.pathname.replace(/\/$/, "");
+    const suffix = `${path}${parsed.search}${parsed.hash}`;
+    const host = parsed.hostname.toLowerCase();
+    candidates.push(`${parsed.hostname}${suffix}`);
+    if (host.startsWith("www.")) candidates.push(`${parsed.hostname.replace(/^www\./, "")}${suffix}`);
+    else candidates.push(`www.${parsed.hostname}${suffix}`);
+  } catch {
+    // Non-URL labels only use the original candidate.
+  }
+  return Array.from(new Set(candidates.filter(Boolean)));
+};
+
+export const extractCompletedNativeSocialPreviewUrl = (value: string) => {
+  const url = extractNativeSocialFirstHttpUrl(value);
+  if (!url) return null;
+  const rawValue = String(value || "");
+  const lowerValue = rawValue.toLowerCase();
+  const matchedCandidate = nativeSocialUrlTextCandidates(url).find((candidate) => lowerValue.includes(candidate.toLowerCase()));
+  if (!matchedCandidate) return null;
+  const urlIndex = lowerValue.indexOf(matchedCandidate.toLowerCase());
+  if (urlIndex < 0) return null;
+  const nextText = rawValue.slice(urlIndex + matchedCandidate.length);
+  if (nextText.length === 0) return null;
+  if (/^\s/.test(nextText) || /^[|.,!?;:)\]]+\s/.test(nextText)) return url;
+  return null;
 };
 
 export const formatNativeSocialUrlLabel = (url: string) => {
@@ -301,6 +412,23 @@ const parseNativeSocialYouTubeVideoId = (url: string) => {
 };
 
 const buildNativeSocialIntrinsicLinkPreview = (url: string): NativeSocialLinkPreview | null => {
+  try {
+    const parsed = new URL(/^https?:\/\//i.test(url) ? url : `https://${url}`);
+    if (parsed.hostname.replace(/^www\./, "").toLowerCase() === "huddle.pet") {
+      return {
+        url,
+        title: HUDDLE_PREVIEW_TITLE,
+        description: HUDDLE_PREVIEW_DESCRIPTION,
+        image: HUDDLE_PREVIEW_IMAGE,
+        siteName: "huddle",
+        loading: false,
+        failed: false,
+        resolved: true,
+      };
+    }
+  } catch {
+    // Non-URL values fall through to the external preview path.
+  }
   const youtubeId = parseNativeSocialYouTubeVideoId(url);
   if (!youtubeId) return null;
   return {
@@ -352,49 +480,60 @@ export const buildNativeSocialCursor = (thread?: NativeSocialThread | null): Nat
   return { created_at: thread.createdAt, id: thread.id, score: thread.score };
 };
 
-export const mapNativeSocialFeedRow = (row: Record<string, unknown>): NativeSocialThread => ({
-  id: String(row.id || ""),
-  title: String(row.title || ""),
-  content: String(row.content || ""),
-  tags: isStringArray(row.tags) ? row.tags : [],
-  hashtags: isStringArray(row.hashtags) ? row.hashtags : [],
-  mentions: parseMentionEntries(row.thread_mentions),
-  images: isStringArray(row.images) ? row.images.filter((entry) => entry.trim().length > 0) : [],
-  likes: toNumber(row.like_count ?? row.likes, 0),
-  commentCount: toNumber(row.comment_count, 0),
-  shareCount: toNumber(row.share_count ?? row.clicks, 0),
-  score: toNumber(row.score, 0),
-  mapId: cleanString(row.map_id) || null,
-  alertType: cleanString(row.alert_type) || null,
-  alertDistrict: cleanString(row.alert_district) || null,
-  hasAlertLink: row.has_alert_link === true,
-  isSensitive: row.is_sensitive === true,
-  videoProvider: row.video_provider === "bunny_stream" ? "bunny_stream" : null,
-  providerVideoId: cleanString(row.provider_video_id) || null,
-  videoPlaybackUrl: cleanString(row.video_playback_url) || null,
-  videoEmbedUrl: cleanString(row.video_embed_url) || null,
-  videoThumbnailUrl: cleanString(row.video_thumbnail_url) || null,
-  videoPreviewUrl: cleanString(row.video_preview_url) || null,
-  videoDurationSeconds: toNumber(row.video_duration_seconds, 0) || null,
-  videoStatus: cleanString(row.video_status) || null,
-  createdAt: String(row.created_at || new Date().toISOString()),
-  updatedAt: cleanString(row.updated_at) || cleanString(row.content_updated_at) || String(row.created_at || new Date().toISOString()),
-  userId: String(row.user_id || ""),
-  author: {
-    displayName: cleanString(row.author_display_name) || null,
-    socialId: cleanString(row.author_social_id) || null,
-    avatarUrl: cleanString(row.author_avatar_url) || null,
-    verificationStatus: cleanString(row.author_verification_status) || null,
-    locationCountry: cleanString(row.author_location_country) || null,
-    isVerified: isNativeVerifiedProfile(row, "author_is_verified", "author_verification_status"),
-    nonSocial: row.author_non_social === true,
-  },
-});
+export const mapNativeSocialFeedRow = (row: Record<string, unknown>): NativeSocialThread => {
+  const mapId = cleanString(row.map_id) || null;
+  const images = isStringArray(row.images) ? row.images.filter((entry) => entry.trim().length > 0) : [];
+  return {
+    id: String(row.id || ""),
+    title: String(row.title || ""),
+    content: String(row.content || ""),
+    tags: isStringArray(row.tags) ? row.tags : [],
+    hashtags: isStringArray(row.hashtags) ? row.hashtags : [],
+    mentions: parseMentionEntries(row.thread_mentions),
+    images,
+    imageMetadata: parseNativeSocialImageMetadata(row.image_metadata, images),
+    likes: toNumber(row.like_count ?? row.likes, 0),
+    commentCount: toNumber(row.comment_count, 0),
+    shareCount: toNumber(row.share_count ?? row.clicks, 0),
+    score: toNumber(row.score, 0),
+    mapId,
+    alertType: cleanString(row.alert_type) || null,
+    alertDistrict: cleanString(row.alert_district) || null,
+    hasAlertLink: Boolean(mapId && row.has_alert_link === true),
+    isSensitive: row.is_sensitive === true,
+    videoProvider: row.video_provider === "bunny_stream" ? "bunny_stream" : null,
+    providerVideoId: cleanString(row.provider_video_id) || null,
+    videoPlaybackUrl: cleanString(row.video_playback_url) || null,
+    videoEmbedUrl: cleanString(row.video_embed_url) || null,
+    videoThumbnailUrl: cleanString(row.video_thumbnail_url) || null,
+    videoPreviewUrl: cleanString(row.video_preview_url) || null,
+    videoDurationSeconds: toNumber(row.video_duration_seconds, 0) || null,
+    videoStatus: cleanString(row.video_status) || null,
+    postCountry: cleanString(row.post_country) || null,
+    postCity: cleanString(row.post_city) || null,
+    postDistrict: cleanString(row.post_district) || null,
+    postLanguage: cleanString(row.post_language) || null,
+    postLocationSource: cleanString(row.post_location_source) || null,
+    createdAt: String(row.created_at || new Date().toISOString()),
+    updatedAt: cleanString(row.updated_at) || cleanString(row.content_updated_at) || String(row.created_at || new Date().toISOString()),
+    userId: String(row.user_id || ""),
+    author: {
+      displayName: cleanString(row.author_display_name) || null,
+      socialId: cleanString(row.author_social_id) || null,
+      avatarUrl: cleanString(row.author_avatar_url) || null,
+      verificationStatus: cleanString(row.author_verification_status) || null,
+      locationCountry: cleanString(row.author_location_country) || null,
+      isVerified: isNativeVerifiedProfile(row, "author_is_verified", "author_verification_status"),
+      nonSocial: row.author_non_social === true,
+      engagement: null,
+    },
+  };
+};
 
 const resolveNativeSocialAvatarUrl = async (value: unknown) => {
   const raw = cleanString(value);
   if (!raw) return null;
-  return resolveNativeProfileImageUrlAsync(raw, 60 * 60, { defaultBucket: "profile_photos" }).catch(() => raw);
+  return resolveNativeProfileImageUrlAsync(raw, 60 * 60, { defaultBucket: "profile_photos" }).catch(() => null);
 };
 
 const resolveNativeSocialThreadAvatarUrls = async (rows: NativeSocialThread[]) => Promise.all(
@@ -410,9 +549,11 @@ const resolveNativeSocialThreadAvatarUrls = async (rows: NativeSocialThread[]) =
 export async function hydrateNativeSocialRows(rows: NativeSocialThread[], accessToken?: string | null): Promise<NativeSocialThread[]> {
   const ids = rows.map((row) => row.id).filter(Boolean);
   if (ids.length === 0) return rows;
-  if (!accessToken) throw new Error("missing_access_token");
 
-  const { data, error } = await nativeExactTokenRpc("get_social_feed_hydration", { p_thread_ids: ids }, accessToken);
+  const [{ data, error }, engagementByUserId] = await Promise.all([
+    nativeExactTokenRpc("get_social_feed_hydration", { p_thread_ids: ids }, accessToken),
+    fetchNativeEngagementTiers(rows.map((row) => row.userId), accessToken),
+  ]);
 
   if (error || !Array.isArray(data)) {
     throw new Error(error?.message || "Social feed hydration is unavailable.");
@@ -434,7 +575,7 @@ export async function hydrateNativeSocialRows(rows: NativeSocialThread[], access
       mapId: cleanString(hydration.map_id) || thread.mapId,
       alertType: cleanString(hydration.alert_type) || thread.alertType,
       alertDistrict: cleanString(hydration.alert_district) || thread.alertDistrict,
-      hasAlertLink: hydration.has_alert_link === true || thread.hasAlertLink,
+      hasAlertLink: Boolean((cleanString(hydration.map_id) || thread.mapId) && (hydration.has_alert_link === true || thread.hasAlertLink)),
       videoProvider: hydration.video_provider === "bunny_stream" ? "bunny_stream" : thread.videoProvider,
       providerVideoId: cleanString(hydration.provider_video_id) || thread.providerVideoId,
       videoPlaybackUrl: cleanString(hydration.video_playback_url) || thread.videoPlaybackUrl,
@@ -451,6 +592,7 @@ export async function hydrateNativeSocialRows(rows: NativeSocialThread[], access
         verificationStatus: cleanString(hydration.author_verification_status) || thread.author.verificationStatus,
         locationCountry: cleanString(hydration.author_location_country) || thread.author.locationCountry,
         isVerified: isNativeVerifiedProfile(hydration, "author_is_verified", "author_verification_status") || thread.author.isVerified,
+        engagement: engagementByUserId.get(thread.userId) ?? thread.author.engagement ?? null,
       },
     };
   });
@@ -458,18 +600,59 @@ export async function hydrateNativeSocialRows(rows: NativeSocialThread[], access
   return resolveNativeSocialThreadAvatarUrls(hydrated);
 }
 
+async function hydrateNativeSocialThreadImageMetadata(rows: NativeSocialThread[], accessToken?: string | null): Promise<NativeSocialThread[]> {
+  const ids = rows.map((row) => row.id).filter(Boolean);
+  if (ids.length === 0) return rows;
+  const { data, error } = await nativeExactTokenRpc<Array<{ thread_id?: string | null; image_metadata?: unknown }>>(
+    "get_native_social_thread_image_metadata",
+    { p_thread_ids: ids },
+    accessToken,
+  );
+  if (error || !Array.isArray(data)) return rows;
+  const byThreadId = new Map(data.map((row) => [String(row.thread_id || ""), row.image_metadata]));
+  return rows.map((row) => (
+    byThreadId.has(row.id)
+      ? { ...row, imageMetadata: parseNativeSocialImageMetadata(byThreadId.get(row.id), row.images) }
+      : row
+  ));
+}
+
+async function hydrateNativeSocialCommentImageMetadata(comments: NativeSocialComment[], accessToken?: string | null): Promise<NativeSocialComment[]> {
+  const ids = comments.map((comment) => comment.id).filter((id) => id && !id.startsWith("pending:"));
+  if (ids.length === 0) return comments;
+  const data = await nativeSocialRpc<Array<{ comment_id?: string | null; image_metadata?: unknown }>>(
+    "get_native_social_comment_image_metadata",
+    { p_comment_ids: ids },
+    accessToken,
+  ).catch(() => null);
+  if (!Array.isArray(data)) return comments;
+  const byCommentId = new Map(data.map((row) => [String(row.comment_id || ""), row.image_metadata]));
+  return comments.map((comment) => (
+    byCommentId.has(comment.id)
+      ? { ...comment, imageMetadata: parseNativeSocialImageMetadata(byCommentId.get(comment.id), comment.images) }
+      : comment
+  ));
+}
+
 export async function fetchNativeSocialFeedPage(options: {
   viewerId: string;
   accessToken?: string | null;
   sortMode: NativeSocialSortMode;
   cursor?: NativeSocialFeedCursor | null;
+  limit?: number;
   viewerScope?: NativeViewerScope | null;
 }): Promise<NativeSocialFeedPage> {
+  const limit = Math.max(1, Math.min(Math.floor(options.limit ?? DEFAULT_SOCIAL_FEED_PAGE_LIMIT), 25));
+  // Fetch one look-ahead row so `hasMore` is authoritative for the page we return.
+  // An exact-size terminal page must not advertise another page and make the UI
+  // show a loader for an empty follow-up request.
+  const fetchLimit = Math.min(limit + 1, 25);
   const scopePoint = options.viewerScope?.primaryPoint ?? null;
+  const profilePoint = options.viewerScope?.profilePoint ?? null;
   const params = {
     p_viewer_id: options.viewerId,
     p_sort: options.sortMode === "Saves" ? "Latest" : options.sortMode,
-    p_limit: PAGE_LIMIT,
+    p_limit: fetchLimit,
     p_cursor: options.cursor ?? null,
     p_viewer_scope: options.viewerScope ? {
       adminArea: options.viewerScope.adminArea ?? null,
@@ -480,40 +663,47 @@ export async function fetchNativeSocialFeedPage(options: {
       district: options.viewerScope.district ?? null,
       lat: scopePoint?.lat ?? null,
       lng: scopePoint?.lng ?? null,
+      profileCountry: options.viewerScope.profileCountry ?? null,
+      profileCountryCode: options.viewerScope.profileCountryCode ?? null,
+      profileCountryName: options.viewerScope.profileCountryName ?? null,
+      profileDistrict: options.viewerScope.profileDistrict ?? null,
+      profileLat: profilePoint?.lat ?? null,
+      profileLng: profilePoint?.lng ?? null,
+      profileLocationName: options.viewerScope.profileLocationName ?? null,
       source: options.viewerScope.source,
       sourceConsistent: options.viewerScope.sourceConsistent,
     } : null,
   };
-  if (!options.accessToken) throw new Error("missing_access_token");
   const { data, error } = await nativeExactTokenRpc("get_social_feed", params, options.accessToken);
   if (error) throw error;
-  const baseRows = (Array.isArray(data) ? data : []).map((row) => mapNativeSocialFeedRow(row as Record<string, unknown>));
-  const rows = await hydrateNativeSocialRows(baseRows, options.accessToken).catch((error) => {
+  const fetchedRows = (Array.isArray(data) ? data : []).map((row) => mapNativeSocialFeedRow(row as Record<string, unknown>));
+  const baseRows = fetchedRows.slice(0, limit);
+  const rowsWithMedia = await hydrateNativeSocialThreadImageMetadata(baseRows, options.accessToken);
+  const rows = await hydrateNativeSocialRows(rowsWithMedia, options.accessToken).catch((error) => {
     if (__DEV__) console.warn("NATIVE_SOCIAL_HYDRATION_NON_FATAL", { message: String((error as { message?: unknown })?.message || error) });
-    return resolveNativeSocialThreadAvatarUrls(baseRows);
+    return resolveNativeSocialThreadAvatarUrls(rowsWithMedia);
   });
   return {
     rows,
-    hasMore: baseRows.length === PAGE_LIMIT,
+    hasMore: fetchedRows.length > limit,
     cursor: buildNativeSocialCursor(rows[rows.length - 1] ?? baseRows[baseRows.length - 1]),
   };
 }
 
 export async function fetchNativeSocialThreadById(threadId: string, accessToken?: string | null): Promise<NativeSocialThread | null> {
   if (!threadId) return null;
-  if (!accessToken) throw new Error("missing_access_token");
   const { data, error } = await nativeExactTokenRpc("get_native_social_thread_by_id", { p_thread_id: threadId }, accessToken);
   if (error || !data) return null;
   const row = Array.isArray(data) ? data[0] : data;
   if (!row) return null;
   const baseRow = mapNativeSocialFeedRow(row as Record<string, unknown>);
-  const [hydrated] = await hydrateNativeSocialRows([baseRow], accessToken).catch(() => resolveNativeSocialThreadAvatarUrls([baseRow]));
+  const [rowWithMedia] = await hydrateNativeSocialThreadImageMetadata([baseRow], accessToken);
+  const [hydrated] = await hydrateNativeSocialRows([rowWithMedia || baseRow], accessToken).catch(() => resolveNativeSocialThreadAvatarUrls([rowWithMedia || baseRow]));
   return hydrated || null;
 }
 
 export async function loadNativeBlockedSocialUserIds(userId: string, accessToken?: string | null): Promise<Set<string>> {
   if (!userId) return new Set();
-  if (!accessToken) throw new Error("missing_access_token");
   const { data, error } = await nativeExactTokenRpc<Array<{ user_id?: string | null }>>(
     "get_native_social_blocked_user_ids",
     {},
@@ -571,7 +761,6 @@ const writeSocialSupportedThreadsCache = async (userId: string, values: Set<stri
 
 export async function loadNativeSupportedSocialThreadIds(userId: string, threadIds: string[], accessToken?: string | null): Promise<Set<string>> {
   if (!userId || threadIds.length === 0) return new Set();
-  if (!accessToken) throw new Error("missing_access_token");
   const ids = Array.from(new Set(threadIds.filter(Boolean)));
   if (ids.length === 0) return new Set();
 
@@ -616,6 +805,7 @@ const mapNativeSocialCommentRow = (row: Record<string, unknown>, fallbackThreadI
   parentCommentId: cleanString(row.parent_comment_id) || null,
   content: String(row.content || ""),
   images: isStringArray(row.images) ? row.images : [],
+  imageMetadata: parseNativeSocialImageMetadata(row.image_metadata, isStringArray(row.images) ? row.images : []),
   createdAt: String(row.created_at || new Date().toISOString()),
   updatedAt: cleanString(row.updated_at) || String(row.created_at || new Date().toISOString()),
   userId: String(row.user_id || ""),
@@ -627,6 +817,7 @@ const mapNativeSocialCommentRow = (row: Record<string, unknown>, fallbackThreadI
     locationCountry: cleanString(row.author_location_country) || null,
     isVerified: isNativeVerifiedProfile(row, "author_is_verified", "author_verification_status"),
     nonSocial: false,
+    engagement: null,
   },
   mentions: parseMentionEntries(row.reply_mentions),
   supportCount: Number(row.support_count ?? 0),
@@ -641,32 +832,46 @@ export async function fetchNativeSocialComments(threadId: string, options: { acc
     { p_thread_id: threadId, p_before_created_at: options.beforeCreatedAt ?? null, p_limit: limit },
     options.accessToken,
   );
-  const comments = (Array.isArray(data) ? data : []).map((row) => mapNativeSocialCommentRow(row, threadId));
+  const comments = await hydrateNativeSocialCommentImageMetadata((Array.isArray(data) ? data : []).map((row) => mapNativeSocialCommentRow(row, threadId)), options.accessToken);
+  const engagementByUserId = await fetchNativeEngagementTiers(comments.map((comment) => comment.userId), options.accessToken);
   return Promise.all(comments.map(async (comment) => ({
     ...comment,
     author: {
       ...comment.author,
       avatarUrl: await resolveNativeSocialAvatarUrl(comment.author.avatarUrl),
+      engagement: engagementByUserId.get(comment.userId) ?? null,
     },
   })));
 }
 
-export async function uploadNativeSocialImage(userId: string, media: NativeSocialComposerMedia, scope: "thread" | "reply" | "report" | "review", accessToken?: string | null): Promise<string> {
-  const token = requireNativeSocialAccessToken(accessToken);
+export async function uploadNativeSocialImage(userId: string, media: NativeSocialComposerMedia, scope: "thread" | "reply" | "report" | "review", accessToken?: string | null, sessionKey?: string | null): Promise<string> {
+  const session = requireNativeSocialSession({ accessToken, sessionKey, userId });
+  const token = await getFreshNativeAccessToken(session.accessToken);
+  if (!token) throw new Error("auth_required");
   const info = await FileSystem.getInfoAsync(media.uri);
   if (!info.exists) throw new Error("Selected image is unavailable.");
-  const ext = (media.name?.split(".").pop() || media.mimeType?.split("/").pop() || "jpg").replace(/[^a-z0-9]/gi, "") || "jpg";
-  const path = `${userId}/${scope}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-  const base64 = await FileSystem.readAsStringAsync(media.uri, { encoding: FileSystem.EncodingType.Base64 });
-  const body = base64ToUint8Array(base64);
-  if (body.byteLength === 0) throw new Error("Selected image is empty.");
+  const path = `${session.userId}/${scope}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+  // Library-picked photos can be 10MP+; base64-encoding the raw file synchronously freezes
+  // the JS thread for several seconds (an app hang). Resize/compress first, matching every
+  // other native upload path (care evidence, broadcast alerts, profile photos).
+  const normalized = await manipulateAsync(media.uri, [{ resize: { width: 1600 } }], { compress: 0.86, format: SaveFormat.JPEG });
+  let body: ReturnType<typeof base64ToUint8Array>;
+  try {
+    const base64 = await FileSystem.readAsStringAsync(normalized.uri, { encoding: FileSystem.EncodingType.Base64 });
+    body = base64ToUint8Array(base64);
+    if (body.byteLength === 0) throw new Error("Selected image is empty.");
+  } finally {
+    if (normalized.uri !== media.uri && normalized.uri.startsWith("file://")) {
+      await FileSystem.deleteAsync(normalized.uri, { idempotent: true }).catch(() => undefined);
+    }
+  }
   const response = await fetch(`${supabaseUrl}/storage/v1/object/notices/${path.split("/").map((part) => encodeURIComponent(part)).join("/")}`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
       apikey: supabaseAnonKey,
       "cache-control": "3600",
-      "content-type": media.mimeType || "image/jpeg",
+      "content-type": "image/jpeg",
       "x-upsert": "false",
     },
     body,
@@ -703,31 +908,58 @@ export async function uploadNativeSocialImage(userId: string, media: NativeSocia
   return buildPublicStorageUrl("notices", path);
 }
 
-export async function uploadNativeServiceCareEvidenceImage(options: {
+export type NativeServiceChatAttachmentStorageRef = {
+  bucket: "care_attachments";
+  mime: string;
+  name: string;
+  path: string;
+  size: number | null;
+};
+
+export async function uploadNativeServiceChatAttachmentImage(options: {
   accessToken?: string | null;
+  chatRoomId: string;
   media: NativeSocialComposerMedia;
-  scope: "checkin" | "issue" | "review";
-  serviceChatId: string;
+  sessionKey?: string | null;
+  uploadGroupId: string;
   userId: string;
-}): Promise<string> {
-  const token = requireNativeSocialAccessToken(options.accessToken);
-  const userId = String(options.userId || "").trim();
-  const serviceChatId = String(options.serviceChatId || "").trim();
-  if (!userId || !serviceChatId) throw new Error("missing_service_care_evidence_context");
+}): Promise<NativeServiceChatAttachmentStorageRef> {
+  const session = requireNativeSocialSession({
+    accessToken: options.accessToken,
+    sessionKey: options.sessionKey,
+    userId: options.userId,
+  });
+  const token = await getFreshNativeAccessToken(session.accessToken);
+  if (!token) throw new Error("auth_required");
+  const chatRoomId = String(options.chatRoomId || "").trim();
+  const uploadGroupId = String(options.uploadGroupId || "").trim().replace(/[^a-zA-Z0-9:_-]/g, "");
+  if (!chatRoomId || !uploadGroupId) throw new Error("missing_service_chat_attachment_scope");
   const info = await FileSystem.getInfoAsync(options.media.uri);
   if (!info.exists) throw new Error("Selected image is unavailable.");
-  const ext = (options.media.name?.split(".").pop() || options.media.mimeType?.split("/").pop() || "jpg").replace(/[^a-z0-9]/gi, "") || "jpg";
-  const path = `${userId}/service-care/${serviceChatId}/${options.scope}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-  const base64 = await FileSystem.readAsStringAsync(options.media.uri, { encoding: FileSystem.EncodingType.Base64 });
-  const body = base64ToUint8Array(base64);
-  if (body.byteLength === 0) throw new Error("Selected image is empty.");
-  const response = await fetch(`${supabaseUrl}/storage/v1/object/${encodeStorageObjectPath("service_care_evidence", path)}`, {
+  const ext = "jpg";
+  const mime = "image/jpeg";
+  const path = `${session.userId}/service-chat/${chatRoomId}/${uploadGroupId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  // Library-picked photos can be 10MP+; base64-encoding the raw file synchronously freezes
+  // the JS thread for several seconds (an app hang). Resize/compress first, matching every
+  // other native upload path (care evidence, broadcast alerts, profile photos).
+  const normalized = await manipulateAsync(options.media.uri, [{ resize: { width: 1600 } }], { compress: 0.86, format: SaveFormat.JPEG });
+  let body: ReturnType<typeof base64ToUint8Array>;
+  try {
+    const base64 = await FileSystem.readAsStringAsync(normalized.uri, { encoding: FileSystem.EncodingType.Base64 });
+    body = base64ToUint8Array(base64);
+    if (body.byteLength === 0) throw new Error("Selected image is empty.");
+  } finally {
+    if (normalized.uri !== options.media.uri && normalized.uri.startsWith("file://")) {
+      await FileSystem.deleteAsync(normalized.uri, { idempotent: true }).catch(() => undefined);
+    }
+  }
+  const response = await fetch(`${supabaseUrl}/storage/v1/object/${encodeStorageObjectPath("care_attachments", path)}`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
       apikey: supabaseAnonKey,
       "cache-control": "3600",
-      "content-type": options.media.mimeType || "image/jpeg",
+      "content-type": mime,
       "x-upsert": "false",
     },
     body,
@@ -736,10 +968,130 @@ export async function uploadNativeServiceCareEvidenceImage(options: {
     throw createNativeProtectedActionError({
       ok: false,
       stage: "upload",
-      originalError: new Error(`Care evidence upload failed (${response.status}).`),
+      originalError: new Error(`Care chat attachment upload failed (${response.status}).`),
       cleanupAttempted: false,
       cleanupResult: "not_needed",
     });
+  }
+  try {
+    await registerNativeMediaAsset({
+      accessToken: token,
+      bucket: "care_attachments",
+      contentId: chatRoomId,
+      contentType: "service_chat_attachment",
+      objectPath: path,
+    });
+  } catch (error) {
+    const cleanupResult = await requestNativeStorageCleanupResult("care_attachments", path, "register_service_chat_attachment_failed", token);
+    throw createNativeProtectedActionError({
+      ok: false,
+      stage: "register",
+      originalError: error,
+      cleanupAttempted: true,
+      cleanupResult,
+    });
+  }
+  return {
+    bucket: "care_attachments",
+    mime,
+    name: options.media.name || `care-chat.${ext}`,
+    path,
+    size: options.media.size ?? null,
+  };
+}
+
+export async function uploadNativeServiceCareEvidenceImage(options: {
+  accessToken?: string | null;
+  media: NativeSocialComposerMedia;
+  scope: "cancellation" | "checkin" | "handoff" | "issue" | "review" | "update";
+  serviceChatId: string;
+  sessionKey?: string | null;
+  userId: string;
+}): Promise<string> {
+  const NATIVE_SERVICE_CARE_EVIDENCE_UPLOAD_TIMEOUT_MS = 15000;
+  const NATIVE_SERVICE_CARE_EVIDENCE_PREP_TIMEOUT_MS = 12000;
+  const withCareEvidenceTimeout = async <T,>(promise: Promise<T>, timeoutMs: number, code: string): Promise<T> => {
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise<T>((_, reject) => {
+          timeoutId = setTimeout(() => reject(new Error(code)), timeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
+  };
+  const session = requireNativeSocialSession({
+    accessToken: options.accessToken,
+    sessionKey: options.sessionKey,
+    userId: options.userId,
+  });
+  const token = await getFreshNativeAccessToken(session.accessToken);
+  if (!token) throw new Error("auth_required");
+  const userId = session.userId;
+  const serviceChatId = String(options.serviceChatId || "").trim();
+  if (!userId || !serviceChatId) throw new Error("missing_service_care_evidence_context");
+  const info = await withCareEvidenceTimeout(FileSystem.getInfoAsync(options.media.uri), NATIVE_SERVICE_CARE_EVIDENCE_PREP_TIMEOUT_MS, "care_update_image_info_timeout");
+  if (!info.exists) throw new Error("Selected image is unavailable.");
+  const path = `${userId}/service-care/${serviceChatId}/${options.scope}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+  // Library-picked photos can be 10MP+; base64-encoding the raw file synchronously froze
+  // the JS thread for several seconds (visible as an app hang). Resize/compress first,
+  // matching every other native upload path (broadcast alerts, profile photos, identity docs).
+  const normalized = await withCareEvidenceTimeout(
+    manipulateAsync(options.media.uri, [{ resize: { width: 1600 } }], { compress: 0.86, format: SaveFormat.JPEG }),
+    NATIVE_SERVICE_CARE_EVIDENCE_PREP_TIMEOUT_MS,
+    "care_update_image_prepare_timeout",
+  );
+  try {
+    const base64 = await withCareEvidenceTimeout(
+      FileSystem.readAsStringAsync(normalized.uri, { encoding: FileSystem.EncodingType.Base64 }),
+      NATIVE_SERVICE_CARE_EVIDENCE_PREP_TIMEOUT_MS,
+      "care_update_image_read_timeout",
+    );
+    const body = base64ToUint8Array(base64);
+    if (body.byteLength === 0) throw new Error("Selected image is empty.");
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), NATIVE_SERVICE_CARE_EVIDENCE_UPLOAD_TIMEOUT_MS);
+    let response: Response;
+    try {
+      response = await fetch(`${supabaseUrl}/storage/v1/object/${encodeStorageObjectPath("service_care_evidence", path)}`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          apikey: supabaseAnonKey,
+          "cache-control": "3600",
+          "content-type": "image/jpeg",
+          "x-upsert": "false",
+        },
+        body,
+        signal: controller.signal,
+      });
+    } catch (error) {
+      throw createNativeProtectedActionError({
+        ok: false,
+        stage: "upload",
+        originalError: controller.signal.aborted ? new Error("care_update_upload_timeout") : error,
+        cleanupAttempted: false,
+        cleanupResult: "not_needed",
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
+    if (!response.ok) {
+      throw createNativeProtectedActionError({
+        ok: false,
+        stage: "upload",
+        originalError: new Error(`Care evidence upload failed (${response.status}).`),
+        cleanupAttempted: false,
+        cleanupResult: "not_needed",
+      });
+    }
+  } finally {
+    if (normalized.uri !== options.media.uri && normalized.uri.startsWith("file://")) {
+      await FileSystem.deleteAsync(normalized.uri, { idempotent: true }).catch(() => undefined);
+    }
   }
   try {
     await registerNativeMediaAsset({
@@ -761,15 +1113,67 @@ export async function uploadNativeServiceCareEvidenceImage(options: {
   }
   return JSON.stringify({
     bucket: "service_care_evidence",
-    mime: options.media.mimeType || "image/jpeg",
-    name: options.media.name || `${options.scope}-evidence.${ext}`,
+    mime: "image/jpeg",
+    name: options.media.name || `${options.scope}-evidence.jpg`,
     path,
     size: options.media.size ?? null,
   });
 }
 
+export async function uploadNativeServiceCareAgreementSignatureImage(options: {
+  accessToken?: string | null;
+  media: NativeSocialComposerMedia;
+  role: "owner" | "provider";
+  serviceChatId: string;
+  sessionKey?: string | null;
+  userId: string;
+}): Promise<{ bucket: "care_agreements"; mime: "image/png"; path: string; size: number | null }> {
+  const session = requireNativeSocialSession({
+    accessToken: options.accessToken,
+    sessionKey: options.sessionKey,
+    userId: options.userId,
+  });
+  const token = await getFreshNativeAccessToken(session.accessToken);
+  if (!token) throw new Error("auth_required");
+  const userId = session.userId;
+  const serviceChatId = String(options.serviceChatId || "").trim();
+  if (!userId || !serviceChatId) throw new Error("missing_service_care_agreement_context");
+  const info = await FileSystem.getInfoAsync(options.media.uri);
+  if (!info.exists) throw new Error("Signature image is unavailable.");
+  const path = `${userId}/care_agreements/${serviceChatId}/${options.role}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`;
+  const base64 = await FileSystem.readAsStringAsync(options.media.uri, { encoding: FileSystem.EncodingType.Base64 });
+  const body = base64ToUint8Array(base64);
+  if (body.byteLength === 0) throw new Error("Signature image is empty.");
+  const response = await fetch(`${supabaseUrl}/storage/v1/object/${encodeStorageObjectPath("care_agreements", path)}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      apikey: supabaseAnonKey,
+      "cache-control": "31536000",
+      "content-type": "image/png",
+      "x-upsert": "false",
+    },
+    body,
+  });
+  if (!response.ok) {
+    throw createNativeProtectedActionError({
+      ok: false,
+      stage: "upload",
+      originalError: new Error(`Care agreement signature upload failed (${response.status}).`),
+      cleanupAttempted: false,
+      cleanupResult: "not_needed",
+    });
+  }
+  return {
+    bucket: "care_agreements",
+    mime: "image/png",
+    path,
+    size: options.media.size ?? null,
+  };
+}
+
 type NoticeStorageRef = {
-  bucket: "notices" | "social_album";
+  bucket: "notices";
   path: string;
 };
 
@@ -784,13 +1188,9 @@ const extractNoticeStorageRef = (mediaUrl: string): NoticeStorageRef | null => {
       }
     };
     const path = decodeSafe(parsed.pathname || "");
-    const markers: Array<{ bucket: "notices" | "social_album"; marker: string }> = [
+    const markers: Array<{ bucket: "notices"; marker: string }> = [
       { bucket: "notices", marker: "/storage/v1/object/public/notices/" },
-      { bucket: "social_album", marker: "/storage/v1/object/public/social_album/" },
-      { bucket: "social_album", marker: "/storage/v1/object/public/social-album/" },
       { bucket: "notices", marker: "/storage/v1/object/notices/" },
-      { bucket: "social_album", marker: "/storage/v1/object/social_album/" },
-      { bucket: "social_album", marker: "/storage/v1/object/social-album/" },
     ];
     for (const { bucket, marker } of markers) {
       const markerIndex = path.indexOf(marker);
@@ -799,13 +1199,13 @@ const extractNoticeStorageRef = (mediaUrl: string): NoticeStorageRef | null => {
         return objectPath ? { bucket, path: objectPath } : null;
       }
     }
-    const fallback = path.split("/notices/").pop() || path.split("/social_album/").pop() || path.split("/social-album/").pop();
+    const fallback = path.split("/notices/").pop();
     if (!fallback) return null;
     const normalized = decodeSafe(fallback.replace(/^\/+/, ""));
     if (!normalized) return null;
     return { bucket: "notices", path: normalized };
   } catch {
-    const fallback = mediaUrl.split("?")[0].split("/notices/").pop() || mediaUrl.split("?")[0].split("/social_album/").pop() || mediaUrl.split("?")[0].split("/social-album/").pop();
+    const fallback = mediaUrl.split("?")[0].split("/notices/").pop();
     if (!fallback || fallback.length === 0) return null;
     const decodeSafe = (value: string) => {
       try {
@@ -816,8 +1216,7 @@ const extractNoticeStorageRef = (mediaUrl: string): NoticeStorageRef | null => {
     };
     const normalized = decodeSafe(fallback.replace(/^\/+/, ""));
     if (!normalized) return null;
-    const isSocialAlbum = mediaUrl.includes("/social_album/") || mediaUrl.includes("/social-album/");
-    return { bucket: isSocialAlbum ? "social_album" : "notices", path: normalized };
+    return { bucket: "notices", path: normalized };
   }
 };
 
@@ -831,7 +1230,7 @@ const makeNoticeStorageIdentity = (mediaUrl: string) => {
   if (!normalizedUrl) return null;
   const ref = extractNoticeStorageRef(normalizedUrl);
   if (!ref?.path) return null;
-  const bucket = ref.bucket === "social_album" ? "social_album" : "notices";
+  const bucket = "notices";
   const safeDecode = (value: string) => {
     try {
       return decodeURIComponent(value);
@@ -848,10 +1247,11 @@ export const cleanupNativeSocialStorageImages = async (
   ownerUserId?: string | null,
   accessToken?: string | null,
   reason = "delete_social_thread",
+  sessionKey?: string | null,
 ) : Promise<NativeProtectedActionCleanupResult> => {
-  const token = requireNativeSocialAccessToken(accessToken);
   const ownerPrefix = String(ownerUserId || "").trim();
   if (!ownerPrefix) return "not_needed";
+  const session = requireNativeSocialSession({ accessToken, sessionKey, userId: ownerPrefix });
   const refs = urls
     .map((mediaUrl) => extractNoticeStorageRef(mediaUrl))
     .filter((entry): entry is NoticeStorageRef => !!entry && Boolean(entry.path) && entry.path.startsWith(`${ownerPrefix}/`));
@@ -859,8 +1259,9 @@ export const cleanupNativeSocialStorageImages = async (
   const uniqueRefs = Array.from(new Map(refs.map((entry) => [`${entry.bucket}:${entry.path}`, entry])).values());
   let cleanupResult: NativeProtectedActionCleanupResult = "not_needed";
   for (const entry of uniqueRefs) {
-    const nextResult = await requestNativeStorageCleanupResult(entry.bucket, entry.path, reason, token);
+    const nextResult = await requestNativeStorageCleanupResult(entry.bucket, entry.path, reason, session.accessToken);
     if (nextResult === "failed") cleanupResult = "failed";
+    else if (nextResult === "deleted" && cleanupResult === "not_needed") cleanupResult = "deleted";
     else if (nextResult === "queued" && cleanupResult !== "failed") cleanupResult = "queued";
   }
   return cleanupResult;
@@ -891,16 +1292,14 @@ const computeRemovedNoticeImageUrls = (previousImages: string[] | undefined, nex
     .map((entry) => entry.original);
 };
 
-export async function createNativeSocialVideoUpload(userId: string, media: NativeSocialComposerMedia, title: string, accessToken?: string | null) {
-  requireNativeSocialAccessToken(accessToken);
+export async function createNativeSocialVideoUpload(userId: string, media: NativeSocialComposerMedia, title: string, accessToken?: string | null, sessionKey?: string | null) {
+  const session = requireNativeSocialSession({ accessToken, sessionKey, userId });
   if (Number(media.durationSeconds ?? 0) > SOCIAL_VIDEO_MAX_SECONDS + 0.5) {
     throw new Error("Video must be trimmed to 15 seconds before upload.");
   }
-  const fileInfo = await FileSystem.getInfoAsync(media.uri);
-  if (!fileInfo.exists) throw new Error("Selected video is unavailable.");
+  const file = await readNativeLocalMediaFile(media.uri, { fileName: media.name, mimeType: media.mimeType }, { fallbackContentType: "video/mp4", fallbackExtension: "mp4" });
   const tus = await import("tus-js-client");
-  const response = await fetch(media.uri);
-  const blob = await response.blob();
+  const blob = new Blob([file.body], { type: file.contentType || media.mimeType || "video/mp4" });
   const durationSeconds = Math.max(1, Math.min(SOCIAL_VIDEO_MAX_SECONDS, Number(media.durationSeconds ?? SOCIAL_VIDEO_MAX_SECONDS)));
   const createData = await nativeSocialFunctionRequest<{
     videoId: string;
@@ -917,9 +1316,9 @@ export async function createNativeSocialVideoUpload(userId: string, media: Nativ
     title: title || "Social video",
     durationSeconds,
     fileName: media.name || "social-video.mp4",
-    fileType: media.mimeType || "video/mp4",
-    fileSize: Number(media.size || blob.size || 0),
-  }, accessToken);
+    fileType: file.contentType || media.mimeType || "video/mp4",
+    fileSize: Number(media.size || file.size || blob.size || 0),
+  }, session.accessToken);
   if (!createData?.videoId) throw new Error("Video upload authorization failed.");
 
   await new Promise<void>((resolve, reject) => {
@@ -934,7 +1333,7 @@ export async function createNativeSocialVideoUpload(userId: string, media: Nativ
         VideoId: createData.videoId,
       },
       metadata: {
-        filetype: media.mimeType || "video/mp4",
+        filetype: file.contentType || media.mimeType || "video/mp4",
         title: title || media.name || "Social video",
         ...(createData.collectionId ? { collection: createData.collectionId } : {}),
       },
@@ -947,7 +1346,7 @@ export async function createNativeSocialVideoUpload(userId: string, media: Nativ
   const finalizeData = await nativeSocialFunctionRequest<Record<string, unknown>>(
     "social-video-finalize",
     { videoId: createData.videoId, durationSeconds },
-    accessToken,
+    session.accessToken,
   );
   return {
     provider: "bunny_stream",
@@ -970,20 +1369,38 @@ export async function createNativeSocialThread(args: {
   accessToken?: string | null;
   category: string;
   content: string;
+  imageMetadata?: NativeSocialImageMetadata[];
   images: string[];
   isSensitive: boolean;
+  postLanguage?: string | null;
+  postScope?: NativeViewerScope | null;
+  sessionKey?: string | null;
   title: string;
   userId: string;
   video?: Awaited<ReturnType<typeof createNativeSocialVideoUpload>> | null;
 }) {
+  const session = requireNativeSocialSession(args);
+  const scopePoint = args.postScope?.primaryPoint ?? null;
   const data = await nativeSocialRpc<{ id?: string | null } | string>("create_native_social_thread", {
     p_title: args.title,
     p_content: args.content,
     p_category: args.category || "Social",
     p_images: args.images,
+    p_image_metadata: args.imageMetadata ?? [],
     p_is_sensitive: args.isSensitive,
+    p_post_language: args.postLanguage ?? null,
+    p_post_scope: args.postScope ? {
+      city: args.postScope.city ?? null,
+      country: args.postScope.country ?? null,
+      countryCode: args.postScope.countryCode ?? null,
+      countryName: args.postScope.countryName ?? null,
+      district: args.postScope.district ?? null,
+      lat: scopePoint?.lat ?? null,
+      lng: scopePoint?.lng ?? null,
+      source: args.postScope.source,
+    } : null,
     p_video: args.video ?? null,
-  }, args.accessToken);
+  }, session.accessToken);
   return typeof data === "string" ? data : String(data?.id || "");
 }
 
@@ -992,13 +1409,17 @@ export async function updateNativeSocialThread(args: {
   category: string;
   content: string;
   id: string;
+  imageMetadata?: NativeSocialImageMetadata[];
   images?: string[];
   isSensitive: boolean;
+  postLanguage?: string | null;
+  sessionKey?: string | null;
   title: string;
   userId: string;
   video?: Awaited<ReturnType<typeof createNativeSocialVideoUpload>> | null;
   previousImages?: string[];
 }) {
+  const session = requireNativeSocialSession(args);
   const nextImages = Array.isArray(args.images) ? args.images.map((url) => normalizeNoticeImageUrl(url)).filter((url): url is string => Boolean(url)) : undefined;
   const removedImageUrls = computeRemovedNoticeImageUrls(args.previousImages, nextImages);
   const data = await nativeSocialRpc<{ id?: string | null } | string>("update_native_social_thread", {
@@ -1007,25 +1428,42 @@ export async function updateNativeSocialThread(args: {
     p_content: args.content,
     p_category: args.category || "Social",
     p_images: nextImages ?? null,
+    p_image_metadata: args.imageMetadata ?? null,
     p_is_sensitive: args.isSensitive,
+    p_post_language: args.postLanguage ?? null,
     p_video: args.video ?? null,
-  }, args.accessToken);
+  }, session.accessToken);
   const updatedId = typeof data === "string" ? data : data?.id;
   if (!updatedId) throw new Error("Unable to update post.");
   if (removedImageUrls.length > 0) {
-    await cleanupNativeSocialStorageImages(removedImageUrls, args.userId, args.accessToken, "update_social_thread_removed_media");
+    void cleanupNativeSocialStorageImages(removedImageUrls, session.userId, session.accessToken, "update_social_thread_removed_media", session.sessionKey).catch((cleanupError) => {
+      if (__DEV__) {
+        console.warn("[social.update_thread_removed_media_cleanup.failed]", {
+          threadId: args.id,
+          error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+        });
+      }
+    });
   }
 }
 
-export async function deleteNativeSocialThread(thread: NativeSocialThread, userId: string, accessToken?: string | null): Promise<boolean> {
+export async function deleteNativeSocialThread(thread: NativeSocialThread, userId: string, accessToken?: string | null, sessionKey?: string | null): Promise<boolean> {
   if (!thread.id || !userId) return false;
-  const data = await nativeSocialRpc<unknown>("delete_social_thread", { p_thread_id: thread.id }, accessToken);
+  const session = requireNativeSocialSession({ accessToken, sessionKey, userId });
+  const data = await nativeSocialRpc<unknown>("delete_social_thread", { p_thread_id: thread.id }, session.accessToken);
   const deleted = data === true || (typeof data === "object" && data !== null && (data as { deleted?: boolean }).deleted === true);
   if (deleted && thread.images.length > 0) {
-    await cleanupNativeSocialStorageImages(thread.images, userId, accessToken, "delete_social_thread");
+    void cleanupNativeSocialStorageImages(thread.images, session.userId, session.accessToken, "delete_social_thread", session.sessionKey).catch((cleanupError) => {
+      if (__DEV__) {
+        console.warn("[social.delete_thread_media_cleanup.failed]", {
+          threadId: thread.id,
+          error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+        });
+      }
+    });
   }
   if (thread.providerVideoId) {
-    void deleteNativeSocialVideo(thread.providerVideoId, accessToken).catch((videoError) => {
+    void deleteNativeSocialVideo(thread.providerVideoId, session.accessToken).catch((videoError) => {
       console.error("[social.delete_thread_video.failed]", {
         threadId: thread.id,
         error: videoError instanceof Error ? videoError.message : String(videoError),
@@ -1038,18 +1476,47 @@ export async function deleteNativeSocialThread(thread: NativeSocialThread, userI
 export async function createNativeSocialComment(args: {
   accessToken?: string | null;
   content: string;
+  imageMetadata?: NativeSocialImageMetadata[];
   images: string[];
   parentCommentId?: string | null;
+  sessionKey?: string | null;
   threadId: string;
   userId: string;
 }) {
+  const session = requireNativeSocialSession(args);
   const data = await nativeSocialRpc<{ id?: string | null } | string>("create_native_social_comment", {
     p_thread_id: args.threadId,
     p_parent_comment_id: args.parentCommentId || null,
     p_content: args.content,
     p_images: args.images,
-  }, args.accessToken);
+    p_image_metadata: args.imageMetadata ?? [],
+  }, session.accessToken);
   return typeof data === "string" ? data : String(data?.id || "");
+}
+
+export async function updateNativeSocialComment(commentId: string, userId: string, content: string, images?: string[] | null, previousImages?: string[] | null, accessToken?: string | null, sessionKey?: string | null, imageMetadata?: NativeSocialImageMetadata[] | null) {
+  if (!commentId || !userId) throw new Error("Reply is unavailable.");
+  const session = requireNativeSocialSession({ accessToken, sessionKey, userId });
+  const nextImages = Array.isArray(images)
+    ? images.map((url) => normalizeNoticeImageUrl(url)).filter((url): url is string => Boolean(url))
+    : null;
+  const removedImageUrls = computeRemovedNoticeImageUrls(previousImages ?? undefined, nextImages ?? undefined);
+  await nativeSocialRpc("update_native_social_comment", {
+    p_comment_id: commentId,
+    p_content: content,
+    p_images: nextImages,
+    p_image_metadata: imageMetadata ?? null,
+  }, session.accessToken);
+  if (removedImageUrls.length > 0) {
+    void cleanupNativeSocialStorageImages(removedImageUrls, session.userId, session.accessToken, "update_social_comment_removed_media", session.sessionKey).catch((cleanupError) => {
+      if (__DEV__) {
+        console.warn("[social.update_comment_removed_media_cleanup.failed]", {
+          commentId,
+          error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+        });
+      }
+    });
+  }
 }
 
 export async function persistNativeSocialReplyMentions(
@@ -1135,6 +1602,7 @@ export async function searchNativeSocialMentionSuggestions(query: string, exclud
       socialId: String(row.social_id || "").trim(),
       displayName: cleanString(row.display_name) || null,
       avatarUrl: cleanString(row.avatar_url) || null,
+      updatedAt: cleanString(row.updated_at) || null,
     }))
     .filter((entry) => {
       if (!entry.userId || !entry.socialId || seen.has(entry.userId)) return false;
@@ -1144,14 +1612,15 @@ export async function searchNativeSocialMentionSuggestions(query: string, exclud
     .slice(0, 10);
 }
 
-export async function createNativeSocialMentionNotifications(threadId: string, actorId: string, mentionedUserIds: string[], accessToken?: string | null) {
+export async function createNativeSocialMentionNotifications(threadId: string, actorId: string, mentionedUserIds: string[], accessToken?: string | null, sessionKey?: string | null) {
   const uniqueIds = Array.from(new Set(mentionedUserIds.filter(Boolean)));
   if (!threadId || !actorId || uniqueIds.length === 0) return;
+  const session = requireNativeSocialSession({ accessToken, sessionKey, userId: actorId });
   await nativeSocialRpc("create_thread_mention_notifications", {
-    p_actor_id: actorId,
+    p_actor_id: session.userId,
     p_thread_id: threadId,
     p_recipient_ids: uniqueIds,
-  }, accessToken);
+  }, session.accessToken);
 }
 
 export async function upsertNativeSocialNotificationWindow(args: {
@@ -1159,15 +1628,17 @@ export async function upsertNativeSocialNotificationWindow(args: {
   actorName: string;
   category: "social";
   href: string;
-  kind: "comment" | "like" | "reply";
+  kind: "comment" | "comment_like" | "like" | "reply";
   ownerUserId: string;
   subjectId: string;
   subjectType: "comment" | "thread";
   accessToken?: string | null;
+  sessionKey?: string | null;
 }) {
   if (!args.ownerUserId || !args.subjectId || !args.actorId) return;
+  const session = requireNativeSocialSession({ accessToken: args.accessToken, sessionKey: args.sessionKey, userId: args.actorId });
   await nativeSocialRpc("upsert_notification_window", {
-    p_actor_id: args.actorId,
+    p_actor_id: session.userId,
     p_actor_name: args.actorName,
     p_category: args.category,
     p_href: args.href,
@@ -1175,17 +1646,25 @@ export async function upsertNativeSocialNotificationWindow(args: {
     p_owner_user_id: args.ownerUserId,
     p_subject_id: args.subjectId,
     p_subject_type: args.subjectType,
-  }, args.accessToken);
+  }, session.accessToken);
 }
 
-export async function updateNativeSocialComment(commentId: string, userId: string, content: string, accessToken?: string | null) {
+export async function deleteNativeSocialComment(commentId: string, commentImages: string[], userId: string, accessToken?: string | null, sessionKey?: string | null) {
   if (!commentId || !userId) throw new Error("Reply is unavailable.");
-  await nativeSocialRpc("update_native_social_comment", { p_comment_id: commentId, p_content: content }, accessToken);
-}
-
-export async function deleteNativeSocialComment(commentId: string, userId: string, accessToken?: string | null) {
-  if (!commentId || !userId) throw new Error("Reply is unavailable.");
-  await nativeSocialRpc("delete_native_social_comment", { p_comment_id: commentId }, accessToken);
+  const session = requireNativeSocialSession({ accessToken, sessionKey, userId });
+  const data = await nativeSocialRpc<{ deleted?: boolean } | boolean>("delete_native_social_comment", { p_comment_id: commentId }, session.accessToken);
+  const deleted = data === true || (typeof data === "object" && data !== null && data.deleted === true);
+  if (deleted && commentImages.length > 0) {
+    void cleanupNativeSocialStorageImages(commentImages, session.userId, session.accessToken, "delete_social_comment", session.sessionKey).catch((cleanupError) => {
+      if (__DEV__) {
+        console.warn("[social.delete_comment_media_cleanup.failed]", {
+          commentId,
+          error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+        });
+      }
+    });
+  }
+  return deleted;
 }
 
 export async function updateNativeSupportedSocialThreadCache(userId: string, threadId: string, supported: boolean) {
@@ -1196,9 +1675,10 @@ export async function updateNativeSupportedSocialThreadCache(userId: string, thr
   await writeSocialSupportedThreadsCache(userId, cached);
 }
 
-export async function setNativeSocialSupport(thread: NativeSocialThread, userId: string, supported: boolean, accessToken?: string | null) {
+export async function setNativeSocialSupport(thread: NativeSocialThread, userId: string, supported: boolean, accessToken?: string | null, sessionKey?: string | null) {
+  const session = requireNativeSocialSession({ accessToken, sessionKey, userId });
   if (__DEV__) console.log("NATIVE_SOCIAL_SUPPORT_RPC_START", {
-    hasAccessToken: Boolean(accessToken),
+    hasAccessToken: Boolean(session.accessToken),
     supportedBefore: supported,
     threadId: thread.id,
   });
@@ -1207,7 +1687,7 @@ export async function setNativeSocialSupport(thread: NativeSocialThread, userId:
     data = await nativeSocialRpc<{ support_count?: number | null } | number>("set_native_social_support", {
       p_thread_id: thread.id,
       p_supported_before: supported,
-    }, accessToken);
+    }, session.accessToken);
     if (__DEV__) console.log("NATIVE_SOCIAL_SUPPORT_RPC_RESULT", {
       isArray: Array.isArray(data),
       rawDataShape: data === null ? "null" : Array.isArray(data) ? "array" : typeof data,
@@ -1222,18 +1702,19 @@ export async function setNativeSocialSupport(thread: NativeSocialThread, userId:
     });
     throw error;
   }
-  const cached = await readSocialSupportedThreadsCache(userId) ?? new Set<string>();
+  const cached = await readSocialSupportedThreadsCache(session.userId) ?? new Set<string>();
   if (supported) cached.delete(thread.id);
   else cached.add(thread.id);
-  await writeSocialSupportedThreadsCache(userId, cached);
+  await writeSocialSupportedThreadsCache(session.userId, cached);
   return typeof data === "number" ? data : Number(data?.support_count ?? 0);
 }
 
-export async function setNativeSocialCommentSupport(commentId: string, supported: boolean, accessToken?: string | null) {
+export async function setNativeSocialCommentSupport(commentId: string, supported: boolean, accessToken?: string | null, userId?: string | null, sessionKey?: string | null) {
   if (!commentId) throw new Error("Comment is unavailable.");
+  const session = requireNativeSocialSession({ accessToken, sessionKey, userId });
   if (__DEV__) console.log("NATIVE_SOCIAL_COMMENT_SUPPORT_RPC_START", {
     commentId,
-    hasAccessToken: Boolean(accessToken),
+    hasAccessToken: Boolean(session.accessToken),
     nextSupported: supported,
   });
   let data: { support_count?: number | null; supported?: boolean | null } | Array<{ support_count?: number | null; supported?: boolean | null }>;
@@ -1243,7 +1724,7 @@ export async function setNativeSocialCommentSupport(commentId: string, supported
     >("set_native_social_comment_support", {
       p_comment_id: commentId,
       p_supported: supported,
-    }, accessToken);
+    }, session.accessToken);
     if (__DEV__) console.log("NATIVE_SOCIAL_COMMENT_SUPPORT_RPC_RESULT", {
       commentId,
       isArray: Array.isArray(data),
@@ -1264,8 +1745,9 @@ export async function setNativeSocialCommentSupport(commentId: string, supported
   };
 }
 
-export async function blockNativeSocialUser(authorId: string, accessToken?: string | null) {
-  await nativeSocialRpc("block_user", { p_blocked_id: authorId }, accessToken);
+export async function blockNativeSocialUser(authorId: string, accessToken?: string | null, userId?: string | null, sessionKey?: string | null) {
+  const session = requireNativeSocialSession({ accessToken, sessionKey, userId });
+  await nativeSocialRpc("block_user", { p_blocked_id: authorId }, session.accessToken);
 }
 
 export const purgeNativeSocialPersistentCache = async (userId: string, options?: { commentsOnlyForThreadId?: string | null }) => {
@@ -1304,14 +1786,16 @@ export async function reportNativeSocialUser(args: {
   targetName?: string | null;
   attachmentUrls?: string[];
   accessToken?: string | null;
+  sessionKey?: string | null;
 }) {
+  const session = requireNativeSocialSession({ accessToken: args.accessToken, sessionKey: args.sessionKey, userId: args.reporterId });
   const data = await nativeSocialRpc<unknown>("process_user_report", {
     p_target_id: args.targetUserId,
     p_categories: args.categories,
     p_details: args.details,
     p_attachment_urls: args.attachmentUrls ?? [],
     p_source: args.sourceOrigin ?? "social",
-  }, args.accessToken);
+  }, session.accessToken);
   const reportId = (() => {
     if (!data || typeof data !== "object") return null;
     const row = data as Record<string, unknown>;
@@ -1323,10 +1807,9 @@ export async function reportNativeSocialUser(args: {
       p_chat_id: args.chatRoomId,
       p_report_id: reportId,
       p_reported_message_id: null,
-    }, args.accessToken);
+    }, session.accessToken);
   }
   void nativeSocialFunctionRequest("support-request", {
-      userId: args.reporterId,
       subject: `Report: ${args.targetName || args.targetUserId}`,
       message: JSON.stringify({
         target_user_id: args.targetUserId,
@@ -1336,7 +1819,7 @@ export async function reportNativeSocialUser(args: {
         attachments: args.attachmentUrls ?? [],
       }),
       source: args.source ?? "Social",
-  }, args.accessToken).catch(() => undefined);
+  }, session.accessToken).catch(() => undefined);
 }
 
 export async function recordNativeSocialShare(threadId: string, accessToken?: string | null): Promise<number | null> {
@@ -1351,21 +1834,7 @@ export async function recordNativeSocialShare(threadId: string, accessToken?: st
 export async function fetchNativeSocialShareTargets(userId: string, accessToken?: string | null): Promise<NativeSocialShareTarget[]> {
   if (!userId) return [];
   const data = await nativeSocialRpc<unknown>("get_share_targets", {}, accessToken);
-  return (Array.isArray(data) ? data : []).map((row) => {
-    const item = row as Record<string, unknown>;
-    const roomType = cleanString(item.room_type).toLowerCase();
-    const peerUserId = cleanString(item.user_id) || cleanString(item.peer_user_id) || null;
-    return {
-      avatarUrl: cleanString(item.avatar) || cleanString(item.avatar_url) || null,
-      chatId: cleanString(item.chat_id),
-      label: cleanString(item.name) || "Conversation",
-      lastMessageAt: cleanString(item.last_message_at) || null,
-      socialId: cleanString(item.social_id).replace(/^@+/, "") || null,
-      subtitle: roomType === "group" ? "Group chat" : roomType === "service" ? "Care" : cleanString(item.social_id) ? `@${cleanString(item.social_id).replace(/^@+/, "")}` : "Chat",
-      type: roomType === "group" ? "group" : roomType === "service" ? "service" : "direct",
-      userId: roomType === "group" ? null : peerUserId,
-    } satisfies NativeSocialShareTarget;
-  }).filter((target) => target.chatId);
+  return normalizeNativeSocialShareTargetsForDisplay(Array.isArray(data) ? data : []);
 }
 
 export function buildNativeSocialSharePayload(thread: NativeSocialThread) {
@@ -1491,7 +1960,11 @@ async function writeNativeStoredLinkPreviewMap(entries: Record<string, NativeSoc
 async function fetchNativeSocialLinkPreview(url: string, accessToken?: string | null): Promise<NativeSocialLinkPreview> {
   const intrinsicPreview = buildNativeSocialIntrinsicLinkPreview(url);
   if (intrinsicPreview) return intrinsicPreview;
-  try {
+  const inFlightKey = `${accessToken ? "auth" : "anon"}:${url}`;
+  const existing = nativeSocialLinkPreviewInFlight.get(inFlightKey);
+  if (existing) return existing;
+  const request = (async () => {
+    try {
     const invokePromise = (async () => {
       const data = await nativeSocialFunctionRequest<Record<string, unknown> | null>("link-preview", { url }, accessToken);
       return { data: data ?? null, error: null };
@@ -1516,9 +1989,14 @@ async function fetchNativeSocialLinkPreview(url: string, accessToken?: string | 
       resolved: true,
     };
     return resolved;
-  } catch (error) {
-    return buildFallbackLinkPreview(url, error instanceof Error ? error.message : "preview_exception");
-  }
+    } catch (error) {
+      return buildFallbackLinkPreview(url, error instanceof Error ? error.message : "preview_exception");
+    }
+  })().finally(() => {
+    if (nativeSocialLinkPreviewInFlight.get(inFlightKey) === request) nativeSocialLinkPreviewInFlight.delete(inFlightKey);
+  });
+  nativeSocialLinkPreviewInFlight.set(inFlightKey, request);
+  return request;
 }
 
 export async function fetchNativeSocialLinkPreviews(urls: string[], accessToken?: string | null): Promise<Record<string, NativeSocialLinkPreview>> {
@@ -1528,6 +2006,11 @@ export async function fetchNativeSocialLinkPreviews(urls: string[], accessToken?
   const stored = await readNativeStoredLinkPreviewMap();
   const next: Record<string, NativeSocialLinkPreview> = {};
   uniqueUrls.forEach((url) => {
+    const intrinsicPreview = buildNativeSocialIntrinsicLinkPreview(url);
+    if (intrinsicPreview) {
+      next[url] = intrinsicPreview;
+      return;
+    }
     const cached = stored[url];
     if (cached?.resolved) {
       const { fetchedAt: _fetchedAt, ...preview } = cached;

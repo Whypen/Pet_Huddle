@@ -46,6 +46,7 @@ const requestCardFromQuoteCard = (quoteCard: Record<string, unknown>): Record<st
   scopeFrequency: clean(quoteCard.scopeFrequency),
   scopeTasks: normalizeTaskList(quoteCard.scopeTasks),
   otherTasks: clean(quoteCard.otherTasks),
+  updatePreference: clean(quoteCard.updatePreference),
 });
 const visibleRequestCard = (
   requestCard: Record<string, unknown>,
@@ -76,6 +77,7 @@ const visibleRequestCard = (
     scopeFrequency: clean(requestCard.scopeFrequency),
     scopeTasks: normalizeTaskList(requestCard.scopeTasks),
     otherTasks: clean(requestCard.otherTasks),
+    updatePreference: clean(requestCard.updatePreference) || clean(quoteCard.updatePreference),
   };
   const quoteOwnsCurrentTurn = actorRole === "carer";
   const paymentFieldsPresent = Boolean(clean(quoteCard.currency) || clean(quoteCard.finalPrice) || clean(quoteCard.rate) || quoteCard.voluntary === true);
@@ -332,23 +334,11 @@ serve(async (req) => {
     if (!serviceChatId) return json({ error: "service_chat_id is required" }, 400);
     if (!UUID_RE.test(serviceChatId)) return json({ error: "service_chat_id must be a valid UUID" }, 400);
 
-    let chatResult = await supabase
+    const chatResult = await supabase
       .from("service_chats")
       .select("id, requester_id, provider_id, status, care_status, booking_snapshot, request_card, quote_card")
       .eq("id", serviceChatId)
       .maybeSingle();
-    if (!chatResult.error && !chatResult.data) {
-      const snapshotModeInput = clean(payload.snapshot_mode || payload.snapshotMode).toLowerCase() === "history" ? "history" : "live";
-      const { data: canonicalId, error: canonicalIdErr } = await supabase.rpc("current_active_service_chat_id_for_room", { p_chat_id: serviceChatId });
-      if (canonicalIdErr) throw canonicalIdErr;
-      if (snapshotModeInput === "live" && canonicalId) {
-        chatResult = await supabase
-          .from("service_chats")
-          .select("id, requester_id, provider_id, status, care_status, booking_snapshot, request_card, quote_card")
-          .eq("id", canonicalId)
-          .maybeSingle();
-      }
-    }
     const { data: chat, error: chatError } = chatResult;
     if (chatError) throw chatError;
     if (!chat) return json({ error: "Service chat not found" }, 404);

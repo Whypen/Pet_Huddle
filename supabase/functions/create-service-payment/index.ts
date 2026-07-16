@@ -39,7 +39,13 @@ const STRIPE_MINIMUM_CHARGE_CENTS: Record<string, number> = {
 };
 const CARE_PAYMENT_RETRY_LOCK_MS = 5 * 60 * 1000;
 const STRIPE_ZERO_DECIMAL_CURRENCIES = new Set(["bif", "clp", "djf", "gnf", "jpy", "kmf", "krw", "mga", "pyg", "rwf", "ugx", "vnd", "vuv", "xaf", "xof", "xpf"]);
-const CARE_CANCELLATION_TERMS = "More than 72 hours before care starts -- full refund. 24 to 72 hours before -- 50% refund; the retained 50% covers the provider's reserved time and the cost of arranging the booking. Less than 24 hours before -- the booking is final and non-refundable, and cancelling within this window forfeits the full booking amount.";
+const CARE_CANCELLATION_TERMS = "More than 72 hours before care starts -- full refund. 24 to 72 hours before -- 50% refund; huddle retains the remaining 50%. Less than 24 hours before -- the booking is final and non-refundable.";
+const CARE_NO_START_POLICY = {
+  version: "13 July 2026",
+  minimumBookingMinutes: 60,
+  scheduledEndCancellation: true,
+  settlement: "no_start_responsibility_matrix_v2",
+} as const;
 const toStripeMinorUnitAmount = (amount: number, currency: string) =>
   STRIPE_ZERO_DECIMAL_CURRENCIES.has(currency)
     ? Math.round(amount)
@@ -80,6 +86,7 @@ const isNonProductionRuntime = appEnv === "staging" || appEnv === "preview" || a
 type ServicePaymentStage =
   | "service_chat_load_failed"
   | "quote_invalid"
+  | "no_start_policy_acknowledgement_required"
   | "snapshot_pending_write_failed"
   | "stripe_customer_create_failed"
   | "stripe_checkout_create_failed"
@@ -203,22 +210,11 @@ serve(async (req) => {
       return json({ error: "Booking confirmation is required" }, 400);
     }
 
-    let serviceChatResult = await supabase
+    const serviceChatResult = await supabase
       .from("service_chats")
       .select("id, chat_id, requester_id, provider_id, status, request_card, quote_card")
       .eq("id", serviceChatId)
       .maybeSingle();
-    if (!serviceChatResult.error && !serviceChatResult.data) {
-      // Old app builds sent the conversation chat_id. Reused conversations can have
-      // completed/history rows, so resolve only the explicit active service row.
-      const { data: canonicalId, error: canonicalIdErr } = await supabase.rpc("current_active_service_chat_id_for_room", { p_chat_id: serviceChatId });
-      if (canonicalIdErr) return json({ error: "Service lookup failed" }, 500);
-      serviceChatResult = await supabase
-        .from("service_chats")
-        .select("id, chat_id, requester_id, provider_id, status, request_card, quote_card")
-        .eq("id", canonicalId)
-        .maybeSingle();
-    }
     const { data: serviceChat, error: serviceChatErr } = serviceChatResult;
     if (serviceChatErr) {
       logStageError("service_chat_load_failed", serviceChatErr);
@@ -451,8 +447,9 @@ serve(async (req) => {
           providerQuote: quoteCents,
           requesterTotal: customerTotal,
         },
+        noStartPolicy: CARE_NO_START_POLICY,
         cancellationTerms: CARE_CANCELLATION_TERMS,
-        disputeIssueWindow: "If something serious happens -- provider no-show, handoff issue, or safety concern -- send the case with evidence to huddle Support. We'll hold payment while we review it.",
+        disputeIssueWindow: "If something serious happens -- provider no-show, handoff issue, or safety concern -- send the case with evidence through huddle's booking dispute process. huddle may hold payment or review the outcome based on the available records; no response time or outcome is guaranteed.",
         termsVersion: clean(incomingSnapshot.termsVersion),
         termsPath: clean(incomingSnapshot.termsPath),
         agreedAt: clean(incomingSnapshot.agreedAt) || new Date().toISOString(),
@@ -467,6 +464,17 @@ serve(async (req) => {
     if (!snapshot.startAt) return json({ error: "Booking start time is required" }, 400);
     if (!snapshot.endAt) return json({ error: "Booking end time is required" }, 400);
     if (serviceWindow.error) return json({ error: "Booking end time must be after the start time", code: serviceWindow.error }, 400);
+
+    const { data: noStartPolicyAcknowledgement, error: noStartPolicyAcknowledgementErr } = await supabase.rpc(
+      "current_service_no_start_policy_acknowledgement",
+      { p_service_chat_id: serviceChat.id },
+    );
+    if (noStartPolicyAcknowledgementErr) {
+      return stageJson("no_start_policy_acknowledgement_required", "Both parties must accept the no-start policy before payment.", 409, exposeStage, {
+        code: clean(noStartPolicyAcknowledgementErr.message),
+      });
+    }
+    snapshot.noStartPolicyAcknowledgement = noStartPolicyAcknowledgement;
 
     const { error: validateSnapshotErr } = await supabase.rpc("validate_service_booking_snapshot", { p_snapshot: snapshot });
     if (validateSnapshotErr) {
@@ -484,6 +492,8 @@ serve(async (req) => {
       providerFee,
       platformGross,
       cancellationRefundAcknowledged: true,
+      noStartPolicyAcknowledged: true,
+      noStartPolicy: CARE_NO_START_POLICY,
       termsPath: snapshot.termsPath,
       termsVersion: snapshot.termsVersion,
       checkoutRequestedAt: new Date().toISOString(),

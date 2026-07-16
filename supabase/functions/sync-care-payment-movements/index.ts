@@ -157,6 +157,70 @@ const destinationPaymentsForPayout = async (connectedAccountId: string, payoutId
   return Array.from(destinationPaymentIds);
 };
 
+const discoverRefundForService = async (serviceChatId: string) => {
+  const { data: serviceChat, error: serviceError } = await supabase
+    .from("service_chats")
+    .select("id,stripe_payment_intent_id,stripe_refund_id")
+    .eq("id", serviceChatId)
+    .maybeSingle();
+  if (serviceError) throw new Error(`service_refund_discovery_failed:${serviceError.message}`);
+  const paymentIntentId = clean(serviceChat?.stripe_payment_intent_id);
+  if (!serviceChat?.id || !paymentIntentId) return;
+
+  const { data: existing, error: existingError } = await supabase
+    .from("care_payment_movements")
+    .select("id")
+    .eq("service_chat_id", serviceChatId)
+    .eq("movement_kind", "owner_refund")
+    .limit(1);
+  if (existingError) throw new Error(`refund_movement_lookup_failed:${existingError.message}`);
+  if ((existing || []).length > 0) return;
+
+  let refund: Stripe.Refund | null = null;
+  for (const secret of stripeSecrets()) {
+    try {
+      const page = await makeStripe(secret).refunds.list({ payment_intent: paymentIntentId, limit: 100 });
+      const candidate = (page.data as Stripe.Refund[]).slice().sort((left: Stripe.Refund, right: Stripe.Refund) =>
+        Number(right.created || 0) - Number(left.created || 0)
+      )[0];
+      if (candidate) {
+        refund = candidate;
+        break;
+      }
+    } catch {
+      // Continue across configured Stripe modes; only one owns this payment intent.
+    }
+  }
+  if (!refund) return;
+  const createdAt = iso(refund.created) || new Date().toISOString();
+  const normalizedStatus = clean(refund.status).toLowerCase();
+  const status = normalizedStatus === "succeeded" ? "succeeded"
+    : normalizedStatus === "failed" ? "failed"
+    : normalizedStatus === "canceled" ? "canceled"
+    : "pending";
+  const { error: upsertError } = await supabase.rpc("upsert_care_payment_movement", {
+    p_service_chat_id: serviceChatId,
+    p_movement_kind: "owner_refund",
+    p_movement_reason: "service_refund",
+    p_source_kind: "stripe_reconciliation",
+    p_source_record_id: refund.id,
+    p_amount_minor: refund.amount,
+    p_currency: clean(refund.currency).toUpperCase(),
+    p_status: status,
+    p_stripe_payment_intent_id: paymentIntentId,
+    p_stripe_refund_id: refund.id,
+    p_stripe_transfer_id: null,
+    p_requested_at: createdAt,
+    p_processed_at: status === "succeeded" ? createdAt : null,
+  });
+  if (upsertError) throw new Error(`refund_movement_discovery_upsert_failed:${upsertError.message}`);
+  const { error: serviceUpdateError } = await supabase
+    .from("service_chats")
+    .update({ stripe_refund_id: refund.id, refund_issued_at: createdAt })
+    .eq("id", serviceChatId);
+  if (serviceUpdateError) throw new Error(`service_refund_link_update_failed:${serviceUpdateError.message}`);
+};
+
 const syncRefund = async (movement: Movement) => {
   const refundId = clean(movement.stripe_refund_id);
   if (!refundId) throw new Error("refund_id_missing");
@@ -281,6 +345,11 @@ serve(async (request) => {
     "id,service_chat_id,movement_kind,stripe_refund_id,stripe_transfer_id,stripe_connected_account_id,stripe_destination_payment_id,stripe_payout_id,sync_attempt_count,created_at",
   );
   if (serviceChatId) {
+    try {
+      await discoverRefundForService(serviceChatId);
+    } catch (discoveryError) {
+      return json({ ok: false, error: "refund_discovery_failed", detail: safeError(discoveryError) }, 500);
+    }
     query = query.eq("service_chat_id", serviceChatId);
   } else if (preferredPayoutId && preferredConnectedAccountId) {
     const destinationPaymentIds = await destinationPaymentsForPayout(preferredConnectedAccountId, preferredPayoutId);

@@ -46,6 +46,12 @@ describe("Care payment movement contract", () => {
     expect(sync).toContain("next_sync_at: nextSyncAt");
     expect(sync).toContain("reconciliation_attention_at");
     expect(sync).toContain("retryDelayMs === null ? null");
+    expect(sync).toContain("discoverRefundForService");
+    expect(sync).toContain('refunds.list({ payment_intent: paymentIntentId, limit: 100 })');
+    expect(webhook).toContain("resolveRefundServiceChatId");
+    expect(webhook).toContain('.eq("stripe_payment_intent_id", paymentIntentId)');
+    expect(webhook).toContain("STRIPE_WEBHOOK_SECRETS");
+    expect(webhook).toContain("for (const secret of webhookSecrets)");
   });
 
   it("keeps owner refund and carer payout details role-separated", () => {

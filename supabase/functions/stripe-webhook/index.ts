@@ -14,7 +14,6 @@ const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") as string, {
 });
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL") as string;
-const webhookSecret = Deno.env.get("STRIPE_WEBHOOK_SECRET") as string;
 const allowWebhookTestBypass = Deno.env.get("ALLOW_WEBHOOK_TEST_BYPASS") === "true";
 
 const firstSecretKey = (value: string | null | undefined) => {
@@ -35,6 +34,22 @@ const firstSecretKey = (value: string | null | undefined) => {
   }
   return raw.split(/[\s,]+/).map((item) => item.trim().replace(/^['"]+|['"]+$/g, "")).find(Boolean) || "";
 };
+const allSecretKeys = (value: string | null | undefined) => {
+  const raw = String(value || "").trim().replace(/^['"]+|['"]+$/g, "");
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed.map((item) => String(item || "").trim()).filter(Boolean);
+    if (parsed && typeof parsed === "object") return Object.values(parsed).map((item) => String(item || "").trim()).filter(Boolean);
+  } catch {
+    // Fall through to delimited secret parsing.
+  }
+  return raw.split(/[\s,]+/).map((item) => item.trim().replace(/^['"]+|['"]+$/g, "")).filter(Boolean);
+};
+const webhookSecrets = Array.from(new Set([
+  ...allSecretKeys(Deno.env.get("STRIPE_WEBHOOK_SECRETS")),
+  ...allSecretKeys(Deno.env.get("STRIPE_WEBHOOK_SECRET")),
+]));
 const supabaseServiceKey =
   firstSecretKey(Deno.env.get("SUPABASE_SECRET_KEYS")) ||
   firstSecretKey(Deno.env.get("SUPABASE_SECRET_KEY")) ||
@@ -363,7 +378,13 @@ serve(async (req: Request): Promise<Response> => {
       console.log(`[STRIPE WEBHOOK] Local bypass mode accepted event: ${event.type} (ID: ${event.id})`);
     } else {
       try {
-        const verified = await verifyStripeWebhookSignature(body, signature, webhookSecret);
+        let verified = false;
+        for (const secret of webhookSecrets) {
+          if (await verifyStripeWebhookSignature(body, signature, secret)) {
+            verified = true;
+            break;
+          }
+        }
         if (!verified) throw new Error("stripe_signature_mismatch");
         event = JSON.parse(body) as Stripe.Event;
         console.log(`[STRIPE WEBHOOK] Verified event: ${event.type} (ID: ${event.id})`);
@@ -1229,11 +1250,29 @@ const addRefundBusinessDays = (value: string, days: number) => {
   return date.toISOString();
 };
 
+async function resolveRefundServiceChatId(refund: Stripe.Refund): Promise<string> {
+  const metadataServiceId = normalizeType(refund.metadata?.service_chat_id);
+  if (metadataServiceId) {
+    const { data, error } = await supabase.from("service_chats").select("id").eq("id", metadataServiceId).maybeSingle();
+    if (error) throw new Error(`care_refund_metadata_service_lookup_failed:${error.message}`);
+    if (data?.id) return String(data.id);
+  }
+  const paymentIntentId = typeof refund.payment_intent === "string" ? refund.payment_intent : refund.payment_intent?.id || "";
+  if (!paymentIntentId) return "";
+  const { data, error } = await supabase
+    .from("service_chats")
+    .select("id")
+    .eq("stripe_payment_intent_id", paymentIntentId)
+    .limit(2);
+  if (error) throw new Error(`care_refund_payment_intent_lookup_failed:${error.message}`);
+  return data?.length === 1 ? String(data[0].id) : "";
+}
+
 async function handleCareRefundChanged(event: Stripe.Event): Promise<WebhookResponse> {
   const refund = event.data.object as Stripe.Refund;
-  const serviceChatId = normalizeType(refund.metadata?.service_chat_id);
+  const serviceChatId = await resolveRefundServiceChatId(refund);
   if (serviceChatId) {
-    await supabase.rpc("upsert_care_payment_movement", {
+    const { error: upsertError } = await supabase.rpc("upsert_care_payment_movement", {
       p_service_chat_id: serviceChatId,
       p_movement_kind: "owner_refund",
       p_movement_reason: normalizeType(refund.metadata?.reason) || "service_refund",
@@ -1248,6 +1287,12 @@ async function handleCareRefundChanged(event: Stripe.Event): Promise<WebhookResp
       p_requested_at: new Date(refund.created * 1000).toISOString(),
       p_processed_at: null,
     });
+    if (upsertError) throw new Error(`care_refund_movement_upsert_failed:${upsertError.message}`);
+    const { error: serviceUpdateError } = await supabase
+      .from("service_chats")
+      .update({ stripe_refund_id: refund.id, refund_issued_at: new Date(refund.created * 1000).toISOString() })
+      .eq("id", serviceChatId);
+    if (serviceUpdateError) throw new Error(`care_refund_service_link_failed:${serviceUpdateError.message}`);
   }
 
   const details = (refund as unknown as { destination_details?: Record<string, unknown> | null }).destination_details || {};

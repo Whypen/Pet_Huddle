@@ -51,20 +51,11 @@ serve(async (req) => {
       : null;
     if (!serviceChatId || !bookingSnapshot) return json({ error: "Missing required fields" }, 400);
 
-    let serviceChatResult = await supabase
+    const serviceChatResult = await supabase
       .from("service_chats")
       .select("id,chat_id,requester_id,quote_card,status")
       .eq("id", serviceChatId)
       .maybeSingle();
-    if (!serviceChatResult.error && !serviceChatResult.data) {
-      const { data: canonicalId, error: canonicalIdErr } = await supabase.rpc("current_active_service_chat_id_for_room", { p_chat_id: serviceChatId });
-      if (canonicalIdErr) return json({ error: "Service lookup failed" }, 500);
-      serviceChatResult = await supabase
-        .from("service_chats")
-        .select("id,chat_id,requester_id,quote_card,status")
-        .eq("id", canonicalId)
-        .maybeSingle();
-    }
     const { data: serviceChat, error: serviceChatErr } = serviceChatResult;
     if (serviceChatErr) return json({ error: "Service lookup failed" }, 500);
     if (!serviceChat) return json({ error: "Service chat not found" }, 404);
@@ -78,8 +69,8 @@ serve(async (req) => {
       return json({ error: "This booking is not a no-charge voluntary booking" }, 409);
     }
 
-    const { error } = await supabase.rpc("confirm_voluntary_service_booking", {
-      p_chat_id: serviceChat.id,
+    const { error } = await supabase.rpc("confirm_voluntary_service_booking_by_service_id", {
+      p_service_chat_id: serviceChat.id,
       p_requester_id: user.id,
       p_booking_snapshot: bookingSnapshot,
     });
