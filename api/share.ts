@@ -58,10 +58,13 @@ const buildSharePreviewDescription = (content?: string | null) => {
   return truncateSoft(cleaned);
 };
 
-const buildCanonicalShareId = (shareType: "thread" | "alert", contentId: string) => {
+type ShareType = "thread" | "alert" | "profile" | "carer";
+
+const buildCanonicalShareId = (shareType: ShareType, contentId: string) => {
   const normalizedId = String(contentId || "").trim();
   if (!normalizedId) return "";
-  return shareType === "thread" ? normalizedId : `alert_${normalizedId}`;
+  if (shareType === "thread") return normalizedId;
+  return `${shareType}_${normalizedId}`;
 };
 
 const first = (value: MaybeString) => (Array.isArray(value) ? value[0] || "" : value || "");
@@ -205,12 +208,69 @@ const fetchAlertPreviewData = async (alertId: string) => {
   };
 };
 
+// Share-card previews: the person's own avatar + real name/services, so links
+// pasted into iMessage/WhatsApp/socials unfurl as a proper card — never a raw link.
+const fetchProfilePreviewData = async (userId: string) => {
+  const config = resolveSupabaseConfig();
+  if (!config || !userId) return null;
+  const profileUrl = `${config.url}/rest/v1/profiles?select=id,display_name,social_id,bio,avatar_url&id=eq.${encodeURIComponent(userId)}&limit=1`;
+  const rows = await fetchJson<Array<ProfileRow & { id?: string; bio?: string | null; avatar_url?: string | null }>>(profileUrl, config.apiKey);
+  const profile = Array.isArray(rows) ? rows[0] : null;
+  if (!profile?.id) return null;
+  const avatar = String(profile.avatar_url || "").trim();
+  return {
+    shareType: "profile" as const,
+    contentId: String(profile.id),
+    title: buildSharePreviewTitle(profile.display_name, profile.social_id),
+    description: cleanContent(profile.bio)
+      ? truncateSoft(cleanContent(profile.bio))
+      : "Meet them and their pack on huddle.",
+    imageUrl: /^https:\/\//.test(avatar) ? avatar : null,
+  };
+};
+
+const fetchCarerPreviewData = async (userId: string) => {
+  const config = resolveSupabaseConfig();
+  if (!config || !userId) return null;
+  const profileUrl = `${config.url}/rest/v1/profiles?select=id,display_name,social_id,avatar_url&id=eq.${encodeURIComponent(userId)}&limit=1`;
+  const careUrl = `${config.url}/rest/v1/pet_care_profiles?select=services_offered,listed&user_id=eq.${encodeURIComponent(userId)}&limit=1`;
+  const [profileRows, careRows] = await Promise.all([
+    fetchJson<Array<ProfileRow & { id?: string; avatar_url?: string | null }>>(profileUrl, config.apiKey),
+    fetchJson<Array<{ services_offered?: string[] | null; listed?: boolean | null }>>(careUrl, config.apiKey),
+  ]);
+  const profile = Array.isArray(profileRows) ? profileRows[0] : null;
+  if (!profile?.id) return null;
+  const care = Array.isArray(careRows) ? careRows[0] : null;
+  const services = Array.isArray(care?.services_offered) ? care.services_offered.filter(Boolean) : [];
+  const avatar = String(profile.avatar_url || "").trim();
+  const name = String(profile.display_name || "").trim() || "A huddle carer";
+  return {
+    shareType: "carer" as const,
+    contentId: String(profile.id),
+    title: `${name} · Pet Care on huddle`,
+    description: services.length
+      ? truncateSoft(`${services.join(" · ")} — trusted pet care on huddle.`)
+      : "Trusted pet care on huddle.",
+    imageUrl: /^https:\/\//.test(avatar) ? avatar : null,
+  };
+};
+
 const parseShareQuery = (req: RequestShape) => {
   const idFromPath = first(req.query?.id).trim();
   if (idFromPath) {
     if (idFromPath.startsWith("alert_")) {
       const alertId = idFromPath.slice("alert_".length).trim();
       if (alertId) return { shareType: "alert" as const, contentId: alertId };
+      return null;
+    }
+    if (idFromPath.startsWith("profile_")) {
+      const profileId = idFromPath.slice("profile_".length).trim();
+      if (profileId) return { shareType: "profile" as const, contentId: profileId };
+      return null;
+    }
+    if (idFromPath.startsWith("carer_")) {
+      const carerId = idFromPath.slice("carer_".length).trim();
+      if (carerId) return { shareType: "carer" as const, contentId: carerId };
       return null;
     }
     return { shareType: "thread" as const, contentId: idFromPath };
@@ -243,27 +303,36 @@ export default async function handler(req: RequestShape, res: ResponseShape) {
     ? null
     : parsed.shareType === "thread"
       ? await fetchThreadPreviewData(parsed.contentId)
-      : await fetchAlertPreviewData(parsed.contentId);
-  const effectiveType = preview?.shareType || parsed?.shareType || "thread";
+      : parsed.shareType === "profile"
+        ? await fetchProfilePreviewData(parsed.contentId)
+        : parsed.shareType === "carer"
+          ? await fetchCarerPreviewData(parsed.contentId)
+          : await fetchAlertPreviewData(parsed.contentId);
+  const effectiveType: ShareType = preview?.shareType || parsed?.shareType || "thread";
   const effectiveContentId = preview?.contentId || parsed?.contentId || "";
-  const title = preview?.title || (effectiveType === "alert" ? "Map Alert on huddle" : "Social Post on huddle");
-  const description = preview?.description || (effectiveType === "alert"
-    ? "See this alert on huddle map."
-    : "See this post on huddle social.");
-  const image = `${origin}/huddle-logo.jpg`;
+  const title = preview?.title || (
+    effectiveType === "alert" ? "Map Alert on huddle"
+      : effectiveType === "profile" ? "A member on huddle"
+        : effectiveType === "carer" ? "Pet Care on huddle"
+          : "Social Post on huddle");
+  const description = preview?.description || (
+    effectiveType === "alert" ? "See this alert on huddle map."
+      : effectiveType === "profile" ? "Meet them and their pack on huddle."
+        : effectiveType === "carer" ? "Trusted pet care on huddle."
+          : "See this post on huddle social.");
+  const previewImage = preview && "imageUrl" in preview ? preview.imageUrl : null;
+  const image = previewImage || `${origin}/huddle-logo.jpg`;
   const shareId = effectiveContentId ? buildCanonicalShareId(effectiveType, effectiveContentId) : "";
   const shareUrl = shareId ? `${origin}/share/${encodeURIComponent(shareId)}` : `${origin}/share`;
-  const destination = !effectiveContentId
-    ? `${origin}/threads`
-    : effectiveType === "alert"
-      ? `${origin}/map?alert=${encodeURIComponent(effectiveContentId)}`
-      : `${origin}/threads?focus=${encodeURIComponent(effectiveContentId)}`;
-
+  const fallbackDownloadUrl = `${origin}/waitlist`;
+  const iosDownloadUrl = String(process.env.HUDDLE_IOS_DOWNLOAD_URL || "").trim() || fallbackDownloadUrl;
+  const androidDownloadUrl = String(process.env.HUDDLE_ANDROID_DOWNLOAD_URL || "").trim() || fallbackDownloadUrl;
   const html = `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="apple-itunes-app" content="app-id=6766207079" />
     <title>${escapeHtml(title)}</title>
     <meta name="description" content="${escapeHtml(description)}" />
     <meta property="og:title" content="${escapeHtml(title)}" />
@@ -300,9 +369,21 @@ export default async function handler(req: RequestShape, res: ResponseShape) {
         <div class="preview"><img src="${escapeHtml(image)}" alt="huddle preview" /></div>
         <h1 class="title">${escapeHtml(title)}</h1>
         <p class="desc">${escapeHtml(description)}</p>
-        <a class="cta" href="${escapeHtml(destination)}">Open on huddle</a>
+        <a class="cta" id="download-app" href="${escapeHtml(iosDownloadUrl)}">Get huddle</a>
       </article>
     </main>
+    <script>
+      (() => {
+        const ua = navigator.userAgent || "";
+        const android = /Android/i.test(ua);
+        const ios = /iPhone|iPad|iPod/i.test(ua);
+        const store = android
+          ? ${JSON.stringify(androidDownloadUrl)}
+          : ${JSON.stringify(iosDownloadUrl)};
+        document.getElementById("download-app").href = store;
+        if (android || ios) window.setTimeout(() => window.location.replace(store), 80);
+      })();
+    </script>
   </body>
 </html>`;
 
