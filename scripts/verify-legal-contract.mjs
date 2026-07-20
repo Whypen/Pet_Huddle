@@ -50,6 +50,8 @@ const requiredCoverage = {
     "Mapbox — map tile rendering",
     "Expo — push notification delivery",
     "Automated systems and safety review",
+    "Meta Platform Data",
+    "does not permanently store personal data received through Meta APIs",
   ],
   "/terms": ["Social, Discover, Groups, and Map", "individual arbitration"],
   "/community-guidelines": ["Consent and meaningful interactions", "Care marketplace conduct"],

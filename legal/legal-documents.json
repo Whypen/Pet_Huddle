@@ -131,7 +131,13 @@
           ]
         },
         {
-          "title": "15. Deleting your account",
+          "title": "15. Meta Platform Data",
+          "body": [
+            "HUDDLE does not permanently store personal data received through Meta APIs, including messages, comments, profiles, leads, access tokens, or insights. Any temporary processing, caching, or logging is used only to manage HUDDLE-owned social accounts and is not used for unrelated purposes. To request deletion of personal data received through Meta APIs, contact support@huddle.pet."
+          ]
+        },
+        {
+          "title": "16. Deleting your account",
           "body": [
             "You can delete your HUDDLE account at any time from Account → Delete Account in the app. Deletion is immediate and permanent — there is no delay, grace period, or way to undo it once confirmed. Your profile, photos, posts, pets, chats, messages, and uploaded content are removed at that time, and your email is removed from HUDDLE's mailing lists.",
             "HUDDLE retains two limited categories of information after deletion, for as long as legally or operationally necessary: (1) a hashed identifier for accounts that were banned, to prevent re-registration by the same person; and (2) payment, payout, and dispute records tied to your bookings, to meet financial, tax, and legal record-keeping obligations. These records are not linked to your deleted profile and are not used for any purpose other than fraud prevention and legal or financial compliance.",
@@ -139,7 +145,7 @@
           ]
         },
         {
-          "title": "16. Changes to this Policy",
+          "title": "17. Changes to this Policy",
           "body": [
             "HUDDLE may update this Policy from time to time. The latest version will appear on HUDDLE's public legal pages. Where required by law, HUDDLE will provide additional notice or seek consent before a material change takes effect."
           ]
