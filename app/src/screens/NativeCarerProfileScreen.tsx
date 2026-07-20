@@ -1951,6 +1951,12 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
                           {section.body.map((paragraph, index) => (
                             <Text key={`${section.title}-${index}`} style={styles.agreementSheetText}>{paragraph}</Text>
                           ))}
+                          {section.bullets?.map((bullet, index) => (
+                            <View key={`${section.title}-bullet-${index}`} style={styles.agreementBulletRow}>
+                              <Text style={styles.agreementBulletDot}>•</Text>
+                              <Text style={styles.agreementBulletText}>{bullet}</Text>
+                            </View>
+                          ))}
                         </View>
                       ))}
                       <Text style={styles.locationHelper}>{serviceAgreementPage.effectiveDate}</Text>
@@ -2913,6 +2919,26 @@ const styles = StyleSheet.create({
     fontFamily: "Urbanist-700",
     fontSize: huddleType.label,
     lineHeight: huddleType.labelLine,
+    color: huddleColors.text,
+  },
+  agreementBulletRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: huddleSpacing.x2,
+  },
+  agreementBulletDot: {
+    width: 12,
+    fontFamily: "Urbanist-700",
+    fontSize: huddleType.body,
+    lineHeight: huddleType.body + 7,
+    color: huddleColors.blue,
+  },
+  agreementBulletText: {
+    flex: 1,
+    minWidth: 0,
+    fontFamily: "Urbanist-500",
+    fontSize: huddleType.body,
+    lineHeight: huddleType.body + 7,
     color: huddleColors.text,
   },
   agreementConfirmRow: {

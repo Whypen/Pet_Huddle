@@ -290,6 +290,7 @@ const tabForPath = (path: NativeRoute): NativeBottomTab | null => {
 const isNativeLegalPath = (path: string) =>
   path.startsWith("/privacy") ||
   path.startsWith("/privacy-choices") ||
+  path.startsWith("/collection-notice") ||
   path.startsWith("/terms") ||
   path.startsWith("/community-guidelines") ||
   path.startsWith("/cookies") ||
