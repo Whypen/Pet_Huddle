@@ -174,3 +174,13 @@ verify_jwt = false
 
 [functions.social-video-cleanup]
 verify_jwt = false
+
+# Huddle Growth Agent validates admin JWTs internally and accepts only the
+# separately configured worker secret for scheduled queue execution. OAuth
+# callbacks and Meta webhook verification are also handled inside the
+# functions, so Supabase gateway JWT verification must remain off.
+[functions.huddle-growth]
+verify_jwt = false
+
+[functions.huddle-growth-webhook]
+verify_jwt = false
