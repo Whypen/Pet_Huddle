@@ -18,7 +18,7 @@ const emptyConsole: ConsoleData = { connections: [], assets: [], actions: [], ap
 const label = (value: string) => value.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
 const when = (value?: string | null) => value ? new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)) : "—";
 
-const AdminGrowth = () => {
+export const GrowthOperationsPanel = () => {
   const { profile } = useAuth();
   const isAdmin = profile?.is_admin === true || profile?.user_role === "admin";
   const [consoleData, setConsoleData] = useState<ConsoleData>(emptyConsole);
@@ -91,8 +91,7 @@ const AdminGrowth = () => {
   if (!isAdmin) return <div className="flex min-h-[100svh] items-center justify-center p-6 text-sm text-muted-foreground">Admin access required.</div>;
 
   return (
-    <main className="min-h-[100svh] w-full bg-transparent px-4 py-6 text-foreground sm:px-8 lg:px-12">
-      <div className="mx-auto max-w-7xl space-y-6">
+    <div className="space-y-6">
         <header className="flex flex-col gap-4 border-b border-border/60 pb-5 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-brandBlue"><ShieldCheck className="h-4 w-4" /> Huddle Growth Agent</div>
@@ -128,9 +127,16 @@ const AdminGrowth = () => {
 
           <TabsContent value="audit"><Card><CardHeader><CardTitle>Audit trail</CardTitle><CardDescription>Every connection, policy change, queue transition, and execution result is retained here.</CardDescription></CardHeader><CardContent className="space-y-3">{consoleData.audit.map((entry) => <div key={entry.id} className="flex items-start gap-3 border-b border-border/60 pb-3 last:border-0"><Activity className="mt-0.5 h-4 w-4 text-brandBlue" /><div className="min-w-0 flex-1"><div className="text-sm font-medium">{label(entry.action)}{entry.platform ? ` · ${label(entry.platform)}` : ""}</div><div className="text-xs text-muted-foreground">{when(entry.created_at)}</div></div></div>)}{consoleData.audit.length === 0 ? <div className="text-sm text-muted-foreground">No Growth Agent events yet.</div> : null}</CardContent></Card></TabsContent>
         </Tabs>
-      </div>
-    </main>
+    </div>
   );
 };
+
+const AdminGrowth = () => (
+  <main className="min-h-[100svh] w-full bg-transparent px-4 py-6 text-foreground sm:px-8 lg:px-12">
+    <div className="mx-auto max-w-7xl">
+      <GrowthOperationsPanel />
+    </div>
+  </main>
+);
 
 export default AdminGrowth;

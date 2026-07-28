@@ -34,6 +34,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { TEAM_HUDDLE_USER_ID } from "@/lib/teamHuddleIdentity";
+import { GrowthOperationsPanel } from "@/pages/admin/AdminGrowth";
 
 type ReportsQueueRow = Database["public"]["Views"]["view_admin_reports_queue"]["Row"] & {
   target_display_name?: string | null;
@@ -282,7 +283,7 @@ type TeamHuddleCorrespondenceRow = {
   recipient_role: string | null;
 };
 
-type ActiveTab = "reports" | "disputes" | "users" | "audit";
+type ActiveTab = "reports" | "disputes" | "users" | "growth" | "audit";
 
 type CaseSelection =
   | { type: "report"; targetUserId: string }
@@ -677,7 +678,7 @@ const AdminSafety = () => {
 
   useEffect(() => {
     const requestedTab = new URLSearchParams(location.search).get("tab");
-    if (requestedTab === "disputes") setActiveTab("disputes");
+    if (requestedTab === "disputes" || requestedTab === "growth") setActiveTab(requestedTab);
   }, [location.search]);
   const [demoReportTargetIds, setDemoReportTargetIds] = useState<Set<string>>(new Set());
 
@@ -2277,6 +2278,7 @@ const AdminSafety = () => {
             <TabsTrigger value="reports">Reports</TabsTrigger>
             <TabsTrigger value="disputes">Care Cases</TabsTrigger>
             <TabsTrigger value="users">Users</TabsTrigger>
+            <TabsTrigger value="growth">Growth</TabsTrigger>
             <TabsTrigger value="audit">Audit Log</TabsTrigger>
           </TabsList>
 
@@ -2695,6 +2697,10 @@ const AdminSafety = () => {
                 </table>
               </div>
             </div>
+          </TabsContent>
+
+          <TabsContent value="growth" className="space-y-3">
+            <GrowthOperationsPanel />
           </TabsContent>
 
           <TabsContent value="audit" className="space-y-3">
