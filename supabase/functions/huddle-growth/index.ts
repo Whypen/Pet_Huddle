@@ -188,6 +188,108 @@ const discoverThreadsAsset = async (connection: Record<string, unknown>, token: 
   return storeAsset(String(connection.id), { assetType: "threads_profile", externalId: userId, name: String(profile.username || profile.name || userId), token, scopes: Array.isArray(connection.granted_scopes) ? connection.granted_scopes.map(String) : [], metadata: { username: profile.username } });
 };
 
+const requiredConfiguredSecret = (name: string) => {
+  const value = String(Deno.env.get(name) || "").trim();
+  if (!value) throw new Error(`configured_secret_missing:${name}`);
+  return value;
+};
+
+const configuredAssetId = (name: string) => requiredConfiguredSecret(name);
+
+const bootstrapConfiguredAssets = async (adminId: string) => {
+  const metaToken = requiredConfiguredSecret("META_ACCESS_TOKEN");
+  const pageId = configuredAssetId("HUDDLE_FACEBOOK_PAGE_ID");
+  const instagramId = configuredAssetId("HUDDLE_INSTAGRAM_ACCOUNT_ID");
+  const adAccountId = configuredAssetId("HUDDLE_AD_ACCOUNT_ID");
+  const me = await graphRequest(graphJson("me?fields=id,name"), { token: metaToken });
+  const grantedScopes = await listMetaScopes(metaToken);
+  const connection = await storeConnection({
+    provider: "meta",
+    externalUserId: String(me.id || ""),
+    displayName: String(me.name || me.id || "Huddle Meta business user"),
+    token: metaToken,
+    expiresAt: null,
+    scopes: grantedScopes,
+    metadata: { app_id: META_APP_ID, source: "configured_asset_bootstrap" },
+    createdBy: adminId,
+  });
+  const connectionId = String(connection.id);
+  const page = await graphRequest(graphJson(`${pageId}?fields=id,name,access_token,instagram_business_account`), { token: metaToken });
+  if (String(page.id || "") !== pageId) throw new Error("configured_page_id_mismatch");
+  const pageToken = String(page.access_token || metaToken);
+  const facebookAsset = await storeAsset(connectionId, {
+    assetType: "facebook_page",
+    externalId: pageId,
+    name: String(page.name || pageId),
+    token: pageToken,
+    scopes: grantedScopes,
+    metadata: { page_id: pageId, source: "configured_asset_bootstrap" },
+  });
+  const instagram = await graphRequest(graphJson(`${instagramId}?fields=id,username,name,profile_picture_url`), { token: pageToken });
+  if (String(instagram.id || "") !== instagramId) throw new Error("configured_instagram_id_mismatch");
+  const instagramAsset = await storeAsset(connectionId, {
+    assetType: "instagram_business",
+    externalId: instagramId,
+    name: String(instagram.username || instagram.name || instagramId),
+    token: pageToken,
+    scopes: grantedScopes,
+    metadata: { page_id: pageId, username: instagram.username || null, source: "configured_asset_bootstrap" },
+  });
+  const adAccount = await graphRequest(graphJson(`${adAccountId}?fields=id,name,account_status,currency`), { token: metaToken });
+  if (String(adAccount.id || "") !== adAccountId) throw new Error("configured_ad_account_id_mismatch");
+  const adsAsset = await storeAsset(connectionId, {
+    assetType: "ad_account",
+    externalId: adAccountId,
+    name: String(adAccount.name || adAccountId),
+    token: metaToken,
+    scopes: grantedScopes,
+    metadata: { account_status: adAccount.account_status || null, currency: adAccount.currency || null, source: "configured_asset_bootstrap" },
+  });
+  const assets: Record<string, unknown>[] = [facebookAsset, instagramAsset, adsAsset];
+  const threadsToken = String(Deno.env.get("THREADS_ACCESS_TOKEN") || "").trim();
+  let threadsError: string | null = null;
+  if (threadsToken) {
+    try {
+      const profile = await graphRequest(threadsJson("me?fields=id,username,name,threads_profile_picture_url"), { token: threadsToken });
+      const threadsUserId = String(profile.id || "");
+      if (!threadsUserId) throw new Error("threads_profile_missing");
+      // The configured token is verified against Threads before it is stored.
+      // Only the scope supplied by the authorised connector is recorded; the
+      // execution layer still blocks publishing/replies until Meta grants the
+      // corresponding capability in a future OAuth refresh.
+      const threadsScopes = ["threads_business_basic"];
+      const threadsConnection = await storeConnection({
+        provider: "threads",
+        externalUserId: threadsUserId,
+        displayName: String(profile.username || profile.name || threadsUserId),
+        token: threadsToken,
+        expiresAt: null,
+        scopes: threadsScopes,
+        metadata: { app_id: THREADS_APP_ID, source: "configured_asset_bootstrap" },
+        createdBy: adminId,
+      });
+      assets.push(await storeAsset(String(threadsConnection.id), {
+        assetType: "threads_profile",
+        externalId: threadsUserId,
+        name: String(profile.username || profile.name || threadsUserId),
+        token: threadsToken,
+        scopes: threadsScopes,
+        metadata: { username: profile.username || null, source: "configured_asset_bootstrap" },
+      }));
+    } catch (error) {
+      threadsError = safeError(error);
+    }
+  }
+  await supabase.from("huddle_growth_audit_logs").insert({
+    actor_id: adminId,
+    connection_id: connectionId,
+    action: "configured_assets_bootstrapped",
+    platform: "meta",
+    details: { asset_types: assets.map((asset) => String(asset.asset_type || "")), threads_error: threadsError },
+  });
+  return { assets, threads_error: threadsError };
+};
+
 const resolveAssetToken = async (asset: Record<string, unknown>, connection: Record<string, unknown>) => {
   const assetCiphertext = String(asset.encrypted_access_token || "");
   if (assetCiphertext && asset.access_token_iv) return decryptToken(assetCiphertext, String(asset.access_token_iv));
@@ -478,6 +580,10 @@ serve(async (req: Request) => {
     }
     if (operation === "console") {
       return json({ console: await getConsole() });
+    }
+    if (operation === "bootstrap_configured_assets") {
+      const bootstrap = await bootstrapConfiguredAssets(adminId);
+      return json({ ...bootstrap, console: await getConsole() });
     }
     if (operation === "discover") {
       const connection = await getConnection(String(body.connection_id || ""));
