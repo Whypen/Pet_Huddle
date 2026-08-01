@@ -372,6 +372,34 @@ const contentTypeFromMedia = (value: unknown): "text" | "image" | "video" | "car
   return "image";
 };
 
+const insightMetrics = (result: Record<string, unknown>) => {
+  const metrics: Record<string, unknown> = {};
+  for (const row of (Array.isArray(result.data) ? result.data : []) as Array<Record<string, unknown>>) {
+    const name = String(row.name || "");
+    if (!name) continue;
+    const values = Array.isArray(row.values) ? row.values as Array<Record<string, unknown>> : [];
+    const totalValue = row.total_value && typeof row.total_value === "object" ? (row.total_value as Record<string, unknown>).value : undefined;
+    metrics[name] = totalValue ?? values[0]?.value ?? 0;
+  }
+  return metrics;
+};
+
+const mediaChildren = (value: unknown) => {
+  const field = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  return (Array.isArray(field.data) ? field.data : []).slice(0, 10).map((child) => {
+    const item = child && typeof child === "object" ? child as Record<string, unknown> : {};
+    return { id: item.id || null, media_type: item.media_type || null, media_url: item.media_url || null, thumbnail_url: item.thumbnail_url || null };
+  });
+};
+
+const attachmentPreview = (value: unknown): string | null => {
+  const field = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  const first = (Array.isArray(field.data) ? field.data[0] : null) as Record<string, unknown> | null;
+  const media = first?.media && typeof first.media === "object" ? first.media as Record<string, unknown> : {};
+  const image = media.image && typeof media.image === "object" ? media.image as Record<string, unknown> : {};
+  return String(image.src || "") || null;
+};
+
 const syncLiveSocial = async () => {
   const { data: assets, error: assetError } = await supabase.from("huddle_growth_assets").select("*").eq("status", "active");
   if (assetError) throw assetError;
@@ -386,14 +414,27 @@ const syncLiveSocial = async () => {
       const connection = await getConnection(String(asset.connection_id));
       const token = await resolveAssetToken(asset, connection);
       if (type === "instagram_business") {
-        const media = await graphRequest(graphJson(`${asset.external_id}/media?${new URLSearchParams({ fields: "id,caption,media_type,permalink,timestamp,like_count,comments_count,comments.limit(25){id,text,username,timestamp,like_count}", limit: "25" })}`), { token });
-        for (const item of (Array.isArray(media.data) ? media.data : []) as Array<Record<string, unknown>>) {
+        const media = await graphRequest(graphJson(`${asset.external_id}/media?${new URLSearchParams({ fields: "id,caption,media_type,media_product_type,media_url,thumbnail_url,permalink,timestamp,like_count,comments_count,children{id,media_type,media_url,thumbnail_url},comments.limit(25){id,text,username,timestamp,like_count}", limit: "25" })}`), { token });
+        const items = (Array.isArray(media.data) ? media.data : []) as Array<Record<string, unknown>>;
+        const insights = new Map<string, Record<string, unknown>>();
+        await Promise.all(items.map(async (item) => {
+          const externalId = String(item.id || "");
+          if (!externalId) return;
+          try {
+            const result = await graphRequest(graphJson(`${externalId}/insights?${new URLSearchParams({ metric: "reach,saved,shares,total_interactions,views" })}`), { token });
+            insights.set(externalId, insightMetrics(result));
+          } catch { insights.set(externalId, {}); }
+        }));
+        for (const item of items) {
           const externalId = String(item.id || "");
           if (!externalId) continue;
           await recordImportedContent(asset, {
             platform: "instagram", externalId, copy: String(item.caption || ""), publishedAt: String(item.timestamp || "") || null,
-            contentType: contentTypeFromMedia(item.media_type), metadata: { permalink: item.permalink || null, media_type: item.media_type || null },
-            performance: { like_count: item.like_count || 0, comments_count: item.comments_count || 0 },
+            contentType: contentTypeFromMedia(item.media_product_type || item.media_type), metadata: {
+              permalink: item.permalink || null, media_type: item.media_type || null, media_product_type: item.media_product_type || null,
+              preview_url: item.thumbnail_url || item.media_url || null, children: mediaChildren(item.children),
+            },
+            performance: { like_count: item.like_count || 0, comments_count: item.comments_count || 0, ...(insights.get(externalId) || {}) },
           });
           imported += 1;
           const commentsField = item.comments as Record<string, unknown> | undefined;
@@ -408,13 +449,25 @@ const syncLiveSocial = async () => {
           }
         }
       } else if (type === "facebook_page") {
-        const feed = await graphRequest(graphJson(`${asset.external_id}/feed?${new URLSearchParams({ fields: "id,message,created_time,permalink_url,comments.limit(25){id,message,created_time}", limit: "25" })}`), { token });
-        for (const item of (Array.isArray(feed.data) ? feed.data : []) as Array<Record<string, unknown>>) {
+        const feed = await graphRequest(graphJson(`${asset.external_id}/feed?${new URLSearchParams({ fields: "id,message,created_time,permalink_url,full_picture,attachments{media,target,type,url,subattachments},comments.limit(25){id,message,created_time}", limit: "25" })}`), { token });
+        const items = (Array.isArray(feed.data) ? feed.data : []) as Array<Record<string, unknown>>;
+        const insights = new Map<string, Record<string, unknown>>();
+        await Promise.all(items.map(async (item) => {
+          const externalId = String(item.id || "");
+          if (!externalId) return;
+          try {
+            const result = await graphRequest(graphJson(`${externalId}/insights?${new URLSearchParams({ metric: "post_clicks,post_reactions_by_type_total,post_video_views,post_media_view,post_activity_by_action_type" })}`), { token });
+            insights.set(externalId, insightMetrics(result));
+          } catch { insights.set(externalId, {}); }
+        }));
+        for (const item of items) {
           const externalId = String(item.id || "");
           if (!externalId) continue;
           await recordImportedContent(asset, {
             platform: "facebook", externalId, copy: String(item.message || ""), publishedAt: String(item.created_time || "") || null,
-            contentType: "text", metadata: { permalink: item.permalink_url || null }, performance: {},
+            contentType: item.full_picture || item.attachments ? "image" : "text", metadata: {
+              permalink: item.permalink_url || null, preview_url: item.full_picture || attachmentPreview(item.attachments), attachments: item.attachments || null,
+            }, performance: insights.get(externalId) || {},
           });
           imported += 1;
           const commentsField = item.comments as Record<string, unknown> | undefined;
@@ -429,13 +482,26 @@ const syncLiveSocial = async () => {
           }
         }
       } else if (type === "threads_profile") {
-        const threads = await graphRequest(threadsJson(`${asset.external_id}/threads?${new URLSearchParams({ fields: "id,text,permalink,timestamp,media_type", limit: "25" })}`), { token });
-        for (const item of (Array.isArray(threads.data) ? threads.data : []) as Array<Record<string, unknown>>) {
+        const threads = await graphRequest(threadsJson(`${asset.external_id}/threads?${new URLSearchParams({ fields: "id,text,permalink,timestamp,media_type,media_url,thumbnail_url,children{id,media_type,media_url,thumbnail_url}", limit: "25" })}`), { token });
+        const items = (Array.isArray(threads.data) ? threads.data : []) as Array<Record<string, unknown>>;
+        const insights = new Map<string, Record<string, unknown>>();
+        await Promise.all(items.map(async (item) => {
+          const externalId = String(item.id || "");
+          if (!externalId) return;
+          try {
+            const result = await graphRequest(threadsJson(`${externalId}/insights?${new URLSearchParams({ metric: "views,likes,replies,reposts,quotes,shares" })}`), { token });
+            insights.set(externalId, insightMetrics(result));
+          } catch { insights.set(externalId, {}); }
+        }));
+        for (const item of items) {
           const externalId = String(item.id || "");
           if (!externalId) continue;
           await recordImportedContent(asset, {
             platform: "threads", externalId, copy: String(item.text || ""), publishedAt: String(item.timestamp || "") || null,
-            contentType: contentTypeFromMedia(item.media_type), metadata: { permalink: item.permalink || null, media_type: item.media_type || null }, performance: {},
+            contentType: contentTypeFromMedia(item.media_type), metadata: {
+              permalink: item.permalink || null, media_type: item.media_type || null,
+              preview_url: item.thumbnail_url || item.media_url || null, children: mediaChildren(item.children),
+            }, performance: insights.get(externalId) || {},
           });
           imported += 1;
         }
