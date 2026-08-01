@@ -354,13 +354,57 @@ const recordImportedContent = async (asset: Record<string, unknown>, input: {
   if (result.error) throw result.error;
 };
 
+const classifyConversation = (textValue: unknown) => {
+  const text = String(textValue || "").trim();
+  const lower = text.toLowerCase();
+  const has = (...terms: string[]) => terms.some((term) => lower.includes(term));
+  const words = (...terms: string[]) => terms.some((term) => new RegExp(`\\b${term}\\b`, "i").test(text));
+  if (has("where are you based", "where are you from", "which country", "what country")) return {
+    classification: "location question", risk: "routine", reply_status: "ready",
+    agent_draft: "huddle is operating across the UK and Asia first. Is there something you’d like help with where you are?",
+  };
+  if (has("vet", "veterinary", "bleeding", "poison", "can't breathe", "cannot breathe", "seizure", "emergency", "dying", "injured")) return {
+    classification: "animal safety", risk: "sensitive", reply_status: "needs_approval",
+    agent_draft: "I’m sorry — this sounds like it needs professional help now. Please contact a local vet or emergency veterinary service straight away. huddle can’t diagnose or assess an emergency from a message.",
+  };
+  if (has("lawyer", "legal", "police", "refund", "payment", "charged", "privacy", "harass", "abuse", "scam", "suicide", "kill", "torture", "murder", "serial killer")) return {
+    classification: "sensitive support", risk: "sensitive", reply_status: "needs_approval",
+    agent_draft: "Thanks for telling us. We’re taking this seriously and have passed it to the right person at huddle to review. We won’t make assumptions here, but we’ll follow up as soon as we can.",
+  };
+  if (words("partner", "partnership", "collab", "collaboration", "press", "sponsor")) return {
+    classification: "partnership lead", risk: "review", reply_status: "ready",
+    agent_draft: "Thanks for reaching out — this sounds worth a proper look. Could you share a little more about the idea, your organisation, and the best email for us to follow up on?",
+  };
+  if (has("waitlist", "launch", "available", "download", "app", "sign up")) return {
+    classification: "product question", risk: "routine", reply_status: "ready",
+    agent_draft: "Thanks for checking in. huddle is rolling out carefully, and we don’t want to invent a date before it’s confirmed. Tell us where you are and what you’d most want huddle to help with — we’ll point you to the right next step.",
+  };
+  if (has("missing", "lost", "reward", "last seen")) return {
+    classification: "community support", risk: "review", reply_status: "ready",
+    agent_draft: "Thanks for sharing this. We really hope they’re home soon. Please keep personal contact details out of public comments and use DMs for anything private.",
+  };
+  if (has("ice water", "fresh water", "curtains", "blinds", "tower fan", "garden hose")) return {
+    classification: "community care", risk: "routine", reply_status: "ready",
+    agent_draft: "This is the kind of practical care that matters. Thanks for sharing what’s working for you.",
+  };
+  if (text.length <= 180) return {
+    classification: "community comment", risk: "routine", reply_status: "ready",
+    agent_draft: "Honestly 😭 they notice more than we think. Thanks for being here.",
+  };
+  return {
+    classification: "general message", risk: "routine", reply_status: "ready",
+    agent_draft: "Thanks for messaging huddle. We’ve got this — could you share a little more detail so we can give you the right answer?",
+  };
+};
+
 const recordConversationSignal = async (platform: "instagram" | "facebook" | "threads", externalEventId: string, payload: Record<string, unknown>) => {
+  const triage = classifyConversation(payload.text);
   const { error } = await supabase.from("huddle_growth_webhook_events").upsert({
     provider: "meta",
     external_event_id: externalEventId,
     event_type: `${platform}_comment`,
-    payload: { platform, source: "live_sync", received_at: new Date().toISOString(), ...payload },
-  }, { onConflict: "provider,external_event_id", ignoreDuplicates: true });
+    payload: { platform, source: "live_sync", received_at: new Date().toISOString(), ...triage, ...payload },
+  }, { onConflict: "provider,external_event_id" });
   if (error) throw error;
 };
 
@@ -481,6 +525,20 @@ const syncLiveSocial = async () => {
             conversationSignals += 1;
           }
         }
+        if ((Array.isArray(asset.granted_scopes) ? asset.granted_scopes.map(String) : []).includes("leads_retrieval")) {
+          const forms = await graphRequest(graphJson(`${asset.external_id}/leadgen_forms?${new URLSearchParams({ fields: "id,name,status", limit: "50" })}`), { token });
+          for (const form of (Array.isArray(forms.data) ? forms.data : []) as Array<Record<string, unknown>>) {
+            const formId = String(form.id || "");
+            if (!formId) continue;
+            const leads = await graphRequest(graphJson(`${formId}/leads?${new URLSearchParams({ fields: "id,created_time,field_data", limit: "50" })}`), { token });
+            for (const lead of (Array.isArray(leads.data) ? leads.data : []) as Array<Record<string, unknown>>) {
+              const leadId = String(lead.id || "");
+              if (!leadId) continue;
+              const { error } = await supabase.from("huddle_growth_leads").upsert({ asset_id: asset.id, external_lead_id: leadId, source: "meta_lead_ads", status: "new", data: { form_id: formId, form_name: form.name || null, created_time: lead.created_time || null, field_data: lead.field_data || [] }, last_seen_at: new Date().toISOString() }, { onConflict: "source,external_lead_id" });
+              if (error) throw error;
+            }
+          }
+        }
       } else if (type === "threads_profile") {
         const threads = await graphRequest(threadsJson(`${asset.external_id}/threads?${new URLSearchParams({ fields: "id,text,permalink,timestamp,media_type,media_url,thumbnail_url,children{id,media_type,media_url,thumbnail_url}", limit: "25" })}`), { token });
         const items = (Array.isArray(threads.data) ? threads.data : []) as Array<Record<string, unknown>>;
@@ -515,8 +573,14 @@ const syncLiveSocial = async () => {
         if (error) throw error;
         performanceSnapshots += 1;
       }
+      const syncedAt = new Date().toISOString();
+      await supabase.from("huddle_growth_assets").update({ status: "active", last_synced_at: syncedAt, updated_at: syncedAt }).eq("id", asset.id);
+      await supabase.from("huddle_growth_connections").update({ status: "active", last_synced_at: syncedAt, last_error: null, updated_at: syncedAt }).eq("id", asset.connection_id);
     } catch (error) {
-      notes.push(`${type}:${safeError(error)}`);
+      const message = safeError(error);
+      notes.push(`${type}:${message}`);
+      await supabase.from("huddle_growth_assets").update({ status: "error", updated_at: new Date().toISOString() }).eq("id", asset.id);
+      await supabase.from("huddle_growth_connections").update({ status: "degraded", last_error: message, updated_at: new Date().toISOString() }).eq("id", asset.connection_id);
     }
   }
   await supabase.from("huddle_growth_audit_logs").insert({ action: "live_social_synced", platform: "system", details: { imported, conversation_signals: conversationSignals, performance_snapshots: performanceSnapshots, notes } });
@@ -544,15 +608,29 @@ const executeAction = async (action: Record<string, unknown>) => {
     }
     if (platform === "instagram_business") {
       const missing = missingScopes(granted, ["instagram_content_publish"]); if (missing.length) throw new Error(`missing_scope:${missing.join(",")}`);
-      const imageUrl = String(payload.image_url || "").trim();
-      if (!imageUrl) throw new Error("instagram_public_image_url_required");
-      const created = await graphRequest(graphJson(`${asset.external_id}/media`), { method: "POST", token, form: new URLSearchParams({ image_url: imageUrl, caption: text }) });
+      const mediaUrls = (Array.isArray(payload.media_urls) ? payload.media_urls : [payload.image_url]).map(String).map((url) => url.trim()).filter(Boolean);
+      if (!mediaUrls.length) throw new Error("instagram_public_image_url_required");
+      let created: Record<string, unknown>;
+      if (mediaUrls.length > 1) {
+        const children: string[] = [];
+        for (const imageUrl of mediaUrls.slice(0, 10)) {
+          const child = await graphRequest(graphJson(`${asset.external_id}/media`), { method: "POST", token, form: new URLSearchParams({ image_url: imageUrl, is_carousel_item: "true" }) });
+          if (!child.id) throw new Error("instagram_carousel_child_failed");
+          children.push(String(child.id));
+        }
+        created = await graphRequest(graphJson(`${asset.external_id}/media`), { method: "POST", token, form: new URLSearchParams({ media_type: "CAROUSEL", children: children.join(","), caption: text }) });
+      } else {
+        created = await graphRequest(graphJson(`${asset.external_id}/media`), { method: "POST", token, form: new URLSearchParams({ image_url: mediaUrls[0], caption: text }) });
+      }
       const published = await graphRequest(graphJson(`${asset.external_id}/media_publish`), { method: "POST", token, form: new URLSearchParams({ creation_id: String(created.id || "") }) });
       return { external_id: String(published.id || ""), platform: "instagram" };
     }
     if (platform === "facebook_page") {
       const missing = missingScopes(granted, ["pages_manage_posts"]); if (missing.length) throw new Error(`missing_scope:${missing.join(",")}`);
-      const published = await graphRequest(graphJson(`${asset.external_id}/feed`), { method: "POST", token, form: new URLSearchParams({ message: text, ...(payload.link ? { link: String(payload.link) } : {}) }) });
+      const imageUrl = String(payload.image_url || "").trim();
+      const published = imageUrl
+        ? await graphRequest(graphJson(`${asset.external_id}/photos`), { method: "POST", token, form: new URLSearchParams({ url: imageUrl, caption: text }) })
+        : await graphRequest(graphJson(`${asset.external_id}/feed`), { method: "POST", token, form: new URLSearchParams({ message: text, ...(payload.link ? { link: String(payload.link) } : {}) }) });
       return { external_id: String(published.id || ""), platform: "facebook" };
     }
     throw new Error(`unsupported_publish_asset:${platform}`);
@@ -576,7 +654,7 @@ const executeAction = async (action: Record<string, unknown>) => {
         const result = await graphRequest(graphJson("me/messages"), { method: "POST", token, body: { recipient: { id: targetId }, message: { text: message }, messaging_type: "RESPONSE" } });
         return { platform: "messenger", result };
       }
-      const missing = missingScopes(granted, ["pages_read_engagement"]); if (missing.length) throw new Error(`missing_scope:${missing.join(",")}`);
+      const missing = missingScopes(granted, ["pages_manage_engagement"]); if (missing.length) throw new Error(`missing_scope:${missing.join(",")}`);
       const result = await graphRequest(graphJson(`${targetId}/comments`), { method: "POST", token, form: new URLSearchParams({ message }) });
       return { platform: "facebook", result };
     }
@@ -587,7 +665,8 @@ const executeAction = async (action: Record<string, unknown>) => {
     }
     if (asset.asset_type === "threads_profile") {
       const missing = missingScopes(granted, ["threads_manage_replies"]); if (missing.length) throw new Error(`missing_scope:${missing.join(",")}`);
-      const result = await graphRequest(threadsJson(`${targetId}/replies`), { method: "POST", token, form: new URLSearchParams({ text: message }) });
+      const created = await graphRequest(threadsJson(`${asset.external_id}/threads`), { method: "POST", token, form: new URLSearchParams({ media_type: "TEXT", text: message, reply_to_id: targetId }) });
+      const result = await graphRequest(threadsJson(`${asset.external_id}/threads_publish`), { method: "POST", token, form: new URLSearchParams({ creation_id: String(created.id || "") }) });
       return { platform: "threads", result };
     }
     throw new Error(`unsupported_reply_asset:${asset.asset_type}`);
@@ -674,19 +753,20 @@ const startOAuth = async (req: Request, provider: "meta" | "threads", adminId: s
 };
 
 const getConsole = async () => {
-  const [connections, assets, content, events, performance, actions, approvals, policy, audit] = await Promise.all([
+  const [connections, assets, content, events, performance, leads, actions, approvals, policy, audit] = await Promise.all([
     supabase.from("huddle_growth_connections").select("id,provider,external_user_id,display_name,status,token_expires_at,granted_scopes,metadata,last_synced_at,last_error,created_at,updated_at").order("created_at", { ascending: false }),
-    supabase.from("huddle_growth_assets").select("id,connection_id,asset_type,external_id,name,status,granted_scopes,metadata,last_synced_at,updated_at").order("updated_at", { ascending: false }),
+    supabase.from("huddle_growth_assets").select("id,connection_id,asset_type,external_id,name,status,token_expires_at,granted_scopes,metadata,last_synced_at,updated_at").order("updated_at", { ascending: false }),
     supabase.from("huddle_growth_content").select("id,platform,asset_id,campaign_name,objective,content_type,body,status,scheduled_at,published_at,external_id,performance,created_at,updated_at").order("updated_at", { ascending: false }).limit(100),
     supabase.from("huddle_growth_webhook_events").select("id,provider,external_event_id,event_type,payload,processed_at,error,created_at").order("created_at", { ascending: false }).limit(100),
     supabase.from("huddle_growth_performance").select("id,asset_id,platform,external_id,period_start,period_end,metrics,source_updated_at,created_at").order("period_end", { ascending: false }).limit(50),
+    supabase.from("huddle_growth_leads").select("id,asset_id,source,status,tags,first_seen_at,last_seen_at").order("last_seen_at", { ascending: false }).limit(100),
     supabase.from("huddle_growth_actions").select("id,action_type,platform,asset_id,content_id,payload,risk_level,status,idempotency_key,attempts,max_attempts,next_retry_at,requested_by,approved_by,started_at,completed_at,last_error,result,created_at,updated_at").in("status", ["queued", "awaiting_approval", "running", "failed"]).order("created_at", { ascending: false }).limit(100),
     supabase.from("huddle_growth_approvals").select("id,action_id,status,note,requested_by,decided_by,decided_at,created_at").eq("status", "pending").order("created_at", { ascending: false }).limit(100),
     supabase.from("huddle_growth_budget_policies").select("emergency_stop,daily_spend_cap_minor,monthly_spend_cap_minor,max_auto_budget_increase_percent,auto_pause_enabled,auto_pause_ctr_threshold,auto_pause_cpl_threshold_minor,allowed_actions,updated_at").eq("id", true).maybeSingle(),
     supabase.from("huddle_growth_audit_logs").select("id,actor_id,action_id,connection_id,action,platform,details,created_at").order("created_at", { ascending: false }).limit(100),
   ]);
-  for (const result of [connections, assets, content, events, performance, actions, approvals, policy, audit]) if (result.error) throw result.error;
-  return { connections: connections.data || [], assets: assets.data || [], content: content.data || [], events: events.data || [], performance: performance.data || [], actions: actions.data || [], approvals: approvals.data || [], policy: policy.data || {}, audit: audit.data || [] };
+  for (const result of [connections, assets, content, events, performance, leads, actions, approvals, policy, audit]) if (result.error) throw result.error;
+  return { connections: connections.data || [], assets: assets.data || [], content: content.data || [], events: events.data || [], performance: performance.data || [], leads: leads.data || [], actions: actions.data || [], approvals: approvals.data || [], policy: policy.data || {}, audit: audit.data || [] };
 };
 
 const queueAction = async (adminId: string, body: Record<string, unknown>) => {
@@ -819,6 +899,7 @@ const createContentPack = async (adminId: string | null, body: Record<string, un
     const content = row.body && typeof row.body === "object" ? row.body as Record<string, unknown> : {};
     return `${row.platform}: ${String(content.copy || "").slice(0, 280)}`;
   }).filter(Boolean).join("\n");
+  const campaignName = `content-pack:${crypto.randomUUID()}`;
   const drafts: Record<string, unknown>[] = [];
   for (const platform of platforms) {
     const asset = (assets || []).find((item) => item.asset_type === assetMap[platform]);
@@ -834,7 +915,8 @@ const createContentPack = async (adminId: string | null, body: Record<string, un
       if (safeError(error) !== "openai_api_key_missing") throw error;
       generated = fallbackPhilosophyPlan(platform);
     }
-    const contentType = platform === "instagram" ? "image" : "text";
+    const postType = String(generated.plan.post_type || "").toLowerCase();
+    const contentType = postType.includes("carousel") ? "carousel" : postType.includes("reel") ? "reel" : postType.includes("video") ? "video" : postType.includes("image") ? "image" : "text";
     const draftBody = {
       copy: generated.copy,
       plan: generated.plan,
@@ -846,6 +928,7 @@ const createContentPack = async (adminId: string | null, body: Record<string, un
     const { data, error } = await supabase.from("huddle_growth_content").insert({
       platform,
       asset_id: asset.id,
+      campaign_name: campaignName,
       objective,
       content_type: contentType,
       body: draftBody,
@@ -860,7 +943,7 @@ const createContentPack = async (adminId: string | null, body: Record<string, un
     actor_id: adminId,
     action: "content_pack_prepared",
     platform: "system",
-    details: { platforms: drafts.map((draft) => draft.platform), objective },
+    details: { platforms: drafts.map((draft) => draft.platform), objective, campaign_name: campaignName },
   });
   return { drafts };
 };
@@ -880,17 +963,19 @@ const publishContentDraft = async (adminId: string, body: Record<string, unknown
   if (!["draft", "awaiting_approval", "failed"].includes(String(content.status))) throw new Error("content_not_ready_for_approval");
   const currentBody = content.body && typeof content.body === "object" ? content.body as Record<string, unknown> : {};
   const copy = String(body.copy || currentBody.copy || "").trim();
-  const imageUrl = String(body.image_url || currentBody.image_url || "").trim();
+  const mediaUrls = (Array.isArray(body.media_urls) ? body.media_urls : String(body.image_url || currentBody.image_url || "").split(/\r?\n/)).map(String).map((url) => url.trim()).filter(Boolean);
+  const imageUrl = mediaUrls[0] || "";
   if (!copy) throw new Error("content_text_required");
   if (content.platform === "instagram" && !imageUrl) throw new Error("instagram_public_image_url_required");
-  const nextBody = { ...currentBody, copy, ...(imageUrl ? { image_url: imageUrl } : {}) };
+  if (content.platform === "instagram" && content.content_type === "carousel" && mediaUrls.length < 2) throw new Error("instagram_carousel_requires_two_images");
+  const nextBody = { ...currentBody, copy, ...(imageUrl ? { image_url: imageUrl, media_urls: mediaUrls } : {}) };
   await supabase.from("huddle_growth_content").update({ body: nextBody, status: "publishing", approved_by: adminId, updated_at: new Date().toISOString() }).eq("id", contentId);
   try {
     const result = await executeAction({
       action_type: "publish_text",
       platform: content.platform,
       asset_id: content.asset_id,
-      payload: { text: copy, ...(imageUrl ? { image_url: imageUrl } : {}) },
+      payload: { text: copy, ...(imageUrl ? { image_url: imageUrl, media_urls: mediaUrls } : {}) },
     });
     await supabase.from("huddle_growth_content").update({
       body: nextBody,
@@ -908,6 +993,60 @@ const publishContentDraft = async (adminId: string, body: Record<string, unknown
     await supabase.from("huddle_growth_audit_logs").insert({ actor_id: adminId, action: "content_publish_failed", platform: String(content.platform), details: { content_id: contentId, error: message } });
     throw error;
   }
+};
+
+const getConversationEvent = async (eventId: string) => {
+  const { data, error } = await supabase.from("huddle_growth_webhook_events").select("*").eq("id", eventId).maybeSingle();
+  if (error || !data) throw error || new Error("conversation_not_found");
+  return data as Record<string, unknown>;
+};
+
+const prepareConversationReply = async (adminId: string, body: Record<string, unknown>) => {
+  const eventId = String(body.event_id || "").trim();
+  const event = await getConversationEvent(eventId);
+  const payload = event.payload && typeof event.payload === "object" ? event.payload as Record<string, unknown> : {};
+  const triage = classifyConversation(payload.text || payload.message);
+  const nextPayload = { ...payload, ...triage, prepared_at: new Date().toISOString() };
+  const { error } = await supabase.from("huddle_growth_webhook_events").update({ payload: nextPayload }).eq("id", eventId);
+  if (error) throw error;
+  await supabase.from("huddle_growth_audit_logs").insert({ actor_id: adminId, action: "conversation_reply_prepared", platform: String(payload.platform || "unknown"), details: { event_id: eventId, classification: triage.classification, risk: triage.risk } });
+  return { event_id: eventId, payload: nextPayload };
+};
+
+const conversationAssetType = (platform: string) => platform === "instagram" ? "instagram_business" : platform === "threads" ? "threads_profile" : platform === "whatsapp" ? "whatsapp_phone" : "facebook_page";
+
+const sendConversationReply = async (adminId: string, body: Record<string, unknown>) => {
+  const eventId = String(body.event_id || "").trim();
+  const message = String(body.message || "").trim();
+  if (!message) throw new Error("reply_message_required");
+  const event = await getConversationEvent(eventId);
+  const payload = event.payload && typeof event.payload === "object" ? event.payload as Record<string, unknown> : {};
+  const platform = String(payload.platform || (String(event.event_type || "").includes("whatsapp") ? "whatsapp" : "facebook"));
+  const { data: asset, error: assetError } = await supabase.from("huddle_growth_assets").select("*").eq("asset_type", conversationAssetType(platform)).eq("status", "active").limit(1).maybeSingle();
+  if (assetError || !asset) throw assetError || new Error(`reply_asset_not_connected:${platform}`);
+  const recipientId = String(payload.sender_id || payload.from || "").trim();
+  const targetId = String(payload.external_message_id || payload.comment_id || "").trim();
+  const action = platform === "whatsapp"
+    ? { action_type: "send_whatsapp_text", asset_id: asset.id, payload: { to: recipientId, text: message } }
+    : { action_type: "send_reply", asset_id: asset.id, payload: { target_id: targetId || recipientId, ...(String(event.event_type || "").includes("messag") && recipientId ? { recipient_id: recipientId } : {}), message } };
+  const result = await executeAction(action);
+  const sentAt = new Date().toISOString();
+  const nextPayload = { ...payload, final_reply: message, reply_status: "sent", sent_at: sentAt, approved_by: adminId };
+  const { error } = await supabase.from("huddle_growth_webhook_events").update({ payload: nextPayload }).eq("id", eventId);
+  if (error) throw error;
+  await supabase.from("huddle_growth_audit_logs").insert({ actor_id: adminId, action: "conversation_reply_sent", platform, details: { event_id: eventId, original_draft: payload.agent_draft || null, final_message: message, recipient_id: recipientId || null, source: payload.source || null, sent_at: sentAt } });
+  return { event_id: eventId, status: "sent", result };
+};
+
+const escalateConversation = async (adminId: string, body: Record<string, unknown>) => {
+  const eventId = String(body.event_id || "").trim();
+  const event = await getConversationEvent(eventId);
+  const payload = event.payload && typeof event.payload === "object" ? event.payload as Record<string, unknown> : {};
+  const nextPayload = { ...payload, reply_status: "escalated", escalated_at: new Date().toISOString(), escalated_by: adminId };
+  const { error } = await supabase.from("huddle_growth_webhook_events").update({ payload: nextPayload }).eq("id", eventId);
+  if (error) throw error;
+  await supabase.from("huddle_growth_audit_logs").insert({ actor_id: adminId, action: "conversation_escalated", platform: String(payload.platform || "unknown"), details: { event_id: eventId, classification: payload.classification || null, risk: payload.risk || null } });
+  return { event_id: eventId, status: "escalated" };
 };
 
 const cleanupRetention = async () => {
@@ -1018,6 +1157,15 @@ serve(async (req: Request) => {
     }
     if (operation === "publish_content_draft") {
       return json(await publishContentDraft(adminId, body));
+    }
+    if (operation === "prepare_conversation_reply") {
+      return json(await prepareConversationReply(adminId, body));
+    }
+    if (operation === "send_conversation_reply") {
+      return json(await sendConversationReply(adminId, body));
+    }
+    if (operation === "escalate_conversation") {
+      return json(await escalateConversation(adminId, body));
     }
     if (operation === "retention_cleanup") {
       if (!workerOperation) throw new Error("worker_required");

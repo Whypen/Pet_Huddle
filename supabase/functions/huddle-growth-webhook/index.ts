@@ -21,6 +21,14 @@ const validSignature = async (raw: string, provided: string) => {
   return timingSafeEqual(`sha256=${hex(new Uint8Array(digest))}`, provided);
 };
 
+const triage = (value: string) => {
+  const text = value.toLowerCase();
+  if (["vet", "bleeding", "poison", "emergency", "injured", "legal", "privacy", "refund", "harass", "abuse", "torture", "murder", "kill"].some((term) => text.includes(term))) return { classification: "sensitive support", risk: "sensitive", reply_status: "needs_approval", agent_draft: "Thanks for telling us. We’re taking this seriously and have passed it to the right person at huddle to review. If an animal is in immediate danger, please contact a local vet or emergency service now." };
+  if (["where are you based", "where are you from", "which country"].some((term) => text.includes(term))) return { classification: "location question", risk: "routine", reply_status: "ready", agent_draft: "huddle is operating across the UK and Asia first. Is there something you’d like help with where you are?" };
+  if (["missing", "lost", "last seen"].some((term) => text.includes(term))) return { classification: "community support", risk: "review", reply_status: "ready", agent_draft: "Thanks for sharing this. We really hope they’re home soon. Please keep personal contact details out of public messages and use DMs for anything private." };
+  return { classification: "general message", risk: "routine", reply_status: "ready", agent_draft: "Thanks for messaging huddle. We’ve got this — could you share a little more detail so we can give you the right answer?" };
+};
+
 serve(async (req: Request) => {
   const url = new URL(req.url);
   if (req.method === "GET") {
@@ -63,10 +71,13 @@ serve(async (req: Request) => {
           received_at: new Date().toISOString(),
           platform: platform || null,
           external_message_id: whatsappMessage.id || message.mid || message.id || null,
+          sender_id: whatsappMessage.from || (event.sender && typeof event.sender === "object" ? (event.sender as Record<string, unknown>).id : null) || null,
+          from: whatsappMessage.from || null,
           contact_label: whatsappContact.name || null,
           text: text || null,
           timestamp: whatsappMessage.timestamp || null,
           value: event.value || event.message || null,
+          ...triage(text),
         };
         const { error } = await supabase.from("huddle_growth_webhook_events").insert({ provider, external_event_id: externalEventId, event_type: eventType, payload: compact });
         if (!error || error.code === "23505") accepted += 1;
