@@ -19,8 +19,11 @@ export const THREADS_SCOPES = [
   "threads_manage_insights",
 ];
 
+// The Operations console is a local, authenticated admin tool. The function
+// still verifies the Huddle admin JWT on every non-worker request; allowing
+// browser origins here lets the local app use the same secured endpoint.
 export const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": String(Deno.env.get("GROWTH_ALLOWED_ORIGIN") || "https://huddle.pet"),
+  "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-huddle-access-token",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Vary": "Origin",
