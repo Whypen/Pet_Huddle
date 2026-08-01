@@ -4,6 +4,7 @@ import { getServiceClient, GRAPH_BASE, json, safeError } from "../_shared/huddle
 const supabase = getServiceClient();
 const verifyToken = String(Deno.env.get("META_WEBHOOK_VERIFY_TOKEN") || "").trim();
 const appSecret = String(Deno.env.get("META_APP_SECRET") || "").trim();
+const webhookRevision = "dm-connectivity-v2";
 
 const hex = (bytes: Uint8Array) => Array.from(bytes).map((value) => value.toString(16).padStart(2, "0")).join("");
 
@@ -25,6 +26,14 @@ const stableIndex = (value: string, length: number) => {
   let hash = 0;
   for (const character of value) hash = ((hash * 31) + character.charCodeAt(0)) >>> 0;
   return length ? hash % length : 0;
+};
+
+const normalizedTimestamp = (value: unknown) => {
+  const raw = String(value || "").trim();
+  if (/^\d{10}$/.test(raw)) return new Date(Number(raw) * 1000).toISOString();
+  if (/^\d{13}$/.test(raw)) return new Date(Number(raw)).toISOString();
+  const parsed = new Date(raw);
+  return raw && Number.isFinite(parsed.getTime()) ? parsed.toISOString() : null;
 };
 
 const triage = (value: string, kind = "message", sender = "", eventId = "") => {
@@ -98,7 +107,7 @@ serve(async (req: Request) => {
           kind,
           source_type: kind === "comment" ? "comment" : "inbox",
           inbox_label: kind === "comment" ? null : platform === "instagram" ? "Instagram inbox" : platform === "facebook" ? "Facebook Messenger" : "WhatsApp inbox",
-          timestamp: whatsappMessage.timestamp || null,
+          timestamp: normalizedTimestamp(whatsappMessage.timestamp),
           value: event.value || event.message || null,
           ...triage(text, kind, String(whatsappContact.name || ""), externalEventId),
         };
@@ -106,7 +115,7 @@ serve(async (req: Request) => {
         if (!error || error.code === "23505") accepted += 1;
       }
     }
-    return json({ ok: true, accepted, graph_base: GRAPH_BASE });
+    return json({ ok: true, accepted, graph_base: GRAPH_BASE, revision: webhookRevision });
   } catch (error) {
     console.error("[huddle-growth-webhook]", safeError(error));
     return json({ error: "webhook_processing_failed" }, 500);

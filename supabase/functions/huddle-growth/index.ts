@@ -614,7 +614,12 @@ const syncLiveSocial = async () => {
             const author = comment.from && typeof comment.from === "object" ? comment.from as Record<string, unknown> : { username: comment.username };
             if (isOwnAuthor(author, asset)) continue;
             const repliesField = comment.replies && typeof comment.replies === "object" ? comment.replies as Record<string, unknown> : {};
-            const ownReply = ((Array.isArray(repliesField.data) ? repliesField.data : []) as Array<Record<string, unknown>>).find((reply) => {
+            let replyRows = (Array.isArray(repliesField.data) ? repliesField.data : []) as Array<Record<string, unknown>>;
+            try {
+              const directReplies = await graphRequest(graphJson(`${commentId}/replies?${new URLSearchParams({ fields: "id,text,username,timestamp,from", limit: "100" })}`), { token });
+              if (Array.isArray(directReplies.data)) replyRows = directReplies.data as Array<Record<string, unknown>>;
+            } catch { /* The nested replies already fetched above remain the fallback. */ }
+            const ownReply = replyRows.find((reply) => {
               const replyAuthor = reply.from && typeof reply.from === "object" ? reply.from as Record<string, unknown> : { username: reply.username };
               return isOwnAuthor(replyAuthor, asset);
             });
@@ -629,7 +634,10 @@ const syncLiveSocial = async () => {
           }
         }
         try {
-          const conversations = await graphRequest(graphJson(`${asset.external_id}/conversations?${new URLSearchParams({ platform: "instagram", fields: "id,updated_time,participants,messages.limit(25){id,message,created_time,from,to}", limit: "25" })}`), { token });
+          const metadata = asset.metadata && typeof asset.metadata === "object" ? asset.metadata as Record<string, unknown> : {};
+          const inboxOwnerId = String(metadata.page_id || "");
+          if (!inboxOwnerId) throw new Error("instagram_page_id_missing");
+          const conversations = await graphRequest(graphJson(`${inboxOwnerId}/conversations?${new URLSearchParams({ platform: "instagram", fields: "id,updated_time,participants,messages.limit(100){id,message,created_time,from,to}", limit: "50" })}`), { token });
           for (const conversation of (Array.isArray(conversations.data) ? conversations.data : []) as Array<Record<string, unknown>>) {
             const messages = conversation.messages && typeof conversation.messages === "object" ? conversation.messages as Record<string, unknown> : {};
             for (const message of (Array.isArray(messages.data) ? messages.data : []) as Array<Record<string, unknown>>) {
@@ -747,17 +755,24 @@ const syncLiveSocial = async () => {
           });
           imported += 1;
           try {
-            const replies = await graphRequest(threadsJson(`${externalId}/replies?${new URLSearchParams({ fields: "id,text,username,timestamp,permalink,from", limit: "25" })}`), { token });
-            for (const reply of (Array.isArray(replies.data) ? replies.data : []) as Array<Record<string, unknown>>) {
+            const conversation = await graphRequest(threadsJson(`${externalId}/conversation?${new URLSearchParams({ fields: "id,text,username,timestamp,permalink,from,replied_to", reverse: "true", limit: "100" })}`), { token });
+            const conversationRows = (Array.isArray(conversation.data) ? conversation.data : []) as Array<Record<string, unknown>>;
+            for (const reply of conversationRows) {
               const replyId = String(reply.id || "");
               if (!replyId) continue;
               const author = reply.from && typeof reply.from === "object" ? reply.from as Record<string, unknown> : { username: reply.username };
               if (isOwnAuthor(author, asset)) continue;
+              const ownReply = conversationRows.find((candidate) => {
+                const candidateAuthor = candidate.from && typeof candidate.from === "object" ? candidate.from as Record<string, unknown> : { username: candidate.username };
+                const repliedTo = candidate.replied_to && typeof candidate.replied_to === "object" ? candidate.replied_to as Record<string, unknown> : {};
+                return String(repliedTo.id || "") === replyId && isOwnAuthor(candidateAuthor, asset);
+              });
               await recordConversationSignal("threads", `threads-reply:${replyId}`, {
                 kind: "reply", source_type: "reply", parent_id: externalId, parent_permalink: item.permalink || null,
                 parent_copy: String(item.text || ""), parent_content_type: contentTypeFromMedia(item.media_type), external_message_id: replyId,
                 text: String(reply.text || ""), author_id: author.id || null, author_username: author.username || reply.username || null,
                 contact_label: String(reply.username || author.name || "Threads user"), timestamp: reply.timestamp || null,
+                ...(ownReply ? { reply_status: "sent", final_reply: String(ownReply.text || ""), sent_at: ownReply.timestamp || null, reply_source: "meta_existing_reply" } : {}),
               });
               conversationSignals += 1;
             }
@@ -1406,6 +1421,33 @@ const subscribeWhatsAppWebhooks = async () => {
   return subscriptions;
 };
 
+const ensureMetaWebhookSubscriptions = async () => {
+  const appSecret = String(Deno.env.get("META_APP_SECRET") || "").trim();
+  const verifyToken = String(Deno.env.get("META_WEBHOOK_VERIFY_TOKEN") || "").trim();
+  const supabaseUrl = String(Deno.env.get("SUPABASE_URL") || "").replace(/\/$/, "");
+  if (!appSecret || !verifyToken || !supabaseUrl) throw new Error("meta_webhook_configuration_missing");
+  const callbackUrl = `${supabaseUrl}/functions/v1/huddle-growth-webhook`;
+  const appToken = `${META_APP_ID}|${appSecret}`;
+  const configured: Array<Record<string, unknown>> = [];
+  for (const [object, fields] of [
+    ["instagram", "comments,messages,mentions,messaging_postbacks,messaging_seen"],
+    ["page", "feed,messages,messaging_postbacks"],
+  ]) {
+    const result = await graphRequest(graphJson(`${META_APP_ID}/subscriptions`), {
+      method: "POST", token: appToken, form: new URLSearchParams({ object, callback_url: callbackUrl, verify_token: verifyToken, fields }),
+    });
+    configured.push({ object, success: result.success === true });
+  }
+  const { data: pages, error } = await supabase.from("huddle_growth_assets").select("*").eq("asset_type", "facebook_page").eq("status", "active");
+  if (error) throw error;
+  for (const page of (pages || []) as Array<Record<string, unknown>>) {
+    const connection = await getConnection(String(page.connection_id));
+    const token = await resolveAssetToken(page, connection);
+    await graphRequest(graphJson(`${page.external_id}/subscribed_apps`), { method: "POST", token, form: new URLSearchParams({ subscribed_fields: "feed,messages,messaging_postbacks" }) });
+  }
+  return { callback_url: callbackUrl, configured };
+};
+
 const enforceSpendCaps = async () => {
   const { data: policy, error } = await supabase.from("huddle_growth_budget_policies").select("daily_spend_cap_minor,monthly_spend_cap_minor,auto_pause_enabled,emergency_stop").eq("id", true).maybeSingle();
   if (error) throw error;
@@ -1444,12 +1486,13 @@ const enforceSpendCaps = async () => {
 
 const maintenanceCycle = async () => {
   const tokens = await maintainTokens();
+  const metaWebhooks = await ensureMetaWebhookSubscriptions();
   const whatsapp = await subscribeWhatsAppWebhooks();
   const sync = await syncLiveSocial();
   const spend = await enforceSpendCaps();
   const action = await runAction();
   const retention = await cleanupRetention();
-  return { tokens, whatsapp, sync, spend, action, retention };
+  return { tokens, meta_webhooks: metaWebhooks, whatsapp, sync, spend, action, retention };
 };
 
 const claimAction = async (actionId?: string) => {
@@ -1514,8 +1557,9 @@ serve(async (req: Request) => {
     }
     if (operation === "sync_live_social") {
       if (!workerOperation) throw new Error("worker_required");
+      const metaWebhooks = await ensureMetaWebhookSubscriptions();
       const whatsappSubscriptions = await subscribeWhatsAppWebhooks();
-      return json({ ...await syncLiveSocial(), whatsapp_subscriptions: whatsappSubscriptions });
+      return json({ ...await syncLiveSocial(), meta_webhooks: metaWebhooks, whatsapp_subscriptions: whatsappSubscriptions });
     }
     if (operation === "prepare_content_pack") {
       if (!workerOperation) throw new Error("worker_required");
