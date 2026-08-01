@@ -81,6 +81,8 @@ serve(async (req: Request) => {
         const valueMessage = whatsappMessages[0] || {};
         const whatsappMessage = provider === "whatsapp" ? valueMessage : {};
         const whatsappContact = whatsappContacts[0]?.profile && typeof whatsappContacts[0].profile === "object" ? whatsappContacts[0].profile as Record<string, unknown> : {};
+        const valueAuthor = value.from && typeof value.from === "object" ? value.from as Record<string, unknown> : {};
+        const valueMedia = value.media && typeof value.media === "object" ? value.media as Record<string, unknown> : {};
         const facebookText = message.text || (message.message && typeof message.message === "object" ? (message.message as Record<string, unknown>).text : "");
         const valueText = valueMessage.text && typeof valueMessage.text === "object" ? (valueMessage.text as Record<string, unknown>).body : valueMessage.text;
         const text = String(valueText || facebookText || value.message || "");
@@ -100,14 +102,19 @@ serve(async (req: Request) => {
           received_at: new Date().toISOString(),
           platform: platform || null,
           external_message_id: valueMessage.id || message.mid || message.id || null,
-          sender_id: valueMessage.from || (valueMessage.sender && typeof valueMessage.sender === "object" ? (valueMessage.sender as Record<string, unknown>).id : null) || (event.sender && typeof event.sender === "object" ? (event.sender as Record<string, unknown>).id : null) || null,
+          sender_id: valueMessage.from || valueAuthor.id || (valueMessage.sender && typeof valueMessage.sender === "object" ? (valueMessage.sender as Record<string, unknown>).id : null) || (event.sender && typeof event.sender === "object" ? (event.sender as Record<string, unknown>).id : null) || null,
           from: whatsappMessage.from || null,
-          contact_label: whatsappContact.name || null,
+          author_id: valueAuthor.id || null,
+          author_username: valueAuthor.username || null,
+          contact_label: whatsappContact.name || valueAuthor.username || valueAuthor.name || null,
           text: text || null,
           kind,
           source_type: kind === "comment" ? "comment" : "inbox",
           inbox_label: kind === "comment" ? null : platform === "instagram" ? "Instagram inbox" : platform === "facebook" ? "Facebook Messenger" : "WhatsApp inbox",
           timestamp: normalizedTimestamp(whatsappMessage.timestamp),
+          parent_id: valueMedia.id || value.post_id || null,
+          parent_copy: valueMedia.caption || null,
+          parent_permalink: valueMedia.permalink || value.permalink_url || null,
           value: event.value || event.message || null,
           ...triage(text, kind, String(whatsappContact.name || ""), externalEventId),
         };

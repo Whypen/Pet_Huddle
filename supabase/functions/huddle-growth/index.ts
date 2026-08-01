@@ -568,6 +568,20 @@ const isOwnAuthor = (author: Record<string, unknown>, asset: Record<string, unkn
   return incoming.some((value) => own.includes(value)) || incoming.includes("huddle.pet") || incoming.includes("huddle");
 };
 
+const graphRows = async (initialUrl: string, token: string, maxPages = 100) => {
+  const rows: Record<string, unknown>[] = [];
+  const visited = new Set<string>();
+  let next: string | null = initialUrl;
+  for (let page = 0; next && page < maxPages && !visited.has(next); page += 1) {
+    visited.add(next);
+    const result = await graphRequest(next, { token });
+    if (Array.isArray(result.data)) rows.push(...result.data as Array<Record<string, unknown>>);
+    const paging = result.paging && typeof result.paging === "object" ? result.paging as Record<string, unknown> : {};
+    next = typeof paging.next === "string" && paging.next ? paging.next : null;
+  }
+  return rows;
+};
+
 const syncLiveSocial = async () => {
   const { data: assets, error: assetError } = await supabase.from("huddle_growth_assets").select("*").eq("status", "active");
   if (assetError) throw assetError;
@@ -582,8 +596,7 @@ const syncLiveSocial = async () => {
       const connection = await getConnection(String(asset.connection_id));
       const token = await resolveAssetToken(asset, connection);
       if (type === "instagram_business") {
-        const media = await graphRequest(graphJson(`${asset.external_id}/media?${new URLSearchParams({ fields: "id,caption,media_type,media_product_type,media_url,thumbnail_url,permalink,timestamp,like_count,comments_count,children{id,media_type,media_url,thumbnail_url},comments.limit(25){id,text,username,timestamp,like_count,from,replies.limit(25){id,text,username,timestamp,from}}", limit: "25" })}`), { token });
-        const items = (Array.isArray(media.data) ? media.data : []) as Array<Record<string, unknown>>;
+        const items = await graphRows(graphJson(`${asset.external_id}/media?${new URLSearchParams({ fields: "id,caption,media_type,media_product_type,media_url,thumbnail_url,permalink,timestamp,like_count,comments_count,children{id,media_type,media_url,thumbnail_url}", limit: "100" })}`), token);
         const insights = new Map<string, Record<string, unknown>>();
         await Promise.all(items.map(async (item) => {
           const externalId = String(item.id || "");
@@ -607,8 +620,8 @@ const syncLiveSocial = async () => {
             performance: { like_count: item.like_count || 0, comments_count: item.comments_count || 0, ...(insights.get(externalId) || {}) },
           });
           imported += 1;
-          const commentsField = item.comments as Record<string, unknown> | undefined;
-          for (const comment of (Array.isArray(commentsField?.data) ? commentsField.data : []) as Array<Record<string, unknown>>) {
+          const comments = await graphRows(graphJson(`${externalId}/comments?${new URLSearchParams({ fields: "id,text,username,timestamp,like_count,from,replies.limit(100){id,text,username,timestamp,from}", limit: "100" })}`), token);
+          for (const comment of comments) {
             const commentId = String(comment.id || "");
             if (!commentId) continue;
             const author = comment.from && typeof comment.from === "object" ? comment.from as Record<string, unknown> : { username: comment.username };
@@ -616,13 +629,24 @@ const syncLiveSocial = async () => {
             const repliesField = comment.replies && typeof comment.replies === "object" ? comment.replies as Record<string, unknown> : {};
             let replyRows = (Array.isArray(repliesField.data) ? repliesField.data : []) as Array<Record<string, unknown>>;
             try {
-              const directReplies = await graphRequest(graphJson(`${commentId}/replies?${new URLSearchParams({ fields: "id,text,username,timestamp,from", limit: "100" })}`), { token });
-              if (Array.isArray(directReplies.data)) replyRows = directReplies.data as Array<Record<string, unknown>>;
+              replyRows = await graphRows(graphJson(`${commentId}/replies?${new URLSearchParams({ fields: "id,text,username,timestamp,from", limit: "100" })}`), token);
             } catch { /* The nested replies already fetched above remain the fallback. */ }
             const ownReply = replyRows.find((reply) => {
               const replyAuthor = reply.from && typeof reply.from === "object" ? reply.from as Record<string, unknown> : { username: reply.username };
               return isOwnAuthor(replyAuthor, asset);
             });
+            for (const nestedReply of replyRows) {
+              const nestedId = String(nestedReply.id || "");
+              const nestedAuthor = nestedReply.from && typeof nestedReply.from === "object" ? nestedReply.from as Record<string, unknown> : { username: nestedReply.username };
+              if (!nestedId || isOwnAuthor(nestedAuthor, asset)) continue;
+              await recordConversationSignal("instagram", `instagram-reply:${nestedId}`, {
+                kind: "reply", source_type: "reply", parent_id: commentId, parent_permalink: item.permalink || null,
+                parent_copy: String(comment.text || item.caption || ""), parent_content_type: contentTypeFromMedia(item.media_product_type || item.media_type),
+                external_message_id: nestedId, text: String(nestedReply.text || ""), author_id: nestedAuthor.id || null,
+                author_username: nestedAuthor.username || nestedReply.username || null, contact_label: String(nestedReply.username || nestedAuthor.name || "Instagram user"), timestamp: nestedReply.timestamp || null,
+              });
+              conversationSignals += 1;
+            }
             await recordConversationSignal("instagram", `instagram-comment:${commentId}`, {
               kind: "comment", source_type: "comment", parent_id: externalId, parent_permalink: item.permalink || null,
               parent_copy: String(item.caption || ""), parent_content_type: contentTypeFromMedia(item.media_product_type || item.media_type),
@@ -637,12 +661,12 @@ const syncLiveSocial = async () => {
           const metadata = asset.metadata && typeof asset.metadata === "object" ? asset.metadata as Record<string, unknown> : {};
           const inboxOwnerId = String(metadata.page_id || "");
           if (!inboxOwnerId) throw new Error("instagram_page_id_missing");
-          const conversations = await graphRequest(graphJson(`${inboxOwnerId}/conversations?${new URLSearchParams({ platform: "instagram", fields: "id,updated_time,participants,messages.limit(100){id,message,created_time,from,to}", limit: "50" })}`), { token });
-          for (const conversation of (Array.isArray(conversations.data) ? conversations.data : []) as Array<Record<string, unknown>>) {
-            const messages = conversation.messages && typeof conversation.messages === "object" ? conversation.messages as Record<string, unknown> : {};
-            for (const message of (Array.isArray(messages.data) ? messages.data : []) as Array<Record<string, unknown>>) {
+          const conversations = await graphRows(graphJson(`${inboxOwnerId}/conversations?${new URLSearchParams({ platform: "instagram", fields: "id,updated_time,participants", limit: "100" })}`), token);
+          for (const conversation of conversations) {
+            const messages = await graphRows(graphJson(`${conversation.id}/messages?${new URLSearchParams({ fields: "id,message,created_time,from,to", limit: "100" })}`), token);
+            for (const message of messages) {
               const from = message.from && typeof message.from === "object" ? message.from as Record<string, unknown> : {};
-              if (String(from.id || "") === String(asset.external_id)) continue;
+              if (isOwnAuthor(from, asset)) continue;
               const messageId = String(message.id || "");
               if (!messageId) continue;
               const messageText = String(message.message || "").trim();
@@ -655,8 +679,7 @@ const syncLiveSocial = async () => {
           notes.push(`instagram_inbox:${safeError(inboxError)}`);
         }
       } else if (type === "facebook_page") {
-        const feed = await graphRequest(graphJson(`${asset.external_id}/feed?${new URLSearchParams({ fields: "id,message,created_time,permalink_url,full_picture,attachments{media,target,type,url,subattachments},comments.limit(25){id,message,created_time,from,comments.limit(25){id,message,created_time,from}}", limit: "25" })}`), { token });
-        const items = (Array.isArray(feed.data) ? feed.data : []) as Array<Record<string, unknown>>;
+        const items = await graphRows(graphJson(`${asset.external_id}/feed?${new URLSearchParams({ fields: "id,message,created_time,permalink_url,full_picture,attachments{media,target,type,url,subattachments}", limit: "100" })}`), token);
         const insights = new Map<string, Record<string, unknown>>();
         await Promise.all(items.map(async (item) => {
           const externalId = String(item.id || "");
@@ -676,17 +699,31 @@ const syncLiveSocial = async () => {
             }, performance: insights.get(externalId) || {},
           });
           imported += 1;
-          const commentsField = item.comments as Record<string, unknown> | undefined;
-          for (const comment of (Array.isArray(commentsField?.data) ? commentsField?.data : []) as Array<Record<string, unknown>>) {
+          const comments = await graphRows(graphJson(`${externalId}/comments?${new URLSearchParams({ fields: "id,message,created_time,from,comments.limit(100){id,message,created_time,from}", limit: "100" })}`), token);
+          for (const comment of comments) {
             const commentId = String(comment.id || "");
             if (!commentId) continue;
             const author = comment.from && typeof comment.from === "object" ? comment.from as Record<string, unknown> : {};
             if (isOwnAuthor(author, asset)) continue;
             const repliesField = comment.comments && typeof comment.comments === "object" ? comment.comments as Record<string, unknown> : {};
-            const ownReply = ((Array.isArray(repliesField.data) ? repliesField.data : []) as Array<Record<string, unknown>>).find((reply) => {
+            let replyRows = (Array.isArray(repliesField.data) ? repliesField.data : []) as Array<Record<string, unknown>>;
+            try { replyRows = await graphRows(graphJson(`${commentId}/comments?${new URLSearchParams({ fields: "id,message,created_time,from", limit: "100" })}`), token); } catch { /* Use nested replies when direct pagination is unavailable. */ }
+            const ownReply = replyRows.find((reply) => {
               const replyAuthor = reply.from && typeof reply.from === "object" ? reply.from as Record<string, unknown> : {};
               return isOwnAuthor(replyAuthor, asset);
             });
+            for (const nestedReply of replyRows) {
+              const nestedId = String(nestedReply.id || "");
+              const nestedAuthor = nestedReply.from && typeof nestedReply.from === "object" ? nestedReply.from as Record<string, unknown> : {};
+              if (!nestedId || isOwnAuthor(nestedAuthor, asset)) continue;
+              await recordConversationSignal("facebook", `facebook-reply:${nestedId}`, {
+                kind: "reply", source_type: "reply", parent_id: commentId, parent_permalink: item.permalink_url || null,
+                parent_copy: String(comment.message || item.message || ""), parent_content_type: item.full_picture || item.attachments ? "image" : "text",
+                external_message_id: nestedId, text: String(nestedReply.message || ""), author_id: nestedAuthor.id || null,
+                author_username: nestedAuthor.name || null, contact_label: String(nestedAuthor.name || "Facebook user"), timestamp: nestedReply.created_time || null,
+              });
+              conversationSignals += 1;
+            }
             await recordConversationSignal("facebook", `facebook-comment:${commentId}`, {
               kind: "comment", source_type: "comment", parent_id: externalId, parent_permalink: item.permalink_url || null,
               parent_copy: String(item.message || ""), parent_content_type: item.full_picture || item.attachments ? "image" : "text",
@@ -698,12 +735,12 @@ const syncLiveSocial = async () => {
           }
         }
         try {
-          const conversations = await graphRequest(graphJson(`${asset.external_id}/conversations?${new URLSearchParams({ fields: "id,updated_time,participants,messages.limit(25){id,message,created_time,from,to}", limit: "25" })}`), { token });
-          for (const conversation of (Array.isArray(conversations.data) ? conversations.data : []) as Array<Record<string, unknown>>) {
-            const messages = conversation.messages && typeof conversation.messages === "object" ? conversation.messages as Record<string, unknown> : {};
-            for (const message of (Array.isArray(messages.data) ? messages.data : []) as Array<Record<string, unknown>>) {
+          const conversations = await graphRows(graphJson(`${asset.external_id}/conversations?${new URLSearchParams({ fields: "id,updated_time,participants", limit: "100" })}`), token);
+          for (const conversation of conversations) {
+            const messages = await graphRows(graphJson(`${conversation.id}/messages?${new URLSearchParams({ fields: "id,message,created_time,from,to", limit: "100" })}`), token);
+            for (const message of messages) {
               const from = message.from && typeof message.from === "object" ? message.from as Record<string, unknown> : {};
-              if (String(from.id || "") === String(asset.external_id)) continue;
+              if (isOwnAuthor(from, asset)) continue;
               const messageId = String(message.id || "");
               if (!messageId) continue;
               const messageText = String(message.message || "").trim();
@@ -730,8 +767,7 @@ const syncLiveSocial = async () => {
           }
         }
       } else if (type === "threads_profile") {
-        const threads = await graphRequest(threadsJson(`${asset.external_id}/threads?${new URLSearchParams({ fields: "id,text,permalink,timestamp,media_type,media_url,thumbnail_url,children{id,media_type,media_url,thumbnail_url}", limit: "25" })}`), { token });
-        const items = (Array.isArray(threads.data) ? threads.data : []) as Array<Record<string, unknown>>;
+        const items = await graphRows(threadsJson(`${asset.external_id}/threads?${new URLSearchParams({ fields: "id,text,permalink,timestamp,media_type,media_url,thumbnail_url,children{id,media_type,media_url,thumbnail_url}", limit: "100" })}`), token);
         const insights = new Map<string, Record<string, unknown>>();
         await Promise.all(items.map(async (item) => {
           const externalId = String(item.id || "");
@@ -991,13 +1027,29 @@ const startOAuth = async (req: Request, provider: "meta" | "threads", adminId: s
   return { provider, authorization_url: `https://www.facebook.com/${GRAPH_VERSION}/dialog/oauth?${params}` };
 };
 
+const loadAllConversationEvents = async () => {
+  const rows: Record<string, unknown>[] = [];
+  const pageSize = 1000;
+  for (let offset = 0; ; offset += pageSize) {
+    const { data, error } = await supabase.from("huddle_growth_webhook_events")
+      .select("id,provider,external_event_id,event_type,payload,processed_at,error,created_at")
+      .order("created_at", { ascending: false })
+      .range(offset, offset + pageSize - 1);
+    if (error) throw error;
+    const page = (data || []) as Array<Record<string, unknown>>;
+    rows.push(...page);
+    if (page.length < pageSize) break;
+  }
+  return { data: rows, error: null };
+};
+
 const getConsole = async () => {
   await enforceHuddleOwnedAssets();
   const [connections, assets, content, events, performance, leads, actions, approvals, policy, audit] = await Promise.all([
     supabase.from("huddle_growth_connections").select("id,provider,external_user_id,display_name,status,token_expires_at,granted_scopes,metadata,last_synced_at,last_error,created_at,updated_at").order("created_at", { ascending: false }),
     supabase.from("huddle_growth_assets").select("id,connection_id,asset_type,external_id,name,status,token_expires_at,granted_scopes,metadata,last_synced_at,updated_at").order("updated_at", { ascending: false }),
     supabase.from("huddle_growth_content").select("id,platform,asset_id,campaign_name,objective,content_type,body,status,scheduled_at,published_at,external_id,performance,created_at,updated_at").order("updated_at", { ascending: false }).limit(100),
-    supabase.from("huddle_growth_webhook_events").select("id,provider,external_event_id,event_type,payload,processed_at,error,created_at").order("created_at", { ascending: false }).limit(100),
+    loadAllConversationEvents(),
     supabase.from("huddle_growth_performance").select("id,asset_id,platform,external_id,period_start,period_end,metrics,source_updated_at,created_at").order("period_end", { ascending: false }).limit(50),
     supabase.from("huddle_growth_leads").select("id,asset_id,source,status,tags,first_seen_at,last_seen_at").order("last_seen_at", { ascending: false }).limit(100),
     supabase.from("huddle_growth_actions").select("id,action_type,platform,asset_id,content_id,payload,risk_level,status,idempotency_key,attempts,max_attempts,next_retry_at,requested_by,approved_by,started_at,completed_at,last_error,result,created_at,updated_at").in("status", ["queued", "awaiting_approval", "running", "failed"]).order("created_at", { ascending: false }).limit(100),
