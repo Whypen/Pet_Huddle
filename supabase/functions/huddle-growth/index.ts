@@ -432,9 +432,10 @@ const recordImportedContent = async (asset: Record<string, unknown>, input: {
   if (result.error) throw result.error;
 };
 
-const classifyConversation = (textValue: unknown) => {
+const classifyConversation = (textValue: unknown, context: Record<string, unknown> = {}) => {
   const text = String(textValue || "").trim();
   const lower = text.toLowerCase();
+  const isComment = String(context.kind || context.source_type || "").toLowerCase() === "comment" || String(context.kind || "").toLowerCase() === "reply";
   const has = (...terms: string[]) => terms.some((term) => lower.includes(term));
   const words = (...terms: string[]) => terms.some((term) => new RegExp(`\\b${term}\\b`, "i").test(text));
   if (has("where are you based", "where are you from", "which country", "what country")) return {
@@ -447,7 +448,7 @@ const classifyConversation = (textValue: unknown) => {
   };
   if (has("lawyer", "legal", "police", "refund", "payment", "charged", "privacy", "harass", "abuse", "scam", "suicide", "kill", "torture", "murder", "serial killer")) return {
     classification: "sensitive support", risk: "sensitive", reply_status: "needs_approval",
-    agent_draft: "Thanks for telling us. We’re taking this seriously and have passed it to the right person at huddle to review. We won’t make assumptions here, but we’ll follow up as soon as we can.",
+    agent_draft: "This needs a proper human look, so I’m flagging it for the huddle team. We won’t guess or give you a risky answer here.",
   };
   if (words("partner", "partnership", "collab", "collaboration", "press", "sponsor")) return {
     classification: "partnership lead", risk: "review", reply_status: "ready",
@@ -455,28 +456,28 @@ const classifyConversation = (textValue: unknown) => {
   };
   if (has("waitlist", "launch", "available", "download", "app", "sign up")) return {
     classification: "product question", risk: "routine", reply_status: "ready",
-    agent_draft: "Thanks for checking in. huddle is rolling out carefully, and we don’t want to invent a date before it’s confirmed. Tell us where you are and what you’d most want huddle to help with — we’ll point you to the right next step.",
+    agent_draft: isComment ? "We’re rolling it out carefully — no fake launch date over here. What would you want huddle to do first?" : "Hey — we’re rolling this out carefully, so we don’t want to invent a date. Tell us where you are and what you’d want huddle to help with first.",
   };
   if (has("missing", "lost", "reward", "last seen")) return {
     classification: "community support", risk: "review", reply_status: "ready",
-    agent_draft: "Thanks for sharing this. We really hope they’re home soon. Please keep personal contact details out of public comments and use DMs for anything private.",
+    agent_draft: isComment ? "Hope they’re home soon — keeping the private details in DMs is the move." : "Hey — I hope they’re home soon. Send the private details by DM rather than posting contact information publicly.",
   };
   if (has("ice water", "fresh water", "curtains", "blinds", "tower fan", "garden hose")) return {
     classification: "community care", risk: "routine", reply_status: "ready",
-    agent_draft: "This is the kind of practical care that matters. Thanks for sharing what’s working for you.",
+    agent_draft: isComment ? "Okay this is actually useful. Saving that for the next heatwave 🫡" : "That’s a useful practical step. Tell us a little more about what’s working for you.",
   };
   if (text.length <= 180) return {
     classification: "community comment", risk: "routine", reply_status: "ready",
-    agent_draft: "Honestly 😭 they notice more than we think. Thanks for being here.",
+    agent_draft: isComment ? "Honestly 😭 they notice more than we think." : "Hey — tell us a bit more and we’ll point you in the right direction.",
   };
   return {
     classification: "general message", risk: "routine", reply_status: "ready",
-    agent_draft: "Thanks for messaging huddle. We’ve got this — could you share a little more detail so we can give you the right answer?",
+    agent_draft: isComment ? "The internet is very confident for something that depends on the animal in front of you 😭 What happened?" : "Hey — tell us a little more and we’ll point you in the right direction.",
   };
 };
 
 const recordConversationSignal = async (platform: "instagram" | "facebook" | "threads", externalEventId: string, payload: Record<string, unknown>) => {
-  const triage = classifyConversation(payload.text);
+  const triage = classifyConversation(payload.text, payload);
   const kind = String(payload.kind || "comment");
   const { error } = await supabase.from("huddle_growth_webhook_events").upsert({
     provider: "meta",
@@ -523,6 +524,14 @@ const attachmentPreview = (value: unknown): string | null => {
   return String(image.src || "") || null;
 };
 
+const normalizedIdentity = (value: unknown) => String(value || "").trim().toLowerCase().replace(/^@/, "");
+const isOwnAuthor = (author: Record<string, unknown>, asset: Record<string, unknown>) => {
+  const metadata = asset.metadata && typeof asset.metadata === "object" ? asset.metadata as Record<string, unknown> : {};
+  const own = [asset.external_id, asset.name, metadata.username, metadata.page_id].map(normalizedIdentity).filter(Boolean);
+  const incoming = [author.id, author.username, author.name].map(normalizedIdentity).filter(Boolean);
+  return incoming.some((value) => own.includes(value)) || incoming.includes("huddle.pet") || incoming.includes("huddle");
+};
+
 const syncLiveSocial = async () => {
   const { data: assets, error: assetError } = await supabase.from("huddle_growth_assets").select("*").eq("status", "active");
   if (assetError) throw assetError;
@@ -537,7 +546,7 @@ const syncLiveSocial = async () => {
       const connection = await getConnection(String(asset.connection_id));
       const token = await resolveAssetToken(asset, connection);
       if (type === "instagram_business") {
-        const media = await graphRequest(graphJson(`${asset.external_id}/media?${new URLSearchParams({ fields: "id,caption,media_type,media_product_type,media_url,thumbnail_url,permalink,timestamp,like_count,comments_count,children{id,media_type,media_url,thumbnail_url},comments.limit(25){id,text,username,timestamp,like_count}", limit: "25" })}`), { token });
+        const media = await graphRequest(graphJson(`${asset.external_id}/media?${new URLSearchParams({ fields: "id,caption,media_type,media_product_type,media_url,thumbnail_url,permalink,timestamp,like_count,comments_count,children{id,media_type,media_url,thumbnail_url},comments.limit(25){id,text,username,timestamp,like_count,from}", limit: "25" })}`), { token });
         const items = (Array.isArray(media.data) ? media.data : []) as Array<Record<string, unknown>>;
         const insights = new Map<string, Record<string, unknown>>();
         await Promise.all(items.map(async (item) => {
@@ -564,9 +573,13 @@ const syncLiveSocial = async () => {
           for (const comment of (Array.isArray(commentsField?.data) ? commentsField.data : []) as Array<Record<string, unknown>>) {
             const commentId = String(comment.id || "");
             if (!commentId) continue;
+            const author = comment.from && typeof comment.from === "object" ? comment.from as Record<string, unknown> : { username: comment.username };
+            if (isOwnAuthor(author, asset)) continue;
             await recordConversationSignal("instagram", `instagram-comment:${commentId}`, {
-              parent_id: externalId, external_message_id: commentId, text: String(comment.text || ""),
-              contact_label: String(comment.username || "Instagram user"), timestamp: comment.timestamp || null,
+              kind: "comment", source_type: "comment", parent_id: externalId, parent_permalink: item.permalink || null,
+              parent_copy: String(item.caption || ""), parent_content_type: contentTypeFromMedia(item.media_product_type || item.media_type),
+              external_message_id: commentId, text: String(comment.text || ""), author_id: author.id || null,
+              author_username: author.username || comment.username || null, contact_label: String(comment.username || author.name || "Instagram user"), timestamp: comment.timestamp || null,
             });
             conversationSignals += 1;
           }
@@ -580,7 +593,9 @@ const syncLiveSocial = async () => {
               if (String(from.id || "") === String(asset.external_id)) continue;
               const messageId = String(message.id || "");
               if (!messageId) continue;
-              await recordConversationSignal("instagram", `instagram-message:${messageId}`, { kind: "message", external_message_id: messageId, sender_id: from.id || null, contact_label: from.name || "Instagram user", text: String(message.message || ""), timestamp: message.created_time || null, conversation_id: conversation.id || null });
+              const messageText = String(message.message || "").trim();
+              if (!messageText) continue;
+              await recordConversationSignal("instagram", `instagram-message:${messageId}`, { kind: "message", source_type: "inbox", inbox_label: "Instagram inbox", external_message_id: messageId, sender_id: from.id || null, contact_label: from.name || "Instagram user", text: messageText, timestamp: message.created_time || null, conversation_id: conversation.id || null });
               conversationSignals += 1;
             }
           }
@@ -588,7 +603,7 @@ const syncLiveSocial = async () => {
           notes.push(`instagram_inbox:${safeError(inboxError)}`);
         }
       } else if (type === "facebook_page") {
-        const feed = await graphRequest(graphJson(`${asset.external_id}/feed?${new URLSearchParams({ fields: "id,message,created_time,permalink_url,full_picture,attachments{media,target,type,url,subattachments},comments.limit(25){id,message,created_time}", limit: "25" })}`), { token });
+        const feed = await graphRequest(graphJson(`${asset.external_id}/feed?${new URLSearchParams({ fields: "id,message,created_time,permalink_url,full_picture,attachments{media,target,type,url,subattachments},comments.limit(25){id,message,created_time,from}", limit: "25" })}`), { token });
         const items = (Array.isArray(feed.data) ? feed.data : []) as Array<Record<string, unknown>>;
         const insights = new Map<string, Record<string, unknown>>();
         await Promise.all(items.map(async (item) => {
@@ -613,9 +628,13 @@ const syncLiveSocial = async () => {
           for (const comment of (Array.isArray(commentsField?.data) ? commentsField?.data : []) as Array<Record<string, unknown>>) {
             const commentId = String(comment.id || "");
             if (!commentId) continue;
+            const author = comment.from && typeof comment.from === "object" ? comment.from as Record<string, unknown> : {};
+            if (isOwnAuthor(author, asset)) continue;
             await recordConversationSignal("facebook", `facebook-comment:${commentId}`, {
-              parent_id: externalId, external_message_id: commentId, text: String(comment.message || ""),
-              contact_label: "Facebook user", timestamp: comment.created_time || null,
+              kind: "comment", source_type: "comment", parent_id: externalId, parent_permalink: item.permalink_url || null,
+              parent_copy: String(item.message || ""), parent_content_type: item.full_picture || item.attachments ? "image" : "text",
+              external_message_id: commentId, text: String(comment.message || ""), author_id: author.id || null,
+              author_username: author.name || null, contact_label: String(author.name || "Facebook user"), timestamp: comment.created_time || null,
             });
             conversationSignals += 1;
           }
@@ -629,7 +648,9 @@ const syncLiveSocial = async () => {
               if (String(from.id || "") === String(asset.external_id)) continue;
               const messageId = String(message.id || "");
               if (!messageId) continue;
-              await recordConversationSignal("facebook", `facebook-message:${messageId}`, { kind: "message", external_message_id: messageId, sender_id: from.id || null, contact_label: from.name || "Messenger user", text: String(message.message || ""), timestamp: message.created_time || null, conversation_id: conversation.id || null });
+              const messageText = String(message.message || "").trim();
+              if (!messageText) continue;
+              await recordConversationSignal("facebook", `facebook-message:${messageId}`, { kind: "message", source_type: "inbox", inbox_label: "Facebook Messenger", external_message_id: messageId, sender_id: from.id || null, contact_label: from.name || "Messenger user", text: messageText, timestamp: message.created_time || null, conversation_id: conversation.id || null });
               conversationSignals += 1;
             }
           }
@@ -673,6 +694,24 @@ const syncLiveSocial = async () => {
             }, performance: insights.get(externalId) || {},
           });
           imported += 1;
+          try {
+            const replies = await graphRequest(threadsJson(`${externalId}/replies?${new URLSearchParams({ fields: "id,text,username,timestamp,permalink,from", limit: "25" })}`), { token });
+            for (const reply of (Array.isArray(replies.data) ? replies.data : []) as Array<Record<string, unknown>>) {
+              const replyId = String(reply.id || "");
+              if (!replyId) continue;
+              const author = reply.from && typeof reply.from === "object" ? reply.from as Record<string, unknown> : { username: reply.username };
+              if (isOwnAuthor(author, asset)) continue;
+              await recordConversationSignal("threads", `threads-reply:${replyId}`, {
+                kind: "reply", source_type: "reply", parent_id: externalId, parent_permalink: item.permalink || null,
+                parent_copy: String(item.text || ""), parent_content_type: contentTypeFromMedia(item.media_type), external_message_id: replyId,
+                text: String(reply.text || ""), author_id: author.id || null, author_username: author.username || reply.username || null,
+                contact_label: String(reply.username || author.name || "Threads user"), timestamp: reply.timestamp || null,
+              });
+              conversationSignals += 1;
+            }
+          } catch (replyError) {
+            notes.push(`threads_replies:${safeError(replyError)}`);
+          }
         }
       } else if (type === "ad_account") {
         const today = new Date();

@@ -21,12 +21,13 @@ const validSignature = async (raw: string, provided: string) => {
   return timingSafeEqual(`sha256=${hex(new Uint8Array(digest))}`, provided);
 };
 
-const triage = (value: string) => {
+const triage = (value: string, kind = "message") => {
   const text = value.toLowerCase();
+  const isComment = kind === "comment" || kind === "reply";
   if (["vet", "bleeding", "poison", "emergency", "injured", "legal", "privacy", "refund", "harass", "abuse", "torture", "murder", "kill"].some((term) => text.includes(term))) return { classification: "sensitive support", risk: "sensitive", reply_status: "needs_approval", agent_draft: "Thanks for telling us. We’re taking this seriously and have passed it to the right person at huddle to review. If an animal is in immediate danger, please contact a local vet or emergency service now." };
   if (["where are you based", "where are you from", "which country"].some((term) => text.includes(term))) return { classification: "location question", risk: "routine", reply_status: "ready", agent_draft: "huddle is operating across the UK and Asia first. Is there something you’d like help with where you are?" };
-  if (["missing", "lost", "last seen"].some((term) => text.includes(term))) return { classification: "community support", risk: "review", reply_status: "ready", agent_draft: "Thanks for sharing this. We really hope they’re home soon. Please keep personal contact details out of public messages and use DMs for anything private." };
-  return { classification: "general message", risk: "routine", reply_status: "ready", agent_draft: "Thanks for messaging huddle. We’ve got this — could you share a little more detail so we can give you the right answer?" };
+  if (["missing", "lost", "last seen"].some((term) => text.includes(term))) return { classification: "community support", risk: "review", reply_status: "ready", agent_draft: isComment ? "Hope they’re home soon — keeping the private details in DMs is the move." : "Hey — I hope they’re home soon. Send the private details by DM rather than posting contact information publicly." };
+  return { classification: "general message", risk: "routine", reply_status: "ready", agent_draft: isComment ? "Honestly 😭 they notice more than we think." : "Hey — tell us a bit more and we’ll point you in the right direction." };
 };
 
 serve(async (req: Request) => {
@@ -66,6 +67,10 @@ serve(async (req: Request) => {
         const platform = provider === "whatsapp" ? "whatsapp" : objectName.includes("instagram") ? "instagram" : (Object.keys(message).length || objectName.includes("page") ? "facebook" : "");
         const externalEventId = String(event.id || message.id || value.id || `${entry.id || "entry"}:${JSON.stringify(event).slice(0, 240)}`);
         const eventType = String(event.field || event.type || (event.value && typeof event.value === "object" ? (event.value as Record<string, unknown>).messaging_product : "meta_event"));
+        const hasWhatsAppMessage = provider === "whatsapp" && whatsappMessages.length > 0;
+        // Delivery/read/status callbacks are operational events, not conversations.
+        if (provider === "whatsapp" && (!hasWhatsAppMessage || !text.trim())) continue;
+        const kind = platform === "whatsapp" ? "message" : (message.comment_id || eventType.toLowerCase().includes("comment") ? "comment" : "message");
         const compact = {
           object: payload.object,
           entry_id: entry.id,
@@ -78,9 +83,12 @@ serve(async (req: Request) => {
           from: whatsappMessage.from || null,
           contact_label: whatsappContact.name || null,
           text: text || null,
+          kind,
+          source_type: kind === "comment" ? "comment" : "inbox",
+          inbox_label: kind === "comment" ? null : platform === "instagram" ? "Instagram inbox" : platform === "facebook" ? "Facebook Messenger" : "WhatsApp inbox",
           timestamp: whatsappMessage.timestamp || null,
           value: event.value || event.message || null,
-          ...triage(text),
+          ...triage(text, kind),
         };
         const { error } = await supabase.from("huddle_growth_webhook_events").insert({ provider, external_event_id: externalEventId, event_type: eventType, payload: compact });
         if (!error || error.code === "23505") accepted += 1;
