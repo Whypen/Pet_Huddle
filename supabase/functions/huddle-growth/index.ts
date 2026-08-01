@@ -399,10 +399,11 @@ const classifyConversation = (textValue: unknown) => {
 
 const recordConversationSignal = async (platform: "instagram" | "facebook" | "threads", externalEventId: string, payload: Record<string, unknown>) => {
   const triage = classifyConversation(payload.text);
+  const kind = String(payload.kind || "comment");
   const { error } = await supabase.from("huddle_growth_webhook_events").upsert({
     provider: "meta",
     external_event_id: externalEventId,
-    event_type: `${platform}_comment`,
+    event_type: `${platform}_${kind}`,
     payload: { platform, source: "live_sync", received_at: new Date().toISOString(), ...triage, ...payload },
   }, { onConflict: "provider,external_event_id" });
   if (error) throw error;
@@ -492,6 +493,22 @@ const syncLiveSocial = async () => {
             conversationSignals += 1;
           }
         }
+        try {
+          const conversations = await graphRequest(graphJson(`${asset.external_id}/conversations?${new URLSearchParams({ platform: "instagram", fields: "id,updated_time,participants,messages.limit(25){id,message,created_time,from,to}", limit: "25" })}`), { token });
+          for (const conversation of (Array.isArray(conversations.data) ? conversations.data : []) as Array<Record<string, unknown>>) {
+            const messages = conversation.messages && typeof conversation.messages === "object" ? conversation.messages as Record<string, unknown> : {};
+            for (const message of (Array.isArray(messages.data) ? messages.data : []) as Array<Record<string, unknown>>) {
+              const from = message.from && typeof message.from === "object" ? message.from as Record<string, unknown> : {};
+              if (String(from.id || "") === String(asset.external_id)) continue;
+              const messageId = String(message.id || "");
+              if (!messageId) continue;
+              await recordConversationSignal("instagram", `instagram-message:${messageId}`, { kind: "message", external_message_id: messageId, sender_id: from.id || null, contact_label: from.name || "Instagram user", text: String(message.message || ""), timestamp: message.created_time || null, conversation_id: conversation.id || null });
+              conversationSignals += 1;
+            }
+          }
+        } catch (inboxError) {
+          notes.push(`instagram_inbox:${safeError(inboxError)}`);
+        }
       } else if (type === "facebook_page") {
         const feed = await graphRequest(graphJson(`${asset.external_id}/feed?${new URLSearchParams({ fields: "id,message,created_time,permalink_url,full_picture,attachments{media,target,type,url,subattachments},comments.limit(25){id,message,created_time}", limit: "25" })}`), { token });
         const items = (Array.isArray(feed.data) ? feed.data : []) as Array<Record<string, unknown>>;
@@ -524,6 +541,22 @@ const syncLiveSocial = async () => {
             });
             conversationSignals += 1;
           }
+        }
+        try {
+          const conversations = await graphRequest(graphJson(`${asset.external_id}/conversations?${new URLSearchParams({ fields: "id,updated_time,participants,messages.limit(25){id,message,created_time,from,to}", limit: "25" })}`), { token });
+          for (const conversation of (Array.isArray(conversations.data) ? conversations.data : []) as Array<Record<string, unknown>>) {
+            const messages = conversation.messages && typeof conversation.messages === "object" ? conversation.messages as Record<string, unknown> : {};
+            for (const message of (Array.isArray(messages.data) ? messages.data : []) as Array<Record<string, unknown>>) {
+              const from = message.from && typeof message.from === "object" ? message.from as Record<string, unknown> : {};
+              if (String(from.id || "") === String(asset.external_id)) continue;
+              const messageId = String(message.id || "");
+              if (!messageId) continue;
+              await recordConversationSignal("facebook", `facebook-message:${messageId}`, { kind: "message", external_message_id: messageId, sender_id: from.id || null, contact_label: from.name || "Messenger user", text: String(message.message || ""), timestamp: message.created_time || null, conversation_id: conversation.id || null });
+              conversationSignals += 1;
+            }
+          }
+        } catch (inboxError) {
+          notes.push(`messenger_inbox:${safeError(inboxError)}`);
         }
         if ((Array.isArray(asset.granted_scopes) ? asset.granted_scopes.map(String) : []).includes("leads_retrieval")) {
           const forms = await graphRequest(graphJson(`${asset.external_id}/leadgen_forms?${new URLSearchParams({ fields: "id,name,status", limit: "50" })}`), { token });

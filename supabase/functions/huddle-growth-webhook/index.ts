@@ -56,11 +56,14 @@ serve(async (req: Request) => {
         const value = event.value && typeof event.value === "object" ? event.value as Record<string, unknown> : {};
         const whatsappMessages = Array.isArray(value.messages) ? value.messages as Array<Record<string, unknown>> : [];
         const whatsappContacts = Array.isArray(value.contacts) ? value.contacts as Array<Record<string, unknown>> : [];
-        const whatsappMessage = whatsappMessages[0] || {};
+        const valueMessage = whatsappMessages[0] || {};
+        const whatsappMessage = provider === "whatsapp" ? valueMessage : {};
         const whatsappContact = whatsappContacts[0]?.profile && typeof whatsappContacts[0].profile === "object" ? whatsappContacts[0].profile as Record<string, unknown> : {};
         const facebookText = message.text || (message.message && typeof message.message === "object" ? (message.message as Record<string, unknown>).text : "");
-        const text = String(whatsappMessage.text && typeof whatsappMessage.text === "object" ? (whatsappMessage.text as Record<string, unknown>).body || "" : facebookText || "");
-        const platform = provider === "whatsapp" ? "whatsapp" : (Object.keys(message).length ? "facebook" : "");
+        const valueText = valueMessage.text && typeof valueMessage.text === "object" ? (valueMessage.text as Record<string, unknown>).body : valueMessage.text;
+        const text = String(valueText || facebookText || value.message || "");
+        const objectName = String(payload.object || "").toLowerCase();
+        const platform = provider === "whatsapp" ? "whatsapp" : objectName.includes("instagram") ? "instagram" : (Object.keys(message).length || objectName.includes("page") ? "facebook" : "");
         const externalEventId = String(event.id || message.id || value.id || `${entry.id || "entry"}:${JSON.stringify(event).slice(0, 240)}`);
         const eventType = String(event.field || event.type || (event.value && typeof event.value === "object" ? (event.value as Record<string, unknown>).messaging_product : "meta_event"));
         const compact = {
@@ -70,8 +73,8 @@ serve(async (req: Request) => {
           event_id: externalEventId,
           received_at: new Date().toISOString(),
           platform: platform || null,
-          external_message_id: whatsappMessage.id || message.mid || message.id || null,
-          sender_id: whatsappMessage.from || (event.sender && typeof event.sender === "object" ? (event.sender as Record<string, unknown>).id : null) || null,
+          external_message_id: valueMessage.id || message.mid || message.id || null,
+          sender_id: valueMessage.from || (valueMessage.sender && typeof valueMessage.sender === "object" ? (valueMessage.sender as Record<string, unknown>).id : null) || (event.sender && typeof event.sender === "object" ? (event.sender as Record<string, unknown>).id : null) || null,
           from: whatsappMessage.from || null,
           contact_label: whatsappContact.name || null,
           text: text || null,
