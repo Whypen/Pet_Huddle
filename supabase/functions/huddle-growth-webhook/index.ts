@@ -21,15 +21,25 @@ const validSignature = async (raw: string, provided: string) => {
   return timingSafeEqual(`sha256=${hex(new Uint8Array(digest))}`, provided);
 };
 
-const triage = (value: string, kind = "message") => {
+const stableIndex = (value: string, length: number) => {
+  let hash = 0;
+  for (const character of value) hash = ((hash * 31) + character.charCodeAt(0)) >>> 0;
+  return length ? hash % length : 0;
+};
+
+const triage = (value: string, kind = "message", sender = "", eventId = "") => {
   const text = value.toLowerCase();
   const isComment = kind === "comment" || kind === "reply";
-  if (["vet", "bleeding", "poison", "emergency", "injured"].some((term) => text.includes(term))) return { classification: "animal safety", risk: "sensitive", reply_status: "needs_approval", agent_draft: isComment ? "This sounds urgent — please contact a local vet or emergency veterinary service now. We can’t assess an emergency from a comment." : "I’m sorry — this sounds urgent. Please contact a local vet or emergency veterinary service now. We can’t diagnose or assess an emergency from a message." };
-  if (["animal torture", "torture", "animal murder", "murder videos", "animal abuse", "kill animals", "killing animals"].some((term) => text.includes(term))) return { classification: "animal harm", risk: "sensitive", reply_status: "needs_approval", agent_draft: isComment ? "Yeah, this is horrifying. We’re not repeating the graphic details, but animal harm should never be treated like normal content." : "I’m sorry you had to see this. Please don’t send or repost graphic material. Share the public link only and we’ll review what can be reported safely." };
-  if (["legal", "privacy", "refund", "payment", "charged", "harass", "abuse", "scam"].some((term) => text.includes(term))) return { classification: "sensitive support", risk: "sensitive", reply_status: "needs_approval", agent_draft: isComment ? "We’re taking this seriously. Please DM us the details so nothing private ends up in public." : "I’m sorry you’re dealing with this. Share only what we need to review it — never send passwords, one-time codes, full card details, or ID." };
+  const cleanSender = sender.trim().replace(/^@/, "");
+  const generic = ["", "community member", "instagram user", "facebook user", "threads user", "messenger user"].includes(cleanSender.toLowerCase());
+  const address = generic ? "" : isComment && /^[a-z0-9._]+$/i.test(cleanSender) ? `@${cleanSender} ` : isComment ? `${cleanSender}, ` : `Hey ${cleanSender.split(/\s+/)[0]} — `;
+  const choose = (variants: string[]) => `${address}${variants[stableIndex(`${eventId}|${sender}|${value}`, variants.length)]}`;
+  if (["vet", "bleeding", "poison", "emergency", "injured"].some((term) => text.includes(term))) return { classification: "animal safety", risk: "sensitive", reply_status: "needs_approval", agent_draft: isComment ? choose(["this sounds urgent — please contact a local vet or emergency veterinary service now. We can’t assess an emergency from a comment."]) : `${address || "Hey — "}I’m sorry, this sounds urgent. Please contact a local vet or emergency veterinary service now. We can’t diagnose or assess an emergency from a message.` };
+  if (["animal torture", "torture", "animal murder", "murder videos", "animal abuse", "kill animals", "killing animals"].some((term) => text.includes(term))) return { classification: "animal harm", risk: "sensitive", reply_status: "needs_approval", agent_draft: isComment ? choose(["yeah, this is horrifying. We’re not repeating the graphic details, but animal harm should never be treated like normal content.", "this is genuinely awful. We won’t amplify the graphic details, but treating animal harm as normal content is never okay."]) : `${address || "Hey — "}I’m sorry you had to see this. Please don’t send or repost graphic material. Share the public link only and we’ll review what can be reported safely.` };
+  if (["legal", "privacy", "refund", "payment", "charged", "harass", "abuse", "scam"].some((term) => text.includes(term))) return { classification: "sensitive support", risk: "sensitive", reply_status: "needs_approval", agent_draft: isComment ? choose(["we’re taking this seriously. Please DM us the details so nothing private ends up in public.", "this deserves a careful look. Send us the details privately so nothing sensitive sits in the comments."]) : `${address || "Hey — "}I’m sorry you’re dealing with this. Share only what we need to review it — never send passwords, one-time codes, full card details, or ID.` };
   if (["where are you based", "where are you from", "which country"].some((term) => text.includes(term))) return { classification: "location question", risk: "routine", reply_status: "ready", agent_draft: "huddle is operating across the UK and Asia first. Is there something you’d like help with where you are?" };
-  if (["missing", "lost", "last seen"].some((term) => text.includes(term))) return { classification: "community support", risk: "review", reply_status: "ready", agent_draft: isComment ? "Hope they’re home soon — keeping the private details in DMs is the move." : "Hey — I hope they’re home soon. Send the private details by DM rather than posting contact information publicly." };
-  return { classification: "general message", risk: "routine", reply_status: "ready", agent_draft: isComment ? "Honestly 😭 they notice more than we think." : "Hey — tell us a bit more and we’ll point you in the right direction." };
+  if (["missing", "lost", "last seen"].some((term) => text.includes(term))) return { classification: "community support", risk: "review", reply_status: "ready", agent_draft: isComment ? choose(["really hope they’re home soon. Keeping contact details in DMs is the move.", "hoping they’re back safe soon 🤞 keep the private details out of the comments and in DMs."]) : `${address || "Hey — "}I hope they’re home soon. Send the private details by DM rather than posting contact information publicly.` };
+  return { classification: "general message", risk: "routine", reply_status: "ready", agent_draft: isComment ? choose(text.includes("?") ? ["wait, what happened? 👀", "okay we need the rest of this story 👀", "hold on — tell us more 😭"] : ["honestly 😭 they notice way more than we give them credit for.", "yeah 😭 the animal has already read the room.", "not them understanding the assignment before us."]) : `${address || "Hey — "}tell us a bit more and we’ll point you in the right direction.` };
 };
 
 serve(async (req: Request) => {
@@ -90,7 +100,7 @@ serve(async (req: Request) => {
           inbox_label: kind === "comment" ? null : platform === "instagram" ? "Instagram inbox" : platform === "facebook" ? "Facebook Messenger" : "WhatsApp inbox",
           timestamp: whatsappMessage.timestamp || null,
           value: event.value || event.message || null,
-          ...triage(text, kind),
+          ...triage(text, kind, String(whatsappContact.name || ""), externalEventId),
         };
         const { error } = await supabase.from("huddle_growth_webhook_events").insert({ provider, external_event_id: externalEventId, event_type: eventType, payload: compact });
         if (!error || error.code === "23505") accepted += 1;

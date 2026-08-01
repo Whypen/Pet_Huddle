@@ -432,10 +432,26 @@ const recordImportedContent = async (asset: Record<string, unknown>, input: {
   if (result.error) throw result.error;
 };
 
+const stableIndex = (value: string, length: number) => {
+  let hash = 0;
+  for (const character of value) hash = ((hash * 31) + character.charCodeAt(0)) >>> 0;
+  return length ? hash % length : 0;
+};
+
+const replyAddress = (context: Record<string, unknown>, isComment: boolean) => {
+  const raw = String(context.contact_label || context.author_username || "").trim().replace(/^@/, "");
+  if (!raw || ["community member", "instagram user", "facebook user", "threads user", "messenger user"].includes(raw.toLowerCase())) return "";
+  if (!isComment) return `Hey ${raw.split(/\s+/)[0]} — `;
+  return /^[a-z0-9._]+$/i.test(raw) ? `@${raw} ` : `${raw}, `;
+};
+
 const classifyConversation = (textValue: unknown, context: Record<string, unknown> = {}) => {
   const text = String(textValue || "").trim();
   const lower = text.toLowerCase();
   const isComment = String(context.kind || context.source_type || "").toLowerCase() === "comment" || String(context.kind || "").toLowerCase() === "reply";
+  const address = replyAddress(context, isComment);
+  const variantSeed = `${context.external_message_id || ""}|${context.contact_label || ""}|${text}`;
+  const choose = (variants: string[]) => `${address}${variants[stableIndex(variantSeed, variants.length)]}`;
   const has = (...terms: string[]) => terms.some((term) => lower.includes(term));
   const words = (...terms: string[]) => terms.some((term) => new RegExp(`\\b${term}\\b`, "i").test(text));
   if (has("where are you based", "where are you from", "which country", "what country")) return {
@@ -444,11 +460,11 @@ const classifyConversation = (textValue: unknown, context: Record<string, unknow
   };
   if (has("vet", "veterinary", "bleeding", "poison", "can't breathe", "cannot breathe", "seizure", "emergency", "dying", "injured")) return {
     classification: "animal safety", risk: "sensitive", reply_status: "needs_approval",
-    agent_draft: isComment ? "This sounds urgent — please contact a local vet or emergency veterinary service now. We can’t assess an emergency from a comment." : "I’m sorry — this sounds urgent. Please contact a local vet or emergency veterinary service now. We can’t diagnose or assess an emergency from a message.",
+    agent_draft: isComment ? choose(["this sounds urgent — please contact a local vet or emergency veterinary service now. We can’t assess an emergency from a comment."]) : `${address || "Hey — "}I’m sorry, this sounds urgent. Please contact a local vet or emergency veterinary service now. We can’t diagnose or assess an emergency from a message.`,
   };
   if (has("animal torture", "torture", "animal murder", "murder videos", "animal abuse", "kill animals", "killing animals")) return {
     classification: "animal harm", risk: "sensitive", reply_status: "needs_approval",
-    agent_draft: isComment ? "Yeah, this is horrifying. We’re not repeating the graphic details, but animal harm should never be treated like normal content." : "I’m sorry you had to see this. Please don’t send or repost graphic material. Share the public link only and we’ll review what can be reported safely.",
+    agent_draft: isComment ? choose(["yeah, this is horrifying. We’re not repeating the graphic details, but animal harm should never be treated like normal content.", "this is genuinely awful. We won’t amplify the graphic details, but treating animal harm as normal content is never okay."]) : `${address || "Hey — "}I’m sorry you had to see this. Please don’t send or repost graphic material. Share the public link only and we’ll review what can be reported safely.`,
   };
   if (has("suicide", "kill myself", "self harm", "self-harm")) return {
     classification: "crisis safety", risk: "sensitive", reply_status: "needs_approval",
@@ -456,31 +472,31 @@ const classifyConversation = (textValue: unknown, context: Record<string, unknow
   };
   if (has("lawyer", "legal", "police", "refund", "payment", "charged", "privacy", "harass", "abuse", "scam")) return {
     classification: "sensitive support", risk: "sensitive", reply_status: "needs_approval",
-    agent_draft: isComment ? "We’re taking this seriously. Please DM us the details so nothing private ends up in public." : "I’m sorry you’re dealing with this. Share only what we need to review it — never send passwords, one-time codes, full card details, or ID.",
+    agent_draft: isComment ? choose(["we’re taking this seriously. Please DM us the details so nothing private ends up in public.", "this deserves a careful look. Send us the details privately so nothing sensitive sits in the comments."]) : `${address || "Hey — "}I’m sorry you’re dealing with this. Share only what we need to review it — never send passwords, one-time codes, full card details, or ID.`,
   };
   if (words("partner", "partnership", "collab", "collaboration", "press", "sponsor")) return {
     classification: "partnership lead", risk: "review", reply_status: "ready",
-    agent_draft: "Thanks for reaching out — this sounds worth a proper look. Could you share a little more about the idea, your organisation, and the best email for us to follow up on?",
+    agent_draft: isComment ? choose(["okay, you’ve got our attention 👀 send the idea and the best contact by DM.", "this could be interesting 👀 drop us a DM with the idea and who we should speak to."]) : `${address || "Hey — "}this sounds worth a proper look. Share the idea, your organisation, and the best email for us to follow up on.`,
   };
   if (has("waitlist", "launch", "available", "download", "app", "sign up")) return {
     classification: "product question", risk: "routine", reply_status: "ready",
-    agent_draft: isComment ? "We’re rolling it out carefully — no fake launch date over here. What would you want huddle to do first?" : "Hey — we’re rolling this out carefully, so we don’t want to invent a date. Tell us where you are and what you’d want huddle to help with first.",
+    agent_draft: isComment ? choose(["we’re rolling it out carefully — no fake launch date over here. What would you want huddle to do first?", "still cooking, and we refuse to invent a launch date 😭 what would you want huddle to help with first?"]) : `${address || "Hey — "}we’re rolling this out carefully, so we don’t want to invent a date. Tell us where you are and what you’d want huddle to help with first.`,
   };
   if (has("missing", "lost", "reward", "last seen")) return {
     classification: "community support", risk: "review", reply_status: "ready",
-    agent_draft: isComment ? "Hope they’re home soon — keeping the private details in DMs is the move." : "Hey — I hope they’re home soon. Send the private details by DM rather than posting contact information publicly.",
+    agent_draft: isComment ? choose(["really hope they’re home soon. Keeping contact details in DMs is the move.", "hoping they’re back safe soon 🤞 keep the private details out of the comments and in DMs."]) : `${address || "Hey — "}I hope they’re home soon. Send the private details by DM rather than posting contact information publicly.`,
   };
   if (has("ice water", "fresh water", "curtains", "blinds", "tower fan", "garden hose")) return {
     classification: "community care", risk: "routine", reply_status: "ready",
-    agent_draft: isComment ? "Okay this is actually useful. Saving that for the next heatwave 🫡" : "That’s a useful practical step. Tell us a little more about what’s working for you.",
+    agent_draft: isComment ? choose(["okay this is actually useful. Saving that for the next heatwave 🫡", "wait, this is a genuinely good shout 👀 adding it to the heatwave brain file."]) : `${address || "Hey — "}that’s a useful practical step. Tell us a little more about what’s working for you.`,
   };
   if (text.length <= 180) return {
     classification: "community comment", risk: "routine", reply_status: "ready",
-    agent_draft: isComment ? "Honestly 😭 they notice more than we think." : "Hey — tell us a bit more and we’ll point you in the right direction.",
+    agent_draft: isComment ? choose(lower.includes("?") ? ["wait, what happened? 👀", "okay we need the rest of this story 👀", "hold on — tell us more 😭"] : ["honestly 😭 they notice way more than we give them credit for.", "yeah 😭 the animal has already read the room.", "not them understanding the assignment before us.", "exactly. They clock the vibe before anyone says a word."]) : `${address || "Hey — "}tell us a bit more and we’ll point you in the right direction.`,
   };
   return {
     classification: "general message", risk: "routine", reply_status: "ready",
-    agent_draft: isComment ? "The internet is very confident for something that depends on the animal in front of you 😭 What happened?" : "Hey — tell us a little more and we’ll point you in the right direction.",
+    agent_draft: isComment ? choose(["the internet is very confident for something that depends on the animal in front of you 😭 what happened?", "there’s definitely more to this story 👀 what happened next?", "okay, we need context before the group chat starts guessing 😭"]) : `${address || "Hey — "}tell us a little more and we’ll point you in the right direction.`,
   };
 };
 
@@ -572,7 +588,9 @@ const syncLiveSocial = async () => {
             platform: "instagram", externalId, copy: String(item.caption || ""), publishedAt: String(item.timestamp || "") || null,
             contentType: contentTypeFromMedia(item.media_product_type || item.media_type), metadata: {
               permalink: item.permalink || null, media_type: item.media_type || null, media_product_type: item.media_product_type || null,
-              preview_url: item.thumbnail_url || item.media_url || null, children: mediaChildren(item.children),
+              preview_url: item.thumbnail_url || item.media_url || null, thumbnail_url: item.thumbnail_url || null,
+              media_url: item.media_url || null, video_url: String(item.media_type || "").toUpperCase().includes("VIDEO") || String(item.media_product_type || "").toUpperCase().includes("REEL") ? item.media_url || null : null,
+              children: mediaChildren(item.children),
             },
             performance: { like_count: item.like_count || 0, comments_count: item.comments_count || 0, ...(insights.get(externalId) || {}) },
           });
@@ -698,7 +716,9 @@ const syncLiveSocial = async () => {
             platform: "threads", externalId, copy: String(item.text || ""), publishedAt: String(item.timestamp || "") || null,
             contentType: contentTypeFromMedia(item.media_type), metadata: {
               permalink: item.permalink || null, media_type: item.media_type || null,
-              preview_url: item.thumbnail_url || item.media_url || null, children: mediaChildren(item.children),
+              preview_url: item.thumbnail_url || item.media_url || null, thumbnail_url: item.thumbnail_url || null,
+              media_url: item.media_url || null, video_url: String(item.media_type || "").toUpperCase().includes("VIDEO") ? item.media_url || null : null,
+              children: mediaChildren(item.children),
             }, performance: insights.get(externalId) || {},
           });
           imported += 1;
