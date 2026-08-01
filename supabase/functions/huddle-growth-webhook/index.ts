@@ -46,9 +46,28 @@ serve(async (req: Request) => {
       for (const event of events) {
         const message = event.message && typeof event.message === "object" ? event.message as Record<string, unknown> : {};
         const value = event.value && typeof event.value === "object" ? event.value as Record<string, unknown> : {};
+        const whatsappMessages = Array.isArray(value.messages) ? value.messages as Array<Record<string, unknown>> : [];
+        const whatsappContacts = Array.isArray(value.contacts) ? value.contacts as Array<Record<string, unknown>> : [];
+        const whatsappMessage = whatsappMessages[0] || {};
+        const whatsappContact = whatsappContacts[0]?.profile && typeof whatsappContacts[0].profile === "object" ? whatsappContacts[0].profile as Record<string, unknown> : {};
+        const facebookText = message.text || (message.message && typeof message.message === "object" ? (message.message as Record<string, unknown>).text : "");
+        const text = String(whatsappMessage.text && typeof whatsappMessage.text === "object" ? (whatsappMessage.text as Record<string, unknown>).body || "" : facebookText || "");
+        const platform = provider === "whatsapp" ? "whatsapp" : (Object.keys(message).length ? "facebook" : "");
         const externalEventId = String(event.id || message.id || value.id || `${entry.id || "entry"}:${JSON.stringify(event).slice(0, 240)}`);
         const eventType = String(event.field || event.type || (event.value && typeof event.value === "object" ? (event.value as Record<string, unknown>).messaging_product : "meta_event"));
-        const compact = { object: payload.object, entry_id: entry.id, field: eventType, event_id: externalEventId, received_at: new Date().toISOString(), value: event.value || event.message || null };
+        const compact = {
+          object: payload.object,
+          entry_id: entry.id,
+          field: eventType,
+          event_id: externalEventId,
+          received_at: new Date().toISOString(),
+          platform: platform || null,
+          external_message_id: whatsappMessage.id || message.mid || message.id || null,
+          contact_label: whatsappContact.name || null,
+          text: text || null,
+          timestamp: whatsappMessage.timestamp || null,
+          value: event.value || event.message || null,
+        };
         const { error } = await supabase.from("huddle_growth_webhook_events").insert({ provider, external_event_id: externalEventId, event_type: eventType, payload: compact });
         if (!error || error.code === "23505") accepted += 1;
       }

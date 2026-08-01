@@ -64,7 +64,7 @@ const storeConnection = async ({ provider, externalUserId, displayName, token, e
   expiresAt?: string | null;
   scopes: string[];
   metadata?: Record<string, unknown>;
-  createdBy: string;
+  createdBy: string | null;
 }) => {
   const encrypted = await encryptToken(token);
   const { data, error } = await supabase.from("huddle_growth_connections").upsert({
@@ -196,7 +196,7 @@ const requiredConfiguredSecret = (name: string) => {
 
 const configuredAssetId = (name: string) => requiredConfiguredSecret(name);
 
-const bootstrapConfiguredAssets = async (adminId: string) => {
+const bootstrapConfiguredAssets = async (adminId: string | null) => {
   const metaToken = requiredConfiguredSecret("META_ACCESS_TOKEN");
   const pageId = configuredAssetId("HUDDLE_FACEBOOK_PAGE_ID");
   const instagramId = configuredAssetId("HUDDLE_INSTAGRAM_ACCOUNT_ID");
@@ -246,6 +246,30 @@ const bootstrapConfiguredAssets = async (adminId: string) => {
     metadata: { account_status: adAccount.account_status || null, currency: adAccount.currency || null, source: "configured_asset_bootstrap" },
   });
   const assets: Record<string, unknown>[] = [facebookAsset, instagramAsset, adsAsset];
+  let whatsappError: string | null = null;
+  if (!missingScopes(grantedScopes, ["business_management", "whatsapp_business_management"]).length) {
+    try {
+      const businesses = await graphRequest(graphJson("me/businesses?fields=id,name"), { token: metaToken });
+      const failures: string[] = [];
+      for (const business of (Array.isArray(businesses.data) ? businesses.data : []) as Array<Record<string, unknown>>) {
+        try {
+          const wabas = await graphRequest(graphJson(`${String(business.id)}/owned_whatsapp_business_accounts?fields=id,name`), { token: metaToken });
+          for (const waba of (Array.isArray(wabas.data) ? wabas.data : []) as Array<Record<string, unknown>>) {
+            assets.push(await storeAsset(connectionId, { assetType: "whatsapp_business", externalId: String(waba.id), name: String(waba.name || waba.id), token: metaToken, scopes: grantedScopes, metadata: { business_id: business.id, source: "configured_asset_bootstrap" } }));
+            const phones = await graphRequest(graphJson(`${String(waba.id)}/phone_numbers?fields=id,display_phone_number,verified_name,quality_rating`), { token: metaToken });
+            for (const phone of (Array.isArray(phones.data) ? phones.data : []) as Array<Record<string, unknown>>) {
+              assets.push(await storeAsset(connectionId, { assetType: "whatsapp_phone", externalId: String(phone.id), name: String(phone.verified_name || phone.display_phone_number || phone.id), token: metaToken, scopes: grantedScopes, metadata: { waba_id: waba.id, source: "configured_asset_bootstrap", ...phone } }));
+            }
+          }
+        } catch (error) {
+          failures.push(safeError(error));
+        }
+      }
+      whatsappError = failures.length ? failures.join("; ") : null;
+    } catch (error) {
+      whatsappError = safeError(error);
+    }
+  }
   const threadsToken = String(Deno.env.get("THREADS_ACCESS_TOKEN") || "").trim();
   let threadsError: string | null = null;
   if (threadsToken) {
@@ -285,15 +309,152 @@ const bootstrapConfiguredAssets = async (adminId: string) => {
     connection_id: connectionId,
     action: "configured_assets_bootstrapped",
     platform: "meta",
-    details: { asset_types: assets.map((asset) => String(asset.asset_type || "")), threads_error: threadsError },
+    details: { asset_types: assets.map((asset) => String(asset.asset_type || "")), threads_error: threadsError, whatsapp_error: whatsappError },
   });
-  return { assets, threads_error: threadsError };
+  return { assets, threads_error: threadsError, whatsapp_error: whatsappError };
 };
 
 const resolveAssetToken = async (asset: Record<string, unknown>, connection: Record<string, unknown>) => {
   const assetCiphertext = String(asset.encrypted_access_token || "");
   if (assetCiphertext && asset.access_token_iv) return decryptToken(assetCiphertext, String(asset.access_token_iv));
   return readToken(connection);
+};
+
+const recordImportedContent = async (asset: Record<string, unknown>, input: {
+  platform: "instagram" | "threads" | "facebook";
+  externalId: string;
+  copy: string;
+  publishedAt?: string | null;
+  contentType: "text" | "image" | "video" | "carousel" | "reel";
+  metadata: Record<string, unknown>;
+  performance?: Record<string, unknown>;
+}) => {
+  const body = { copy: input.copy, imported_from: "meta_live_sync", ...input.metadata };
+  const row = {
+    platform: input.platform,
+    asset_id: String(asset.id),
+    external_id: input.externalId,
+    objective: "Live account activity",
+    content_type: input.contentType,
+    body,
+    performance: input.performance || {},
+    status: "published",
+    published_at: input.publishedAt || null,
+    updated_at: new Date().toISOString(),
+  };
+  const { data: existing, error: lookupError } = await supabase.from("huddle_growth_content")
+    .select("id")
+    .eq("platform", input.platform)
+    .eq("external_id", input.externalId)
+    .maybeSingle();
+  if (lookupError) throw lookupError;
+  const result = existing
+    ? await supabase.from("huddle_growth_content").update(row).eq("id", existing.id)
+    : await supabase.from("huddle_growth_content").insert(row);
+  if (result.error) throw result.error;
+};
+
+const recordConversationSignal = async (platform: "instagram" | "facebook" | "threads", externalEventId: string, payload: Record<string, unknown>) => {
+  const { error } = await supabase.from("huddle_growth_webhook_events").upsert({
+    provider: "meta",
+    external_event_id: externalEventId,
+    event_type: `${platform}_comment`,
+    payload: { platform, source: "live_sync", received_at: new Date().toISOString(), ...payload },
+  }, { onConflict: "provider,external_event_id", ignoreDuplicates: true });
+  if (error) throw error;
+};
+
+const contentTypeFromMedia = (value: unknown): "text" | "image" | "video" | "carousel" | "reel" => {
+  const type = String(value || "").toUpperCase();
+  if (type.includes("CAROUSEL")) return "carousel";
+  if (type.includes("REEL")) return "reel";
+  if (type.includes("VIDEO")) return "video";
+  return "image";
+};
+
+const syncLiveSocial = async () => {
+  const { data: assets, error: assetError } = await supabase.from("huddle_growth_assets").select("*").eq("status", "active");
+  if (assetError) throw assetError;
+  let imported = 0;
+  let conversationSignals = 0;
+  let performanceSnapshots = 0;
+  const notes: string[] = [];
+  for (const asset of (assets || []) as Array<Record<string, unknown>>) {
+    const type = String(asset.asset_type);
+    if (!['instagram_business', 'facebook_page', 'threads_profile', 'ad_account'].includes(type)) continue;
+    try {
+      const connection = await getConnection(String(asset.connection_id));
+      const token = await resolveAssetToken(asset, connection);
+      if (type === "instagram_business") {
+        const media = await graphRequest(graphJson(`${asset.external_id}/media?${new URLSearchParams({ fields: "id,caption,media_type,permalink,timestamp,like_count,comments_count", limit: "25" })}`), { token });
+        for (const item of (Array.isArray(media.data) ? media.data : []) as Array<Record<string, unknown>>) {
+          const externalId = String(item.id || "");
+          if (!externalId) continue;
+          await recordImportedContent(asset, {
+            platform: "instagram", externalId, copy: String(item.caption || ""), publishedAt: String(item.timestamp || "") || null,
+            contentType: contentTypeFromMedia(item.media_type), metadata: { permalink: item.permalink || null, media_type: item.media_type || null },
+            performance: { like_count: item.like_count || 0, comments_count: item.comments_count || 0 },
+          });
+          imported += 1;
+          const comments = await graphRequest(graphJson(`${externalId}/comments?${new URLSearchParams({ fields: "id,text,username,timestamp,like_count", limit: "25" })}`), { token });
+          for (const comment of (Array.isArray(comments.data) ? comments.data : []) as Array<Record<string, unknown>>) {
+            const commentId = String(comment.id || "");
+            if (!commentId) continue;
+            await recordConversationSignal("instagram", `instagram-comment:${commentId}`, {
+              parent_id: externalId, external_message_id: commentId, text: String(comment.text || ""),
+              contact_label: String(comment.username || "Instagram user"), timestamp: comment.timestamp || null,
+            });
+            conversationSignals += 1;
+          }
+        }
+      } else if (type === "facebook_page") {
+        const feed = await graphRequest(graphJson(`${asset.external_id}/feed?${new URLSearchParams({ fields: "id,message,created_time,permalink_url,comments.limit(25){id,message,created_time}", limit: "25" })}`), { token });
+        for (const item of (Array.isArray(feed.data) ? feed.data : []) as Array<Record<string, unknown>>) {
+          const externalId = String(item.id || "");
+          if (!externalId) continue;
+          await recordImportedContent(asset, {
+            platform: "facebook", externalId, copy: String(item.message || ""), publishedAt: String(item.created_time || "") || null,
+            contentType: "text", metadata: { permalink: item.permalink_url || null }, performance: {},
+          });
+          imported += 1;
+          const commentsField = item.comments as Record<string, unknown> | undefined;
+          for (const comment of (Array.isArray(commentsField?.data) ? commentsField?.data : []) as Array<Record<string, unknown>>) {
+            const commentId = String(comment.id || "");
+            if (!commentId) continue;
+            await recordConversationSignal("facebook", `facebook-comment:${commentId}`, {
+              parent_id: externalId, external_message_id: commentId, text: String(comment.message || ""),
+              contact_label: "Facebook user", timestamp: comment.created_time || null,
+            });
+            conversationSignals += 1;
+          }
+        }
+      } else if (type === "threads_profile") {
+        const threads = await graphRequest(threadsJson(`${asset.external_id}/threads?${new URLSearchParams({ fields: "id,text,permalink,timestamp,media_type", limit: "25" })}`), { token });
+        for (const item of (Array.isArray(threads.data) ? threads.data : []) as Array<Record<string, unknown>>) {
+          const externalId = String(item.id || "");
+          if (!externalId) continue;
+          await recordImportedContent(asset, {
+            platform: "threads", externalId, copy: String(item.text || ""), publishedAt: String(item.timestamp || "") || null,
+            contentType: contentTypeFromMedia(item.media_type), metadata: { permalink: item.permalink || null, media_type: item.media_type || null }, performance: {},
+          });
+          imported += 1;
+        }
+      } else if (type === "ad_account") {
+        const today = new Date();
+        const periodEnd = today.toISOString().slice(0, 10);
+        const periodStart = new Date(today.getTime() - 29 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+        const insight = await graphRequest(graphJson(`${asset.external_id}/insights?${new URLSearchParams({ fields: "impressions,reach,spend,clicks,ctr,cpm,cpc,actions", date_preset: "last_30d" })}`), { token });
+        const metrics = ((Array.isArray(insight.data) ? insight.data[0] : null) || {}) as Record<string, unknown>;
+        const { error } = await supabase.from("huddle_growth_performance").upsert({ asset_id: asset.id, platform: "ads", external_id: String(asset.external_id), period_start: periodStart, period_end: periodEnd, metrics, source_updated_at: new Date().toISOString() }, { onConflict: "asset_id,external_id,period_start,period_end" });
+        if (error) throw error;
+        performanceSnapshots += 1;
+      }
+    } catch (error) {
+      notes.push(`${type}:${safeError(error)}`);
+    }
+  }
+  await supabase.from("huddle_growth_audit_logs").insert({ action: "live_social_synced", platform: "system", details: { imported, conversation_signals: conversationSignals, performance_snapshots: performanceSnapshots, notes } });
+  return { imported, conversation_signals: conversationSignals, performance_snapshots: performanceSnapshots, notes };
 };
 
 const executeAction = async (action: Record<string, unknown>) => {
@@ -447,17 +608,19 @@ const startOAuth = async (req: Request, provider: "meta" | "threads", adminId: s
 };
 
 const getConsole = async () => {
-  const [connections, assets, content, actions, approvals, policy, audit] = await Promise.all([
+  const [connections, assets, content, events, performance, actions, approvals, policy, audit] = await Promise.all([
     supabase.from("huddle_growth_connections").select("id,provider,external_user_id,display_name,status,token_expires_at,granted_scopes,metadata,last_synced_at,last_error,created_at,updated_at").order("created_at", { ascending: false }),
     supabase.from("huddle_growth_assets").select("id,connection_id,asset_type,external_id,name,status,granted_scopes,metadata,last_synced_at,updated_at").order("updated_at", { ascending: false }),
     supabase.from("huddle_growth_content").select("id,platform,asset_id,campaign_name,objective,content_type,body,status,scheduled_at,published_at,external_id,performance,created_at,updated_at").order("updated_at", { ascending: false }).limit(100),
+    supabase.from("huddle_growth_webhook_events").select("id,provider,external_event_id,event_type,payload,processed_at,error,created_at").order("created_at", { ascending: false }).limit(100),
+    supabase.from("huddle_growth_performance").select("id,asset_id,platform,external_id,period_start,period_end,metrics,source_updated_at,created_at").order("period_end", { ascending: false }).limit(50),
     supabase.from("huddle_growth_actions").select("id,action_type,platform,asset_id,content_id,payload,risk_level,status,idempotency_key,attempts,max_attempts,next_retry_at,requested_by,approved_by,started_at,completed_at,last_error,result,created_at,updated_at").in("status", ["queued", "awaiting_approval", "running", "failed"]).order("created_at", { ascending: false }).limit(100),
     supabase.from("huddle_growth_approvals").select("id,action_id,status,note,requested_by,decided_by,decided_at,created_at").eq("status", "pending").order("created_at", { ascending: false }).limit(100),
     supabase.from("huddle_growth_budget_policies").select("emergency_stop,daily_spend_cap_minor,monthly_spend_cap_minor,max_auto_budget_increase_percent,auto_pause_enabled,auto_pause_ctr_threshold,auto_pause_cpl_threshold_minor,allowed_actions,updated_at").eq("id", true).maybeSingle(),
     supabase.from("huddle_growth_audit_logs").select("id,actor_id,action_id,connection_id,action,platform,details,created_at").order("created_at", { ascending: false }).limit(100),
   ]);
-  for (const result of [connections, assets, content, actions, approvals, policy, audit]) if (result.error) throw result.error;
-  return { connections: connections.data || [], assets: assets.data || [], content: content.data || [], actions: actions.data || [], approvals: approvals.data || [], policy: policy.data || {}, audit: audit.data || [] };
+  for (const result of [connections, assets, content, events, performance, actions, approvals, policy, audit]) if (result.error) throw result.error;
+  return { connections: connections.data || [], assets: assets.data || [], content: content.data || [], events: events.data || [], performance: performance.data || [], actions: actions.data || [], approvals: approvals.data || [], policy: policy.data || {}, audit: audit.data || [] };
 };
 
 const queueAction = async (adminId: string, body: Record<string, unknown>) => {
@@ -508,7 +671,11 @@ const generateContent = async (body: Record<string, unknown>) => {
   const platform = String(body.platform || "Threads");
   const objective = String(body.objective || "useful local pet-safety awareness");
   const brief = String(body.brief || "").trim();
-  const system = "You are huddle’s official social media manager. huddle helps people turn care into local action: pet safety, community, trusted care, and pet-life continuity. Write concise, warm, witty, culturally awake, useful, human copy. Never use generic pet puns, corporate language, guilt, panic, rescue-saviour language, or empty engagement bait. Give one true thought or one clear, safe action. Safety is calm and exact; care is specific and never guaranteed; education is not veterinary advice. Never invent Huddle traction, users, partnerships, funding, product capability, locations, market availability, or outcomes. Do not volunteer where huddle is from, headquartered, founded, incorporated, or where its team lives. Only if directly asked, the approved answer is: ‘huddle is operating across the UK and Asia first.’ Do not name a city, country, launch date, or availability unless it is confirmed. Return only the final post copy, with no quotation marks or explanation.";
+  const system = `You are huddle’s official social media manager. You are not making pet content. You are building huddle’s philosophy: animals are lives, not property; caring should not be a niche; small actions matter; communities protect better than individuals; huddle makes caring easier, never replaces rescuers; the world changes when caring becomes ordinary.
+
+Write like a Gen Z friend sharing a real 2am thought: blunt, kind, curious, vulnerable and direct. It should make someone save it, share it, or quietly think about it later. Never preach, motivate, sound like AI, explain too much, use poetry filler, generic pet puns, corporate language, guilt, panic, rescue-saviour language, clickbait, listicles, repetitive sentence structure, or empty engagement bait. Do not give veterinary, legal, financial, or crisis advice. Never invent Huddle traction, users, partnerships, funding, product capability, locations, market availability, outcomes, or claims. Do not volunteer where huddle is from, headquartered, founded, incorporated, or where its team lives. Only if directly asked, the approved answer is: “huddle is operating across the UK and Asia first.” Do not name a city, country, launch date, or availability unless it is confirmed.
+
+Return valid JSON only, with exactly these keys: post_type, hooks, topic_direction, cover_copy, image_copy, caption. hooks must contain 10-20 distinct curiosity hooks. post_type must be one of Carousel, Reel, Single image, Threads, Story, Short video. topic_direction explains what we are really talking about, why it matters, and the perspective shift. cover_copy is one short sentence. image_copy is one thought per slide; every line introduces a new thought. caption expands the thought without repeating slides. Hooks are curiosity, not clickbait.`;
   const input = `Platform: ${platform}\nObjective: ${objective}\nBrief: ${brief || "Create one strong launch-ready idea for Huddle."}`;
   const response = await fetch("https://api.openai.com/v1/responses", { method: "POST", headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }, body: JSON.stringify({ model, store: false, input: [{ role: "developer", content: [{ type: "input_text", text: system }] }, { role: "user", content: [{ type: "input_text", text: input }] }] }) });
   const raw = await response.text();
@@ -517,10 +684,57 @@ const generateContent = async (body: Record<string, unknown>) => {
   if (!response.ok) throw new Error(`openai_request_failed:${response.status}`);
   const outputText = String(parsed.output_text || ((Array.isArray(parsed.output) ? parsed.output : []).flatMap((item) => (item && typeof item === "object" && Array.isArray((item as Record<string, unknown>).content) ? (item as Record<string, unknown>).content as Array<Record<string, unknown>> : [])).map((item) => String(item.text || "")).filter(Boolean).join("\n")) || "").trim();
   if (!outputText) throw new Error("openai_empty_response");
-  return { copy: outputText, model };
+  let plan: Record<string, unknown>;
+  try { plan = JSON.parse(outputText) as Record<string, unknown>; } catch { throw new Error("openai_invalid_content_plan"); }
+  const hooks = Array.isArray(plan.hooks) ? plan.hooks.map(String).filter(Boolean).slice(0, 20) : [];
+  const imageCopy = Array.isArray(plan.image_copy) ? plan.image_copy.map(String).filter(Boolean).slice(0, 12) : [];
+  const caption = String(plan.caption || "").trim();
+  if (!caption || hooks.length < 10 || !String(plan.topic_direction || "").trim() || !String(plan.cover_copy || "").trim()) throw new Error("openai_incomplete_content_plan");
+  return { copy: caption, model, plan: { post_type: String(plan.post_type || "Carousel"), hooks, topic_direction: String(plan.topic_direction), cover_copy: String(plan.cover_copy), image_copy: imageCopy, caption } };
 };
 
-const createContentPack = async (adminId: string, body: Record<string, unknown>) => {
+const fallbackPhilosophyPlan = (platform: string) => {
+  const hooks = [
+    "An animal can be loved and still be treated like an accessory.",
+    "We say “my dog” like the whole day belongs to us.",
+    "Maybe care starts before something is wrong.",
+    "It’s strange how quickly a life becomes “just a pet.”",
+    "Animals don’t need a perfect person. They need someone who notices.",
+    "Love gets practical faster than people think.",
+    "A pet isn’t low maintenance. They’re trusting you quietly.",
+    "The bare minimum can still feel like love to someone dependent on you.",
+    "Maybe being responsible is just refusing to look away.",
+    "They don’t ask for much. That is not the same as needing little.",
+    "A lot of care is boring. That’s why it matters.",
+    "The world gets softer when care stops being a personality trait.",
+  ];
+  const plan = platform === "threads"
+    ? {
+      post_type: "Threads", hooks,
+      topic_direction: "We are talking about the quiet imbalance in a human–animal relationship: they depend on us without being able to negotiate the terms. The perspective shift is from feeling affectionate to being attentive.",
+      cover_copy: "They don’t ask for much. That’s not the same as needing little.",
+      image_copy: [],
+      caption: "I keep thinking about how easy it is to call an animal “low maintenance” when they can’t really tell us when something feels off.\n\nThey just adjust around us.\n\nMaybe care is noticing before they have to make it obvious.",
+    }
+    : {
+      post_type: platform === "facebook" ? "Single image" : "Carousel", hooks,
+      topic_direction: "We are talking about how affection can make us feel like we are already doing enough. It matters because animals live inside the systems we create for them. The perspective shift is from “I love them” to “does their life actually feel considered?”",
+      cover_copy: "They don’t ask for much. That’s not the same as needing little.",
+      image_copy: [
+        "They live in our homes.",
+        "But they also live around our moods, plans and blind spots.",
+        "Most of the time, they just adapt.",
+        "That can look a lot like being easy.",
+        "It isn’t.",
+        "They’re trusting us to notice the things they can’t explain.",
+        "Maybe that’s what care is.",
+      ],
+      caption: "We talk about loving animals like it’s a feeling.\n\nBut a lot of love is checking the small stuff before it becomes a big thing.\n\nNot because you’re trying to be perfect.\n\nBecause someone’s whole little world is built around the choices you barely think about.",
+    };
+  return { copy: plan.caption, model: "huddle_curated_starter", plan };
+};
+
+const createContentPack = async (adminId: string | null, body: Record<string, unknown>) => {
   const objective = String(body.objective || "Build useful local awareness").trim().slice(0, 140);
   const direction = String(body.direction || "").trim().slice(0, 1200);
   const assetMap: Record<string, string> = {
@@ -533,20 +747,33 @@ const createContentPack = async (adminId: string, body: Record<string, unknown>)
   if (!platforms.length) throw new Error("content_platform_required");
   const { data: assets, error: assetError } = await supabase.from("huddle_growth_assets").select("id,asset_type,name,status").eq("status", "active");
   if (assetError) throw assetError;
+  const { data: recent, error: recentError } = await supabase.from("huddle_growth_content").select("platform,body,published_at").eq("status", "published").order("published_at", { ascending: false }).limit(12);
+  if (recentError) throw recentError;
+  const recentContext = (recent || []).map((row) => {
+    const content = row.body && typeof row.body === "object" ? row.body as Record<string, unknown> : {};
+    return `${row.platform}: ${String(content.copy || "").slice(0, 280)}`;
+  }).filter(Boolean).join("\n");
   const drafts: Record<string, unknown>[] = [];
   for (const platform of platforms) {
     const asset = (assets || []).find((item) => item.asset_type === assetMap[platform]);
     if (!asset) continue;
-    const generated = await generateContent({
-      platform: platform === "instagram" ? "Instagram" : platform === "threads" ? "Threads" : "Facebook Page",
-      objective,
-      brief: `${direction || "Choose the strongest current Huddle story."}\nCreate a platform-native draft that is useful, truthful, and ready for the founder’s final edit.`,
-    });
+    let generated: Awaited<ReturnType<typeof generateContent>> | ReturnType<typeof fallbackPhilosophyPlan>;
+    try {
+      generated = await generateContent({
+        platform: platform === "instagram" ? "Instagram" : platform === "threads" ? "Threads" : "Facebook Page",
+        objective,
+        brief: `${direction || "Choose the strongest current Huddle story."}\nCreate a platform-native, philosophy-led content plan ready for the founder’s final edit.\nRecent account context (do not repeat it):\n${recentContext || "No prior posts are available yet."}`,
+      });
+    } catch (error) {
+      if (safeError(error) !== "openai_api_key_missing") throw error;
+      generated = fallbackPhilosophyPlan(platform);
+    }
     const contentType = platform === "instagram" ? "image" : "text";
     const draftBody = {
       copy: generated.copy,
+      plan: generated.plan,
       direction: direction || null,
-      visual_brief: platform === "instagram" ? `Create a candid, real-feeling pet-world visual for: ${objective}. Avoid stock imagery, generic pet tips, and unverified product claims.` : null,
+      visual_brief: platform === "instagram" ? "Build the carousel from the approved cover and slide copy. It should feel candid, real, and human; never stock, generic pet-tip content, or an unverified product claim." : null,
       generated_by: "huddle_growth_agent",
       model: generated.model,
     };
@@ -668,7 +895,7 @@ serve(async (req: Request) => {
   try {
     const body = req.method === "POST" ? await req.json().catch(() => ({})) as Record<string, unknown> : {};
     const operation = String(body.operation || url.searchParams.get("operation") || "");
-    const workerOperation = operation === "run_worker" || operation === "run_action";
+    const workerOperation = ["run_worker", "run_action", "bootstrap_configured_assets", "sync_live_social", "prepare_content_pack", "retention_cleanup"].includes(operation);
     let adminId = "";
     if (workerOperation && !getBearerToken(req)) requireWorker(req);
     else adminId = (await requireAdmin(req, supabase)).id;
@@ -680,8 +907,21 @@ serve(async (req: Request) => {
       return json({ console: await getConsole() });
     }
     if (operation === "bootstrap_configured_assets") {
-      const bootstrap = await bootstrapConfiguredAssets(adminId);
+      const bootstrap = await bootstrapConfiguredAssets(adminId || null);
       return json({ ...bootstrap, console: await getConsole() });
+    }
+    if (operation === "sync_live_social") {
+      if (!workerOperation) throw new Error("worker_required");
+      return json({ ...await syncLiveSocial(), console: await getConsole() });
+    }
+    if (operation === "prepare_content_pack") {
+      if (!workerOperation) throw new Error("worker_required");
+      const defaults = {
+        objective: "Make people rethink what it means to care for an animal",
+        direction: "Build a philosophy-led post around this thought: an animal is not a smaller version of a human life. Their life still has a whole centre. Make it feel like an honest realisation, not a lesson. Use the recent huddle account activity as context, but do not repeat it.",
+        platforms: ["instagram", "threads", "facebook"],
+      };
+      return json({ ...await createContentPack(adminId || null, { ...defaults, ...body }), console: await getConsole() });
     }
     if (operation === "discover") {
       const connection = await getConnection(String(body.connection_id || ""));
