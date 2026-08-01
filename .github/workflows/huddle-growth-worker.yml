@@ -1,0 +1,29 @@
+name: Huddle Growth worker
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: huddle-growth-worker
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Run maintenance cycle
+        env:
+          GROWTH_WORKER_SECRET: ${{ secrets.GROWTH_WORKER_SECRET }}
+        run: |
+          test -n "$GROWTH_WORKER_SECRET"
+          curl --fail-with-body --silent --show-error \
+            'https://ztrbourwcnhrpmzwlrcn.supabase.co/functions/v1/huddle-growth' \
+            -H 'content-type: application/json' \
+            -H "x-growth-worker-secret: $GROWTH_WORKER_SECRET" \
+            --data '{"operation":"maintenance_cycle"}'
