@@ -386,7 +386,7 @@ const syncLiveSocial = async () => {
       const connection = await getConnection(String(asset.connection_id));
       const token = await resolveAssetToken(asset, connection);
       if (type === "instagram_business") {
-        const media = await graphRequest(graphJson(`${asset.external_id}/media?${new URLSearchParams({ fields: "id,caption,media_type,permalink,timestamp,like_count,comments_count", limit: "25" })}`), { token });
+        const media = await graphRequest(graphJson(`${asset.external_id}/media?${new URLSearchParams({ fields: "id,caption,media_type,permalink,timestamp,like_count,comments_count,comments.limit(25){id,text,username,timestamp,like_count}", limit: "25" })}`), { token });
         for (const item of (Array.isArray(media.data) ? media.data : []) as Array<Record<string, unknown>>) {
           const externalId = String(item.id || "");
           if (!externalId) continue;
@@ -396,8 +396,8 @@ const syncLiveSocial = async () => {
             performance: { like_count: item.like_count || 0, comments_count: item.comments_count || 0 },
           });
           imported += 1;
-          const comments = await graphRequest(graphJson(`${externalId}/comments?${new URLSearchParams({ fields: "id,text,username,timestamp,like_count", limit: "25" })}`), { token });
-          for (const comment of (Array.isArray(comments.data) ? comments.data : []) as Array<Record<string, unknown>>) {
+          const commentsField = item.comments as Record<string, unknown> | undefined;
+          for (const comment of (Array.isArray(commentsField?.data) ? commentsField.data : []) as Array<Record<string, unknown>>) {
             const commentId = String(comment.id || "");
             if (!commentId) continue;
             await recordConversationSignal("instagram", `instagram-comment:${commentId}`, {
@@ -912,7 +912,7 @@ serve(async (req: Request) => {
     }
     if (operation === "sync_live_social") {
       if (!workerOperation) throw new Error("worker_required");
-      return json({ ...await syncLiveSocial(), console: await getConsole() });
+      return json(await syncLiveSocial());
     }
     if (operation === "prepare_content_pack") {
       if (!workerOperation) throw new Error("worker_required");
