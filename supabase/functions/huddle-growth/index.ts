@@ -812,7 +812,8 @@ const updatePolicy = async (adminId: string, body: Record<string, unknown>) => {
 
 const generateContent = async (body: Record<string, unknown>) => {
   const apiKey = String(Deno.env.get("OPENAI_API_KEY") || "").trim();
-  if (!apiKey) throw new Error("openai_api_key_missing");
+  const geminiKey = String(Deno.env.get("GEMINI_API_KEY") || "").trim();
+  if (!apiKey && !geminiKey) throw new Error("ai_provider_key_missing");
   const model = String(Deno.env.get("OPENAI_GROWTH_MODEL") || "gpt-5.2").trim();
   const platform = String(body.platform || "Threads");
   const objective = String(body.objective || "useful local pet-safety awareness");
@@ -823,20 +824,27 @@ Write like a Gen Z friend sharing a real 2am thought: blunt, kind, curious, vuln
 
 Return valid JSON only, with exactly these keys: post_type, hooks, topic_direction, cover_copy, image_copy, caption. hooks must contain 10-20 distinct curiosity hooks. post_type must be one of Carousel, Reel, Single image, Threads, Story, Short video. topic_direction explains what we are really talking about, why it matters, and the perspective shift. cover_copy is one short sentence. image_copy is one thought per slide; every line introduces a new thought. caption expands the thought without repeating slides. Hooks are curiosity, not clickbait.`;
   const input = `Platform: ${platform}\nObjective: ${objective}\nBrief: ${brief || "Create one strong launch-ready idea for Huddle."}`;
-  const response = await fetch("https://api.openai.com/v1/responses", { method: "POST", headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }, body: JSON.stringify({ model, store: false, input: [{ role: "developer", content: [{ type: "input_text", text: system }] }, { role: "user", content: [{ type: "input_text", text: input }] }] }) });
+  const geminiModel = String(Deno.env.get("GEMINI_GROWTH_MODEL") || "gemini-2.5-flash").trim();
+  const response = apiKey
+    ? await fetch("https://api.openai.com/v1/responses", { method: "POST", headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }, body: JSON.stringify({ model, store: false, input: [{ role: "developer", content: [{ type: "input_text", text: system }] }, { role: "user", content: [{ type: "input_text", text: input }] }] }) })
+    : await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${geminiKey}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: `${system}\n\n${input}` }] }], generationConfig: { responseMimeType: "application/json", temperature: 0.8 } }) });
   const raw = await response.text();
   let parsed: Record<string, unknown> = {};
   try { parsed = raw ? JSON.parse(raw) as Record<string, unknown> : {}; } catch { parsed = {}; }
-  if (!response.ok) throw new Error(`openai_request_failed:${response.status}`);
-  const outputText = String(parsed.output_text || ((Array.isArray(parsed.output) ? parsed.output : []).flatMap((item) => (item && typeof item === "object" && Array.isArray((item as Record<string, unknown>).content) ? (item as Record<string, unknown>).content as Array<Record<string, unknown>> : [])).map((item) => String(item.text || "")).filter(Boolean).join("\n")) || "").trim();
-  if (!outputText) throw new Error("openai_empty_response");
+  if (!response.ok) {
+    const providerError = parsed.error && typeof parsed.error === "object" ? String((parsed.error as Record<string, unknown>).message || "") : "";
+    throw new Error(`ai_request_failed:${response.status}${providerError ? `:${providerError.slice(0, 240)}` : ""}`);
+  }
+  const geminiText = Array.isArray(parsed.candidates) ? ((parsed.candidates[0] as Record<string, unknown>)?.content as Record<string, unknown>)?.parts : [];
+  const outputText = String(parsed.output_text || ((Array.isArray(parsed.output) ? parsed.output : []).flatMap((item) => (item && typeof item === "object" && Array.isArray((item as Record<string, unknown>).content) ? (item as Record<string, unknown>).content as Array<Record<string, unknown>> : [])).map((item) => String(item.text || "")).filter(Boolean).join("\n")) || (Array.isArray(geminiText) ? (geminiText as Array<Record<string, unknown>>).map((item) => String(item.text || "")).join("\n") : "") || "").trim();
+  if (!outputText) throw new Error("ai_empty_response");
   let plan: Record<string, unknown>;
-  try { plan = JSON.parse(outputText) as Record<string, unknown>; } catch { throw new Error("openai_invalid_content_plan"); }
+  try { plan = JSON.parse(outputText) as Record<string, unknown>; } catch { throw new Error("ai_invalid_content_plan"); }
   const hooks = Array.isArray(plan.hooks) ? plan.hooks.map(String).filter(Boolean).slice(0, 20) : [];
   const imageCopy = Array.isArray(plan.image_copy) ? plan.image_copy.map(String).filter(Boolean).slice(0, 12) : [];
   const caption = String(plan.caption || "").trim();
-  if (!caption || hooks.length < 10 || !String(plan.topic_direction || "").trim() || !String(plan.cover_copy || "").trim()) throw new Error("openai_incomplete_content_plan");
-  return { copy: caption, model, plan: { post_type: String(plan.post_type || "Carousel"), hooks, topic_direction: String(plan.topic_direction), cover_copy: String(plan.cover_copy), image_copy: imageCopy, caption } };
+  if (!caption || hooks.length < 10 || !String(plan.topic_direction || "").trim() || !String(plan.cover_copy || "").trim()) throw new Error("ai_incomplete_content_plan");
+  return { copy: caption, model: apiKey ? model : geminiModel, plan: { post_type: String(plan.post_type || "Carousel"), hooks, topic_direction: String(plan.topic_direction), cover_copy: String(plan.cover_copy), image_copy: imageCopy, caption } };
 };
 
 const fallbackPhilosophyPlan = (platform: string) => {
@@ -912,8 +920,8 @@ const createContentPack = async (adminId: string | null, body: Record<string, un
         brief: `${direction || "Choose the strongest current Huddle story."}\nCreate a platform-native, philosophy-led content plan ready for the founder’s final edit.\nRecent account context (do not repeat it):\n${recentContext || "No prior posts are available yet."}`,
       });
     } catch (error) {
-      if (safeError(error) !== "openai_api_key_missing") throw error;
       generated = fallbackPhilosophyPlan(platform);
+      generated = { ...generated, model: `${generated.model}:${safeError(error).slice(0, 80)}` };
     }
     const postType = String(generated.plan.post_type || "").toLowerCase();
     const contentType = postType.includes("carousel") ? "carousel" : postType.includes("reel") ? "reel" : postType.includes("video") ? "video" : postType.includes("image") ? "image" : "text";
@@ -1063,6 +1071,119 @@ const cleanupRetention = async () => {
   return { deleted: { webhook_events: webhooks.count || 0, leads: leads.count || 0, oauth_states: oauth.count || 0 }, retention_days: { webhook_events: webhookDays, leads: leadDays } };
 };
 
+const maintainTokens = async () => {
+  const { data: connections, error } = await supabase.from("huddle_growth_connections").select("*").eq("status", "active");
+  if (error) throw error;
+  const refreshed: string[] = [];
+  const checked: string[] = [];
+  const notes: string[] = [];
+  for (const connection of (connections || []) as Array<Record<string, unknown>>) {
+    try {
+      const token = await readToken(connection);
+      const metadata = connection.metadata && typeof connection.metadata === "object" ? connection.metadata as Record<string, unknown> : {};
+      const lastRefresh = new Date(String(metadata.last_token_refresh_at || 0)).getTime();
+      if (connection.provider === "threads" && (!lastRefresh || Date.now() - lastRefresh > 7 * 24 * 60 * 60 * 1000)) {
+        const secret = String(Deno.env.get("THREADS_APP_SECRET") || Deno.env.get("META_APP_SECRET") || "").trim();
+        const result = await graphRequest(`${THREADS_GRAPH_BASE}/refresh_access_token?${new URLSearchParams({ grant_type: "th_refresh_token", access_token: token })}`, { token });
+        const nextToken = String(result.access_token || token);
+        const encrypted = await encryptToken(nextToken);
+        const expiresAt = Number(result.expires_in || 0) ? new Date(Date.now() + Number(result.expires_in) * 1000).toISOString() : connection.token_expires_at;
+        const nextMetadata = { ...metadata, last_token_refresh_at: new Date().toISOString() };
+        await supabase.from("huddle_growth_connections").update({ encrypted_access_token: encrypted.ciphertext, access_token_iv: encrypted.iv, token_expires_at: expiresAt, metadata: nextMetadata, last_error: null, updated_at: new Date().toISOString() }).eq("id", connection.id);
+        await supabase.from("huddle_growth_assets").update({ encrypted_access_token: encrypted.ciphertext, access_token_iv: encrypted.iv, token_expires_at: expiresAt, updated_at: new Date().toISOString() }).eq("connection_id", connection.id);
+        refreshed.push("threads");
+      } else if (connection.provider === "meta") {
+        const secret = String(Deno.env.get("META_APP_SECRET") || "").trim();
+        if (secret) {
+          const debug = await graphRequest(graphJson(`debug_token?${new URLSearchParams({ input_token: token, access_token: `${META_APP_ID}|${secret}` })}`), {});
+          const data = debug.data && typeof debug.data === "object" ? debug.data as Record<string, unknown> : {};
+          const expiresAt = Number(data.expires_at || 0) ? new Date(Number(data.expires_at) * 1000).toISOString() : null;
+          await supabase.from("huddle_growth_connections").update({ token_expires_at: expiresAt, status: data.is_valid === false ? "degraded" : "active", last_error: data.is_valid === false ? "meta_token_invalid" : null, updated_at: new Date().toISOString() }).eq("id", connection.id);
+          checked.push("meta");
+        }
+      }
+    } catch (tokenError) {
+      const message = safeError(tokenError);
+      notes.push(`${connection.provider}:${message}`);
+      await supabase.from("huddle_growth_connections").update({ status: "degraded", last_error: message, updated_at: new Date().toISOString() }).eq("id", connection.id);
+    }
+  }
+  return { refreshed, checked, notes };
+};
+
+const subscribeWhatsAppWebhooks = async () => {
+  const { data: assets, error } = await supabase.from("huddle_growth_assets").select("*").eq("asset_type", "whatsapp_business").eq("status", "active");
+  if (error) throw error;
+  const subscriptions: Record<string, unknown>[] = [];
+  for (const asset of (assets || []) as Array<Record<string, unknown>>) {
+    const connection = await getConnection(String(asset.connection_id));
+    const token = await resolveAssetToken(asset, connection);
+    try {
+      await graphRequest(graphJson(`${asset.external_id}/subscribed_apps`), { method: "POST", token, form: new URLSearchParams() });
+      const verified = await graphRequest(graphJson(`${asset.external_id}/subscribed_apps`), { token });
+      const count = Array.isArray(verified.data) ? verified.data.length : 0;
+      const metadata = asset.metadata && typeof asset.metadata === "object" ? asset.metadata as Record<string, unknown> : {};
+      const subscriptionMetadata = { ...metadata, webhook_subscription_count: count, webhook_subscription_checked_at: new Date().toISOString() };
+      await supabase.from("huddle_growth_assets").update({ metadata: subscriptionMetadata, updated_at: new Date().toISOString() }).eq("id", asset.id);
+      const { data: phones } = await supabase.from("huddle_growth_assets").select("id,metadata").eq("asset_type", "whatsapp_phone").eq("connection_id", asset.connection_id);
+      for (const phone of (phones || []) as Array<Record<string, unknown>>) {
+        const phoneMetadata = phone.metadata && typeof phone.metadata === "object" ? phone.metadata as Record<string, unknown> : {};
+        if (String(phoneMetadata.waba_id || "") === String(asset.external_id)) await supabase.from("huddle_growth_assets").update({ metadata: { ...phoneMetadata, webhook_subscription_count: count, webhook_subscription_checked_at: new Date().toISOString() }, updated_at: new Date().toISOString() }).eq("id", phone.id);
+      }
+      subscriptions.push({ asset_id: asset.id, subscribed_apps: count });
+    } catch (subscriptionError) {
+      subscriptions.push({ asset_id: asset.id, error: safeError(subscriptionError) });
+    }
+  }
+  return subscriptions;
+};
+
+const enforceSpendCaps = async () => {
+  const { data: policy, error } = await supabase.from("huddle_growth_budget_policies").select("daily_spend_cap_minor,monthly_spend_cap_minor,auto_pause_enabled,emergency_stop").eq("id", true).maybeSingle();
+  if (error) throw error;
+  if (!policy?.auto_pause_enabled || policy.emergency_stop) return { enforced: false, reason: "disabled_or_emergency_stop" };
+  const dailyCap = Number(policy.daily_spend_cap_minor || 2000);
+  const monthlyCap = Number(policy.monthly_spend_cap_minor || 30000);
+  if (!Number(policy.daily_spend_cap_minor || 0) && !Number(policy.monthly_spend_cap_minor || 0)) {
+    await supabase.from("huddle_growth_budget_policies").update({ daily_spend_cap_minor: dailyCap, monthly_spend_cap_minor: monthlyCap, updated_at: new Date().toISOString() }).eq("id", true);
+    await supabase.from("huddle_growth_audit_logs").insert({ action: "conservative_spend_caps_initialised", platform: "ads", details: { daily_cap_minor: dailyCap, monthly_cap_minor: monthlyCap, currency: "account_currency" } });
+  }
+  const { data: assets, error: assetError } = await supabase.from("huddle_growth_assets").select("*").eq("asset_type", "ad_account").eq("status", "active");
+  if (assetError) throw assetError;
+  const paused: string[] = [];
+  for (const asset of (assets || []) as Array<Record<string, unknown>>) {
+    const connection = await getConnection(String(asset.connection_id));
+    const token = await resolveAssetToken(asset, connection);
+    const [daily, monthly] = await Promise.all([
+      graphRequest(graphJson(`${asset.external_id}/insights?${new URLSearchParams({ fields: "spend", date_preset: "today" })}`), { token }),
+      graphRequest(graphJson(`${asset.external_id}/insights?${new URLSearchParams({ fields: "spend", date_preset: "this_month" })}`), { token }),
+    ]);
+    const dailySpend = Math.round(Number((Array.isArray(daily.data) ? (daily.data[0] as Record<string, unknown>)?.spend : 0) || 0) * 100);
+    const monthlySpend = Math.round(Number((Array.isArray(monthly.data) ? (monthly.data[0] as Record<string, unknown>)?.spend : 0) || 0) * 100);
+    if ((dailyCap && dailySpend >= dailyCap) || (monthlyCap && monthlySpend >= monthlyCap)) {
+      const campaigns = await graphRequest(graphJson(`${asset.external_id}/campaigns?${new URLSearchParams({ fields: "id,effective_status", effective_status: '["ACTIVE"]', limit: "100" })}`), { token });
+      for (const campaign of (Array.isArray(campaigns.data) ? campaigns.data : []) as Array<Record<string, unknown>>) {
+        const campaignId = String(campaign.id || "");
+        if (!campaignId) continue;
+        await graphRequest(graphJson(campaignId), { method: "POST", token, form: new URLSearchParams({ status: "PAUSED" }) });
+        paused.push(campaignId);
+      }
+      await supabase.from("huddle_growth_audit_logs").insert({ action: "spend_cap_enforced", platform: "ads", details: { asset_id: asset.id, daily_spend_minor: dailySpend, monthly_spend_minor: monthlySpend, daily_cap_minor: dailyCap, monthly_cap_minor: monthlyCap, paused_campaigns: paused } });
+    }
+  }
+  return { enforced: true, paused_campaigns: paused };
+};
+
+const maintenanceCycle = async () => {
+  const tokens = await maintainTokens();
+  const whatsapp = await subscribeWhatsAppWebhooks();
+  const sync = await syncLiveSocial();
+  const spend = await enforceSpendCaps();
+  const action = await runAction();
+  const retention = await cleanupRetention();
+  return { tokens, whatsapp, sync, spend, action, retention };
+};
+
 const claimAction = async (actionId?: string) => {
   const query = supabase.from("huddle_growth_actions").select("*").in("status", ["queued"]).lte("next_retry_at", new Date().toISOString()).order("created_at", { ascending: true }).limit(1);
   const { data: rows, error } = actionId ? await supabase.from("huddle_growth_actions").select("*").eq("id", actionId).eq("status", "queued").limit(1) : await query;
@@ -1100,7 +1221,7 @@ serve(async (req: Request) => {
   try {
     const body = req.method === "POST" ? await req.json().catch(() => ({})) as Record<string, unknown> : {};
     const operation = String(body.operation || url.searchParams.get("operation") || "");
-    const workerOperation = ["run_worker", "run_action", "bootstrap_configured_assets", "sync_live_social", "prepare_content_pack", "retention_cleanup"].includes(operation);
+    const workerOperation = ["run_worker", "run_action", "bootstrap_configured_assets", "sync_live_social", "prepare_content_pack", "retention_cleanup", "maintain_tokens", "subscribe_whatsapp_webhooks", "maintenance_cycle"].includes(operation);
     let adminId = "";
     if (workerOperation && !getBearerToken(req)) requireWorker(req);
     else adminId = (await requireAdmin(req, supabase)).id;
@@ -1171,6 +1292,9 @@ serve(async (req: Request) => {
       if (!workerOperation) throw new Error("worker_required");
       return json(await cleanupRetention());
     }
+    if (operation === "maintain_tokens") return json(await maintainTokens());
+    if (operation === "subscribe_whatsapp_webhooks") return json({ subscriptions: await subscribeWhatsAppWebhooks() });
+    if (operation === "maintenance_cycle") return json(await maintenanceCycle());
     if (operation === "run_worker") return json(await runAction());
     if (operation === "run_action") return json(await runAction(String(body.action_id || "")));
     if (operation === "health") return json({ ok: true, graph_version: GRAPH_BASE, threads_graph: THREADS_GRAPH_BASE });
