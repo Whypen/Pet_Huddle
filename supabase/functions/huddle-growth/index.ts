@@ -956,6 +956,35 @@ const createContentPack = async (adminId: string | null, body: Record<string, un
   return { drafts };
 };
 
+const storeAgentContentPack = async (body: Record<string, unknown>) => {
+  const objective = String(body.objective || "Build Huddle’s philosophy").trim().slice(0, 140);
+  const variants = body.variants && typeof body.variants === "object" ? body.variants as Record<string, unknown> : {};
+  const assetTypes: Record<string, string> = { instagram: "instagram_business", threads: "threads_profile", facebook: "facebook_page" };
+  const { data: assets, error: assetError } = await supabase.from("huddle_growth_assets").select("id,asset_type").eq("status", "active");
+  if (assetError) throw assetError;
+  const campaignName = `codex-content-pack:${crypto.randomUUID()}`;
+  const drafts: Record<string, unknown>[] = [];
+  for (const platform of ["instagram", "threads", "facebook"]) {
+    const plan = variants[platform] && typeof variants[platform] === "object" ? variants[platform] as Record<string, unknown> : null;
+    if (!plan) continue;
+    const caption = String(plan.caption || "").trim();
+    const cover = String(plan.cover_copy || "").trim();
+    const hooks = Array.isArray(plan.hooks) ? plan.hooks.map(String).map((item) => item.trim()).filter(Boolean).slice(0, 20) : [];
+    if (!caption || !cover || hooks.length < 10) throw new Error(`invalid_agent_content_plan:${platform}`);
+    const asset = (assets || []).find((item) => item.asset_type === assetTypes[platform]);
+    if (!asset) continue;
+    const postType = String(plan.post_type || (platform === "threads" ? "Threads" : "Carousel")).toLowerCase();
+    const contentType = postType.includes("carousel") ? "carousel" : postType.includes("reel") ? "reel" : postType.includes("video") ? "video" : postType.includes("image") ? "image" : "text";
+    const normalizedPlan = { post_type: plan.post_type || (platform === "threads" ? "Threads" : "Carousel"), hooks, topic_direction: String(plan.topic_direction || ""), cover_copy: cover, image_copy: Array.isArray(plan.image_copy) ? plan.image_copy.map(String).filter(Boolean).slice(0, 12) : [], caption };
+    const { data, error } = await supabase.from("huddle_growth_content").insert({ platform, asset_id: asset.id, campaign_name: campaignName, objective, content_type: contentType, body: { copy: caption, plan: normalizedPlan, generated_by: "codex_growth_manager", model: "codex" }, status: "draft" }).select("id,platform,content_type,status").single();
+    if (error || !data) throw error || new Error("agent_content_store_failed");
+    drafts.push(data as Record<string, unknown>);
+  }
+  if (!drafts.length) throw new Error("agent_content_variants_required");
+  await supabase.from("huddle_growth_audit_logs").insert({ action: "codex_content_pack_prepared", platform: "system", details: { campaign_name: campaignName, objective, platforms: drafts.map((item) => item.platform) } });
+  return { campaign_name: campaignName, drafts };
+};
+
 const publishContentDraft = async (adminId: string, body: Record<string, unknown>) => {
   const { data: policy, error: policyError } = await supabase
     .from("huddle_growth_budget_policies")
@@ -1221,7 +1250,7 @@ serve(async (req: Request) => {
   try {
     const body = req.method === "POST" ? await req.json().catch(() => ({})) as Record<string, unknown> : {};
     const operation = String(body.operation || url.searchParams.get("operation") || "");
-    const workerOperation = ["run_worker", "run_action", "bootstrap_configured_assets", "sync_live_social", "prepare_content_pack", "retention_cleanup", "maintain_tokens", "subscribe_whatsapp_webhooks", "maintenance_cycle"].includes(operation);
+    const workerOperation = ["run_worker", "run_action", "bootstrap_configured_assets", "sync_live_social", "prepare_content_pack", "store_agent_content_pack", "retention_cleanup", "maintain_tokens", "subscribe_whatsapp_webhooks", "maintenance_cycle"].includes(operation);
     let adminId = "";
     if (workerOperation && !getBearerToken(req)) requireWorker(req);
     else adminId = (await requireAdmin(req, supabase)).id;
@@ -1249,6 +1278,7 @@ serve(async (req: Request) => {
       };
       return json({ ...await createContentPack(adminId || null, { ...defaults, ...body }), console: await getConsole() });
     }
+    if (operation === "store_agent_content_pack") return json(await storeAgentContentPack(body));
     if (operation === "discover") {
       const connection = await getConnection(String(body.connection_id || ""));
       const token = await readToken(connection);
