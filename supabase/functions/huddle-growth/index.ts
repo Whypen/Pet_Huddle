@@ -503,11 +503,23 @@ const classifyConversation = (textValue: unknown, context: Record<string, unknow
 const recordConversationSignal = async (platform: "instagram" | "facebook" | "threads", externalEventId: string, payload: Record<string, unknown>) => {
   const triage = classifyConversation(payload.text, payload);
   const kind = String(payload.kind || "comment");
+  const incomingPayload = { platform, source: "live_sync", received_at: new Date().toISOString(), ...triage, ...payload };
+  const { data: existing, error: existingError } = await supabase.from("huddle_growth_webhook_events").select("payload").eq("provider", "meta").eq("external_event_id", externalEventId).maybeSingle();
+  if (existingError) throw existingError;
+  const existingPayload = existing?.payload && typeof existing.payload === "object" ? existing.payload as Record<string, unknown> : {};
+  const terminalStatus = ["sent", "dismissed"].includes(String(existingPayload.reply_status || ""));
+  const preserved = terminalStatus ? {
+    reply_status: existingPayload.reply_status,
+    final_reply: existingPayload.final_reply || null,
+    sent_at: existingPayload.sent_at || null,
+    dismissed_at: existingPayload.dismissed_at || null,
+    dismissed_by: existingPayload.dismissed_by || null,
+  } : {};
   const { error } = await supabase.from("huddle_growth_webhook_events").upsert({
     provider: "meta",
     external_event_id: externalEventId,
     event_type: `${platform}_${kind}`,
-    payload: { platform, source: "live_sync", received_at: new Date().toISOString(), ...triage, ...payload },
+    payload: { ...incomingPayload, ...preserved },
   }, { onConflict: "provider,external_event_id" });
   if (error) throw error;
 };
@@ -570,7 +582,7 @@ const syncLiveSocial = async () => {
       const connection = await getConnection(String(asset.connection_id));
       const token = await resolveAssetToken(asset, connection);
       if (type === "instagram_business") {
-        const media = await graphRequest(graphJson(`${asset.external_id}/media?${new URLSearchParams({ fields: "id,caption,media_type,media_product_type,media_url,thumbnail_url,permalink,timestamp,like_count,comments_count,children{id,media_type,media_url,thumbnail_url},comments.limit(25){id,text,username,timestamp,like_count,from}", limit: "25" })}`), { token });
+        const media = await graphRequest(graphJson(`${asset.external_id}/media?${new URLSearchParams({ fields: "id,caption,media_type,media_product_type,media_url,thumbnail_url,permalink,timestamp,like_count,comments_count,children{id,media_type,media_url,thumbnail_url},comments.limit(25){id,text,username,timestamp,like_count,from,replies.limit(25){id,text,username,timestamp,from}}", limit: "25" })}`), { token });
         const items = (Array.isArray(media.data) ? media.data : []) as Array<Record<string, unknown>>;
         const insights = new Map<string, Record<string, unknown>>();
         await Promise.all(items.map(async (item) => {
@@ -601,11 +613,17 @@ const syncLiveSocial = async () => {
             if (!commentId) continue;
             const author = comment.from && typeof comment.from === "object" ? comment.from as Record<string, unknown> : { username: comment.username };
             if (isOwnAuthor(author, asset)) continue;
+            const repliesField = comment.replies && typeof comment.replies === "object" ? comment.replies as Record<string, unknown> : {};
+            const ownReply = ((Array.isArray(repliesField.data) ? repliesField.data : []) as Array<Record<string, unknown>>).find((reply) => {
+              const replyAuthor = reply.from && typeof reply.from === "object" ? reply.from as Record<string, unknown> : { username: reply.username };
+              return isOwnAuthor(replyAuthor, asset);
+            });
             await recordConversationSignal("instagram", `instagram-comment:${commentId}`, {
               kind: "comment", source_type: "comment", parent_id: externalId, parent_permalink: item.permalink || null,
               parent_copy: String(item.caption || ""), parent_content_type: contentTypeFromMedia(item.media_product_type || item.media_type),
               external_message_id: commentId, text: String(comment.text || ""), author_id: author.id || null,
               author_username: author.username || comment.username || null, contact_label: String(comment.username || author.name || "Instagram user"), timestamp: comment.timestamp || null,
+              ...(ownReply ? { reply_status: "sent", final_reply: String(ownReply.text || ""), sent_at: ownReply.timestamp || null, reply_source: "meta_existing_reply" } : {}),
             });
             conversationSignals += 1;
           }
@@ -629,7 +647,7 @@ const syncLiveSocial = async () => {
           notes.push(`instagram_inbox:${safeError(inboxError)}`);
         }
       } else if (type === "facebook_page") {
-        const feed = await graphRequest(graphJson(`${asset.external_id}/feed?${new URLSearchParams({ fields: "id,message,created_time,permalink_url,full_picture,attachments{media,target,type,url,subattachments},comments.limit(25){id,message,created_time,from}", limit: "25" })}`), { token });
+        const feed = await graphRequest(graphJson(`${asset.external_id}/feed?${new URLSearchParams({ fields: "id,message,created_time,permalink_url,full_picture,attachments{media,target,type,url,subattachments},comments.limit(25){id,message,created_time,from,comments.limit(25){id,message,created_time,from}}", limit: "25" })}`), { token });
         const items = (Array.isArray(feed.data) ? feed.data : []) as Array<Record<string, unknown>>;
         const insights = new Map<string, Record<string, unknown>>();
         await Promise.all(items.map(async (item) => {
@@ -656,11 +674,17 @@ const syncLiveSocial = async () => {
             if (!commentId) continue;
             const author = comment.from && typeof comment.from === "object" ? comment.from as Record<string, unknown> : {};
             if (isOwnAuthor(author, asset)) continue;
+            const repliesField = comment.comments && typeof comment.comments === "object" ? comment.comments as Record<string, unknown> : {};
+            const ownReply = ((Array.isArray(repliesField.data) ? repliesField.data : []) as Array<Record<string, unknown>>).find((reply) => {
+              const replyAuthor = reply.from && typeof reply.from === "object" ? reply.from as Record<string, unknown> : {};
+              return isOwnAuthor(replyAuthor, asset);
+            });
             await recordConversationSignal("facebook", `facebook-comment:${commentId}`, {
               kind: "comment", source_type: "comment", parent_id: externalId, parent_permalink: item.permalink_url || null,
               parent_copy: String(item.message || ""), parent_content_type: item.full_picture || item.attachments ? "image" : "text",
               external_message_id: commentId, text: String(comment.message || ""), author_id: author.id || null,
               author_username: author.name || null, contact_label: String(author.name || "Facebook user"), timestamp: comment.created_time || null,
+              ...(ownReply ? { reply_status: "sent", final_reply: String(ownReply.message || ""), sent_at: ownReply.created_time || null, reply_source: "meta_existing_reply" } : {}),
             });
             conversationSignals += 1;
           }
@@ -1243,7 +1267,7 @@ const prepareConversationReply = async (adminId: string, body: Record<string, un
   const eventId = String(body.event_id || "").trim();
   const event = await getConversationEvent(eventId);
   const payload = event.payload && typeof event.payload === "object" ? event.payload as Record<string, unknown> : {};
-  const triage = classifyConversation(payload.text || payload.message);
+  const triage = classifyConversation(payload.text || payload.message, payload);
   const nextPayload = { ...payload, ...triage, prepared_at: new Date().toISOString() };
   const { error } = await supabase.from("huddle_growth_webhook_events").update({ payload: nextPayload }).eq("id", eventId);
   if (error) throw error;
@@ -1285,6 +1309,20 @@ const escalateConversation = async (adminId: string, body: Record<string, unknow
   if (error) throw error;
   await supabase.from("huddle_growth_audit_logs").insert({ actor_id: adminId, action: "conversation_escalated", platform: String(payload.platform || "unknown"), details: { event_id: eventId, classification: payload.classification || null, risk: payload.risk || null } });
   return { event_id: eventId, status: "escalated" };
+};
+
+const setConversationArchiveState = async (adminId: string, body: Record<string, unknown>, archived: boolean) => {
+  const eventId = String(body.event_id || "").trim();
+  const event = await getConversationEvent(eventId);
+  const payload = event.payload && typeof event.payload === "object" ? event.payload as Record<string, unknown> : {};
+  if (!archived && String(payload.reply_status || "") === "sent") throw new Error("sent_conversation_cannot_be_reopened");
+  const nextPayload = archived
+    ? { ...payload, reply_status: "dismissed", dismissed_at: new Date().toISOString(), dismissed_by: adminId }
+    : { ...payload, reply_status: payload.agent_draft ? "ready" : "unprepared", dismissed_at: null, dismissed_by: null };
+  const { error } = await supabase.from("huddle_growth_webhook_events").update({ payload: nextPayload }).eq("id", eventId);
+  if (error) throw error;
+  await supabase.from("huddle_growth_audit_logs").insert({ actor_id: adminId, action: archived ? "conversation_dismissed" : "conversation_restored", platform: String(payload.platform || "unknown"), details: { event_id: eventId } });
+  return { event_id: eventId, status: archived ? "dismissed" : "ready" };
 };
 
 const cleanupRetention = async () => {
@@ -1476,7 +1514,8 @@ serve(async (req: Request) => {
     }
     if (operation === "sync_live_social") {
       if (!workerOperation) throw new Error("worker_required");
-      return json(await syncLiveSocial());
+      const whatsappSubscriptions = await subscribeWhatsAppWebhooks();
+      return json({ ...await syncLiveSocial(), whatsapp_subscriptions: whatsappSubscriptions });
     }
     if (operation === "prepare_content_pack") {
       if (!workerOperation) throw new Error("worker_required");
@@ -1527,6 +1566,8 @@ serve(async (req: Request) => {
     if (operation === "escalate_conversation") {
       return json(await escalateConversation(adminId, body));
     }
+    if (operation === "dismiss_conversation") return json(await setConversationArchiveState(adminId, body, true));
+    if (operation === "restore_conversation") return json(await setConversationArchiveState(adminId, body, false));
     if (operation === "retention_cleanup") {
       if (!workerOperation) throw new Error("worker_required");
       return json(await cleanupRetention());
