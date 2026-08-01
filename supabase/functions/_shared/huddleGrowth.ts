@@ -8,7 +8,8 @@ export const THREADS_APP_ID = String(Deno.env.get("THREADS_APP_ID") || "10256934
 
 export const META_SCOPES = [
   "business_management", "pages_show_list", "pages_read_engagement",
-  "pages_read_user_content", "pages_messaging", "instagram_basic", "instagram_content_publish",
+  "pages_read_user_content", "pages_manage_posts", "pages_manage_engagement",
+  "pages_manage_metadata", "pages_messaging", "instagram_basic", "instagram_content_publish",
   "instagram_manage_comments", "instagram_manage_messages", "instagram_manage_insights",
   "ads_read", "ads_management", "leads_retrieval", "whatsapp_business_management",
   "whatsapp_business_messaging",
