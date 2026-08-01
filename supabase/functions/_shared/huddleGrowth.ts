@@ -7,7 +7,7 @@ export const META_APP_ID = String(Deno.env.get("META_APP_ID") || "19354685477451
 export const THREADS_APP_ID = String(Deno.env.get("THREADS_APP_ID") || "1025693406835613").trim();
 
 export const META_SCOPES = [
-  "business_management", "pages_show_list", "pages_read_engagement", "pages_manage_posts",
+  "business_management", "pages_show_list", "pages_read_engagement",
   "pages_read_user_content", "pages_messaging", "instagram_basic", "instagram_content_publish",
   "instagram_manage_comments", "instagram_manage_messages", "instagram_manage_insights",
   "ads_read", "ads_management", "leads_retrieval", "whatsapp_business_management",
@@ -152,5 +152,5 @@ export const threadsJson = (path: string) => `${THREADS_GRAPH_BASE}/${path.repla
 
 export const safeError = (error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
-  return message.slice(0, 500).replaceAll(/(access_token|appsecret|client_secret|token)=[^&\s]*/gi, "$1=[redacted]");
+  return message.slice(0, 500).replaceAll(/(access_token|appsecret|client_secret|token)\s*(?:=|:)\s*[^&,;\s]*/gi, "$1=[redacted]");
 };

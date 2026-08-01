@@ -209,15 +209,19 @@ const exchangeThreadsCode = async (code: string, redirectUri: string) => {
 const discoverMetaAssets = async (connection: Record<string, unknown>, token: string) => {
   const connectionId = String(connection.id);
   const granted = Array.isArray(connection.granted_scopes) ? connection.granted_scopes.map(String) : [];
+  const configuredPageId = String(Deno.env.get("HUDDLE_FACEBOOK_PAGE_ID") || "").trim();
+  const configuredInstagramId = String(Deno.env.get("HUDDLE_INSTAGRAM_ACCOUNT_ID") || "").trim();
+  const configuredAdAccountId = String(Deno.env.get("HUDDLE_AD_ACCOUNT_ID") || "").trim();
   const assets: Record<string, unknown>[] = [];
   if (!missingScopes(granted, ["pages_show_list"])[0]) {
     const pages = await graphRequest(graphJson("me/accounts?fields=id,name,access_token,instagram_business_account"), { token });
     for (const page of (Array.isArray(pages.data) ? pages.data : []) as Array<Record<string, unknown>>) {
+      if (configuredPageId && String(page.id) !== configuredPageId) continue;
       const pageToken = String(page.access_token || "");
       const storedPage = await storeAsset(connectionId, { assetType: "facebook_page", externalId: String(page.id), name: String(page.name || page.id), token: pageToken || undefined, scopes: granted, metadata: { page_id: page.id } });
       assets.push(storedPage);
       const ig = page.instagram_business_account as Record<string, unknown> | undefined;
-      if (ig?.id) {
+      if (ig?.id && (!configuredInstagramId || String(ig.id) === configuredInstagramId)) {
         const igProfile = await graphRequest(graphJson(`${ig.id}?fields=id,username,name,profile_picture_url`), { token: pageToken || token });
         assets.push(await storeAsset(connectionId, { assetType: "instagram_business", externalId: String(ig.id), name: String(igProfile.username || igProfile.name || ig.id), token: pageToken || token, scopes: granted, metadata: { page_id: page.id, username: igProfile.username } }));
       }
@@ -226,6 +230,7 @@ const discoverMetaAssets = async (connection: Record<string, unknown>, token: st
   if (!missingScopes(granted, ["ads_read"])[0]) {
     const adAccounts = await graphRequest(graphJson("me/adaccounts?fields=id,name,account_status,currency"), { token });
     for (const account of (Array.isArray(adAccounts.data) ? adAccounts.data : []) as Array<Record<string, unknown>>) {
+      if (configuredAdAccountId && String(account.id) !== configuredAdAccountId) continue;
       assets.push(await storeAsset(connectionId, { assetType: "ad_account", externalId: String(account.id), name: String(account.name || account.id), token, scopes: granted, metadata: account }));
     }
   }
@@ -242,12 +247,15 @@ const discoverMetaAssets = async (connection: Record<string, unknown>, token: st
       }
     }
   }
+  for (const [assetType, externalId] of [["facebook_page", configuredPageId], ["instagram_business", configuredInstagramId], ["ad_account", configuredAdAccountId]]) {
+    if (externalId) await supabase.from("huddle_growth_assets").update({ status: "revoked", updated_at: new Date().toISOString() }).eq("connection_id", connectionId).eq("asset_type", assetType).neq("external_id", externalId);
+  }
   return assets;
 };
 
 const discoverThreadsAsset = async (connection: Record<string, unknown>, token: string) => {
-  const userId = String(connection.external_user_id);
-  const profile = await graphRequest(threadsJson(`${userId}?fields=id,username,name,threads_profile_picture_url`), { token });
+  const profile = await graphRequest(threadsJson("me?fields=id,username,name,threads_profile_picture_url"), { token });
+  const userId = String(profile.id || connection.external_user_id);
   return storeAsset(String(connection.id), { assetType: "threads_profile", externalId: userId, name: String(profile.username || profile.name || userId), token, scopes: Array.isArray(connection.granted_scopes) ? connection.granted_scopes.map(String) : [], metadata: { username: profile.username } });
 };
 
@@ -258,6 +266,13 @@ const requiredConfiguredSecret = (name: string) => {
 };
 
 const configuredAssetId = (name: string) => requiredConfiguredSecret(name);
+
+const enforceHuddleOwnedAssets = async () => {
+  for (const [assetType, secretName] of [["facebook_page", "HUDDLE_FACEBOOK_PAGE_ID"], ["instagram_business", "HUDDLE_INSTAGRAM_ACCOUNT_ID"], ["ad_account", "HUDDLE_AD_ACCOUNT_ID"]]) {
+    const externalId = String(Deno.env.get(secretName) || "").trim();
+    if (externalId) await supabase.from("huddle_growth_assets").update({ status: "revoked", updated_at: new Date().toISOString() }).eq("asset_type", assetType).neq("external_id", externalId);
+  }
+};
 
 const bootstrapConfiguredAssets = async (adminId: string | null) => {
   const metaToken = requiredConfiguredSecret("META_ACCESS_TOKEN");
@@ -817,17 +832,39 @@ const handleOAuthCallback = async (url: URL) => {
       const me = await graphRequest(graphJson("me?fields=id,name"), { token: exchanged.token });
       const scopes = await listMetaScopes(exchanged.token);
       const connection = await storeConnection({ provider, externalUserId: String(me.id || ""), displayName: String(me.name || me.id || "Meta business user"), token: exchanged.token, expiresAt: exchanged.expiresIn ? new Date(Date.now() + exchanged.expiresIn * 1000).toISOString() : null, scopes, metadata: { app_id: META_APP_ID, requested_scopes: META_SCOPES }, createdBy: String(oauthState.created_by) });
-      await discoverMetaAssets(connection, exchanged.token);
+      try {
+        await discoverMetaAssets(connection, exchanged.token);
+      } catch (discoveryError) {
+        const discoveryMessage = safeError(discoveryError);
+        await supabase.from("huddle_growth_connections").update({ last_error: `asset_discovery_partial:${discoveryMessage}`, updated_at: new Date().toISOString() }).eq("id", connection.id);
+        await supabase.from("huddle_growth_audit_logs").insert({ actor_id: String(oauthState.created_by), connection_id: connection.id, action: "asset_discovery_partial", platform: provider, details: { error: discoveryMessage } });
+      }
+      await enforceHuddleOwnedAssets();
+      await supabase.from("huddle_growth_connections").update({ status: "revoked", updated_at: new Date().toISOString() }).eq("provider", provider).neq("id", connection.id);
     } else {
       const exchanged = await exchangeThreadsCode(code, redirectUri);
-      const me = await graphRequest(threadsJson(`${exchanged.userId}?fields=id,username,name`), { token: exchanged.token });
+      const me = await graphRequest(threadsJson("me?fields=id,username,name"), { token: exchanged.token });
       const scopes = THREADS_SCOPES;
-      const connection = await storeConnection({ provider, externalUserId: String(exchanged.userId || me.id || ""), displayName: String(me.username || me.name || exchanged.userId), token: exchanged.token, expiresAt: exchanged.expiresIn ? new Date(Date.now() + exchanged.expiresIn * 1000).toISOString() : null, scopes, metadata: { app_id: THREADS_APP_ID, requested_scopes: THREADS_SCOPES }, createdBy: String(oauthState.created_by) });
+      const connection = await storeConnection({ provider, externalUserId: String(me.id || exchanged.userId || ""), displayName: String(me.username || me.name || exchanged.userId), token: exchanged.token, expiresAt: exchanged.expiresIn ? new Date(Date.now() + exchanged.expiresIn * 1000).toISOString() : null, scopes, metadata: { app_id: THREADS_APP_ID, requested_scopes: THREADS_SCOPES }, createdBy: String(oauthState.created_by) });
       await discoverThreadsAsset(connection, exchanged.token);
+      await supabase.from("huddle_growth_connections").update({ status: "revoked", updated_at: new Date().toISOString() }).eq("provider", provider).neq("id", connection.id);
     }
+    await supabase.from("huddle_growth_audit_logs").insert({
+      actor_id: String(oauthState.created_by),
+      action: "oauth_connection_succeeded",
+      platform: provider,
+      details: { scopes: provider === "threads" ? THREADS_SCOPES : META_SCOPES },
+    });
     return html("Huddle business account connected. You can close this window.");
   } catch (error) {
-    console.error("[huddle-growth oauth]", safeError(error));
+    const message = safeError(error);
+    console.error("[huddle-growth oauth]", message);
+    await supabase.from("huddle_growth_audit_logs").insert({
+      actor_id: String(oauthState.created_by),
+      action: "oauth_connection_failed",
+      platform: provider,
+      details: { error: message },
+    });
     return html("Meta connection failed. Check the admin log and granted permissions.", 500);
   }
 };
@@ -849,6 +886,7 @@ const startOAuth = async (req: Request, provider: "meta" | "threads", adminId: s
 };
 
 const getConsole = async () => {
+  await enforceHuddleOwnedAssets();
   const [connections, assets, content, events, performance, leads, actions, approvals, policy, audit] = await Promise.all([
     supabase.from("huddle_growth_connections").select("id,provider,external_user_id,display_name,status,token_expires_at,granted_scopes,metadata,last_synced_at,last_error,created_at,updated_at").order("created_at", { ascending: false }),
     supabase.from("huddle_growth_assets").select("id,connection_id,asset_type,external_id,name,status,token_expires_at,granted_scopes,metadata,last_synced_at,updated_at").order("updated_at", { ascending: false }),
