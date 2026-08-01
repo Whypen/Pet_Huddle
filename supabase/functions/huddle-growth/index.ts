@@ -444,11 +444,19 @@ const classifyConversation = (textValue: unknown, context: Record<string, unknow
   };
   if (has("vet", "veterinary", "bleeding", "poison", "can't breathe", "cannot breathe", "seizure", "emergency", "dying", "injured")) return {
     classification: "animal safety", risk: "sensitive", reply_status: "needs_approval",
-    agent_draft: "I’m sorry — this sounds like it needs professional help now. Please contact a local vet or emergency veterinary service straight away. huddle can’t diagnose or assess an emergency from a message.",
+    agent_draft: isComment ? "This sounds urgent — please contact a local vet or emergency veterinary service now. We can’t assess an emergency from a comment." : "I’m sorry — this sounds urgent. Please contact a local vet or emergency veterinary service now. We can’t diagnose or assess an emergency from a message.",
   };
-  if (has("lawyer", "legal", "police", "refund", "payment", "charged", "privacy", "harass", "abuse", "scam", "suicide", "kill", "torture", "murder", "serial killer")) return {
+  if (has("animal torture", "torture", "animal murder", "murder videos", "animal abuse", "kill animals", "killing animals")) return {
+    classification: "animal harm", risk: "sensitive", reply_status: "needs_approval",
+    agent_draft: isComment ? "Yeah, this is horrifying. We’re not repeating the graphic details, but animal harm should never be treated like normal content." : "I’m sorry you had to see this. Please don’t send or repost graphic material. Share the public link only and we’ll review what can be reported safely.",
+  };
+  if (has("suicide", "kill myself", "self harm", "self-harm")) return {
+    classification: "crisis safety", risk: "sensitive", reply_status: "needs_approval",
+    agent_draft: "If you or someone else is in immediate danger, contact local emergency services now. We can’t safely handle a crisis through social messages.",
+  };
+  if (has("lawyer", "legal", "police", "refund", "payment", "charged", "privacy", "harass", "abuse", "scam")) return {
     classification: "sensitive support", risk: "sensitive", reply_status: "needs_approval",
-    agent_draft: "This needs a proper human look, so I’m flagging it for the huddle team. We won’t guess or give you a risky answer here.",
+    agent_draft: isComment ? "We’re taking this seriously. Please DM us the details so nothing private ends up in public." : "I’m sorry you’re dealing with this. Share only what we need to review it — never send passwords, one-time codes, full card details, or ID.",
   };
   if (words("partner", "partnership", "collab", "collaboration", "press", "sponsor")) return {
     classification: "partnership lead", risk: "review", reply_status: "ready",
