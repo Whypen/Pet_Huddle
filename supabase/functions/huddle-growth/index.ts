@@ -432,6 +432,21 @@ const recordImportedContent = async (asset: Record<string, unknown>, input: {
   if (result.error) throw result.error;
 };
 
+const retireMissingImportedContent = async (platform: "instagram" | "threads" | "facebook", liveExternalIds: string[]) => {
+  const { data, error } = await supabase.from("huddle_growth_content").select("id,external_id,body,status").eq("platform", platform).eq("status", "published");
+  if (error) throw error;
+  const live = new Set(liveExternalIds);
+  const staleIds = ((data || []) as Array<Record<string, unknown>>).filter((row) => {
+    const externalId = String(row.external_id || "");
+    return Boolean(externalId) && !live.has(externalId);
+  }).map((row) => String(row.id));
+  if (staleIds.length) {
+    const { error: retireError } = await supabase.from("huddle_growth_content").update({ status: "deleted", updated_at: new Date().toISOString() }).in("id", staleIds);
+    if (retireError) throw retireError;
+  }
+  return staleIds.length;
+};
+
 const stableIndex = (value: string, length: number) => {
   let hash = 0;
   for (const character of value) hash = ((hash * 31) + character.charCodeAt(0)) >>> 0;
@@ -597,6 +612,7 @@ const syncLiveSocial = async () => {
       const token = await resolveAssetToken(asset, connection);
       if (type === "instagram_business") {
         const items = await graphRows(graphJson(`${asset.external_id}/media?${new URLSearchParams({ fields: "id,caption,media_type,media_product_type,media_url,thumbnail_url,permalink,timestamp,like_count,comments_count,children{id,media_type,media_url,thumbnail_url}", limit: "100" })}`), token);
+        await retireMissingImportedContent("instagram", items.map((item) => String(item.id || "")).filter(Boolean));
         const insights = new Map<string, Record<string, unknown>>();
         await Promise.all(items.map(async (item) => {
           const externalId = String(item.id || "");
@@ -680,6 +696,7 @@ const syncLiveSocial = async () => {
         }
       } else if (type === "facebook_page") {
         const items = await graphRows(graphJson(`${asset.external_id}/feed?${new URLSearchParams({ fields: "id,message,created_time,permalink_url,full_picture,attachments{media,target,type,url,subattachments}", limit: "100" })}`), token);
+        await retireMissingImportedContent("facebook", items.map((item) => String(item.id || "")).filter(Boolean));
         const insights = new Map<string, Record<string, unknown>>();
         await Promise.all(items.map(async (item) => {
           const externalId = String(item.id || "");
@@ -767,7 +784,12 @@ const syncLiveSocial = async () => {
           }
         }
       } else if (type === "threads_profile") {
-        const items = await graphRows(threadsJson(`${asset.external_id}/threads?${new URLSearchParams({ fields: "id,text,permalink,timestamp,media_type,media_url,thumbnail_url,children{id,media_type,media_url,thumbnail_url}", limit: "100" })}`), token);
+        const rawItems = await graphRows(threadsJson(`${asset.external_id}/threads?${new URLSearchParams({ fields: "id,text,username,permalink,timestamp,media_type,media_url,thumbnail_url,reposted_post,children{id,media_type,media_url,thumbnail_url}", limit: "100" })}`), token);
+        const assetUsername = normalizedIdentity((asset.metadata as Record<string, unknown> | null)?.username || asset.name);
+        const items = rawItems.filter((item) => normalizedIdentity(item.username) === assetUsername
+          && !(item.reposted_post && typeof item.reposted_post === "object")
+          && String(item.media_type || "").toUpperCase() !== "REPOST_FACADE");
+        await retireMissingImportedContent("threads", items.map((item) => String(item.id || "")).filter(Boolean));
         const insights = new Map<string, Record<string, unknown>>();
         await Promise.all(items.map(async (item) => {
           const externalId = String(item.id || "");
@@ -783,7 +805,7 @@ const syncLiveSocial = async () => {
           await recordImportedContent(asset, {
             platform: "threads", externalId, copy: String(item.text || ""), publishedAt: String(item.timestamp || "") || null,
             contentType: contentTypeFromMedia(item.media_type), metadata: {
-              permalink: item.permalink || null, media_type: item.media_type || null,
+              permalink: item.permalink || null, media_type: item.media_type || null, username: item.username || null,
               preview_url: item.thumbnail_url || item.media_url || null, thumbnail_url: item.thumbnail_url || null,
               media_url: item.media_url || null, video_url: String(item.media_type || "").toUpperCase().includes("VIDEO") ? item.media_url || null : null,
               children: mediaChildren(item.children),
@@ -1048,7 +1070,7 @@ const getConsole = async () => {
   const [connections, assets, content, events, performance, leads, actions, approvals, policy, audit] = await Promise.all([
     supabase.from("huddle_growth_connections").select("id,provider,external_user_id,display_name,status,token_expires_at,granted_scopes,metadata,last_synced_at,last_error,created_at,updated_at").order("created_at", { ascending: false }),
     supabase.from("huddle_growth_assets").select("id,connection_id,asset_type,external_id,name,status,token_expires_at,granted_scopes,metadata,last_synced_at,updated_at").order("updated_at", { ascending: false }),
-    supabase.from("huddle_growth_content").select("id,platform,asset_id,campaign_name,objective,content_type,body,status,scheduled_at,published_at,external_id,performance,created_at,updated_at").order("updated_at", { ascending: false }).limit(100),
+    supabase.from("huddle_growth_content").select("id,platform,asset_id,campaign_name,objective,content_type,body,status,scheduled_at,published_at,external_id,performance,created_at,updated_at").neq("status", "deleted").order("updated_at", { ascending: false }).limit(100),
     loadAllConversationEvents(),
     supabase.from("huddle_growth_performance").select("id,asset_id,platform,external_id,period_start,period_end,metrics,source_updated_at,created_at").order("period_end", { ascending: false }).limit(50),
     supabase.from("huddle_growth_leads").select("id,asset_id,source,status,tags,first_seen_at,last_seen_at").order("last_seen_at", { ascending: false }).limit(100),
