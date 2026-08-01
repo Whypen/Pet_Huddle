@@ -248,7 +248,7 @@ const discoverMetaAssets = async (connection: Record<string, unknown>, token: st
     }
   }
   for (const [assetType, externalId] of [["facebook_page", configuredPageId], ["instagram_business", configuredInstagramId], ["ad_account", configuredAdAccountId]]) {
-    if (externalId) await supabase.from("huddle_growth_assets").update({ status: "revoked", updated_at: new Date().toISOString() }).eq("connection_id", connectionId).eq("asset_type", assetType).neq("external_id", externalId);
+    if (externalId) await supabase.from("huddle_growth_assets").update({ status: "inactive", updated_at: new Date().toISOString() }).eq("connection_id", connectionId).eq("asset_type", assetType).neq("external_id", externalId);
   }
   return assets;
 };
@@ -270,7 +270,7 @@ const configuredAssetId = (name: string) => requiredConfiguredSecret(name);
 const enforceHuddleOwnedAssets = async () => {
   for (const [assetType, secretName] of [["facebook_page", "HUDDLE_FACEBOOK_PAGE_ID"], ["instagram_business", "HUDDLE_INSTAGRAM_ACCOUNT_ID"], ["ad_account", "HUDDLE_AD_ACCOUNT_ID"]]) {
     const externalId = String(Deno.env.get(secretName) || "").trim();
-    if (externalId) await supabase.from("huddle_growth_assets").update({ status: "revoked", updated_at: new Date().toISOString() }).eq("asset_type", assetType).neq("external_id", externalId);
+    if (externalId) await supabase.from("huddle_growth_assets").update({ status: "inactive", updated_at: new Date().toISOString() }).eq("asset_type", assetType).neq("external_id", externalId);
   }
 };
 
