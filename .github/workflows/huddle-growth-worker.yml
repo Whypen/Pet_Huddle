@@ -1,5 +1,7 @@
 name: Huddle Growth worker
 
+# This isolated worker calls the deployed Growth Agent; it does not build the app.
+
 on:
   schedule:
     - cron: "*/15 * * * *"
