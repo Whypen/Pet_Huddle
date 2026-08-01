@@ -447,16 +447,17 @@ const startOAuth = async (req: Request, provider: "meta" | "threads", adminId: s
 };
 
 const getConsole = async () => {
-  const [connections, assets, actions, approvals, policy, audit] = await Promise.all([
+  const [connections, assets, content, actions, approvals, policy, audit] = await Promise.all([
     supabase.from("huddle_growth_connections").select("id,provider,external_user_id,display_name,status,token_expires_at,granted_scopes,metadata,last_synced_at,last_error,created_at,updated_at").order("created_at", { ascending: false }),
     supabase.from("huddle_growth_assets").select("id,connection_id,asset_type,external_id,name,status,granted_scopes,metadata,last_synced_at,updated_at").order("updated_at", { ascending: false }),
+    supabase.from("huddle_growth_content").select("id,platform,asset_id,campaign_name,objective,content_type,body,status,scheduled_at,published_at,external_id,performance,created_at,updated_at").order("updated_at", { ascending: false }).limit(100),
     supabase.from("huddle_growth_actions").select("id,action_type,platform,asset_id,content_id,payload,risk_level,status,idempotency_key,attempts,max_attempts,next_retry_at,requested_by,approved_by,started_at,completed_at,last_error,result,created_at,updated_at").in("status", ["queued", "awaiting_approval", "running", "failed"]).order("created_at", { ascending: false }).limit(100),
     supabase.from("huddle_growth_approvals").select("id,action_id,status,note,requested_by,decided_by,decided_at,created_at").eq("status", "pending").order("created_at", { ascending: false }).limit(100),
     supabase.from("huddle_growth_budget_policies").select("emergency_stop,daily_spend_cap_minor,monthly_spend_cap_minor,max_auto_budget_increase_percent,auto_pause_enabled,auto_pause_ctr_threshold,auto_pause_cpl_threshold_minor,allowed_actions,updated_at").eq("id", true).maybeSingle(),
     supabase.from("huddle_growth_audit_logs").select("id,actor_id,action_id,connection_id,action,platform,details,created_at").order("created_at", { ascending: false }).limit(100),
   ]);
-  for (const result of [connections, assets, actions, approvals, policy, audit]) if (result.error) throw result.error;
-  return { connections: connections.data || [], assets: assets.data || [], actions: actions.data || [], approvals: approvals.data || [], policy: policy.data || {}, audit: audit.data || [] };
+  for (const result of [connections, assets, content, actions, approvals, policy, audit]) if (result.error) throw result.error;
+  return { connections: connections.data || [], assets: assets.data || [], content: content.data || [], actions: actions.data || [], approvals: approvals.data || [], policy: policy.data || {}, audit: audit.data || [] };
 };
 
 const queueAction = async (adminId: string, body: Record<string, unknown>) => {
@@ -507,7 +508,7 @@ const generateContent = async (body: Record<string, unknown>) => {
   const platform = String(body.platform || "Threads");
   const objective = String(body.objective || "useful local pet-safety awareness");
   const brief = String(body.brief || "").trim();
-  const system = "You are Huddle's Growth Agent. Huddle is a London-first pet safety, care and social platform built around 'Know first. Act fast.'. Write concise, warm, witty, Gen-Z, useful, human, street-aware copy. Never use generic pet puns or corporate language. Never invent Huddle traction, users, partnerships, funding, locations, or product claims. Do not give veterinary, legal, financial, or crisis advice. If a safety topic is requested, use a careful reminder to contact an appropriately qualified professional. Return only the final post copy, no quotation marks or explanation.";
+  const system = "You are huddle’s official social media manager. huddle helps people turn care into local action: pet safety, community, trusted care, and pet-life continuity. Write concise, warm, witty, culturally awake, useful, human copy. Never use generic pet puns, corporate language, guilt, panic, rescue-saviour language, or empty engagement bait. Give one true thought or one clear, safe action. Safety is calm and exact; care is specific and never guaranteed; education is not veterinary advice. Never invent Huddle traction, users, partnerships, funding, product capability, locations, market availability, or outcomes. Do not volunteer where huddle is from, headquartered, founded, incorporated, or where its team lives. Only if directly asked, the approved answer is: ‘huddle is operating across the UK and Asia first.’ Do not name a city, country, launch date, or availability unless it is confirmed. Return only the final post copy, with no quotation marks or explanation.";
   const input = `Platform: ${platform}\nObjective: ${objective}\nBrief: ${brief || "Create one strong launch-ready idea for Huddle."}`;
   const response = await fetch("https://api.openai.com/v1/responses", { method: "POST", headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }, body: JSON.stringify({ model, store: false, input: [{ role: "developer", content: [{ type: "input_text", text: system }] }, { role: "user", content: [{ type: "input_text", text: input }] }] }) });
   const raw = await response.text();
@@ -517,6 +518,103 @@ const generateContent = async (body: Record<string, unknown>) => {
   const outputText = String(parsed.output_text || ((Array.isArray(parsed.output) ? parsed.output : []).flatMap((item) => (item && typeof item === "object" && Array.isArray((item as Record<string, unknown>).content) ? (item as Record<string, unknown>).content as Array<Record<string, unknown>> : [])).map((item) => String(item.text || "")).filter(Boolean).join("\n")) || "").trim();
   if (!outputText) throw new Error("openai_empty_response");
   return { copy: outputText, model };
+};
+
+const createContentPack = async (adminId: string, body: Record<string, unknown>) => {
+  const objective = String(body.objective || "Build useful local awareness").trim().slice(0, 140);
+  const direction = String(body.direction || "").trim().slice(0, 1200);
+  const assetMap: Record<string, string> = {
+    instagram: "instagram_business",
+    threads: "threads_profile",
+    facebook: "facebook_page",
+  };
+  const requested = Array.isArray(body.platforms) ? body.platforms.map(String) : ["instagram", "threads", "facebook"];
+  const platforms = requested.filter((platform) => Object.prototype.hasOwnProperty.call(assetMap, platform));
+  if (!platforms.length) throw new Error("content_platform_required");
+  const { data: assets, error: assetError } = await supabase.from("huddle_growth_assets").select("id,asset_type,name,status").eq("status", "active");
+  if (assetError) throw assetError;
+  const drafts: Record<string, unknown>[] = [];
+  for (const platform of platforms) {
+    const asset = (assets || []).find((item) => item.asset_type === assetMap[platform]);
+    if (!asset) continue;
+    const generated = await generateContent({
+      platform: platform === "instagram" ? "Instagram" : platform === "threads" ? "Threads" : "Facebook Page",
+      objective,
+      brief: `${direction || "Choose the strongest current Huddle story."}\nCreate a platform-native draft that is useful, truthful, and ready for the founder’s final edit.`,
+    });
+    const contentType = platform === "instagram" ? "image" : "text";
+    const draftBody = {
+      copy: generated.copy,
+      direction: direction || null,
+      visual_brief: platform === "instagram" ? `Create a candid, real-feeling pet-world visual for: ${objective}. Avoid stock imagery, generic pet tips, and unverified product claims.` : null,
+      generated_by: "huddle_growth_agent",
+      model: generated.model,
+    };
+    const { data, error } = await supabase.from("huddle_growth_content").insert({
+      platform,
+      asset_id: asset.id,
+      objective,
+      content_type: contentType,
+      body: draftBody,
+      status: "draft",
+      created_by: adminId,
+    }).select("id,platform,asset_id,objective,content_type,body,status,created_at").single();
+    if (error || !data) throw error || new Error("content_draft_store_failed");
+    drafts.push(data as Record<string, unknown>);
+  }
+  if (!drafts.length) throw new Error("no_requested_content_assets_connected");
+  await supabase.from("huddle_growth_audit_logs").insert({
+    actor_id: adminId,
+    action: "content_pack_prepared",
+    platform: "system",
+    details: { platforms: drafts.map((draft) => draft.platform), objective },
+  });
+  return { drafts };
+};
+
+const publishContentDraft = async (adminId: string, body: Record<string, unknown>) => {
+  const { data: policy, error: policyError } = await supabase
+    .from("huddle_growth_budget_policies")
+    .select("emergency_stop")
+    .eq("id", true)
+    .maybeSingle();
+  if (policyError) throw policyError;
+  if (policy?.emergency_stop) throw new Error("emergency_stop_enabled");
+  const contentId = String(body.content_id || "").trim();
+  if (!contentId) throw new Error("content_required");
+  const { data: content, error: contentError } = await supabase.from("huddle_growth_content").select("*").eq("id", contentId).maybeSingle();
+  if (contentError || !content) throw contentError || new Error("content_not_found");
+  if (!["draft", "awaiting_approval", "failed"].includes(String(content.status))) throw new Error("content_not_ready_for_approval");
+  const currentBody = content.body && typeof content.body === "object" ? content.body as Record<string, unknown> : {};
+  const copy = String(body.copy || currentBody.copy || "").trim();
+  const imageUrl = String(body.image_url || currentBody.image_url || "").trim();
+  if (!copy) throw new Error("content_text_required");
+  if (content.platform === "instagram" && !imageUrl) throw new Error("instagram_public_image_url_required");
+  const nextBody = { ...currentBody, copy, ...(imageUrl ? { image_url: imageUrl } : {}) };
+  await supabase.from("huddle_growth_content").update({ body: nextBody, status: "publishing", approved_by: adminId, updated_at: new Date().toISOString() }).eq("id", contentId);
+  try {
+    const result = await executeAction({
+      action_type: "publish_text",
+      platform: content.platform,
+      asset_id: content.asset_id,
+      payload: { text: copy, ...(imageUrl ? { image_url: imageUrl } : {}) },
+    });
+    await supabase.from("huddle_growth_content").update({
+      body: nextBody,
+      status: "published",
+      approved_by: adminId,
+      published_at: new Date().toISOString(),
+      external_id: String(result.external_id || "") || null,
+      updated_at: new Date().toISOString(),
+    }).eq("id", contentId);
+    await supabase.from("huddle_growth_audit_logs").insert({ actor_id: adminId, action: "content_approved_and_published", platform: String(content.platform), details: { content_id: contentId, external_id: result.external_id || null } });
+    return { content_id: contentId, status: "published", result };
+  } catch (error) {
+    const message = safeError(error);
+    await supabase.from("huddle_growth_content").update({ body: nextBody, status: "failed", updated_at: new Date().toISOString() }).eq("id", contentId);
+    await supabase.from("huddle_growth_audit_logs").insert({ actor_id: adminId, action: "content_publish_failed", platform: String(content.platform), details: { content_id: contentId, error: message } });
+    throw error;
+  }
 };
 
 const cleanupRetention = async () => {
@@ -608,6 +706,12 @@ serve(async (req: Request) => {
     }
     if (operation === "generate_content") {
       return json(await generateContent(body));
+    }
+    if (operation === "create_content_pack") {
+      return json(await createContentPack(adminId, body));
+    }
+    if (operation === "publish_content_draft") {
+      return json(await publishContentDraft(adminId, body));
     }
     if (operation === "retention_cleanup") {
       if (!workerOperation) throw new Error("worker_required");
