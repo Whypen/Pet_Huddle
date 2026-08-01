@@ -25,6 +25,8 @@ import {
 } from "../_shared/huddleGrowth.ts";
 
 const supabase = getServiceClient();
+const META_APP_SECRET = String(Deno.env.get("META_APP_SECRET") || "").trim();
+const THREADS_APP_SECRET = String(Deno.env.get("THREADS_APP_SECRET") || "").trim();
 
 const html = (message: string, status = 200) => new Response(
   `<!doctype html><meta charset="utf-8"><title>Huddle Growth Agent</title><p>${message}</p><script>try{window.opener&&window.opener.postMessage({type:'huddle-growth-connected'},'*')}catch{};setTimeout(()=>location.href=${JSON.stringify(`${Deno.env.get("APP_URL") || "https://huddle.pet"}/admin/growth`)},400)</script>`,
@@ -35,6 +37,67 @@ const requireWorker = (req: Request) => {
   const configured = String(Deno.env.get("GROWTH_WORKER_SECRET") || "").trim();
   const supplied = req.headers.get("x-growth-worker-secret") || "";
   if (!configured || supplied.length < 16 || supplied !== configured) throw new Error("worker_unauthorized");
+};
+
+const decodeBase64Url = (value: string) => {
+  const normalized = value.replaceAll("-", "+").replaceAll("_", "/").padEnd(Math.ceil(value.length / 4) * 4, "=");
+  return Uint8Array.from(atob(normalized), (character) => character.charCodeAt(0));
+};
+
+const verifySignedRequest = async (signedRequest: string, secret: string) => {
+  if (!secret) throw new Error("app_secret_missing");
+  const [encodedSignature, encodedPayload] = signedRequest.split(".");
+  if (!encodedSignature || !encodedPayload) throw new Error("signed_request_invalid");
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
+  const valid = await crypto.subtle.verify("HMAC", key, decodeBase64Url(encodedSignature), new TextEncoder().encode(encodedPayload));
+  if (!valid) throw new Error("signed_request_invalid");
+  const payload = JSON.parse(new TextDecoder().decode(decodeBase64Url(encodedPayload))) as Record<string, unknown>;
+  if (String(payload.algorithm || "HMAC-SHA256").toUpperCase() !== "HMAC-SHA256") throw new Error("signed_request_algorithm_invalid");
+  return payload;
+};
+
+const readSignedRequest = async (req: Request) => {
+  const contentType = req.headers.get("content-type") || "";
+  if (contentType.includes("application/json")) {
+    const body = await req.json().catch(() => ({})) as Record<string, unknown>;
+    return String(body.signed_request || "");
+  }
+  const form = new URLSearchParams(await req.text());
+  return String(form.get("signed_request") || "");
+};
+
+const handleComplianceCallback = async (req: Request, url: URL) => {
+  const operation = String(url.searchParams.get("compliance") || "");
+  if (operation === "deletion_status") {
+    const code = String(url.searchParams.get("code") || "");
+    return html(code ? `Huddle data deletion request ${code} has been received.` : "Deletion request code is missing.", code ? 200 : 400);
+  }
+  if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+  const provider = operation.startsWith("threads_") ? "threads" : "meta";
+  const payload = await verifySignedRequest(await readSignedRequest(req), provider === "threads" ? THREADS_APP_SECRET : META_APP_SECRET);
+  const externalUserId = String(payload.user_id || payload.profile_id || "");
+  if (!externalUserId) throw new Error("signed_request_user_missing");
+  const { data: connection } = await supabase.from("huddle_growth_connections").select("id").eq("provider", provider).eq("external_user_id", externalUserId).maybeSingle();
+  if (connection?.id) {
+    await supabase.from("huddle_growth_connections").update({
+      status: "revoked",
+      encrypted_access_token: null,
+      access_token_iv: null,
+      last_error: operation.endsWith("delete") ? "data_deletion_requested" : "provider_deauthorized",
+      updated_at: new Date().toISOString(),
+    }).eq("id", connection.id);
+    await supabase.from("huddle_growth_audit_logs").insert({
+      connection_id: connection.id,
+      action: operation.endsWith("delete") ? "provider_data_deletion_requested" : "provider_deauthorized",
+      platform: provider,
+      details: { external_user_id: externalUserId },
+    });
+  }
+  if (!operation.endsWith("delete")) return json({ ok: true });
+  const confirmationCode = crypto.randomUUID();
+  const statusUrl = new URL(req.url);
+  statusUrl.search = new URLSearchParams({ compliance: "deletion_status", code: confirmationCode }).toString();
+  return json({ url: statusUrl.toString(), confirmation_code: confirmationCode });
 };
 
 const getConnection = async (connectionId: string) => {
@@ -1279,6 +1342,14 @@ const runAction = async (actionId?: string) => {
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS_HEADERS });
   const url = new URL(req.url);
+  if (url.searchParams.get("compliance")) {
+    try {
+      return await handleComplianceCallback(req, url);
+    } catch (error) {
+      console.error("[huddle-growth compliance]", safeError(error));
+      return json({ error: "invalid_compliance_request" }, 400);
+    }
+  }
   if (req.method === "GET" && url.searchParams.get("code")) return handleOAuthCallback(url);
   try {
     const body = req.method === "POST" ? await req.json().catch(() => ({})) as Record<string, unknown> : {};
