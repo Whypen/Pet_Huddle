@@ -1,10 +1,12 @@
 name: Huddle Growth worker
 
 # This isolated worker calls the deployed Growth Agent; it does not build the app.
+# It runs once daily at 09:00 HKT (01:00 UTC). curl has no retry flags, so a
+# failed invocation ends the run and waits for the next daily schedule.
 
 on:
   schedule:
-    - cron: "*/15 * * * *"
+    - cron: "0 1 * * *"
   workflow_dispatch:
 
 permissions:
