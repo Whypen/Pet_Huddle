@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { cn } from "@/lib/utils";
-import brandLogoVideo from "../../../app/assets/APP/brandlogo.mp4";
-import brandLogoFallback from "../../../app/assets/APP/brandlogofallback.png";
+import brandLogoVideo from "@/assets/brand/brandlogo.mp4";
+import brandLogoFallback from "@/assets/brand/brandlogofallback.png";
 
 type WebBrandMediaProps = {
   size?: number;
