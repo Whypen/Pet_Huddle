@@ -3,8 +3,8 @@ import {
   resolvePublicReadConfig,
   setPublicCacheHeaders,
   type ResponseShape,
-} from "./_publicRead";
-import { checkDistributedRateLimit } from './_distributedRateLimit';
+} from "./_publicRead.js";
+import { checkDistributedRateLimit } from './_distributedRateLimit.js';
 
 type MaybeString = string | string[] | undefined;
 type RequestShape = { headers?: Record<string, MaybeString> };
