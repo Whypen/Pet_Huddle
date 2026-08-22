@@ -1,7 +1,9 @@
 import FingerprintJS from "@fingerprintjs/fingerprintjs";
 import { invokeAuthedFunction } from "@/lib/invokeAuthedFunction";
 
-let fingerprintPromise: Promise<FingerprintJS.Agent> | null = null;
+let fingerprintPromise: ReturnType<typeof FingerprintJS.load> | null = null;
+const LOGIN_DEVICE_ID_KEY = "huddle.web.sign-in-device-id.v1";
+let inMemoryLoginDeviceId = "";
 
 async function getAgent() {
   if (!fingerprintPromise) {
@@ -19,6 +21,33 @@ export async function getVisitorId(): Promise<string | null> {
     console.warn("[deviceFingerprint] failed to compute visitor id", error);
     return null;
   }
+}
+
+export async function getLoginDeviceId(): Promise<string> {
+  if (inMemoryLoginDeviceId) return inMemoryLoginDeviceId;
+
+  try {
+    const stored = window.localStorage.getItem(LOGIN_DEVICE_ID_KEY)?.trim();
+    if (stored) {
+      inMemoryLoginDeviceId = stored;
+      return stored;
+    }
+  } catch {
+    // Private browsing and hardened browser modes can deny storage access.
+  }
+
+  const fingerprintId = await getVisitorId();
+  const generated = typeof globalThis.crypto?.randomUUID === "function"
+    ? globalThis.crypto.randomUUID()
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`;
+  const deviceId = fingerprintId || `web-signin-${generated}`;
+  inMemoryLoginDeviceId = deviceId;
+  try {
+    window.localStorage.setItem(LOGIN_DEVICE_ID_KEY, deviceId);
+  } catch {
+    // The in-memory value still prevents repeated identity rotation this session.
+  }
+  return deviceId;
 }
 
 export async function trackDeviceFingerprint(
