@@ -427,7 +427,7 @@ const DiscoveryDeckInner = ({
         )}
         <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[34%] bg-[linear-gradient(180deg,rgba(9,21,95,0)_0%,rgba(9,21,95,0.82)_100%)]" />
         <div className="absolute inset-x-4 top-4 z-[19] flex items-start justify-between gap-3">
-          <ProfileBadges isVerified={isVerifiedProfile(profile)} hasCar={!!profile.has_car} size="lg" />
+          <ProfileBadges isVerified={isVerifiedProfile(profile)} hasCar={!!profile.has_car} size="md" />
           {isActive && !hideTopChrome ? (
             <div className="pointer-events-auto flex items-start gap-2">
               {footerCtaMode === "promoted" && !isDiscoverDragging ? renderDiscoveryActionButtons("promoted", profile) : null}

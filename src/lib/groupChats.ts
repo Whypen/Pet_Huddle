@@ -32,7 +32,7 @@ export const updateGroupChatMetadata = async ({
   updateAvatar = false,
   updateDescription = false,
 }: UpdateGroupChatMetadataInput) => {
-  const { data, error } = await (supabase.rpc as (
+  const { data, error } = await (supabase.rpc as unknown as (
     fn: string,
     params?: Record<string, unknown>
   ) => Promise<{ data: unknown; error: { message?: string } | null }>)("update_group_chat_metadata", {

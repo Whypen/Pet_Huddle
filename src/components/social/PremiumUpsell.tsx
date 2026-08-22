@@ -42,7 +42,7 @@ export const PremiumUpsell = ({ isOpen, onClose, tier = "plus" }: PremiumUpsellP
         type: `${tier}_${billing === "annual" ? "annual" : "monthly"}`,
         lookupKey: plan.lookupKey,
         priceId: plan.priceId,
-        successUrl: `${window.location.origin}/premium`,
+        successUrl: `${window.location.origin}/member`,
         cancelUrl: window.location.href,
       });
       window.location.assign(url);

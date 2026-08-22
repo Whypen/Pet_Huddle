@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -10,7 +10,7 @@ import { authResetPassword } from "@/lib/publicAuthApi";
 import { useTurnstile } from "@/hooks/useTurnstile";
 import { TurnstileDebugPanel, TurnstileWidget } from "@/components/security/TurnstileWidget";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
+import { buildJoinSignInPath } from "@/lib/authIntent";
 
 const schema = z.object({
   email: z.string().trim().email("Enter a valid email address."),
@@ -21,12 +21,8 @@ type RequestState = "idle" | "sending" | "sent";
 
 const ResetPassword = () => {
   const navigate = useNavigate();
-  const [registeredEmail, setRegisteredEmail] = useState(false);
-  const [checkingEmail, setCheckingEmail] = useState(false);
   const [emailCheckError, setEmailCheckError] = useState<string | null>(null);
   const [requestState, setRequestState] = useState<RequestState>("idle");
-  const [submittedEmail, setSubmittedEmail] = useState("");
-  const duplicateCheckRef = useRef(0);
   const showTurnstileDiag =
     typeof window !== "undefined"
     && new URLSearchParams(window.location.search).get("turnstile_diag") === "1";
@@ -45,52 +41,7 @@ const ResetPassword = () => {
   const email = watch("email") || "";
 
   useEffect(() => {
-    const trimmedEmail = email.trim().toLowerCase();
     setRequestState("idle");
-    setSubmittedEmail("");
-    if (!schema.safeParse({ email: trimmedEmail }).success) {
-      setRegisteredEmail(false);
-      setCheckingEmail(false);
-      setEmailCheckError(null);
-      return;
-    }
-    const checkId = ++duplicateCheckRef.current;
-    const timer = window.setTimeout(async () => {
-      try {
-        setCheckingEmail(true);
-        setEmailCheckError(null);
-        const { data, error } = await supabase.rpc("check_identifier_registered", {
-          p_email: trimmedEmail,
-          p_phone: "",
-        });
-        if (checkId !== duplicateCheckRef.current) return;
-        if (error) {
-          setRegisteredEmail(false);
-          setEmailCheckError("We couldn't check this email right now. Please try again.");
-          return;
-        }
-        if (data?.blocked) {
-          setRegisteredEmail(false);
-          setEmailCheckError(String(data?.public_message || "This account is unavailable."));
-          return;
-        }
-        if (data?.review_required) {
-          setRegisteredEmail(false);
-          setEmailCheckError("This account is temporarily unavailable.");
-          return;
-        }
-        const exists = Boolean(data?.registered);
-        setRegisteredEmail(exists);
-        setEmailCheckError(exists ? null : "We couldn't find an account with that email.");
-      } catch {
-        if (checkId !== duplicateCheckRef.current) return;
-        setRegisteredEmail(false);
-        setEmailCheckError("We couldn't check this email right now. Please try again.");
-      } finally {
-        if (checkId === duplicateCheckRef.current) setCheckingEmail(false);
-      }
-    }, 350);
-    return () => window.clearTimeout(timer);
   }, [email]);
 
   const onSubmit = async (values: FormData) => {
@@ -113,7 +64,6 @@ const ResetPassword = () => {
       setEmailCheckError("We couldn't send that reset email just now. Please try again in a moment.");
       return;
     }
-    setSubmittedEmail(normalizedEmail);
     setEmailCheckError(null);
     setRequestState("sent");
   };
@@ -122,7 +72,7 @@ const ResetPassword = () => {
     <div className="min-h-screen bg-background px-6 pt-10">
       <button
         type="button"
-        onClick={() => navigate("/auth")}
+        onClick={() => navigate(buildJoinSignInPath("/social"), { replace: true })}
         className="mb-4 inline-flex h-9 w-9 items-center justify-center rounded-full border border-border text-brandText"
         aria-label="Back to sign in"
       >
@@ -138,7 +88,7 @@ const ResetPassword = () => {
             <div>
               <p className="font-medium">Check your inbox</p>
               <p className="mt-1 leading-6 text-emerald-800">
-                We&apos;ve sent a password reset link to <span className="font-medium">{submittedEmail}</span>.
+                If that email is in Huddle, we&apos;ve sent a reset link.
                 If it doesn&apos;t arrive in a few minutes, check your spam folder or try again.
               </p>
             </div>
@@ -159,9 +109,9 @@ const ResetPassword = () => {
         <Button
           type="submit"
           className="h-10 w-full"
-          disabled={!isValid || !registeredEmail || checkingEmail || requestState === "sending" || !resetTurnstile.isTokenUsable}
+          disabled={!isValid || requestState === "sending" || !resetTurnstile.isTokenUsable}
         >
-          {checkingEmail ? "Checking…" : requestState === "sending" ? "Sending…" : "Send reset link"}
+          {requestState === "sending" ? "Sending…" : "Send reset link"}
         </Button>
       </form>
 

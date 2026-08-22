@@ -87,6 +87,7 @@ export interface Profile {
   email_verified: boolean;
   owns_pets: boolean;
   non_social?: boolean | null;
+  discovery_opt_out?: boolean | null;
   availability_status: string[];
   social_album?: string[] | null;
   photos?: ProfilePhotos | null;
@@ -106,6 +107,8 @@ export interface Profile {
   location_pinned_until?: string | null;
   location_retention_until?: string | null;
   hide_from_map?: boolean | null;
+  map_precision?: "area" | "hidden" | null;
+  map_visible_until?: string | null;
   care_circle?: string[] | null;
   last_active_at?: string | null;
 }
@@ -159,6 +162,8 @@ interface AuthContextType {
   refreshProfile: () => Promise<void>;
 }
 
+type SignInResult = Awaited<ReturnType<AuthContextType["signIn"]>>;
+
 const ACTIVITY_TOUCH_KEY = "huddle_last_activity_touch_at";
 const EXPIRE_RESTRICTIONS_SESSION_KEY = "huddle:expire-restrictions-ts";
 const EXPIRE_RESTRICTIONS_TTL_MS = 10 * 60 * 1000; // 10 minutes per tab session
@@ -190,7 +195,7 @@ const PROFILE_COLUMNS = [
   "human_verification_status", "human_verified_at",
   "card_verification_status", "card_verified", "card_brand", "card_last4",
   "verification_rejection_code", "social_album", "prefs",
-  "hide_from_map", "last_active_at",
+  "hide_from_map", "map_precision", "map_visible_until", "last_active_at",
 ] as const;
 const PROFILE_SELECT = PROFILE_COLUMNS.join(", ");
 const PROFILE_OPTIONAL_COLUMNS = [
@@ -250,8 +255,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const lastPriceHintsRef = useRef("");
   const previousUserIdRef = useRef<string | null>(null);
+  const profileRef = useRef<Profile | null>(null);
   const hydrationRunRef = useRef(0);
-  const profileDebounceRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const lastHydrationTokenRef = useRef<string | null>(null);
+  const profileDebounceRef = useRef<number | null>(null);
 
   const beginHydrationRun = useCallback(() => {
     hydrationRunRef.current += 1;
@@ -261,6 +268,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const isHydrationRunCurrent = useCallback((runId: number) => {
     return hydrationRunRef.current === runId;
   }, []);
+
+  useEffect(() => {
+    profileRef.current = profile;
+  }, [profile]);
 
   const clearTransientUserStorage = useCallback((options?: { preserveSignupFlow?: boolean }) => {
     const preserveSignupFlow = options?.preserveSignupFlow === true;
@@ -372,12 +383,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         data = fallback.data;
         error = fallback.error;
       }
-      if (!isHydrationRunCurrent(runId)) return;
+      if (!isHydrationRunCurrent(runId)) return null;
       if (error) throw error;
       if (!data) {
         // Never preserve stale in-memory profile state when the row is missing.
         setProfile(null);
-        return;
+        return null;
       }
 
       const resolveFamilyOwnerId = async (seedUserId: string): Promise<string> => {
@@ -400,10 +411,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         }
         return current;
       };
-      const ownerId = await resolveFamilyOwnerId(userId);
-      if (!isHydrationRunCurrent(runId)) return;
-      const familyOwnerId = ownerId !== userId ? ownerId : null;
-      const effectiveTier = normalizeMembershipTier(String(data.effective_tier ?? data.tier ?? "free"));
+      const profileData = data as unknown as Profile;
+      const effectiveTier = normalizeMembershipTier(String(profileData.effective_tier ?? profileData.tier ?? "free"));
 
       // Auto-expire any restriction/suspension that has passed its deadline.
       // Rate-limited to once per 10 min per tab session to avoid firing on every realtime/focus tick.
@@ -417,7 +426,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         // best-effort only
       }
 
-      const nextProfile = { ...(data as Profile), effective_tier: effectiveTier, family_owner_id: familyOwnerId };
+      const previousFamilyOwnerId = profileRef.current?.id === userId
+        ? profileRef.current.family_owner_id ?? null
+        : null;
+      const nextProfile = {
+        ...profileData,
+        effective_tier: effectiveTier,
+        family_owner_id: previousFamilyOwnerId,
+      };
       const nextProfileKey = stableStringify(nextProfile);
       setProfile((prev) => {
         if (prev && stableStringify(prev) === nextProfileKey) {
@@ -426,17 +442,36 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         return nextProfile;
       });
 
+      // Family ownership affects quota billing, not route authorization or the
+      // first paint. Resolve it after publishing the validated profile so every
+      // signed-in surface can render after one profile round trip instead of
+      // waiting on a second chain of family_members reads.
+      void resolveFamilyOwnerId(userId)
+        .then((ownerId) => {
+          if (!isHydrationRunCurrent(runId)) return;
+          const familyOwnerId = ownerId !== userId ? ownerId : null;
+          setProfile((current) => {
+            if (!current || current.id !== userId || current.family_owner_id === familyOwnerId) {
+              return current;
+            }
+            return { ...current, family_owner_id: familyOwnerId };
+          });
+        })
+        .catch(() => {
+          // Quota consumers retain their existing owner fallback on failure.
+        });
+
       // Warm pricing cache in the background so Premium / upsell UI can
       // render the user's resolved currency without a visible flash.
       // Deduplicated: skip if same country+currency hints as last call.
       void (async () => {
-        const profilePrefs = (data as Profile).prefs as Record<string, unknown> | null | undefined;
+        const profilePrefs = profileData.prefs as Record<string, unknown> | null | undefined;
         const savedPricingCurrency = typeof profilePrefs?.pricing_currency === "string"
           ? profilePrefs.pricing_currency
           : null;
         const hints = await resolvePricingHints({
           userId,
-          profileCountry: (data as Profile).location_country ?? null,
+          profileCountry: profileData.location_country ?? null,
           profileCurrency: savedPricingCurrency,
         });
         const hintsKey = `${hints.country ?? ""}:${hints.currency ?? ""}`;
@@ -447,10 +482,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           currency: hints.currency,
         });
       })();
+      return nextProfile;
     } catch (error) {
-      if (!isHydrationRunCurrent(runId)) return;
+      if (!isHydrationRunCurrent(runId)) return null;
       console.error("[AuthContext] fetchProfile failed", error);
       setProfile(null);
+      return null;
     }
   }, [isHydrationRunCurrent]);
 
@@ -472,8 +509,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const hydrateValidatedSession = useCallback(async (candidateSession: Session | null) => {
+    const candidateToken = candidateSession?.access_token || null;
+    if (candidateToken && lastHydrationTokenRef.current === candidateToken) return;
+    lastHydrationTokenRef.current = candidateToken;
     const runId = beginHydrationRun();
     if (!candidateSession) {
+      lastHydrationTokenRef.current = null;
       resetAuthBoundary(runId, { preserveSignupFlow: true });
       setLoading(false);
       setHydrating(false);
@@ -486,17 +527,43 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     // component, destroying modal state like emailModalOpen.
     // Instead, set `hydrating` to signal that user→profile is in flight.
     setHydrating(true);
-    const { data, error } = await supabase.auth.getUser();
+    const candidateUserId = candidateSession.user.id;
+    const sameUserAsCurrent = previousUserIdRef.current === candidateUserId;
+    const preserveExistingProfile = sameUserAsCurrent && Boolean(profileRef.current);
+    if (previousUserIdRef.current && previousUserIdRef.current !== candidateUserId) {
+      clearTransientUserStorage();
+      clearSignupScopedStorage([
+        previousUserIdRef.current,
+        candidateSession.user.email,
+        candidateUserId,
+      ]);
+    }
+    if (!preserveExistingProfile) setProfile(null);
+
+    // The session validation and owner-scoped profile read are independent.
+    // Starting them together removes a full network round trip from every cold
+    // signed-in route without trusting the local session: ProtectedRoute stays
+    // on its loading boundary until getUser has validated the JWT, and RLS still
+    // guards the profile request itself.
+    const profilePromise = fetchProfile(candidateUserId, runId, {
+      preserveExisting: preserveExistingProfile,
+    });
+    const [{ data, error }, aal] = await Promise.all([
+      supabase.auth.getUser(),
+      getAuthenticatorAssurance(supabase),
+    ]);
     if (!isHydrationRunCurrent(runId)) return;
-    if (error || !data.user) {
+    if (error || !data.user || data.user.id !== candidateUserId) {
       if (import.meta.env.DEV) {
         console.warn("[AuthContext] clearing stale local session", {
           error: error?.message ?? null,
         });
       }
+      lastHydrationTokenRef.current = null;
+      const invalidRunId = beginHydrationRun();
       await supabase.auth.signOut({ scope: "local" });
-      if (!isHydrationRunCurrent(runId)) return;
-      resetAuthBoundary(runId, { preserveSignupFlow: true });
+      if (!isHydrationRunCurrent(invalidRunId)) return;
+      resetAuthBoundary(invalidRunId, { preserveSignupFlow: true });
       setLoading(false);
       setHydrating(false);
       return;
@@ -504,11 +571,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     const effectiveSession = candidateSession;
     supabase.realtime.setAuth(effectiveSession.access_token ?? null);
-    const aal = await getAuthenticatorAssurance(supabase);
-    if (!isHydrationRunCurrent(runId)) return;
     const isMfaPending = aal.nextLevel === "aal2" && aal.currentLevel !== "aal2";
     setSession(effectiveSession);
     if (isMfaPending) {
+      lastHydrationTokenRef.current = null;
+      beginHydrationRun();
       setMfaPending(true);
       // Keep public routes visible until MFA challenge is completed.
       setUser(null);
@@ -520,23 +587,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
     setMfaPending(false);
 
-    if (previousUserIdRef.current && previousUserIdRef.current !== data.user.id) {
-      clearTransientUserStorage();
-      clearSignupScopedStorage([previousUserIdRef.current, data.user.email, data.user.id]);
-    }
-
-    const sameUserAsCurrent = previousUserIdRef.current === data.user.id;
-    const preserveExistingProfile = sameUserAsCurrent && Boolean(profile);
     previousUserIdRef.current = data.user.id;
-    if (!preserveExistingProfile) {
-      setProfile(null);
-    }
     setUser(data.user);
-    await fetchProfile(data.user.id, runId, { preserveExisting: preserveExistingProfile });
+    const hydratedProfile = await profilePromise;
     if (!isHydrationRunCurrent(runId)) return;
     // Repair older rows that were created without profiles.email.
     if (data.user.email) {
-      const currentProfileEmail = String((profile as { email?: string | null } | null)?.email || "").trim().toLowerCase();
+      const currentProfileEmail = String(hydratedProfile?.email || "").trim().toLowerCase();
       const authEmail = String(data.user.email || "").trim().toLowerCase();
       if (!currentProfileEmail && authEmail) {
         const { error: repairError } = await supabase
@@ -559,7 +616,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     clearTransientUserStorage,
     fetchProfile,
     isHydrationRunCurrent,
-    profile,
     resetAuthBoundary,
     touchProfileActivity,
   ]);
@@ -585,8 +641,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           if (profileDebounceRef.current !== null) window.clearTimeout(profileDebounceRef.current);
           profileDebounceRef.current = window.setTimeout(() => {
             profileDebounceRef.current = null;
-            const runId = beginHydrationRun();
-            void fetchProfile(user.id, runId);
+            // A profile refresh must not supersede the auth bootstrap run. If it
+            // increments the auth generation while bootstrap is still finishing,
+            // bootstrap exits before clearing its loading state and the app stays
+            // on the route skeleton indefinitely.
+            void fetchProfile(user.id, hydrationRunRef.current);
           }, 300);
         },
       )
@@ -596,19 +655,18 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (profileDebounceRef.current !== null) window.clearTimeout(profileDebounceRef.current);
       void supabase.removeChannel(channel);
     };
-  }, [beginHydrationRun, fetchProfile, user?.id]);
+  }, [fetchProfile, user?.id]);
 
   useEffect(() => {
     if (!user?.id) return;
     const onVerificationUpdated = () => {
-      const runId = beginHydrationRun();
-      void fetchProfile(user.id, runId);
+      void fetchProfile(user.id, hydrationRunRef.current);
     };
     window.addEventListener("huddle:verification-updated", onVerificationUpdated);
     return () => {
       window.removeEventListener("huddle:verification-updated", onVerificationUpdated);
     };
-  }, [beginHydrationRun, fetchProfile, user?.id]);
+  }, [fetchProfile, user?.id]);
 
   useEffect(() => {
     let mounted = true;
@@ -682,19 +740,18 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     if (!error && data?.user?.id) {
       // Best-effort consent audit log. This will succeed when a session exists.
       if (consent?.acceptedAtIso) {
-        await supabase
-          .from("consent_logs" as "profiles")
-          .insert({
+        try {
+          const { error: consentError } = await supabase.from("consent_logs").insert({
             user_id: data.user.id,
             consent_type: "terms_privacy",
             consent_version: consent.version,
             accepted_at: consent.acceptedAtIso,
             metadata: { source: "web_signup" },
-          } as Record<string, unknown>)
-          .throwOnError()
-          .catch(() => {
-            // If email confirmation is required, the user may not have an active session yet.
           });
+          if (consentError) throw consentError;
+        } catch {
+          // If email confirmation is required, the user may not have an active session yet.
+        }
       }
 
       void trackDeviceFingerprint("signup");
@@ -703,7 +760,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     return { error: error as Error | null };
   }, []);
 
-  const signIn = useCallback(async (email: string, password: string, phone?: string, turnstileToken?: string) => {
+  const signIn = useCallback(async (email: string, password: string, phone?: string, turnstileToken?: string): Promise<SignInResult> => {
     const runtimeEnv = getAuthRuntimeEnv();
     if (import.meta.env.DEV) {
       console.debug("[auth.signin] runtime", {
@@ -788,6 +845,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     localStorage.removeItem("huddle_stay_logged_in");
     localStorage.removeItem(scopedSignupKey);
     localStorage.removeItem(SIGNUP_STORAGE_KEY);
+    localStorage.removeItem(scopedSignupPasswordKey);
+    localStorage.removeItem(SIGNUP_PASSWORD_SESSION_KEY);
     sessionStorage.removeItem(scopedSignupPasswordKey);
     sessionStorage.removeItem(SIGNUP_PASSWORD_SESSION_KEY);
     sessionStorage.removeItem("huddle_vi_status");

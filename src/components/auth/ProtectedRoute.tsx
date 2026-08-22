@@ -1,16 +1,28 @@
 import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSignup } from "@/contexts/SignupContext";
-import { Loader2 } from "lucide-react";
+import { RouteSuspenseFallback } from "@/routes/RouteSuspense";
 import { isRegisteredUserProfile } from "@/lib/signupFlow";
 import { AccountWall } from "@/components/moderation/AccountWall";
 import { RestrictedBanner } from "@/components/moderation/RestrictedBanner";
+import { buildJoinSignInPath } from "@/lib/authIntent";
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
+  /**
+   * Rendered instead of redirecting to /auth when nobody is signed in. Used by
+   * /social, /map and /chats, which the access matrix says are readable logged
+   * out.
+   *
+   * Every signed-in path below is untouched: the onboarding redirects, the
+   * email check, and the suspended/removed/restricted walls all still apply the
+   * moment a user exists. This only changes what happens when there is no user
+   * at all.
+   */
+  loggedOutFallback?: React.ReactNode;
 }
 
-export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
+export const ProtectedRoute = ({ children, loggedOutFallback }: ProtectedRouteProps) => {
   const { user, session, loading, hydrating, profile, mfaPending } = useAuth();
   const { flowState } = useSignup();
   const location = useLocation();
@@ -20,31 +32,35 @@ export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
     flowState !== "idle";
   const onboardingComplete = isRegisteredUserProfile(profile);
 
+  // Public read surfaces do not depend on account hydration. Rendering their
+  // projection immediately removes an avoidable auth-network round trip from
+  // first paint; if a valid session resolves, React swaps to the signed-in
+  // surface without ever exposing private data in the interim.
+  if (loggedOutFallback && !user && (loading || hydrating)) {
+    return <>{loggedOutFallback}</>;
+  }
+
   if (loading || (hydrating && (!user || !profile))) {
-    return (
-      <div className="min-h-svh flex items-center justify-center bg-background">
-        <Loader2 className="w-8 h-8 animate-spin text-primary" />
-      </div>
-    );
+    return <RouteSuspenseFallback />;
   }
 
   if (!user) {
     // Session/user resolution is still in-flight: never redirect on transient null.
     if (session) {
-      return (
-        <div className="min-h-svh flex items-center justify-center bg-background">
-          <Loader2 className="w-8 h-8 animate-spin text-primary" />
-        </div>
-      );
+      return <RouteSuspenseFallback />;
     }
     if (allowOnboardingWithoutAuth) {
       return <>{children}</>;
     }
-    return <Navigate to="/auth" state={{ from: location, mfaRequired: mfaPending }} replace />;
+    // Genuinely signed out, and this route has a public read-only view.
+    if (loggedOutFallback) {
+      return <>{loggedOutFallback}</>;
+    }
+    return <Navigate to={buildJoinSignInPath(`${location.pathname}${location.search}${location.hash}`)} state={{ mfaRequired: mfaPending }} replace />;
   }
 
   if (!profile) {
-    return <Navigate to="/auth" state={{ from: location, profileMissing: true }} replace />;
+    return <Navigate to={buildJoinSignInPath(`${location.pathname}${location.search}${location.hash}`)} state={{ profileMissing: true }} replace />;
   }
 
   if (!onboardingComplete && !allowOnboardingRoutes) {

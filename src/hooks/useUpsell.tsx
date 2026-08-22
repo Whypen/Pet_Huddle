@@ -24,7 +24,6 @@ interface UpsellModalState {
 type QuotaSnapshot = {
   user_id: string;
   tier: string;
-  thread_posts_today: number;
   discovery_views_today: number;
   media_usage_today: number;
   stars_used_cycle: number;
@@ -47,7 +46,7 @@ export const useUpsell = () => {
 
   const fetchQuotaSnapshot = useCallback(async (): Promise<QuotaSnapshot | null> => {
     if (!user) return null;
-    const r = await (supabase.rpc as (fn: string) => Promise<{ data: unknown; error: unknown }>)("get_quota_snapshot");
+    const r = await (supabase.rpc as unknown as (fn: string) => Promise<{ data: unknown; error: unknown }>)("get_quota_snapshot");
     if (r.error) {
       console.warn("[useUpsell] get_quota_snapshot failed", r.error);
       return null;
@@ -208,7 +207,7 @@ export const useUpsell = () => {
     if (openNativeMembershipOverview()) return;
     // Store selected add-on in session storage for Premium page to auto-select
     sessionStorage.setItem("pending_addon", type);
-    window.location.href = "/premium";
+    window.location.href = "/member";
   }, []);
 
   return {

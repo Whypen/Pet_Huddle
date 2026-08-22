@@ -1,9 +1,11 @@
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
 import { useSignup } from "@/contexts/SignupContext";
 import { consumeSupabaseAuthRedirect } from "@/lib/supabaseAuthRedirect";
+import { resolveAuthReturnTo, takeAuthIntent, takeAuthReturnTo } from "@/lib/authIntent";
+import { useAuth } from "@/contexts/AuthContext";
 import {
   SETPROFILE_PREFILL_KEY,
   loadSignupDraft,
@@ -23,6 +25,17 @@ const readRememberedIdentifier = () => {
 const AuthCallback = () => {
   const navigate = useNavigate();
   const { setFlowState } = useSignup();
+  const { user: hydratedUser, hydrating, refreshProfile } = useAuth();
+  const [pendingDestination, setPendingDestination] = useState<string | null>(null);
+  const returnInFlightRef = useRef(false);
+
+  useEffect(() => {
+    if (!pendingDestination || !hydratedUser?.id || hydrating || returnInFlightRef.current) return;
+    returnInFlightRef.current = true;
+    void refreshProfile().finally(() => {
+      navigate(pendingDestination, { replace: true });
+    });
+  }, [hydratedUser?.id, hydrating, navigate, pendingDestination, refreshProfile]);
 
   useEffect(() => {
     const run = async () => {
@@ -34,7 +47,7 @@ const AuthCallback = () => {
             ? "That reset link is no longer valid. Please request a new one."
             : "That verification link is no longer valid. Please request a new one.",
         );
-        navigate(isRecovery ? "/reset-password" : "/auth", { replace: true });
+        navigate(isRecovery ? "/reset-password" : "/join?mode=signin", { replace: true });
         return;
       }
 
@@ -48,7 +61,7 @@ const AuthCallback = () => {
       } = await supabase.auth.getUser();
       if (!user?.id) {
         toast.error("That verification link is no longer valid. Please request a new one.");
-        navigate("/auth", { replace: true });
+        navigate("/join?mode=signin", { replace: true });
         return;
       }
 
@@ -76,22 +89,25 @@ const AuthCallback = () => {
         p_email: email || "",
         p_phone: phone || "",
       });
-      if (!signupGateError && signupGateStatus?.blocked) {
+      const signupGate = signupGateStatus && typeof signupGateStatus === "object" && !Array.isArray(signupGateStatus)
+        ? signupGateStatus as Record<string, unknown>
+        : null;
+      if (!signupGateError && signupGate?.blocked) {
         await supabase.auth.signOut({ scope: "local" });
-        navigate("/auth", {
+        navigate("/join?mode=signin", {
           replace: true,
           state: {
             blocked_message: String(
-              signupGateStatus?.public_message ||
+              signupGate.public_message ||
               "Your Huddle account is unavailable. Contact support@huddle.pet if you think this is a mistake.",
             ),
           },
         });
         return;
       }
-      if (!signupGateError && signupGateStatus?.review_required) {
+      if (!signupGateError && signupGate?.review_required) {
         await supabase.auth.signOut({ scope: "local" });
-        navigate("/auth", {
+        navigate("/join?mode=signin", {
           replace: true,
           state: {
             blocked_message: "Signup is temporarily unavailable. Please try again later.",
@@ -142,7 +158,18 @@ const AuthCallback = () => {
         }
       }
 
-      navigate("/", { replace: true });
+      // Intent resume. If the person hit the auth wall mid-action, land them back
+      // where they were instead of on the home dashboard. OAuth unloads the page,
+      // so this is read from sessionStorage, not from memory. `takeAuthIntent`
+      // consumes it, so a refresh of this route cannot replay it a second time,
+      // and anything older than the TTL is discarded rather than fired late.
+      //
+      // Only the returning-user path resumes: a brand new OAuth account is routed
+      // to /signup/dob above, and its intent will have expired by the time
+      // onboarding finishes — which is the safe outcome, not a missed case.
+      const resumed = takeAuthIntent();
+      const destination = resolveAuthReturnTo(resumed?.returnTo, takeAuthReturnTo());
+      setPendingDestination(destination);
     };
     void run();
   }, [navigate, setFlowState]);

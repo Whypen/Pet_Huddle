@@ -1,11 +1,10 @@
 import { PublicRoute } from "@/components/auth/PublicRoute";
 import SignupCredentials from "@/pages/signup/SignupCredentials";
-import { lazyWithChunkRecovery } from "@/routes/lazyWithChunkRecovery";
 import { RouteSuspense } from "@/routes/RouteSuspense";
 import { lazy } from "react";
-import { Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 
-const Auth = lazyWithChunkRecovery("auth", () => import("@/pages/Auth"));
+const Join = lazy(() => import("@/pages/Join"));
 const SignupDob = lazy(() => import("@/pages/signup/SignupDob"));
 const SignupContinueInApp = lazy(() => import("@/pages/signup/SignupContinueInApp"));
 const SignupVerify = lazy(() => import("@/pages/signup/SignupVerify"));
@@ -34,9 +33,25 @@ const BookingTerms = lazy(() => import("@/pages/BookingTerms"));
 const Support = lazy(() => import("@/pages/Support"));
 const NotFound = lazy(() => import("@/pages/NotFound"));
 
+const LegacyAuthRedirect = () => {
+  const location = useLocation();
+  const { search } = location;
+  const params = new URLSearchParams(search);
+  const from = (location.state as { from?: { pathname?: string; search?: string; hash?: string } } | null)?.from;
+  const originatingPath = from?.pathname
+    ? `${from.pathname}${from.search || ""}${from.hash || ""}`
+    : params.get("next");
+  if (originatingPath) {
+    params.set("next", originatingPath);
+  }
+  params.set("mode", "signin");
+  return <Navigate to={`/join?${params.toString()}`} replace />;
+};
+
 export const PublicAuthRoutes = () => (
   <Routes>
-    <Route path="/auth" element={<PublicRoute><RouteSuspense><Auth /></RouteSuspense></PublicRoute>} />
+    <Route path="/auth" element={<LegacyAuthRedirect />} />
+    <Route path="/join" element={<PublicRoute><RouteSuspense><Join /></RouteSuspense></PublicRoute>} />
     <Route path="/reset-password" element={<PublicRoute><RouteSuspense><ResetPassword /></RouteSuspense></PublicRoute>} />
     <Route path="/reset-password-direct" element={<RouteSuspense><ResetPasswordDirect /></RouteSuspense>} />
     <Route path="/reset-password-inline" element={<RouteSuspense><ResetPasswordInline /></RouteSuspense>} />

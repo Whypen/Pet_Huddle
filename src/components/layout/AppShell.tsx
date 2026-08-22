@@ -20,7 +20,10 @@ export const AppShell = ({ children, fullBleed = false }: AppShellProps) => {
   return (
     <div
       data-app-shell="main"
-      className="w-full max-w-[430px] mx-auto min-h-[100svh] h-[100svh] relative overflow-x-hidden flex flex-col [&>*:first-child]:flex-1 [&>*:first-child]:min-h-0"
+      // Reads the design system token (global.css:25-32): 430px, widening to
+      // 640px past lg. Not a hand-written breakpoint — the token already exists
+      // and its own comment names the shell as a surface that should read it.
+      className="w-full max-w-[var(--app-max-width,430px)] mx-auto min-h-[100svh] h-[100svh] relative overflow-x-hidden flex flex-col [&>*:first-child]:flex-1 [&>*:first-child]:min-h-0"
     >
       {children}
     </div>

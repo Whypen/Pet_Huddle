@@ -20,7 +20,7 @@ export const loadBlockedUserIdsFor = async (userId: string): Promise<Set<string>
 
 export const areUsersBlocked = async (viewerId: string, targetId: string): Promise<boolean> => {
   if (!viewerId || !targetId) return false;
-  const { data, error } = await (supabase.rpc as (
+  const { data, error } = await (supabase.rpc as unknown as (
     fn: string,
     args?: Record<string, unknown>
   ) => Promise<{ data: unknown; error: unknown }>)("is_user_blocked", {

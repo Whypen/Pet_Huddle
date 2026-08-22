@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { ChevronLeft, ChevronRight, Play, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Eye, Play, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type MediaItem = {
@@ -18,34 +18,21 @@ type PostMediaCarouselProps = {
   className?: string;
   mode?: "peek" | "full";
   isSensitive?: boolean;
+  onDoubleTap?: () => void;
 };
 
-const MIN_ASPECT = 3 / 4;
-const MAX_ASPECT = 16 / 9;
+// Canonical app bounds: portrait 9:16 through wide 1.91:1.
+const MIN_ASPECT = 9 / 16;
+const MAX_ASPECT = 1.91;
 const DEFAULT_CAROUSEL_ASPECT = 1;
+// Byte-mirrors app/src/theme/huddleDesignTokens.ts huddleSocial.sensitiveBlurRadius.
+const SENSITIVE_BLUR_RADIUS_PX = 100;
 const mediaAspectCache = new Map<string, number>();
 
 const isVideoSrc = (src: string) => /\.(mp4|mov|m4v|webm|ogg)$/i.test(src) || src.includes("video/");
 const clampAspect = (aspect: number) => Math.min(Math.max(aspect || 1, MIN_ASPECT), MAX_ASPECT);
 
 const SENSITIVE_TAP_SEEN_KEY = "huddle_sensitive_tap_seen";
-
-const TapHintIcon = () => (
-  <span className="relative inline-flex items-center justify-center">
-    {/* Ripple rings — anchored at centre, no drift on icon */}
-    <span className="absolute h-14 w-14 rounded-full border-2 border-white/60 animate-[sensitiveRipple_1.6s_ease-out_infinite]" />
-    <span className="absolute h-14 w-14 rounded-full border-2 border-white/40 animate-[sensitiveRipple_1.6s_ease-out_0.5s_infinite]" />
-    <span className="absolute h-14 w-14 rounded-full border-2 border-white/20 animate-[sensitiveRipple_1.6s_ease-out_1s_infinite]" />
-    <svg width="44" height="44" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M20 21V19C20 16.7909 18.2091 15 16 15H15C14.4477 15 14 14.5523 14 14V9C14 7.89543 13.1046 7 12 7V7C10.8954 7 10 7.89543 10 9V18L7.6 14.8C7.22229 14.2964 6.62951 14 6 14H5.56619C4.70121 14 4 14.7012 4 15.5662V15.5662C4 15.8501 4.07715 16.1286 4.22319 16.372L7 21" stroke="white" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2"/>
-      <path d="M12 4V3" stroke="white" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2"/>
-      <path d="M18 10L19 10" stroke="white" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2"/>
-      <path d="M5 10L6 10" stroke="white" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2"/>
-      <path d="M7.34334 5.34309L6.63623 4.63599" stroke="white" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2"/>
-      <path d="M16.6567 5.34309L17.3638 4.63599" stroke="white" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2"/>
-    </svg>
-  </span>
-);
 
 const FeedVideo = ({
   item,
@@ -101,7 +88,7 @@ const FeedVideo = ({
           src={poster}
           alt={item.alt || ""}
           className="h-full w-full object-contain object-center transition-[filter] duration-300 ease-out"
-          style={{ filter: isSensitive && !sensitiveRevealed ? "blur(22px)" : "blur(0px)" }}
+          style={{ filter: isSensitive && !sensitiveRevealed ? `blur(${SENSITIVE_BLUR_RADIUS_PX}px)` : "blur(0px)", transform: isSensitive && !sensitiveRevealed ? "scale(1.12)" : "scale(1)" }}
           loading="lazy"
           onLoad={(event) => onReadyAspect(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)}
         />
@@ -142,11 +129,12 @@ const FeedVideo = ({
   );
 };
 
-export const PostMediaCarousel = ({ items, className, mode = "peek", isSensitive = false }: PostMediaCarouselProps) => {
+export const PostMediaCarousel = ({ items, className, mode = "full", isSensitive = false, onDoubleTap }: PostMediaCarouselProps) => {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const fullscreenScrollRef = useRef<HTMLDivElement | null>(null);
-  const dragStartXRef = useRef<number | null>(null);
+  const dragStartXRef = useRef<{ pointerId: number; clientX: number; scrollLeft: number } | null>(null);
   const dragMovedRef = useRef(false);
+  const openTimerRef = useRef<number | null>(null);
   const primarySrc = items[0]?.src || "";
   const [activeIndex, setActiveIndex] = useState(0);
   const [fullscreenIndex, setFullscreenIndex] = useState<number | null>(null);
@@ -155,13 +143,15 @@ export const PostMediaCarousel = ({ items, className, mode = "peek", isSensitive
     clampAspect(mediaAspectCache.get(primarySrc) || DEFAULT_CAROUSEL_ASPECT)
   );
   const [sensitiveRevealed, setSensitiveRevealed] = useState(false);
+  const [sensitiveTapStage, setSensitiveTapStage] = useState<"toggle" | "fullscreen">("toggle");
   const [tapHintDismissed, setTapHintDismissed] = useState(
     () => localStorage.getItem(SENSITIVE_TAP_SEEN_KEY) === "1"
   );
   const activeSrc = items[activeIndex]?.src || primarySrc;
 
   const revealSensitive = useCallback(() => {
-    setSensitiveRevealed((prev) => !prev);
+    setSensitiveRevealed(true);
+    setSensitiveTapStage("fullscreen");
     if (!tapHintDismissed) {
       setTapHintDismissed(true);
       localStorage.setItem(SENSITIVE_TAP_SEEN_KEY, "1");
@@ -171,6 +161,7 @@ export const PostMediaCarousel = ({ items, className, mode = "peek", isSensitive
   useEffect(() => {
     if (!isSensitive) {
       setSensitiveRevealed(false);
+      setSensitiveTapStage("toggle");
     }
   }, [isSensitive]);
 
@@ -179,6 +170,7 @@ export const PostMediaCarousel = ({ items, className, mode = "peek", isSensitive
     if (!node) return;
     const updateWidth = () => setMeasuredWidth(node.clientWidth);
     updateWidth();
+    if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(updateWidth);
     observer.observe(node);
     return () => observer.disconnect();
@@ -214,18 +206,31 @@ export const PostMediaCarousel = ({ items, className, mode = "peek", isSensitive
   };
 
   const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
-    dragStartXRef.current = event.clientX;
+    const node = scrollRef.current;
+    if (!node) return;
+    dragStartXRef.current = {
+      pointerId: event.pointerId,
+      clientX: event.clientX,
+      scrollLeft: node.scrollLeft,
+    };
     dragMovedRef.current = false;
+    node.setPointerCapture?.(event.pointerId);
   };
 
   const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (dragStartXRef.current == null) return;
-    if (Math.abs(event.clientX - dragStartXRef.current) > 8) {
+    const node = scrollRef.current;
+    const drag = dragStartXRef.current;
+    if (!node || !drag || drag.pointerId !== event.pointerId) return;
+    const delta = event.clientX - drag.clientX;
+    if (Math.abs(delta) > 8) {
       dragMovedRef.current = true;
+      node.scrollLeft = drag.scrollLeft - delta;
     }
   };
 
-  const handlePointerEnd = () => {
+  const handlePointerEnd = (event: React.PointerEvent<HTMLDivElement>) => {
+    const node = scrollRef.current;
+    if (node?.hasPointerCapture?.(event.pointerId)) node.releasePointerCapture?.(event.pointerId);
     dragStartXRef.current = null;
     window.setTimeout(() => {
       dragMovedRef.current = false;
@@ -247,13 +252,22 @@ export const PostMediaCarousel = ({ items, className, mode = "peek", isSensitive
     });
   }, [fullscreenIndex]);
 
+  useEffect(() => () => {
+    if (openTimerRef.current != null) window.clearTimeout(openTimerRef.current);
+  }, []);
+
   return (
     <>
       <div className={cn("space-y-2", className)}>
-        <div className="overflow-hidden" style={{ aspectRatio: `${displayAspect}` }}>
+        <div
+          className="max-h-[min(52svh,440px)] overflow-hidden rounded-[14px] bg-muted/60 sm:max-h-[min(58svh,520px)] lg:max-h-[520px]"
+          style={{
+            aspectRatio: `${displayAspect}`,
+          }}
+        >
           <div
             ref={scrollRef}
-            className="flex h-full snap-x snap-mandatory gap-2 overflow-x-auto scroll-smooth [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+            className="flex h-full snap-x snap-mandatory gap-2 overflow-x-auto rounded-[14px] scroll-smooth [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
             onScroll={handleScroll}
           >
             {items.map((item, index) => {
@@ -265,7 +279,9 @@ export const PostMediaCarousel = ({ items, className, mode = "peek", isSensitive
                   tabIndex={0}
                   className="relative h-full shrink-0 snap-start overflow-hidden rounded-[14px] bg-muted/60 cursor-pointer"
                   style={{
-                    width: slideWidth ? `${slideWidth}px` : undefined,
+                    // Own the rail before ResizeObserver's first callback so
+                    // intrinsic image width cannot collapse a multi-image post.
+                    width: slideWidth ? `${slideWidth}px` : "100%",
                   }}
                   onPointerDown={handlePointerDown}
                   onPointerMove={handlePointerMove}
@@ -274,10 +290,28 @@ export const PostMediaCarousel = ({ items, className, mode = "peek", isSensitive
                   onClick={() => {
                     if (dragMovedRef.current) return;
                     if (isSensitive) {
-                      revealSensitive();
+                      if (sensitiveTapStage === "toggle") revealSensitive();
+                      else setFullscreenIndex(index);
                       return;
                     }
-                    setFullscreenIndex(index);
+                    if (openTimerRef.current != null) window.clearTimeout(openTimerRef.current);
+                    openTimerRef.current = window.setTimeout(() => {
+                      setFullscreenIndex(index);
+                      openTimerRef.current = null;
+                    }, 220);
+                  }}
+                  onDoubleClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    if (openTimerRef.current != null) {
+                      window.clearTimeout(openTimerRef.current);
+                      openTimerRef.current = null;
+                    }
+                    if (isSensitive) {
+                      if (sensitiveTapStage === "toggle") revealSensitive();
+                      return;
+                    }
+                    onDoubleTap?.();
                   }}
                   onKeyDown={(event) => {
                     if (isSensitive) {
@@ -304,8 +338,8 @@ export const PostMediaCarousel = ({ items, className, mode = "peek", isSensitive
                     ) : (
                     <video
                       src={item.src}
-                      className="h-full w-full object-contain object-center transition-[filter] duration-300 ease-out"
-                      style={{ filter: isSensitive && !sensitiveRevealed ? "blur(22px)" : "blur(0px)" }}
+                      className="h-full w-full rounded-[14px] object-contain object-center transition-[filter] duration-300 ease-out"
+                      style={{ filter: isSensitive && !sensitiveRevealed ? `blur(${SENSITIVE_BLUR_RADIUS_PX}px)` : "blur(0px)", transform: isSensitive && !sensitiveRevealed ? "scale(1.12)" : "scale(1)" }}
                       muted
                       playsInline
                       preload="none"
@@ -317,8 +351,8 @@ export const PostMediaCarousel = ({ items, className, mode = "peek", isSensitive
                     <img
                       src={item.src}
                       alt={item.alt || ""}
-                      className="h-full w-full object-contain object-center transition-[filter] duration-300 ease-out"
-                      style={{ filter: isSensitive && !sensitiveRevealed ? "blur(22px)" : "blur(0px)" }}
+                      className="h-full w-full rounded-[14px] object-contain object-center transition-[filter] duration-300 ease-out"
+                      style={{ filter: isSensitive && !sensitiveRevealed ? `blur(${SENSITIVE_BLUR_RADIUS_PX}px)` : "blur(0px)", transform: isSensitive && !sensitiveRevealed ? "scale(1.12)" : "scale(1)" }}
                       loading="lazy"
                       onLoad={(event) => updateAspect(item.src, event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)}
                     />
@@ -327,13 +361,20 @@ export const PostMediaCarousel = ({ items, className, mode = "peek", isSensitive
                     <>
                       <span
                         className={cn(
-                          "pointer-events-none absolute inset-0 bg-black/10 transition-opacity duration-300",
+                          "pointer-events-none absolute inset-0 bg-white/[0.30] backdrop-blur-[20px] transition-opacity duration-300",
+                          sensitiveRevealed ? "opacity-0" : "opacity-100",
+                        )}
+                      />
+                      <span
+                        className={cn(
+                          "pointer-events-none absolute inset-0 bg-slate-950/[0.05] transition-opacity duration-300",
                           sensitiveRevealed ? "opacity-0" : "opacity-100",
                         )}
                       />
                       {!sensitiveRevealed && !tapHintDismissed ? (
-                        <span className="pointer-events-none absolute inset-0 flex items-center justify-center drop-shadow-xl">
-                          <TapHintIcon />
+                        <span className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 text-white drop-shadow-xl">
+                          <Eye className="h-7 w-7" aria-hidden="true" />
+                          <span className="text-sm font-bold">Tap to view</span>
                         </span>
                       ) : null}
                     </>
@@ -347,7 +388,8 @@ export const PostMediaCarousel = ({ items, className, mode = "peek", isSensitive
           <div className="flex items-center justify-center gap-2">
             <button
               type="button"
-              onClick={() => scrollToIndex(activeIndex - 1)}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => { event.stopPropagation(); scrollToIndex(activeIndex - 1); }}
               disabled={activeIndex <= 0}
               className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-border/70 bg-white/80 text-brandText/70 disabled:opacity-35"
               aria-label="Previous image"
@@ -362,7 +404,8 @@ export const PostMediaCarousel = ({ items, className, mode = "peek", isSensitive
             ))}
             <button
               type="button"
-              onClick={() => scrollToIndex(activeIndex + 1)}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => { event.stopPropagation(); scrollToIndex(activeIndex + 1); }}
               disabled={activeIndex >= items.length - 1}
               className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-border/70 bg-white/80 text-brandText/70 disabled:opacity-35"
               aria-label="Next image"
@@ -371,6 +414,9 @@ export const PostMediaCarousel = ({ items, className, mode = "peek", isSensitive
             </button>
           </div>
         )}
+        {isSensitive && sensitiveRevealed && sensitiveTapStage === "fullscreen" ? (
+          <p className="text-center text-xs font-semibold text-muted-foreground">Tap again to enlarge</p>
+        ) : null}
       </div>
 
       {fullscreenIndex != null && typeof document !== "undefined"

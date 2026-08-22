@@ -12,12 +12,14 @@ const SUPABASE_PUBLIC_KEY =
 if (!SUPABASE_PUBLIC_KEY) {
   console.error("SUPABASE publishable key is missing from env");
 }
-console.log("Supabase URL initialized as:", SUPABASE_URL);
-console.log("[SUPABASE_ENV]", {
-  url: SUPABASE_URL,
-  keyPrefix: SUPABASE_PUBLIC_KEY ? SUPABASE_PUBLIC_KEY.slice(0, 8) : "missing",
-  publicAuthBase: rawPublicAuthBase || "unset",
-});
+if (import.meta.env.DEV) {
+  console.debug("Supabase URL initialized as:", SUPABASE_URL);
+  console.debug("[SUPABASE_ENV]", {
+    url: SUPABASE_URL,
+    keyPrefix: SUPABASE_PUBLIC_KEY ? SUPABASE_PUBLIC_KEY.slice(0, 8) : "missing",
+    publicAuthBase: rawPublicAuthBase || "unset",
+  });
+}
 
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";
@@ -27,6 +29,7 @@ const protectedFunctionNames = new Set([
   "auth-signup",
   "auth-reset-password",
   "auth-change-password",
+  "secure-account",
   "send-phone-otp",
   "send-pre-signup-verify",
 ]);

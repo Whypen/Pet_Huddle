@@ -17,7 +17,7 @@ import { toast } from "sonner";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { NeuButton } from "@/components/ui/NeuButton";
 import { ensureDirectChatRoom } from "@/lib/chatRooms";
-import { PublicProfileSheet } from "@/components/profile/PublicProfileSheet";
+import { ProfileShareCard } from "@/components/profile/ProfileShareCard";
 import {
   CANONICAL_GENDER_OPTIONS,
   CANONICAL_ORIENTATION_OPTIONS,
@@ -39,9 +39,9 @@ import { handoffStripeCheckout } from "@/lib/stripeCheckout";
 import { openExternalUrl } from "@/lib/nativeShell";
 import { isStarIntroKind, parseStarChatContent, sendStarChat } from "@/lib/starChat";
 import { parseChatShareMessage } from "@/lib/shareModel";
-import { DiscoveryDeck } from "@/components/chat/DiscoveryDeck";
 import { GroupDetailsPanel } from "@/components/chat/GroupDetailsPanel";
 import { groupActivityRankValue, updateGroupChatMetadata, type GroupMetadataRow } from "@/lib/groupChats";
+import { peekVisibleUserPinIds, subscribeVisibleUserPinIds } from "@/lib/visibleMapPinCache";
 import { useDiscoverLocationGate } from "@/hooks/useDiscoverLocationGate";
 import {
   noteDiscoveryCommit,
@@ -62,6 +62,7 @@ import {
   resolveDiscoveryLocationLabel,
 } from "@/lib/locationLabels";
 import { isVerifiedProfile } from "@/lib/verification";
+import { useAuthGate } from "@/components/auth/authGateContext";
 
 /* ── Discovery Filter Types & Defaults ── */
 const ALL_GENDERS = [...CANONICAL_GENDER_OPTIONS] as const;
@@ -193,7 +194,7 @@ const animateMotionValue = (
     damping?: number;
     mass?: number;
     duration?: number;
-    ease?: number[];
+    ease?: [number, number, number, number];
   }
 ) =>
   new Promise<void>((resolve) => {
@@ -323,12 +324,14 @@ const normalizeAvailabilityLabel = (value: string) => {
 const DISCOVER_MIN_AGE_MESSAGE = "User must be 16+ to access Discover feature on Chats.";
 const DISCOVER_AGE_GATE_BODY =
   "Discover & Chat features are for 16+ only. For now, join the social conversation and help protect the pack by keeping an eye on the Map.";
+// Web scope contract: Discover and Care/Service chat stay fully unmounted.
+const WEB_DISCOVER_ENABLED = false;
+const WEB_SERVICE_CHAT_ENABLED = false;
 
 type MainTab = "friends" | "groups" | "service";
 const mainTabs: { id: MainTab; label: string; icon: typeof MessageSquare }[] = [
   { id: "friends", label: "Friends", icon: MessageSquare },
-  { id: "groups", label: "Groups", icon: Users },
-  { id: "service", label: "Service", icon: MessageSquare },
+  { id: "groups", label: "Group Chats", icon: Users },
 ];
 
 const applyExperienceYearsFilter = (profiles: DiscoveryProfile[], filters: DiscoveryFilters) => {
@@ -474,14 +477,6 @@ const applyDiscoveryClientFilters = (
     if (filters.whoWavedAtMe) {
       const wavedSet = options?.wavedByUserIds;
       if (!wavedSet || !wavedSet.has(profile.id)) return false;
-    }
-
-    if (options?.anchor && Number.isFinite(profile.last_lat) && Number.isFinite(profile.last_lng)) {
-      const dKm = distanceKm(options.anchor.lat, options.anchor.lng, Number(profile.last_lat), Number(profile.last_lng));
-      const viewerCountry = normalizeCountryKey(options.viewerCountry ?? null);
-      const profileCountry = normalizeCountryKey(profile.location_country ?? null);
-      const sameCountry = Boolean(viewerCountry && profileCountry && viewerCountry === profileCountry);
-      if (!sameCountry && Number.isFinite(dKm) && dKm > filters.maxDistanceKm) return false;
     }
 
     return true;
@@ -664,7 +659,7 @@ type InboxSummaryRow = {
 };
 
 const isDuplicateWaveError = (err: unknown) => {
-  const payload = typeof err === "object" && err !== null ? (err as Record<string, unknown>) : null;
+  const payload = typeof err === "object" && err !== null ? (err as unknown as Record<string, unknown>) : null;
   const code = String(payload?.code || "");
   const status = Number(payload?.status || 0);
   const message = String(payload?.message || "");
@@ -675,7 +670,7 @@ const isDuplicateWaveError = (err: unknown) => {
 };
 
 const isWaveSchemaFallbackError = (err: unknown) => {
-  const payload = typeof err === "object" && err !== null ? (err as Record<string, unknown>) : null;
+  const payload = typeof err === "object" && err !== null ? (err as unknown as Record<string, unknown>) : null;
   const code = String(payload?.code || "");
   const message = String(payload?.message || "").toLowerCase();
   return code === "42703" || code === "PGRST204" || message.includes("column");
@@ -734,7 +729,12 @@ const formatServiceDateRange = (requestCard: Record<string, unknown> | null | un
 const Chats = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  // Which conversation the right pane is showing, at lg+. The URL is the source
+  // of truth for both panes, so the list reads it rather than holding its own
+  // selection state that could drift from what is open.
+  const selectedRoomId = searchParams.get("room");
   const { user, profile, loading: authLoading } = useAuth();
+  const { requireAuth } = useAuthGate();
   const t = resolveCopy;
 
   const [isPremiumOpen, setIsPremiumOpen] = useState(false);
@@ -744,16 +744,17 @@ const Chats = () => {
   const [mainTab, setMainTab] = useState<MainTab>(() => {
     const tab = searchParams.get("tab");
     if (tab === "groups") return "groups";
-    if (tab === "service") return "service";
     return "friends";
   });
   const [chats, setChats] = useState<ChatUser[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [chatVisibleCount, setChatVisibleCount] = useState(10);
   const [groupVisibleCount, setGroupVisibleCount] = useState(10);
-  const [groupSubTab, setGroupSubTab] = useState<"my" | "explore">("my");
+  const [groupSubTab, setGroupSubTab] = useState<"my" | "explore">(() => searchParams.get("view") === "explore" ? "explore" : "my");
+  const groupsExploreDestination = searchParams.get("tab") === "groups" && searchParams.get("view") === "explore" && searchParams.get("surface") !== "chats";
   const [exploreGroups, setExploreGroups] = useState<Group[]>([]);
   const [invitedExploreGroups, setInvitedExploreGroups] = useState<Group[]>([]);
+  const [hiddenExploreGroupIds, setHiddenExploreGroupIds] = useState<Set<string>>(() => new Set());
   const [exploreLoading, setExploreLoading] = useState(false);
   const inboxCacheRef = useRef<{ friends: ChatUser[]; service: ChatUser[]; groups: Group[] }>({
     friends: [],
@@ -785,8 +786,6 @@ const Chats = () => {
     groups: false,
   });
   const [inboxBadgeUnreadTotal, setInboxBadgeUnreadTotal] = useState<number | null>(null);
-  const dirtyRoomIdsRef = useRef<Set<string>>(new Set());
-  const dirtyRoomFlushTimerRef = useRef<number | null>(null);
   const [groupsPullRefreshing, setGroupsPullRefreshing] = useState(false);
   const [groupsPullOffset, setGroupsPullOffset] = useState(0);
   const groupsTouchStartYRef = useRef<number | null>(null);
@@ -802,10 +801,8 @@ const Chats = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isFilterModalOpen, setIsFilterModalOpen] = useState(false);
-  const [topTab, setTopTab] = useState<"discover" | "chats">(() => {
-    const tab = searchParams.get("tab");
-    return tab === "chats" || tab === "groups" ? "chats" : "discover";
-  });
+  // Web owns Chats only. Discover and Care remain native-only surfaces.
+  const [topTab, setTopTab] = useState<"discover" | "chats">("chats");
   const [swipeDir, setSwipeDir] = useState<"left" | "right" | "star" | null>(null);
   const [discoveryRefreshTick, setDiscoveryRefreshTick] = useState(0);
   const [discoveryVisibleCount, setDiscoveryVisibleCount] = useState(20);
@@ -816,8 +813,6 @@ const Chats = () => {
   const [ageMinDraft, setAgeMinDraft] = useState(String(DEFAULT_FILTERS.ageMin));
   const [ageMaxDraft, setAgeMaxDraft] = useState(String(DEFAULT_FILTERS.ageMax));
   const [profileSheetUser, setProfileSheetUser] = useState<{ id: string; name: string; avatarUrl?: string | null } | null>(null);
-  const [profileSheetData, setProfileSheetData] = useState<Record<string, unknown> | null>(null);
-  const [profileSheetLoading, setProfileSheetLoading] = useState(false);
   // Group management
   const [groupManageId, setGroupManageId] = useState<string | null>(null);
   const [groupDetailsId, setGroupDetailsId] = useState<string | null>(null);
@@ -870,6 +865,8 @@ const Chats = () => {
   const discoverySendCueCommitPendingRef = useRef(false);
   const discoverySendCueProgress = useMotionValue(0);
   const [activeMatchedPeerIds, setActiveMatchedPeerIds] = useState<Set<string>>(new Set());
+  const [visibleOutIds, setVisibleOutIds] = useState<Set<string>>(() => peekVisibleUserPinIds());
+  useEffect(() => subscribeVisibleUserPinIds(setVisibleOutIds), []);
   const matchesFeedTick = 0;
   const seenMatchUserIdsRef = useRef<Set<string>>(new Set());
   const serverSeenMatchUserIdsRef = useRef<Set<string>>(new Set());
@@ -880,7 +877,6 @@ const Chats = () => {
   const [seenMatchesHydrated, setSeenMatchesHydrated] = useState(false);
   const [seenMatchesServerState, setSeenMatchesServerState] = useState<"idle" | "ready" | "failed">("idle");
   const directPeerByRoomRef = useRef<Record<string, string>>({});
-  const subscribedInboxRoomIdsRef = useRef<Set<string>>(new Set());
   const conversationsHydratedRef = useRef(false);
   const conversationsRetryTimerRef = useRef<number | null>(null);
   const chatsPerfRef = useRef({
@@ -914,20 +910,11 @@ const Chats = () => {
     if (tab === "groups") {
       setTopTab("chats");
       setMainTab("groups");
+      setGroupSubTab(searchParams.get("view") === "explore" ? "explore" : "my");
       return;
     }
-    if (tab === "service") {
-      setTopTab("chats");
-      setMainTab("service");
-      return;
-    }
-    if (tab === "chats") {
-      setTopTab("chats");
-      return;
-    }
-    if (tab === "discover") {
-      setTopTab("discover");
-    }
+    setTopTab("chats");
+    if (tab !== "groups") setMainTab("friends");
   }, [searchParams]);
 
   const logChatsPerfMetric = useCallback(
@@ -1341,7 +1328,7 @@ const Chats = () => {
             ? (parsed.ids as unknown[])
             : [];
         const parsedPassed = new Set(ids.filter((id): id is string => typeof id === "string" && Boolean(id)));
-        const ownerSessionId = typeof parsed === "object" && parsed !== null ? String(parsed.sessionId || "") : "";
+        const ownerSessionId = !Array.isArray(parsed) ? String(parsed.sessionId || "") : "";
           if (parsedPassed.size > 0) {
             if (ownerSessionId && ownerSessionId === discoverySessionId) {
               setCarryoverPassedIds(new Set());
@@ -1409,11 +1396,11 @@ const Chats = () => {
       matched_user_id: matchedUserId,
     }));
     try {
-      const { error } = await (supabase
+      const { error } = (await supabase
         .from("discover_match_seen" as "profiles")
-        .upsert(payload as never, { onConflict: "viewer_id,matched_user_id", ignoreDuplicates: true })) as unknown as Promise<{
+        .upsert(payload as never, { onConflict: "viewer_id,matched_user_id", ignoreDuplicates: true })) as unknown as {
         error: { message?: string } | null;
-      }>;
+      };
       if (error) {
         console.warn("[discover.match_seen] flush_failed", error.message || "unknown_error");
         return;
@@ -1485,7 +1472,7 @@ const Chats = () => {
           lastErrorMessage = result.error.message || lastErrorMessage;
           continue;
         }
-        const rows = (((result.data || []) as unknown) as Array<Record<string, unknown>>).map((row) => ({
+        const rows = (((result.data || []) as unknown) as unknown as Array<Record<string, unknown>>).map((row) => ({
           user1_id: String(row.user1_id || ""),
           user2_id: String(row.user2_id || ""),
           chat_id: typeof row.chat_id === "string" ? row.chat_id : null,
@@ -1568,14 +1555,20 @@ const Chats = () => {
     setSeenMatchesServerState("idle");
     void (async () => {
       try {
-        const { data, error } = await (supabase
-          .from("discover_match_seen" as "profiles")
+        const matchSeenTable = (supabase.from as unknown as (table: string) => {
+          select: (columns: string) => {
+            eq: (column: string, value: string) => {
+              limit: (count: number) => Promise<{
+                data: Array<{ matched_user_id?: string | null }> | null;
+                error: { message?: string } | null;
+              }>;
+            };
+          };
+        })("discover_match_seen");
+        const { data, error } = await matchSeenTable
           .select("matched_user_id" as "*")
           .eq("viewer_id", profile.id)
-          .limit(1000)) as unknown as Promise<{
-          data: Array<{ matched_user_id?: string | null }> | null;
-          error: { message?: string } | null;
-        }>;
+          .limit(1000);
         if (cancelled) return;
         if (error) {
           console.warn("[discover.match_seen] load_failed", error.message || "unknown_error");
@@ -1726,7 +1719,7 @@ const Chats = () => {
     async (targetUserId: string): Promise<boolean> => {
       if (!profile?.id) return false;
       try {
-        const { data, error } = await (supabase.rpc as (
+        const { data, error } = await (supabase.rpc as unknown as (
           fn: string,
           params?: Record<string, unknown>
         ) => Promise<{ data: unknown; error: { message?: string } | null }>)("accept_mutual_wave", {
@@ -1826,20 +1819,20 @@ const Chats = () => {
           receiver_id: targetUserId,
           status: "pending",
           wave_type: "standard",
-        } as Record<string, unknown>;
+        } as unknown as Record<string, unknown>;
         const fromToPayload = {
           from_user_id: profile.id,
           to_user_id: targetUserId,
           status: "pending",
           wave_type: "standard",
-        } as Record<string, unknown>;
+        } as unknown as Record<string, unknown>;
 
         // Use insert-first instead of upsert to avoid schema-specific ON CONFLICT failures.
-        const canonicalInsert = await supabase.from("waves" as "profiles").insert(senderReceiverPayload);
+        const canonicalInsert = await supabase.from("waves" as "profiles").insert(senderReceiverPayload as never);
         if (canonicalInsert.error) {
           if (isDuplicateWaveError(canonicalInsert.error)) throw canonicalInsert.error;
           if (!isWaveSchemaFallbackError(canonicalInsert.error)) throw canonicalInsert.error;
-          const legacyInsert = await supabase.from("waves" as "profiles").insert(fromToPayload);
+          const legacyInsert = await supabase.from("waves" as "profiles").insert(fromToPayload as never);
           if (legacyInsert.error) {
             if (isDuplicateWaveError(legacyInsert.error)) throw legacyInsert.error;
             throw legacyInsert.error;
@@ -1887,7 +1880,7 @@ const Chats = () => {
   }, [starCheckoutLoading]);
 
   const getStarRemaining = useCallback(async () => {
-    const snapshot = await (supabase.rpc as (fn: string) => Promise<{ data: unknown; error: { message?: string } | null }>)("get_quota_snapshot");
+    const snapshot = await (supabase.rpc as unknown as (fn: string) => Promise<{ data: unknown; error: { message?: string } | null }>)("get_quota_snapshot");
     if (snapshot.error) throw snapshot.error;
     const row = Array.isArray(snapshot.data) ? snapshot.data[0] : snapshot.data;
     const typed = (row || {}) as { tier?: string; stars_used_cycle?: number; extra_stars?: number };
@@ -2128,7 +2121,7 @@ const Chats = () => {
         let normalizedHref = args.href;
         if (normalizedHref === "/chats") normalizedHref = "/chats?tab=discover";
         if (!normalizedHref.startsWith("/")) normalizedHref = "/chats?tab=discover";
-        const { error } = await (supabase.rpc as (fn: string, params?: Record<string, unknown>) => Promise<{ error: { message?: string } | null }>)(
+        const { error } = await (supabase.rpc as unknown as (fn: string, params?: Record<string, unknown>) => Promise<{ error: { message?: string } | null }>)(
           "enqueue_notification",
           {
             p_user_id: args.userId,
@@ -2247,7 +2240,7 @@ const Chats = () => {
         type: `${starUpgradeTier}_${starUpgradeBilling === "annual" ? "annual" : "monthly"}`,
         lookupKey: selectedPlan.lookupKey,
         priceId: selectedPlan.priceId,
-        successUrl: `${window.location.origin}/premium`,
+        successUrl: `${window.location.origin}/member`,
         cancelUrl: `${window.location.origin}/chats`,
       }, "chats-star-upgrade");
     } catch {
@@ -2276,10 +2269,7 @@ const Chats = () => {
         setUserPets(data);
         if (data.length > 0) setSelectedPet(data[0].id);
       });
-    setBookingLocation(
-      profile.location_name ||
-        (profile.last_lat && profile.last_lng ? `${profile.last_lat.toFixed(5)}, ${profile.last_lng.toFixed(5)}` : "")
-    );
+    setBookingLocation(profile.location_name || "");
     if (selectedNanny?.id) {
       void supabase
         .from("sitter_profiles" as "profiles")
@@ -2477,7 +2467,7 @@ const Chats = () => {
         Boolean(
           row.service_request_card &&
             typeof row.service_request_card === "object" &&
-            Object.keys(row.service_request_card as Record<string, unknown>).length > 0
+            Object.keys(row.service_request_card as unknown as Record<string, unknown>).length > 0
         );
       const shapeIssue = String(row.shape_issue || "").trim();
       const isMalformedServiceRoom =
@@ -2520,7 +2510,7 @@ const Chats = () => {
       const parsedLastMeta = parseStarChatContent(String(row.last_message_content || ""));
       const serviceRequestCard =
         row.service_request_card && typeof row.service_request_card === "object"
-          ? (row.service_request_card as Record<string, unknown>)
+          ? (row.service_request_card as unknown as Record<string, unknown>)
           : null;
       const showRequesterRequestPrompt =
         Boolean(isService && row.service_requester_id === profile?.id && !serviceRequestCard);
@@ -2626,7 +2616,7 @@ const Chats = () => {
         p_limit: options?.limit ?? null,
         p_cursor: options?.cursor ?? null,
       };
-      const { data, error } = await (supabase.rpc as (
+      const { data, error } = await (supabase.rpc as unknown as (
         fn: string,
         params?: Record<string, unknown>
       ) => Promise<{ data: unknown; error: { message?: string } | null }>)("get_chat_inbox_summaries", payload);
@@ -2872,28 +2862,12 @@ const Chats = () => {
     [applyInboxRowsToCaches, cursorFromRows, fetchInboxSummaryRows, loadConversations, profile?.id],
   );
 
-  const refreshRoomSummaries = useCallback(
-    async (roomIds: string[]) => {
-      const nextRoomIds = Array.from(new Set(roomIds.map((id) => String(id || "").trim()).filter(Boolean)));
-      if (!profile?.id || nextRoomIds.length === 0) return;
-      try {
-        const rows = await fetchInboxSummaryRows("all", nextRoomIds);
-        applyInboxRowsToCaches("all", rows, nextRoomIds);
-      } catch (error) {
-        console.warn("[chats.inbox] room summary refresh failed", error);
-      }
-    },
-    [applyInboxRowsToCaches, fetchInboxSummaryRows, profile?.id]
-  );
-
   // Fetch the inbox unread total from the server. Source of truth for the
   // nav badge — independent of whether all paginated pages are loaded.
-  // Declared before flushDirtyRoomSummaries so the latter's dep-array read
-  // does not hit the const TDZ during render.
   const fetchInboxBadgeTotal = useCallback(async () => {
     if (!profile?.id) return;
     try {
-      const { data, error } = await (supabase.rpc as (
+      const { data, error } = await (supabase.rpc as unknown as (
         fn: string,
         params?: Record<string, unknown>,
       ) => Promise<{ data: unknown; error: { message?: string } | null }>)(
@@ -2908,33 +2882,6 @@ const Chats = () => {
       console.warn("[chats.inbox] unread_total fetch failed", error);
     }
   }, [profile?.id]);
-
-  const flushDirtyRoomSummaries = useCallback(async () => {
-    if (dirtyRoomFlushTimerRef.current != null) {
-      window.clearTimeout(dirtyRoomFlushTimerRef.current);
-      dirtyRoomFlushTimerRef.current = null;
-    }
-    const roomIds = Array.from(dirtyRoomIdsRef.current);
-    dirtyRoomIdsRef.current.clear();
-    if (roomIds.length === 0) return;
-    await refreshRoomSummaries(roomIds);
-    // Realtime-driven changes can affect unread counts in chats both above
-    // and below the paginated fold — re-sync the server-authoritative badge.
-    void fetchInboxBadgeTotal();
-  }, [fetchInboxBadgeTotal, refreshRoomSummaries]);
-
-  const queueDirtyRoomSummaryRefresh = useCallback(
-    (roomId: string | null | undefined) => {
-      const normalized = String(roomId || "").trim();
-      if (!normalized) return;
-      dirtyRoomIdsRef.current.add(normalized);
-      if (dirtyRoomFlushTimerRef.current != null) return;
-      dirtyRoomFlushTimerRef.current = window.setTimeout(() => {
-        void flushDirtyRoomSummaries();
-      }, 120);
-    },
-    [flushDirtyRoomSummaries]
-  );
 
   // Check for pending group invites when opening Groups tab
   useEffect(() => {
@@ -2963,7 +2910,7 @@ const Chats = () => {
         .order("created_at", { ascending: false })
         .limit(1);
       if (!Array.isArray(invites) || invites.length === 0) return;
-      const first = invites[0] as Record<string, unknown>;
+      const first = invites[0] as unknown as Record<string, unknown>;
       const chatId = String(first.chat_id || "");
       if (!chatId) return;
       const inviteId = String(first.id || "");
@@ -2984,7 +2931,7 @@ const Chats = () => {
         inviteId,
         chatId,
         chatName: String(first.chat_name || "Group"),
-        inviterName: String((first.profiles as Record<string, unknown> | null)?.display_name || "Someone"),
+        inviterName: String((first.profiles as unknown as Record<string, unknown> | null)?.display_name || "Someone"),
       });
     };
     void checkInvites();
@@ -3027,7 +2974,7 @@ const Chats = () => {
               if (waveErr) {
                 continue;
               }
-              for (const row of (waveRows || []) as Array<Record<string, unknown>>) {
+              for (const row of (waveRows || []) as unknown as Array<Record<string, unknown>>) {
                 const senderId = String(row.from_user_id || row.sender_id || "");
                 if (senderId) wavedByUserIds.add(senderId);
               }
@@ -3060,7 +3007,7 @@ const Chats = () => {
               .select(selectCols)
               .eq(fromCol, profile.id);
             if (sentErr) continue;
-            for (const row of (sentRows || []) as Array<Record<string, unknown>>) {
+            for (const row of (sentRows || []) as unknown as Array<Record<string, unknown>>) {
               const targetId = String(row.to_user_id || row.receiver_id || "");
               if (targetId) {
                 handledIds.add(targetId);
@@ -3091,7 +3038,7 @@ const Chats = () => {
               error = receivedResultFallback.error;
             }
             if (error) continue;
-            for (const row of (Array.isArray(data) ? data : []) as Array<Record<string, unknown>>) {
+            for (const row of (Array.isArray(data) ? data : []) as unknown as Array<Record<string, unknown>>) {
               const sourceId = String(row.from_user_id || row.sender_id || "");
               if (sourceId && outgoingWaveTargetIds.has(sourceId)) {
                 handledIds.add(sourceId);
@@ -3118,7 +3065,7 @@ const Chats = () => {
               .eq("status", "accepted")
               .limit(500);
             if (acceptedError) continue;
-            for (const row of (acceptedRows || []) as Array<Record<string, unknown>>) {
+            for (const row of (acceptedRows || []) as unknown as Array<Record<string, unknown>>) {
               const counterpart = String(row.receiver_id || row.to_user_id || "");
               if (counterpart) handledIds.add(counterpart);
             }
@@ -3138,7 +3085,7 @@ const Chats = () => {
               .eq("status", "accepted")
               .limit(500);
             if (acceptedError) continue;
-            for (const row of (acceptedRows || []) as Array<Record<string, unknown>>) {
+            for (const row of (acceptedRows || []) as unknown as Array<Record<string, unknown>>) {
               const counterpart = String(row.sender_id || row.from_user_id || "");
               if (counterpart) handledIds.add(counterpart);
             }
@@ -3185,12 +3132,11 @@ const Chats = () => {
         });
         const mergedProfiles = new Map<string, DiscoveryProfile>();
         const pinDistrictByUserId = new Map<string, string | null>();
-        const liveLocationDistrictByUserId = new Map<string, string | null>();
         const pinRadiusM = Math.max(1000, Math.round(effectiveDiscoveryDistanceKm * 1000));
         try {
           const hasExplicitHeightFilter =
             isPremium && (debouncedFilters.heightMin > DEFAULT_FILTERS.heightMin || debouncedFilters.heightMax < DEFAULT_FILTERS.heightMax);
-          const { data, error } = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>)(
+          const { data, error } = await (supabase.rpc as unknown as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>)(
             "social_discovery_restricted",
             {
               p_user_id: profile.id,
@@ -3230,32 +3176,16 @@ const Chats = () => {
 
           const mergedIds = Array.from(mergedProfiles.keys());
           if (mergedIds.length > 0) {
-            const { data: liveLocations } = await supabase
-              .from("user_locations")
-              .select("user_id, location_name, updated_at")
-              .in("user_id", mergedIds)
-              .order("updated_at", { ascending: false });
-
-            for (const row of (liveLocations || []) as Array<{ user_id?: string | null; location_name?: string | null }>) {
-              const userId = String(row.user_id || "").trim();
-              if (!userId || liveLocationDistrictByUserId.has(userId)) continue;
-              const district = extractDistrictToken(row.location_name || null);
-              liveLocationDistrictByUserId.set(userId, district);
-              if (!pinDistrictByUserId.has(userId)) {
-                pinDistrictByUserId.set(userId, district);
-              }
-            }
-
             const { data: profileEnrichment } = await supabase
               .from("profiles")
-              .select("id, pet_experience, degree, languages, height, has_car, verification_status, is_verified, relationship_status, orientation, gender_genre, availability_status, last_active_at, updated_at, created_at, last_lat, last_lng, location_name, location_district, location_country")
+              .select("id, pet_experience, degree, languages, height, has_car, verification_status, is_verified, relationship_status, orientation, gender_genre, availability_status, last_active_at, updated_at, created_at, location_name, location_district, location_country")
               .in("id", mergedIds);
             for (const row of (profileEnrichment || []) as DiscoveryProfile[]) {
               const existing = mergedProfiles.get(row.id);
               if (!existing) continue;
               const profileDistrict = String(row.location_district || "").trim() || null;
               const profileLocation = String(row.location_name || "").trim() || null;
-              const liveDistrict = liveLocationDistrictByUserId.get(row.id) || null;
+              const liveDistrict = null;
               const pinDistrict = pinDistrictByUserId.get(row.id) || null;
               mergedProfiles.set(row.id, {
                 ...existing,
@@ -3406,7 +3336,7 @@ const Chats = () => {
 
       const { error: upsertError } = await supabase
         .from("message_reads")
-        .upsert(missingRows, { onConflict: "message_id,user_id" });
+        .upsert(missingRows, { onConflict: "message_id,user_id", ignoreDuplicates: true });
 
       if (upsertError) {
         console.warn("[chats.mark_read.upsert_failed]", upsertError.message);
@@ -3415,87 +3345,32 @@ const Chats = () => {
     [profile?.id]
   );
 
-  const subscribedInboxRoomIds = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          [...chats.map((chat) => String(chat.id || "").trim()), ...groups.map((group) => String(group.id || "").trim())].filter(Boolean)
-        )
-      ).sort(),
-    [chats, groups]
-  );
-
-  useEffect(() => {
-    subscribedInboxRoomIdsRef.current = new Set(subscribedInboxRoomIds);
-  }, [subscribedInboxRoomIds]);
-
-  // Stable string key — identity is preserved when the *set* of room IDs is
-  // unchanged, even though the upstream `subscribedInboxRoomIds` memo rebuilds
-  // its array each time chats/groups state shifts (last_message_at updates etc.).
-  // Used to gate the realtime resubscribe so it only fires on real list changes.
-  const subscribedInboxRoomIdsKey = useMemo(
-    () => subscribedInboxRoomIds.join(","),
-    [subscribedInboxRoomIds]
-  );
-
-  // Server-side filter the chat_messages stream to only the rooms in this user's
-  // inbox. Previously this subscribed to *all* chat_messages globally and filtered
-  // client-side via subscribedInboxRoomIdsRef — wasting bandwidth and battery on
-  // mobile clients receiving every message on the platform.
-  //
-  // For users with > NARROW_FILTER_MAX rooms we fall back to the broad
-  // subscription because the URL-encoded filter list would grow unwieldy and the
-  // realtime server may refuse it. The client-side guard remains as
-  // defense-in-depth for both paths.
-  //
-  // Resubscribes are debounced 250 ms so that incremental inbox loads (chats
-  // arriving in waves) don't thrash the channel.
+  // One private, user-scoped invalidation replaces the per-room Postgres Changes
+  // filter (and its unsafe broad fallback). Re-fetching the authoritative inbox
+  // also reconciles anything missed while the browser was disconnected.
   useEffect(() => {
     if (!profile?.id) return;
-    if (subscribedInboxRoomIds.length === 0) return;
-    const NARROW_FILTER_MAX = 100;
-    const useNarrowFilter = subscribedInboxRoomIds.length <= NARROW_FILTER_MAX;
-    const roomIdsForFilter = subscribedInboxRoomIds.slice(0, NARROW_FILTER_MAX);
-
-    let channel: ReturnType<typeof supabase.channel> | null = null;
-    const debounceTimer = window.setTimeout(() => {
-      const filterClause = useNarrowFilter
-        ? {
-            event: "*" as const,
-            schema: "public",
-            table: "chat_messages",
-            filter: `chat_id=in.(${roomIdsForFilter.join(",")})`,
-          }
-        : { event: "*" as const, schema: "public", table: "chat_messages" };
-      channel = supabase
-        .channel(`chats_messages_${profile.id}`)
-        .on(
-          "postgres_changes",
-          filterClause,
-          (payload) => {
-            const row = ((payload.new || payload.old || null) as { chat_id?: string | null } | null);
-            const roomId = String(row?.chat_id || "").trim();
-            if (!roomId) return;
-            // Belt-and-braces: even with a server filter, defend against any
-            // race where the filter list is briefly stale during resubscribe.
-            if (!subscribedInboxRoomIdsRef.current.has(roomId)) return;
-            queueDirtyRoomSummaryRefresh(roomId);
-          }
-        );
-      channel.subscribe();
-    }, 250);
+    let refreshTimer: number | null = null;
+    const reconcile = () => {
+      if (refreshTimer != null) window.clearTimeout(refreshTimer);
+      refreshTimer = window.setTimeout(() => {
+        refreshTimer = null;
+        void loadConversations("all");
+        void fetchInboxBadgeTotal();
+      }, 120);
+    };
+    const channel = supabase
+      .channel(`user:${profile.id}:inbox`, { config: { private: true } })
+      .on("broadcast", { event: "changed" }, reconcile)
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED") reconcile();
+      });
 
     return () => {
-      window.clearTimeout(debounceTimer);
-      if (channel) {
-        void supabase.removeChannel(channel);
-      }
+      if (refreshTimer != null) window.clearTimeout(refreshTimer);
+      void supabase.removeChannel(channel);
     };
-  // Gate on the stable string key, not the array reference, so we don't
-  // resubscribe on every chats/groups state shuffle (which preserves the
-  // same room-ID set).
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile?.id, queueDirtyRoomSummaryRefresh, subscribedInboxRoomIdsKey]);
+  }, [fetchInboxBadgeTotal, loadConversations, profile?.id]);
 
   // ---------------------------------------------------------------------------
   // Server-side search across the user's inbox.
@@ -3523,7 +3398,7 @@ const Chats = () => {
     let cancelled = false;
     const timer = window.setTimeout(async () => {
       try {
-        const { data, error } = await (supabase.rpc as (
+        const { data, error } = await (supabase.rpc as unknown as (
           fn: string,
           params?: Record<string, unknown>,
         ) => Promise<{ data: unknown; error: { message?: string } | null }>)(
@@ -3897,25 +3772,17 @@ const Chats = () => {
         mainTab,
       });
     }
-    const shouldHydrateDiscoverInbox =
-      topTab !== "chats" &&
-      discoverBootstrapReady &&
-      (!inboxLoadedScopesRef.current.has("friends") || !inboxLoadedScopesRef.current.has("groups"));
-    if (shouldHydrateDiscoverInbox) {
-      // Mark all scopes optimistically so the 260ms warm timer below doesn't race and
-      // issue redundant individual scope fetches before the "all" RPC returns.
-      inboxLoadedScopesRef.current.add("friends");
-      inboxLoadedScopesRef.current.add("service");
-      inboxLoadedScopesRef.current.add("groups");
-      void loadConversations("all");
-    } else if (!inboxLoadedScopesRef.current.has(mainTab)) {
+    // Web exposes Friends and Groups only. Never use the legacy "all" fan-out:
+    // that scope also fetches Care/service rooms even though web must not reveal
+    // or warm them.
+    if (!inboxLoadedScopesRef.current.has(mainTab)) {
       void loadConversations(mainTab);
     }
     if (inboxWarmTimerRef.current != null) {
       window.clearTimeout(inboxWarmTimerRef.current);
     }
     inboxWarmTimerRef.current = window.setTimeout(() => {
-      const inactiveScopes = (["friends", "groups", "service"] as const).filter(
+      const inactiveScopes = (["friends", "groups"] as const).filter(
         (scope) => (topTab !== "chats" || scope !== mainTab) && !inboxLoadedScopesRef.current.has(scope)
       );
       void (async () => {
@@ -3933,23 +3800,8 @@ const Chats = () => {
         window.clearTimeout(inboxWarmTimerRef.current);
         inboxWarmTimerRef.current = null;
       }
-      // NOTE: dirtyRoomFlushTimerRef is intentionally NOT cleared here — this effect
-      // re-runs on every tab switch and clearing it would drop pending unread-count
-      // delta flushes. It is cleaned up in the profile-scoped unmount effect below.
     };
   }, [authLoading, discoverBootstrapReady, loadConversations, logChatsPerfMetric, mainTab, profile?.id, topTab]);
-
-  // Profile-scoped cleanup: flush the dirty-room timer when the user logs out or
-  // the component unmounts. Separate from the tab-switch effect above so tab
-  // changes never cancel a pending delta flush mid-flight.
-  useEffect(() => {
-    return () => {
-      if (dirtyRoomFlushTimerRef.current != null) {
-        window.clearTimeout(dirtyRoomFlushTimerRef.current);
-        dirtyRoomFlushTimerRef.current = null;
-      }
-    };
-  }, [profile?.id]);
 
   useEffect(() => {
     if (!conversationsHydratedRef.current) return;
@@ -4240,7 +4092,7 @@ const Chats = () => {
     const text = matchQuickHello.trim();
     setOpeningMatchChat(true);
     try {
-      const rpc = supabase.rpc as (
+      const rpc = supabase.rpc as unknown as (
         fn: string,
         params?: Record<string, unknown>
       ) => Promise<{ data: unknown; error: { message?: string } | null }>;
@@ -4569,6 +4421,17 @@ const Chats = () => {
     setIsCreateGroupOpen(true);
   };
 
+  useEffect(() => {
+    if (!groupsExploreDestination || searchParams.get("create") !== "group") return;
+    handleCreateGroup();
+    const next = new URLSearchParams(searchParams);
+    next.delete("create");
+    navigate({ pathname: "/chats", search: `?${next.toString()}` }, { replace: true });
+  // `handleCreateGroup` intentionally resolves current verification state at
+  // navigation time; the URL is only a one-shot action signal.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groupsExploreDestination, navigate, searchParams]);
+
   const handleGroupCreated = (chatId: string) => {
     void loadConversations("groups");
     navigate(`/chat-dialogue?room=${encodeURIComponent(chatId)}`);
@@ -4594,29 +4457,21 @@ const Chats = () => {
               .select("chat_id")
               .eq("user_id", user.id)
               .eq("status", "pending")
-          : Promise.resolve({ data: [] }),
+          : Promise.resolve({ data: [], error: null }),
         user?.id
-          ? (supabase.rpc as (
+          ? (supabase.rpc as unknown as (
               fn: string,
               params?: Record<string, unknown>
-            ) => Promise<{ data: unknown; error: { message?: string } | null }>)("get_group_invite_previews", {
-              p_user_id: user.id,
-            })
+            ) => Promise<{ data: unknown; error: { message?: string } | null }>)("get_my_group_invite_previews")
           : Promise.resolve({ data: [] as unknown[], error: null }),
         user?.id
-          ? (supabase.rpc as (
+          ? (supabase.rpc as unknown as (
               fn: string,
               params?: Record<string, unknown>
             ) => Promise<{ data: unknown; error: { message?: string } | null }>)("get_public_groups_for_viewer")
-          : Promise.resolve({ data: [] }),
+          : Promise.resolve({ data: [], error: null }),
         user?.id
-          ? supabase
-              .from("user_locations")
-              .select("location_name")
-              .eq("user_id", user.id)
-              .order("updated_at", { ascending: false })
-              .limit(1)
-              .maybeSingle()
+          ? supabase.rpc("get_native_viewer_scope")
           : Promise.resolve({ data: null }),
         user?.id
           ? supabase
@@ -4635,7 +4490,7 @@ const Chats = () => {
       if (publicGroupsResult.error) throw publicGroupsResult.error;
 
       const invitePreviewRows = Array.isArray(invitePreviewResult.data)
-        ? (invitePreviewResult.data as Array<Record<string, unknown>>)
+        ? (invitePreviewResult.data as unknown as Array<Record<string, unknown>>)
         : [];
 
       const inviteMap = new Map<string, PendingGroupInvite>();
@@ -4661,14 +4516,14 @@ const Chats = () => {
       const pinActive = Number.isFinite(profilePinnedUntilMs) && profilePinnedUntilMs > Date.now();
       const viewerCountry = resolveCountryByPrecedence({
         gpsCountry: null,
-        gpsLocationName: (liveLocationResult.data as { location_name?: string | null } | null)?.location_name || null,
+        gpsLocationName: (Array.isArray(liveLocationResult.data) ? liveLocationResult.data[0]?.location_name : null) || null,
         pinCountry: pinActive ? profileLocation?.location_country || null : null,
         pinLocationName: pinActive ? profileLocation?.location_name || null : null,
         profileCountry: profileLocation?.location_country || profile?.location_country || null,
         profileLocationName: profileLocation?.location_name || profile?.location_name || null,
       });
       const viewerDistrict = resolveDiscoveryLocationLabel({
-        liveLocationDistrict: extractDistrictToken((liveLocationResult.data as { location_name?: string | null } | null)?.location_name || null),
+        liveLocationDistrict: extractDistrictToken((Array.isArray(liveLocationResult.data) ? liveLocationResult.data[0]?.location_name : null) || null),
         pinDistrict: pinActive ? extractDistrictToken(profileLocation?.location_name || null) : null,
         profileLocationDistrict: profileLocation?.location_district || profile?.location_district || null,
         profileLocationName: profileLocation?.location_name || profile?.location_name || null,
@@ -4690,7 +4545,7 @@ const Chats = () => {
       }> = Array.isArray(publicGroupsResult.data) ? (publicGroupsResult.data as typeof rows) : [];
 
       const inviteChatRows: typeof rows = invitePreviewRows.map((row) => {
-        const record = row as Record<string, unknown>;
+        const record = row as unknown as Record<string, unknown>;
         return {
           id: String(record.chat_id || ""),
           name: String(record.chat_name || "Group"),
@@ -4713,7 +4568,9 @@ const Chats = () => {
 
       // Client-side ranking: proximity (0|4) + pet relevance (0|1|3)×3 + activity (0–2)
       const userSpecies: string[] = (
-        (Array.isArray(profile?.pets) ? profile.pets : []) as Array<{ species?: string }>
+        (Array.isArray((profile as unknown as { pets?: unknown[] } | null)?.pets)
+          ? (profile as unknown as { pets: Array<{ species?: string }> }).pets
+          : [])
       )
         .map((p) => (p.species ?? "").toLowerCase())
         .filter(Boolean);
@@ -4823,7 +4680,7 @@ const Chats = () => {
     profile?.location_country,
     profile?.location_district,
     profile?.location_name,
-    profile?.pets,
+    profile,
     user?.id,
   ]);
 
@@ -4832,7 +4689,7 @@ const Chats = () => {
       let data: unknown = null;
       let error: { message?: string } | null = null;
       if (invite.inviteId) {
-        const byId = await (supabase.rpc as (
+        const byId = await (supabase.rpc as unknown as (
           fn: string,
           params?: Record<string, unknown>
         ) => Promise<{ data: unknown; error: { message?: string } | null }>)(
@@ -4842,7 +4699,7 @@ const Chats = () => {
         data = byId.data;
         error = byId.error;
       } else {
-        const byChat = await (supabase.rpc as (
+        const byChat = await (supabase.rpc as unknown as (
           fn: string,
           params?: Record<string, unknown>
         ) => Promise<{ data: unknown; error: { message?: string } | null }>)(
@@ -4870,13 +4727,11 @@ const Chats = () => {
   const requestGroupJoin = useCallback(
     async (group: Group) => {
       if (!user?.id) {
-        toast.error("Sign in to join groups.");
+        requireAuth("join-group", () => {}, { targetId: group.id, returnTo: "/chats?tab=groups" });
         return false;
       }
-      const { error } = await supabase
-        .from("group_join_requests")
-        .insert({ chat_id: group.id, user_id: user.id, status: "pending" });
-      if (error && error.code !== "23505") {
+      const { error } = await supabase.rpc("request_native_group_join", { p_chat_id: group.id });
+      if (error) {
         toast.error("Couldn't send request. Please try again.");
         return false;
       }
@@ -4884,36 +4739,30 @@ const Chats = () => {
       toast.success("Request sent!");
       return true;
     },
-    [user?.id]
+    [requireAuth, user?.id]
   );
 
   const joinPublicGroupAndOpen = useCallback(
     async (group: Group) => {
       if (!user?.id) {
-        toast.error("Sign in to join groups.");
+        requireAuth("join-group", () => {}, { targetId: group.id, returnTo: "/chats?tab=groups" });
         return false;
       }
-      const { error } = await supabase
-        .from("chat_participants")
-        .insert({ chat_id: group.id, user_id: user.id, role: "member" });
+      const { error } = await supabase.rpc("join_native_group_member", {
+        p_chat_id: group.id,
+        p_user_id: user.id,
+        p_role: "member",
+      });
       if (error) {
         toast.error("Couldn't join. Please try again.");
         return false;
       }
-      const { error: memberErr } = await supabase
-        .from("chat_room_members")
-        .insert({ chat_id: group.id, user_id: user.id });
-      if (memberErr) {
-        toast.error("Couldn't join. Please try again.");
-        return false;
-      }
-      void supabase.rpc("post_group_welcome_message", { p_chat_id: group.id, p_user_id: user.id });
       void supabase.rpc("notify_group_join", { p_chat_id: group.id, p_user_id: user.id });
       await Promise.all([loadConversations("groups"), fetchExploreGroups()]);
       navigate(`/chat-dialogue?room=${encodeURIComponent(group.id)}&name=${encodeURIComponent(group.name)}&joined=1`);
       return true;
     },
-    [fetchExploreGroups, loadConversations, navigate, user?.id]
+    [fetchExploreGroups, loadConversations, navigate, requireAuth, user?.id]
   );
 
   useEffect(() => {
@@ -5152,33 +5001,10 @@ const Chats = () => {
     navigate(`/chat-dialogue?room=${encodeURIComponent(group.id)}&name=${encodeURIComponent(group.name)}`);
   }, [markChatMessagesRead, navigate]);
 
-  // Tap user profile — open right-side sheet showing public fields; block if non_social
-  const handleProfileTap = async (userId: string, displayName: string, avatarUrl?: string | null) => {
+  // The shared ProfileShareCard owns the audience-safe snapshot and under-18
+  // restriction path. Do not prefetch raw profile or pet rows here.
+  const handleProfileTap = (userId: string, displayName: string, avatarUrl?: string | null) => {
     setProfileSheetUser({ id: userId, name: displayName, avatarUrl });
-    setProfileSheetData(null);
-    setProfileSheetLoading(true);
-    try {
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("id, display_name, avatar_url, bio, relationship_status, dob, location_name, occupation, school, major, degree, affiliation, verification_status, is_verified, has_car, tier, effective_tier, non_social, hide_from_map, social_album, availability_status, show_affiliation, show_occupation, show_academic, show_bio, show_relationship_status, show_age, show_gender, show_orientation, show_height, show_weight, gender_genre, orientation, experience_years, languages" as "*")
-        .eq("id", userId)
-        .maybeSingle();
-      if (error) throw error;
-      if (!data) {
-        setProfileSheetData(null);
-        return;
-      }
-      const { data: pets } = await supabase
-        .from("pets")
-        .select("id, name, species, photo_url, is_active")
-        .eq("owner_id", userId);
-      const petHeads = (pets || []).filter((pet) => pet.is_active !== false);
-      setProfileSheetData({ ...(data as Record<string, unknown>), pet_heads: petHeads });
-    } catch {
-      setProfileSheetData(null);
-    } finally {
-      setProfileSheetLoading(false);
-    }
   };
 
   const isTeamHuddleAvatarTapDisabled = useCallback(
@@ -5260,6 +5086,14 @@ const Chats = () => {
       <div>
         <GlobalHeader
           onUpgradeClick={() => setIsPremiumOpen(true)}
+          desktopRail
+          accountLeadingActions={groupsExploreDestination ? (
+            <div className="flex items-center gap-1">
+              <button type="button" onClick={() => setIsSearchOpen((open) => !open)} aria-label="Search groups" className="grid h-9 w-9 place-items-center rounded-full text-muted-foreground hover:bg-muted"><Search className="h-[18px] w-[18px]" strokeWidth={1.75} /></button>
+              <button type="button" onClick={() => setIsJoinWithCodeOpen(true)} aria-label="Join group with code" className="grid h-9 w-9 place-items-center rounded-full text-muted-foreground hover:bg-muted"><Hash className="h-[18px] w-[18px]" strokeWidth={1.75} /></button>
+              <button type="button" onClick={handleCreateGroup} aria-label="Create group" className="grid h-9 w-9 place-items-center rounded-full text-muted-foreground hover:bg-muted"><Users className="h-[18px] w-[18px]" strokeWidth={1.75} /></button>
+            </div>
+          ) : undefined}
         />
       </div>
 
@@ -5273,8 +5107,8 @@ const Chats = () => {
 
       <div className={cn("flex-1 min-h-0 flex flex-col", isMinor && "pointer-events-none opacity-70")}>
 
-      {/* ── Discover | Chats top-tab toggle + filter icon ──────────────────── */}
-      <div className="flex items-center px-4 pt-3 pb-2 flex-shrink-0">
+      {/* Discover is native-only; keep its web UI unmounted. */}
+      {WEB_DISCOVER_ENABLED && <div className="flex items-center px-4 pt-3 pb-2 flex-shrink-0">
         {/* Left spacer — mirrors filter button for visual balance */}
         <div className="w-9 flex-shrink-0" />
         {/* Toggle pill — centered */}
@@ -5324,9 +5158,9 @@ const Chats = () => {
         ) : (
           <div className="w-9 flex-shrink-0" />
         )}
-      </div>
+      </div>}
 
-      {discoverChatAgeBlocked && (
+      {WEB_DISCOVER_ENABLED && discoverChatAgeBlocked && (
         <div className="flex-1 min-h-0 overflow-y-auto px-5 pb-[calc(var(--nav-height)+env(safe-area-inset-bottom,0px)+12px)] pt-3">
           <div className="mx-auto flex w-full max-w-md flex-col items-center">
             <img
@@ -5338,57 +5172,6 @@ const Chats = () => {
               {DISCOVER_AGE_GATE_BODY}
             </p>
           </div>
-        </div>
-      )}
-
-      {/* ── DISCOVER view ────────────────────────────────────────────────────── */}
-      {!discoverChatAgeBlocked && topTab === "discover" && (
-        <div className={cn("flex-1 min-h-0 flex flex-col", matchModal && "scale-[0.985] blur-[2px]")}>
-          <DiscoveryDeck
-            stackedDiscoveryCards={stackedDiscoveryCards}
-            currentDiscovery={currentDiscovery}
-            discoveryLoading={discoveryLoading}
-            discoveryLocationBlocked={discoveryLocationBlocked}
-            renderDiscoverEmpty={renderDiscoverEmpty}
-            canExpandSearch={canExpandSearch}
-            discoveryExpandStepKm={DISCOVERY_EXPAND_STEP_KM}
-            passedDiscoveryCount={passedDiscoveryIds.size}
-            showDiscoveryQuotaLock={showDiscoveryQuotaLock}
-            discoverExhaustedCopy={discoverExhaustedCopy}
-            emptyChatImage={emptyChatImage}
-            profilePlaceholder={profilePlaceholder}
-            swipeUiBusy={discoverySwipeUiBusy}
-            waveButtonAnimating={waveButtonAnimating}
-            dragX={dragX}
-            dragY={dragY}
-            dragRotate={dragRotate}
-            dragScale={dragScale}
-            nextCardScale={nextCardScale}
-            nextCardTranslateY={nextCardTranslateY}
-            stampCounterRotate={stampCounterRotate}
-            waveIndicatorOpacity={waveIndicatorOpacity}
-            passIndicatorOpacity={passIndicatorOpacity}
-            waveIndicatorScale={waveIndicatorScale}
-            passIndicatorScale={passIndicatorScale}
-            waveIndicatorX={waveIndicatorX}
-            waveIndicatorY={waveIndicatorY}
-            passIndicatorX={passIndicatorX}
-            passIndicatorY={passIndicatorY}
-            waveTintOpacity={waveTintOpacity}
-            passTintOpacity={passTintOpacity}
-            onOpenLocationSettings={discoverLocationGate.handleEnableLocation}
-            onExpandSearch={handleExpandSearch}
-            onResurfacePassedProfiles={resurfacePassedProfiles}
-            onWaveFromButton={triggerWaveFromButton}
-            onSwipeRight={triggerDiscoveryWave}
-            onSwipeLeft={triggerDiscoveryPass}
-            onPromptStar={promptDiscoveryStar}
-            onProfileTap={handleProfileTap}
-            onSpringCardHome={springDiscoveryCardHome}
-            getDiscoveryAlbum={getDiscoveryAlbum}
-            getDiscoverySpeciesSummary={getDiscoverySpeciesSummary}
-            getDiscoveryAvailabilityPills={getDiscoveryAvailabilityPills}
-          />
         </div>
       )}
 
@@ -5474,7 +5257,7 @@ const Chats = () => {
       </AnimatePresence>
 
       {/* ── CHATS view ───────────────────────────────────────────────────────── */}
-      {!discoverChatAgeBlocked && topTab === "chats" && (
+      {topTab === "chats" && (
         <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
           {/* Search bar */}
           {isSearchOpen && (
@@ -5501,13 +5284,22 @@ const Chats = () => {
             </div>
           )}
 
-          {/* Friends | Groups tabs + action row */}
-          <div className="flex items-center justify-between px-4 py-2 flex-shrink-0">
+          {/* Chats owns Friends + Group Chats. The separate Groups destination
+              is Explore-only and keeps its actions beside the account avatar. */}
+          {!groupsExploreDestination && <div className="flex items-center justify-between px-4 py-2 flex-shrink-0">
             <div className="flex gap-2">
               {mainTabs.map((tab) => (
                 <button
                   key={tab.id}
-                  onClick={() => setMainTab(tab.id)}
+                  onClick={() => {
+                    setMainTab(tab.id);
+                    if (tab.id === "groups") {
+                      setGroupSubTab("my");
+                      navigate("/chats?tab=groups&view=my&surface=chats", { replace: true });
+                    } else {
+                      navigate("/chats?tab=friends", { replace: true });
+                    }
+                  }}
                   className={cn(
                     "px-3.5 py-2 text-xs font-medium transition-colors relative text-center",
                     mainTab === tab.id
@@ -5553,7 +5345,7 @@ const Chats = () => {
                 </>
               )}
             </div>
-          </div>
+          </div>}
 
           {/* Chat list */}
           <div
@@ -5582,7 +5374,7 @@ const Chats = () => {
               </div>
             ) : null}
 
-            {(mainTab === "friends" || mainTab === "service") && (chatsPullRefreshing || chatsPullOffset > 0) ? (
+            {mainTab === "friends" && (chatsPullRefreshing || chatsPullOffset > 0) ? (
               <div
                 className="flex items-center justify-center gap-2 text-[11px] text-muted-foreground transition-all duration-150"
                 style={{
@@ -5730,7 +5522,18 @@ const Chats = () => {
                                 }
                               }
                             }}
-                            className="relative flex items-center gap-3 p-3 bg-card shadow-card cursor-pointer hover:bg-accent/5 transition-colors"
+                            data-selected={selectedRoomId === chat.id ? "true" : undefined}
+                            className={cn(
+                              "relative flex items-center gap-3 p-3 shadow-card cursor-pointer transition-colors",
+                              // Two-pane needs a persistent "you are here": once
+                              // the list scrolls, nothing else says which
+                              // conversation is open. A filled row, one step
+                              // past hover — not a border or accent bar, which
+                              // would read as an alert.
+                              selectedRoomId === chat.id
+                                ? "bg-muted"
+                                : "bg-card hover:bg-accent/5",
+                            )}
                           >
                             <div
                               className={cn(
@@ -5831,7 +5634,7 @@ const Chats = () => {
             )}
 
             {/* Service View */}
-            {mainTab === "service" && (
+            {WEB_SERVICE_CHAT_ENABLED && mainTab === "service" && (
               <div className="px-5">
                 <div className="space-y-0.5">
                   {filteredServiceChats.length === 0 ? (
@@ -5903,26 +5706,26 @@ const Chats = () => {
             {/* Groups View */}
             {mainTab === "groups" && (
               <div className="pt-2">
-                {/* Sub-tab toggle */}
-                <div className="flex px-5 gap-2 mb-3">
+                {/* Sub-tabs exist only inside Chats. Groups is Explore itself. */}
+                {!groupsExploreDestination && <div className="flex px-5 gap-2 mb-3">
                   <button
-                    onClick={() => setGroupSubTab("my")}
+                    onClick={() => { setGroupSubTab("my"); navigate("/chats?tab=groups&view=my", { replace: true }); }}
                     className="neu-chip text-[13px] px-4 py-1.5 font-medium"
                     data-active={groupSubTab === "my"}
                   >
                     My Groups
                   </button>
                   <button
-                    onClick={() => setGroupSubTab("explore")}
+                    onClick={() => { setGroupSubTab("explore"); navigate("/chats?tab=groups&view=explore", { replace: true }); }}
                     className="neu-chip text-[13px] px-4 py-1.5 font-medium"
                     data-active={groupSubTab === "explore"}
                   >
                     Explore
                   </button>
-                </div>
+                </div>}
 
                 {/* Explore tab */}
-                {groupSubTab === "explore" && (
+                {(groupsExploreDestination || groupSubTab === "explore") && (
                   <div className="px-5 space-y-4">
                     {exploreLoading ? (
                       <div className="flex justify-center py-8">
@@ -5943,7 +5746,7 @@ const Chats = () => {
                       <>
                         {invitedExploreGroups.length > 0 && (
                           <div className="space-y-4">
-                            {invitedExploreGroups.map((group, index) => (
+                            {invitedExploreGroups.filter((group) => !hiddenExploreGroupIds.has(group.id) && `${group.name} ${group.locationLabel || ""} ${(group.petFocus || []).join(" ")}`.toLowerCase().includes(searchQuery.trim().toLowerCase())).map((group, index) => (
                               <motion.div
                                 key={`invite-${group.id}`}
                                 initial={{ opacity: 0, y: 8 }}
@@ -5952,7 +5755,10 @@ const Chats = () => {
                               >
                                 <ExploreGroupCard
                                   group={group}
+                                  friendIds={activeMatchedPeerIds}
+                                  outIds={visibleOutIds}
                                   onCardOpen={() => void openGroupDetailsSheet(group)}
+                                  onHide={() => setHiddenExploreGroupIds((current) => new Set(current).add(group.id))}
                                   cta={{
                                     kind: "invited",
                                     onAccept: async () => {
@@ -5973,7 +5779,7 @@ const Chats = () => {
                           </div>
                         )}
 
-                        {exploreGroups.map((group, index) => {
+                        {exploreGroups.filter((group) => !hiddenExploreGroupIds.has(group.id) && `${group.name} ${group.locationLabel || ""} ${(group.petFocus || []).join(" ")}`.toLowerCase().includes(searchQuery.trim().toLowerCase())).map((group, index) => {
                           const isMember = groups.some((g) => g.id === group.id);
                           const hasSentRequest = sentJoinRequests.has(group.id);
 
@@ -5993,7 +5799,7 @@ const Chats = () => {
                                 kind: "join",
                                 onJoin: () => {
                                   if (!user?.id) {
-                                    toast.error("Sign in to join groups.");
+                                    requireAuth("join-group", () => {}, { targetId: group.id, returnTo: "/chats?tab=groups" });
                                     return;
                                   }
                                   void joinPublicGroupAndOpen(group);
@@ -6003,7 +5809,7 @@ const Chats = () => {
                                 kind: "request",
                                 onRequest: () => {
                                   if (!user?.id) {
-                                    toast.error("Sign in to join groups.");
+                                    requireAuth("join-group", () => {}, { targetId: group.id, returnTo: "/chats?tab=groups" });
                                     return;
                                   }
                                   void requestGroupJoin(group);
@@ -6019,7 +5825,10 @@ const Chats = () => {
                             >
                               <ExploreGroupCard
                                 group={group}
+                                friendIds={activeMatchedPeerIds}
+                                outIds={visibleOutIds}
                                 onCardOpen={() => void openGroupDetailsSheet(group)}
+                                onHide={() => setHiddenExploreGroupIds((current) => new Set(current).add(group.id))}
                                 cta={cta}
                               />
                             </motion.div>
@@ -6031,7 +5840,7 @@ const Chats = () => {
                 )}
 
                 {/* My Groups tab */}
-                {groupSubTab === "my" && (
+                {!groupsExploreDestination && groupSubTab === "my" && (
                 <div className="px-5 space-y-2">
                   {filteredGroups.length === 0 ? (
                     <div className="mx-auto flex w-full max-w-md flex-col items-center py-4">
@@ -6228,13 +6037,16 @@ const Chats = () => {
           <p className="text-sm text-muted-foreground">Are you sure you want to leave this group? This cannot be undone.</p>
           <DialogFooter className="flex gap-2">
             <NeuButton variant="secondary" size="sm" onClick={() => setDeleteGroupConfirmId(null)}>Cancel</NeuButton>
-            <NeuButton variant="destructive" size="sm" onClick={async () => {
-              if (!profile?.id || !deleteGroupConfirmId) return;
-              try {
-                await supabase.from("chat_room_members").delete().eq("chat_id", deleteGroupConfirmId).eq("user_id", profile.id);
-                await supabase.from("chat_participants").delete().eq("chat_id", deleteGroupConfirmId).eq("user_id", profile.id);
-                setGroups((prev) => prev.filter((g) => g.id !== deleteGroupConfirmId));
-                toast.success("You left the group.");
+	            <NeuButton variant="destructive" size="sm" onClick={async () => {
+	              if (!profile?.id || !deleteGroupConfirmId) return;
+	              try {
+	                const { error } = await supabase.rpc("remove_native_group_member", {
+	                  p_chat_id: deleteGroupConfirmId,
+	                  p_user_id: profile.id,
+	                });
+	                if (error) throw error;
+	                setGroups((prev) => prev.filter((g) => g.id !== deleteGroupConfirmId));
+	                toast.success("You left the group.");
               } catch {
                 toast.error("Unable to leave group right now.");
               }
@@ -6698,9 +6510,9 @@ const Chats = () => {
                         <button
                           type="button"
                           className="flex items-center gap-2"
-                          onClick={() => void handleProfileTap(u.id, u.name, u.avatarUrl || null)}
+                          onClick={() => void handleProfileTap(u.id, u.name, u.avatar || null)}
                         >
-                          <UserAvatar avatarUrl={u.avatarUrl || null} name={u.name} isVerified={false} hasCar={false} size="sm" showBadges={false} />
+                          <UserAvatar avatarUrl={u.avatar || null} name={u.name} isVerified={false} hasCar={false} size="sm" showBadges={false} />
                           <span className="text-sm text-brandText">{u.name}</span>
                         </button>
                         <NeuButton
@@ -6731,7 +6543,7 @@ const Chats = () => {
                               setGroupPendingInvites((prev) =>
                                 prev.some((m) => m.id === u.id)
                                   ? prev
-                                  : [...prev, { id: u.id, name: u.name, avatarUrl: u.avatarUrl || null }]
+                                  : [...prev, { id: u.id, name: u.name, avatar: u.avatar }]
                               );
                               void loadConversations("groups");
                               toast.success(`${u.name} invited`);
@@ -6759,7 +6571,7 @@ const Chats = () => {
         <DialogContent className="max-w-sm !z-[9800] !top-[38%] !translate-y-0">
           <DialogHeader>
             <DialogTitle>Identity verification required</DialogTitle>
-            <DialogDescription>Finish verification to unlock Group Creation feature</DialogDescription>
+            <DialogDescription>Verify your identity in the huddle app to unlock group creation.</DialogDescription>
           </DialogHeader>
           <DialogFooter className="!flex-row gap-2 pt-2">
             <NeuButton
@@ -6773,12 +6585,9 @@ const Chats = () => {
             <NeuButton
               size="lg"
               className="flex-1 min-w-0"
-              onClick={() => {
-                setGroupVerifyGateOpen(false);
-                navigate("/verify-identity");
-              }}
+              onClick={() => setGroupVerifyGateOpen(false)}
             >
-              Verify now
+              Got it
             </NeuButton>
           </DialogFooter>
         </DialogContent>
@@ -7035,16 +6844,7 @@ const Chats = () => {
           </>
         )}
       </AnimatePresence>
-      <PublicProfileSheet
-        isOpen={Boolean(profileSheetUser)}
-        onClose={() => setProfileSheetUser(null)}
-        loading={profileSheetLoading}
-        fallbackName={profileSheetUser?.name}
-        viewedUserId={profileSheetUser?.id}
-        data={profileSheetData as never}
-        onStarQuotaBlocked={(targetTier) => openStarUpgradeSheet(targetTier)}
-        zIndexBase={12000}
-      />
+      {profileSheetUser ? <ProfileShareCard profileId={profileSheetUser.id} onClose={() => setProfileSheetUser(null)} /> : null}
       <StarUpgradeSheet
         isOpen={Boolean(starUpgradeTier)}
         tier={starUpgradeTier || "plus"}

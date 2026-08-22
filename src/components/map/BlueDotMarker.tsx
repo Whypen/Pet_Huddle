@@ -109,7 +109,7 @@ const BlueDotMarker = ({
       ) : (
         <div
           className="h-11 w-11 rounded-full shadow-[0_4px_12px_rgba(0,0,0,0.3)] flex items-center justify-center"
-          style={{ border: "3px solid #A6D539", background: "#A6D539" }}
+          style={{ border: "3px solid var(--lime-green)", background: "var(--lime-green)" }}
         >
           <div
             className="h-full w-full rounded-full bg-white flex items-center justify-center overflow-hidden"

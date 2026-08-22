@@ -24,7 +24,7 @@ const AlertPinMarker = ({ alertType, markerState = "active", interactive = false
             "block h-3 w-3 rounded-full border border-white shadow-[0_3px_8px_rgba(0,0,0,0.24)]",
             interactive ? "transition-shadow hover:shadow-[0_0_0_3px_rgba(33,69,207,0.32),0_8px_20px_rgba(0,0,0,0.28)]" : "",
           ].join(" ")}
-          style={{ backgroundColor: style.color }}
+          style={{ backgroundColor: style.markerColor }}
         />
       </span>
     );
@@ -40,13 +40,13 @@ const AlertPinMarker = ({ alertType, markerState = "active", interactive = false
             ? "transition-[filter] hover:[filter:drop-shadow(0_0_0_3px_rgba(33,69,207,0.42))]"
             : "",
         ].join(" ")}
-        style={{ backgroundColor: style.color }}
+        style={{ backgroundColor: style.markerColor }}
       >
         <Icon className="h-4 w-4" />
       </span>
       <span
         className="block h-0 w-0 -mt-[3px] border-l-[8px] border-r-[8px] border-t-[12px] border-l-transparent border-r-transparent"
-        style={{ borderTopColor: style.color }}
+        style={{ borderTopColor: style.markerColor }}
       />
     </span>
   );

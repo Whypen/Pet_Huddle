@@ -32,6 +32,7 @@ import { fetchLivePrices, FALLBACK_PRICES, getCachedLivePrices, getLastLivePrice
 import { PriceDisplay } from "@/components/ui/PriceDisplay";
 import { invokeAuthedFunction } from "@/lib/invokeAuthedFunction";
 import { openExternalUrl } from "@/lib/nativeShell";
+import { buildSubscriptionCheckoutBody } from "@/lib/checkoutContract";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -39,7 +40,7 @@ type PlanTab = "plus" | "gold" | "addons";
 type Billing = "monthly" | "annual";
 
 type FeatureRow = {
-  icon: React.ComponentType<{ size?: number; strokeWidth?: number; className?: string; style?: React.CSSProperties }>;
+  icon: React.ComponentType<{ size?: string | number; strokeWidth?: string | number; className?: string; style?: React.CSSProperties }>;
   label: string;
   sublabel: string;
   sublabelNote?: string;
@@ -47,7 +48,7 @@ type FeatureRow = {
 
 type AddOnItem = {
   id: "superBroadcast" | "topProfileBooster" | "sharePerks";
-  icon: React.ComponentType<{ size?: number; strokeWidth?: number; className?: string; style?: React.CSSProperties }>;
+  icon: React.ComponentType<{ size?: string | number; strokeWidth?: string | number; className?: string; style?: React.CSSProperties }>;
   title: string;
   subtitle: string;
   subtitleNote?: string;
@@ -122,6 +123,12 @@ function discountPct(monthlyAmt: number, annualTotal: number): number {
   return Math.round((1 - annualTotal / 12 / monthlyAmt) * 100);
 }
 
+type NumericLivePriceKey = Exclude<keyof LivePriceMap, "currencyCode" | "sharePerksInterval">;
+const livePrice = (prices: LivePriceMap, key: NumericLivePriceKey, fallback = 0): number => {
+  const value = prices[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+};
+
 const CANCEL_REASONS = [
   "Too expensive",
   "Not using it enough",
@@ -132,6 +139,26 @@ const CANCEL_REASONS = [
 ] as const;
 
 type CancelTarget = "base_plus" | "base_gold" | "share_perks";
+
+type CheckoutStage = "addon_sequence" | "plan" | "share_perks" | "addon_payment";
+
+const checkoutFailureCode = (error: unknown): string => {
+  const message = error instanceof Error ? error.message : String(error || "unknown");
+  if (/auth_required|401|unauthori[sz]ed|invalid[_\s-]?jwt/i.test(message)) return "auth_required";
+  if (/checkout_url_missing/i.test(message)) return "checkout_url_missing";
+  if (/price|lookup/i.test(message)) return "pricing_configuration";
+  if (/currency|country/i.test(message)) return "pricing_region";
+  if (/fetch|network|timeout/i.test(message)) return "network";
+  if (/http_4\d\d/i.test(message)) return "checkout_rejected";
+  if (/http_5\d\d/i.test(message)) return "checkout_service";
+  return "unknown";
+};
+
+const reportCheckoutFailure = (stage: CheckoutStage, error: unknown) => {
+  const code = checkoutFailureCode(error);
+  console.error("[premium.checkout_failed]", { stage, code });
+  return code;
+};
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -198,7 +225,7 @@ export default function PremiumPage() {
       });
       return;
     }
-    navigate("/settings", { replace: true });
+    navigate("/social", { replace: true, state: { openSettingsDrawer: true } });
   };
 
   // ── Live Stripe prices — cached at module level after first fetch ────────────
@@ -276,8 +303,8 @@ export default function PremiumPage() {
             userId: user.id,
             mode: "payment",
             items: pending.map((p) => ({ type: p.id, quantity: p.qty })),
-            successUrl: `${window.location.origin}/premium?addon_done=1${encodedReturnToParam}${reopenDrawerParam}`,
-            cancelUrl: `${window.location.origin}/premium?tab=addons${encodedReturnToParam}${reopenDrawerParam}`,
+            successUrl: `${window.location.origin}/member?addon_done=1${encodedReturnToParam}${reopenDrawerParam}`,
+            cancelUrl: `${window.location.origin}/member?tab=addons${encodedReturnToParam}${reopenDrawerParam}`,
             currency: savedCurrency || undefined,
             country: savedCountry || undefined,
           },
@@ -286,7 +313,8 @@ export default function PremiumPage() {
         const url = (data as { url?: string } | null)?.url;
         if (!url) throw new Error("checkout_url_missing");
         openExternalUrl(url, "premium-addon-sequence");
-      } catch {
+      } catch (error) {
+        reportCheckoutFailure("addon_sequence", error);
         toast.error(t("Checkout unavailable. Please try again."));
       } finally {
         setIsCheckingOut(false);
@@ -341,14 +369,14 @@ export default function PremiumPage() {
 
   const addonTotal = useMemo(
     () => selectedPaymentAddonItems.reduce(
-      (sum, a) => sum + (livePrices[a.id as keyof LivePriceMap] ?? a.price),
+      (sum, a) => sum + livePrice(livePrices, a.id, a.price),
       0
     ),
     [selectedPaymentAddonItems, livePrices]
   );
 
   const startPlanCheckout = async (tier: "plus" | "gold") => {
-    if (!user) { navigate("/auth"); return; }
+    if (!user) { navigate(`/join?next=${encodeURIComponent(`${location.pathname}${location.search}`)}&mode=signin`); return; }
     if (isCheckingOut) return;
     if (ownTierNormalized === "gold") return;
     if (ownTierNormalized === "plus" && tier === "plus") return;
@@ -362,8 +390,8 @@ export default function PremiumPage() {
     const hasPaymentAddons = selectedPaymentAddonItems.length > 0;
     const hasAddons = hasPaymentAddons;
       const successUrl = hasAddons
-        ? `${window.location.origin}/premium?plan_done=1${encodedReturnToParam}${reopenDrawerParam}`
-        : `${window.location.origin}/premium?tab=${tier}${encodedReturnToParam}${reopenDrawerParam}`;
+        ? `${window.location.origin}/member?plan_done=1${encodedReturnToParam}${reopenDrawerParam}`
+        : `${window.location.origin}/member?tab=${tier}${encodedReturnToParam}${reopenDrawerParam}`;
 
       if (hasAddons) {
         sessionStorage.setItem(
@@ -386,24 +414,23 @@ export default function PremiumPage() {
       }
 
       const { data, error } = await invokeAuthedFunction<{ url?: string }>("create-checkout-session", {
-        body: {
+        body: buildSubscriptionCheckoutBody({
           userId: user.id,
-          mode: "subscription",
           type,
           lookupKey: plan.lookupKey,
-          priceId: plan.priceId,
           successUrl,
-          cancelUrl: `${window.location.origin}/premium?tab=${tier}${encodedReturnToParam}${reopenDrawerParam}`,
+          cancelUrl: `${window.location.origin}/member?tab=${tier}${encodedReturnToParam}${reopenDrawerParam}`,
           currency: pricingCurrency || undefined,
           country: pricingCountry || undefined,
-        },
+        }),
       });
       if (error) throw error;
       const url = (data as { url?: string } | null)?.url;
       if (!url) throw new Error("checkout_url_missing");
       openExternalUrl(url, `premium-plan-${tier}`);
-    } catch {
+    } catch (error) {
       sessionStorage.removeItem("pending_addons");
+      reportCheckoutFailure("plan", error);
       toast.error(t("Checkout unavailable. Please try again."));
     } finally {
       setIsCheckingOut(false);
@@ -411,7 +438,7 @@ export default function PremiumPage() {
   };
 
   const startAddonOnlyCheckout = async () => {
-    if (!user) { navigate("/auth"); return; }
+    if (!user) { navigate(`/join?next=${encodeURIComponent(`${location.pathname}${location.search}`)}&mode=signin`); return; }
     if (!selectedAddonItems.length || isCheckingOut) return;
 
     if (addonSelected.sharePerks && !isSharePerksPurchasable) {
@@ -424,8 +451,8 @@ export default function PremiumPage() {
         setIsCheckingOut(true);
         const hasPaymentAddons = selectedPaymentAddonItems.length > 0;
         const successUrl = hasPaymentAddons
-          ? `${window.location.origin}/premium?plan_done=1${encodedReturnToParam}${reopenDrawerParam}`
-          : `${window.location.origin}/premium?addon_done=1${encodedReturnToParam}${reopenDrawerParam}`;
+          ? `${window.location.origin}/member?plan_done=1${encodedReturnToParam}${reopenDrawerParam}`
+          : `${window.location.origin}/member?addon_done=1${encodedReturnToParam}${reopenDrawerParam}`;
 
         if (hasPaymentAddons) {
           sessionStorage.setItem(
@@ -444,7 +471,7 @@ export default function PremiumPage() {
             mode: "subscription",
             type: "family_member",
             successUrl,
-            cancelUrl: `${window.location.origin}/premium?tab=addons${encodedReturnToParam}${reopenDrawerParam}`,
+            cancelUrl: `${window.location.origin}/member?tab=addons${encodedReturnToParam}${reopenDrawerParam}`,
             currency: pricingCurrency || undefined,
             country: pricingCountry || undefined,
           },
@@ -453,9 +480,10 @@ export default function PremiumPage() {
         const url = (data as { url?: string } | null)?.url;
         if (!url) throw new Error("checkout_url_missing");
         openExternalUrl(url, "premium-share-perks");
-      } catch {
+      } catch (error) {
         sessionStorage.removeItem("pending_addons");
         sessionStorage.removeItem("pending_pricing");
+        reportCheckoutFailure("share_perks", error);
         toast.error(t("Checkout unavailable. Please try again."));
       } finally {
         setIsCheckingOut(false);
@@ -470,8 +498,8 @@ export default function PremiumPage() {
           userId: user.id,
           mode: "payment",
           items: selectedPaymentAddonItems.map((a) => ({ type: a.id, quantity: 1 })),
-          successUrl: `${window.location.origin}/premium?addon_done=1${encodedReturnToParam}${reopenDrawerParam}`,
-          cancelUrl: `${window.location.origin}/premium?tab=addons${encodedReturnToParam}${reopenDrawerParam}`,
+          successUrl: `${window.location.origin}/member?addon_done=1${encodedReturnToParam}${reopenDrawerParam}`,
+          cancelUrl: `${window.location.origin}/member?tab=addons${encodedReturnToParam}${reopenDrawerParam}`,
           currency: pricingCurrency || undefined,
           country: pricingCountry || undefined,
         },
@@ -480,7 +508,8 @@ export default function PremiumPage() {
       const url = (data as { url?: string } | null)?.url;
       if (!url) throw new Error("checkout_url_missing");
       openExternalUrl(url, "premium-addon-payment");
-    } catch {
+    } catch (error) {
+      reportCheckoutFailure("addon_payment", error);
       toast.error(t("Checkout unavailable. Please try again."));
     } finally {
       setIsCheckingOut(false);
@@ -553,12 +582,12 @@ export default function PremiumPage() {
     }
   };
 
-  // ── Folder card: Plus / Huddle Gold ──────────────────────────────────────────
+  // ── Folder card: Plus / huddle＊ ──────────────────────────────────────────
 
   const renderPlanFolderCard = (tier: "plus" | "gold") => {
     const theme = PLAN_THEMES[tier];
-    const monthlyAmt  = livePrices[`${tier}_monthly` as keyof LivePriceMap];
-    const annualTotal = livePrices[`${tier}_annual`  as keyof LivePriceMap];
+    const monthlyAmt  = livePrice(livePrices, `${tier}_monthly`);
+    const annualTotal = livePrice(livePrices, `${tier}_annual`);
     const annualPerMo = annualTotal / 12;
     const pct = discountPct(monthlyAmt, annualTotal);
     const billing = tier === "plus" ? plusBilling : goldBilling;
@@ -569,8 +598,8 @@ export default function PremiumPage() {
       ownTierNormalized === "gold" ||
       (ownTierNormalized === "plus" && tier === "plus");
     const ctaLabel = isBlockedByTier
-      ? (ownTierNormalized === "gold" ? "You're on Huddle Gold" : "You're on Huddle+")
-      : (tier === "plus" ? "Get Huddle+" : "Get Huddle Gold");
+      ? (ownTierNormalized === "gold" ? "You're on huddle＊" : "You're on Huddle+")
+      : (tier === "plus" ? "Get Huddle+" : "Get huddle＊");
 
     return (
       <div className="rounded-[20px] overflow-hidden" style={CARD_FLOAT_STYLE}>
@@ -724,7 +753,7 @@ export default function PremiumPage() {
   const renderAddonsCard = () => {
     const theme = PLAN_THEMES.addons;
     const recurringAddonTotal = selectedRecurringAddonItems.reduce(
-      (sum, a) => sum + (livePrices[a.id as keyof LivePriceMap] ?? a.price),
+      (sum, a) => sum + livePrice(livePrices, a.id, a.price),
       0,
     );
     const hasOneTime = selectedPaymentAddonItems.length > 0 && addonTotal > 0;
@@ -789,7 +818,7 @@ export default function PremiumPage() {
                         (isMaxFamilyCapacity ? "Max. capacity reached" : "Temporarily unavailable")
                       ) : (
                         <PriceDisplay
-                          n={livePrices[addon.id as keyof LivePriceMap] ?? addon.price}
+                          n={livePrice(livePrices, addon.id, addon.price)}
                           suffix={addon.id === "sharePerks" && isSharePerksPurchasable ? sharePerksSuffix : undefined}
                           currency={livePrices.currencyCode}
                         />
@@ -937,7 +966,7 @@ export default function PremiumPage() {
                           }
                     }
                   >
-                    {tab === "plus" ? "Huddle+" : tab === "gold" ? "Huddle Gold" : "Add-ons"}
+                    {tab === "plus" ? "Huddle+" : tab === "gold" ? "huddle＊" : "Add-ons"}
                   </button>
                 </div>
               );

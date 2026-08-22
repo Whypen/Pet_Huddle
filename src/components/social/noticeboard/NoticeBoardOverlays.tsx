@@ -1,6 +1,6 @@
 import { memo } from "react";
 
-import { PublicProfileSheet } from "@/components/profile/PublicProfileSheet";
+import { ProfileShareCard } from "@/components/profile/ProfileShareCard";
 import { ShareSheet } from "@/components/social/ShareSheet";
 import { ReportModal } from "@/components/moderation/ReportModal";
 import {
@@ -59,14 +59,7 @@ export const NoticeBoardOverlays = memo(({
 }: NoticeBoardOverlaysProps) => {
   return (
     <>
-      <PublicProfileSheet
-        isOpen={profileOpen}
-        onClose={onProfileClose}
-        loading={false}
-        fallbackName={profileFallbackName}
-        viewedUserId={profileUserId}
-        data={null}
-      />
+      {profileOpen && profileUserId ? <ProfileShareCard profileId={profileUserId} onClose={onProfileClose} /> : null}
 
       {sharePayload ? (
         <ShareSheet

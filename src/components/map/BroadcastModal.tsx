@@ -12,6 +12,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { getBroadcastPinStyle, normalizeBroadcastAlertType } from "@/lib/broadcastPinStyle";
 import { getBroadcastCapsForTier, getSuperBroadcastCaps, quotaConfig } from "@/config/quotaConfig";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { humanError } from "@/lib/humanError";
 import { MAPBOX_ACCESS_TOKEN } from "@/lib/constants";
 import { toast } from "sonner";
@@ -56,9 +57,13 @@ interface BroadcastModalProps {
       created_at: string;
       creator_id: string | null;
       thread_id: string | null;
+      social_post_id?: string | null;
+      post_on_social?: boolean;
       creator: { display_name: string | null; avatar_url: string | null } | null;
       expires_at?: string | null;
       range_meters?: number | null;
+      range_km?: number | null;
+      duration_hours?: number | null;
       is_sensitive?: boolean;
     };
   }) => void;
@@ -79,6 +84,7 @@ const BroadcastModal = ({
   onSuccess,
   onError,
 }: BroadcastModalProps) => {
+  const isMobile = useIsMobile();
   const navigate = useNavigate();
   const { user, profile } = useAuth();
   const [alertTitle, setAlertTitle] = useState("");
@@ -116,7 +122,7 @@ const BroadcastModal = ({
 
     (async () => {
       if (!user) return;
-      const r = await (supabase.rpc as (fn: string) => Promise<{ data: unknown; error: unknown }>)(
+      const r = await (supabase.rpc as unknown as (fn: string) => Promise<{ data: unknown; error: unknown }>)(
         "get_quota_snapshot"
       );
       if (r.error) return;
@@ -373,7 +379,7 @@ const BroadcastModal = ({
         is_sensitive: isSensitive,
       };
 
-      const rpcResult = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>)(
+      const rpcResult = await (supabase.rpc as unknown as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>)(
         "create_alert_thread_and_pin",
         { payload }
       );
@@ -441,17 +447,17 @@ const BroadcastModal = ({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[5000] bg-black/50"
+          className="fixed inset-0 z-[5000] flex items-end justify-center bg-black/50 md:items-center md:p-6"
           onClick={onClose}
         >
         <motion.div
-          data-huddle-bottom-sheet="true"
-          initial={{ y: "100%" }}
-          animate={{ y: 0 }}
-          exit={{ y: "100%" }}
+          data-huddle-bottom-sheet={isMobile ? "true" : undefined}
+          initial={isMobile ? { y: "100%" } : { y: 24, scale: 0.98, opacity: 0 }}
+          animate={{ y: 0, scale: 1, opacity: 1 }}
+          exit={isMobile ? { y: "100%" } : { y: 16, scale: 0.98, opacity: 0 }}
           transition={{ type: "spring", damping: 25, stiffness: 300 }}
           onClick={(e) => e.stopPropagation()}
-          className="fixed left-0 right-0 bottom-0 mx-auto w-full max-w-[var(--app-max-width,430px)] bg-card rounded-t-3xl px-6 pt-6 huddle-sheet-bottom-padding max-h-[calc(100svh-env(safe-area-inset-bottom,0px)-8px)] overflow-auto border-t border-border shadow-elevated"
+          className="w-full max-w-[var(--app-max-width,430px)] bg-card rounded-t-3xl px-6 pt-6 huddle-sheet-bottom-padding max-h-[calc(100svh-env(safe-area-inset-bottom,0px)-8px)] overflow-auto border-t border-border shadow-elevated md:max-w-[560px] md:rounded-3xl md:border md:pb-6"
         >
           <div className="mb-4 flex items-center justify-between gap-3">
             <h2 className="text-lg font-bold text-brandText">Broadcast Alert</h2>
@@ -543,7 +549,7 @@ const BroadcastModal = ({
                   <span>Upgrade to spread wider & stay longer!</span>
                   <button
                     type="button"
-                    onClick={() => navigate("/premium")}
+                    onClick={() => navigate("/member")}
                     className="shrink-0 rounded-full border border-brandBlue/25 bg-white px-3 py-1 text-[11px] font-semibold text-brandBlue"
                   >
                     Unlock

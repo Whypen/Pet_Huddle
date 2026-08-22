@@ -1,7 +1,7 @@
 /**
  * StarUpgradeSheet — stars upsell modal (center-screen)
  * tier="plus"  → Free → Huddle+     (blue  #5BA4F5)
- * tier="gold"  → Plus → Huddle Gold  (coral #FF6452)
+ * tier="gold"  → Plus → huddle＊  (coral #FF6452)
  *
  * Layout: pure folder-tab card, centered on screen.
  * "Maybe later" lives inside the card below the CTA.
@@ -31,7 +31,7 @@ type StarUpgradeSheetProps = {
 };
 
 type FeatureItem = {
-  icon: React.ComponentType<{ size?: number; strokeWidth?: number; style?: React.CSSProperties; "aria-hidden"?: boolean }>;
+  icon: React.ComponentType<{ size?: string | number; strokeWidth?: string | number; style?: React.CSSProperties; "aria-hidden"?: React.AriaAttributes["aria-hidden"] }>;
   label: string;
   sublabel?: string;
   sublabelNote?: string;

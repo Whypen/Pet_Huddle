@@ -205,7 +205,8 @@ export function useFormDraftAutosave<TValue, TDraft extends Record<string, unkno
         requestId,
       });
       if (requestId !== latestIssuedRequestIdRef.current) return false;
-      commitLatestDraftAsBaseline(result?.baselineUpdatedAt ?? null, result?.baselineValue ?? currentDraft);
+      const saved = result || {};
+      commitLatestDraftAsBaseline(saved.baselineUpdatedAt ?? null, saved.baselineValue ?? currentDraft);
       return true;
     } catch {
       if (requestId === latestIssuedRequestIdRef.current) {

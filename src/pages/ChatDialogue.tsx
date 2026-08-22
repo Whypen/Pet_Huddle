@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { ArrowDown, ArrowLeft, BadgeCheck, ChevronLeft, ImagePlus, Loader2, MoreVertical, SendHorizontal, Settings, ShieldAlert, UserX, Users, Bell, BellOff, UserPlus, LogOut, Image as ImageIcon, Lock, Pencil, Save, X } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { buildJoinSignInPath } from "@/lib/authIntent";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -10,7 +11,7 @@ import { UserAvatar } from "@/components/ui/UserAvatar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { PublicProfileSheet } from "@/components/profile/PublicProfileSheet";
+import { ProfileShareCard } from "@/components/profile/ProfileShareCard";
 import { isStarIntroKind, parseStarChatContent } from "@/lib/starChat";
 import { parseChatShareMessage, type ShareModel } from "@/lib/shareModel";
 import { SharedContentCard } from "@/components/chat/SharedContentCard";
@@ -40,6 +41,81 @@ type ChatMessage = {
   sender_id: string;
   content: string;
   created_at: string;
+};
+
+type DialogueRoom = {
+  id?: string | null;
+  type?: string | null;
+  name?: string | null;
+  avatar_url?: string | null;
+  created_by?: string | null;
+  visibility?: "public" | "private" | null;
+  room_code?: string | null;
+  location_label?: string | null;
+  description?: string | null;
+};
+
+type DialogueMember = {
+  user_id?: string | null;
+  role?: string | null;
+};
+
+type DialogueSnapshot = {
+  room: DialogueRoom | null;
+  members: DialogueMember[];
+  messages: ChatMessage[];
+  readMessageIds: Set<string>;
+};
+
+const dialogueLoadToast = (stage: string) => {
+  if (stage === "messages") return "Messages didn't load. Try again in a moment.";
+  if (stage === "counterpart") return "Chat details didn't load. Try again in a moment.";
+  if (stage === "group_or_room_identity") return "Chat details didn't load. Try again in a moment.";
+  if (stage === "matched_fallback_target") return "You no longer have access to this conversation.";
+  return "Couldn't open that conversation. Try again in a moment.";
+};
+
+const fetchDialogueSnapshot = async (
+  chatId: string,
+  options: { beforeCreatedAt?: string | null; limit?: number } = {},
+): Promise<DialogueSnapshot> => {
+  const { data, error } = await (supabase.rpc as unknown as (
+    fn: string,
+    params: Record<string, unknown>,
+  ) => Promise<{ data: unknown; error: { message?: string } | null }>)(
+    "get_native_chat_dialogue_snapshot",
+    {
+      p_chat_id: chatId,
+      p_before_created_at: options.beforeCreatedAt || null,
+      p_limit: options.limit ?? 50,
+      p_target_message_id: null,
+    },
+  );
+  if (error) throw error;
+  const payload = data && typeof data === "object" ? data as Record<string, unknown> : {};
+  const messages = (Array.isArray(payload.messages) ? payload.messages : [])
+    .map((row) => row as Partial<ChatMessage>)
+    .filter((row): row is ChatMessage => Boolean(row.id && row.sender_id && typeof row.content === "string" && row.created_at));
+  return {
+    room: payload.room && typeof payload.room === "object" ? payload.room as DialogueRoom : null,
+    members: (Array.isArray(payload.members) ? payload.members : []) as DialogueMember[],
+    messages,
+    readMessageIds: new Set(
+      (Array.isArray(payload.read_message_ids) ? payload.read_message_ids : [])
+        .map((id) => String(id || "").trim())
+        .filter(Boolean),
+    ),
+  };
+};
+
+const fetchChatProfileSummaries = async (userIds: string[]) => {
+  const ids = Array.from(new Set(userIds.map((id) => String(id || "").trim()).filter(Boolean)));
+  if (ids.length === 0) return [] as Record<string, unknown>[];
+  const { data, error } = await supabase.rpc("get_native_chat_profile_summaries", {
+    p_user_ids: ids,
+  });
+  if (error) throw error;
+  return (Array.isArray(data) ? data : []) as Record<string, unknown>[];
 };
 
 type Attachment = {
@@ -128,7 +204,7 @@ const ChatDialogue = () => {
   const [unmatchState, setUnmatchState] = useState<UnmatchState>("none");
   const isUnmatched = unmatchState !== "none";
   const [profileSheetOpen, setProfileSheetOpen] = useState(false);
-  const [profileSheetData, setProfileSheetData] = useState<Record<string, unknown> | null>(null);
+  const [profileSheetUserId, setProfileSheetUserId] = useState<string | null>(null);
   const [confirmUnmatchOpen, setConfirmUnmatchOpen] = useState(false);
   const [confirmBlockOpen, setConfirmBlockOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
@@ -139,6 +215,9 @@ const ChatDialogue = () => {
   const [dismissedPreviewUrls, setDismissedPreviewUrls] = useState<Set<string>>(new Set());
   const [lockedPreviewUrl, setLockedPreviewUrl] = useState<string | null>(null);
   const [isGroup, setIsGroup] = useState(false);
+  const returnToInbox = searchParams.get("tab") === "groups"
+    ? `/chats?tab=groups${searchParams.get("view") === "explore" ? "&view=explore" : ""}`
+    : "/chats";
   const [groupAvatarUrl, setGroupAvatarUrl] = useState<string | null>(null);
   const [groupCreatedBy, setGroupCreatedBy] = useState<string | null>(null);
   const [groupMemberCount, setGroupMemberCount] = useState(0);
@@ -278,24 +357,20 @@ const ChatDialogue = () => {
   }, []);
 
   const flushPendingMessageReads = useCallback(async () => {
-    if (!profile?.id || readFlushInFlightRef.current) return;
+    if (!profile?.id || !roomId || readFlushInFlightRef.current) return;
     const pendingIds = Array.from(pendingReadIdsRef.current);
     if (pendingIds.length === 0) return;
 
     pendingReadIdsRef.current = new Set();
     readFlushInFlightRef.current = true;
 
-    const { error: upsertError } = await supabase
-      .from("message_reads")
-      .upsert(
-        pendingIds.map((messageId) => ({
-          message_id: messageId,
-          user_id: profile.id,
-          read_at: new Date().toISOString(),
-          chat_id: roomId ?? null,
-        })),
-        { onConflict: "message_id,user_id" },
-      );
+    const { error: upsertError } = await (supabase.rpc as unknown as (
+      fn: string,
+      params: Record<string, unknown>,
+    ) => Promise<{ error: { message?: string } | null }>)("mark_room_read_messages", {
+      p_chat_id: roomId,
+      p_visible_message_ids: pendingIds,
+    });
 
     if (upsertError) {
       pendingIds.forEach((messageId) => pendingReadIdsRef.current.add(messageId));
@@ -344,21 +419,8 @@ const ChatDialogue = () => {
   }, [flushPendingMessageReads, roomId]);
 
   const loadGroupInfo = useCallback(async (nextRoomId: string): Promise<boolean> => {
-    const { data: chatRow } = await supabase
-      .from("chats")
-      .select("id, name, type, avatar_url, description, visibility, room_code, location_label, created_by")
-      .eq("id", nextRoomId)
-      .maybeSingle();
-    const row = chatRow as {
-      name?: string | null;
-      type?: string;
-      avatar_url?: string | null;
-      description?: string | null;
-      visibility?: "public" | "private" | null;
-      room_code?: string | null;
-      location_label?: string | null;
-      created_by?: string | null;
-    } | null;
+    const snapshot = await fetchDialogueSnapshot(nextRoomId, { limit: 1 });
+    const row = snapshot.room;
     if (!row || row.type !== "group") return false;
 
     setIsGroup(true);
@@ -372,37 +434,32 @@ const ChatDialogue = () => {
     setGroupIsAdmin((row.created_by || null) === profile?.id);
 
     try {
-      const [{ data: members }, { data: participantRow }] = await Promise.all([
-        supabase
-          .from("chat_room_members")
-          .select("user_id")
-          .eq("chat_id", nextRoomId),
+      const memberIds = snapshot.members.map((member) => String(member.user_id || "").trim()).filter(Boolean);
+      const [{ data: memberState }, memberProfiles] = await Promise.all([
         profile?.id
-          ? supabase
-              .from("chat_participants")
-              .select("is_muted, role")
-              .eq("chat_id", nextRoomId)
-              .eq("user_id", profile.id)
-              .maybeSingle()
+          ? supabase.rpc("get_native_group_member_state", { p_chat_id: nextRoomId })
           : Promise.resolve({ data: null }),
+        fetchChatProfileSummaries(memberIds),
       ]);
-      const memberIds = ((members || []) as { user_id: string }[]).map((m) => m.user_id).filter(Boolean);
+      const ownState = (Array.isArray(memberState) ? memberState[0] : memberState) as {
+        is_muted?: boolean;
+        role?: string | null;
+      } | null;
       setGroupMemberCount(memberIds.length);
-      setGroupMuted(Boolean((participantRow as { is_muted?: boolean } | null)?.is_muted));
+      setGroupMuted(ownState?.is_muted === true);
       setGroupIsAdmin(
         (row.created_by || null) === profile?.id ||
-        String((participantRow as { role?: string } | null)?.role || "").toLowerCase() === "admin"
+        String(ownState?.role || "").toLowerCase() === "admin" ||
+        snapshot.members.some((member) => member.user_id === profile?.id && String(member.role || "").toLowerCase() === "admin")
       );
 
       if (memberIds.length === 0) return;
       memberIds.forEach((id) => fetchedSenderIdsRef.current.add(id));
-      const { data: memberProfiles } = await supabase
-        .from("profiles")
-        .select("id, display_name")
-        .in("id", memberIds);
       const nameMap: Record<string, string> = {};
-      ((memberProfiles || []) as { id: string; display_name?: string | null }[]).forEach((p) => {
-        if (p.id && p.display_name) nameMap[p.id] = p.display_name;
+      memberProfiles.forEach((member) => {
+        const id = String(member.id || "").trim();
+        const displayName = String(member.display_name || "").trim();
+        if (id && displayName) nameMap[id] = displayName;
       });
       setSenderNames(nameMap);
     } catch (error) {
@@ -413,17 +470,11 @@ const ChatDialogue = () => {
   }, [profile?.id]);
 
   const loadRoomMessages = useCallback(async (nextRoomId: string) => {
-    const { data, error } = await supabase
-      .from("chat_messages")
-      .select("id, sender_id, content, created_at")
-      .eq("chat_id", nextRoomId)
-      .order("created_at", { ascending: false })
-      .limit(INITIAL_MESSAGE_LOAD_SIZE + 1);
-    if (error) throw error;
-    const rows = (data || []) as ChatMessage[];
-    const nextMessages = rows.slice(0, INITIAL_MESSAGE_LOAD_SIZE).reverse();
-    setHasOlderMessages(rows.length > INITIAL_MESSAGE_LOAD_SIZE);
+    const snapshot = await fetchDialogueSnapshot(nextRoomId, { limit: INITIAL_MESSAGE_LOAD_SIZE + 1 });
+    const nextMessages = snapshot.messages.slice(-INITIAL_MESSAGE_LOAD_SIZE);
+    setHasOlderMessages(snapshot.messages.length > INITIAL_MESSAGE_LOAD_SIZE);
     setMessages(nextMessages);
+    setReadMessageIds(snapshot.readMessageIds);
     void markMessagesAsRead(nextMessages);
   }, [markMessagesAsRead]);
 
@@ -453,17 +504,12 @@ const ChatDialogue = () => {
     const viewport = messagesViewportRef.current;
     const previousHeight = viewport?.scrollHeight || 0;
     try {
-      const { data, error } = await supabase
-        .from("chat_messages")
-        .select("id, sender_id, content, created_at")
-        .eq("chat_id", roomId)
-        .lt("created_at", oldestCreatedAt)
-        .order("created_at", { ascending: false })
-        .limit(OLDER_MESSAGE_PAGE_SIZE + 1);
-      if (error) throw error;
-      const rows = (data || []) as ChatMessage[];
-      const olderMessages = rows.slice(0, OLDER_MESSAGE_PAGE_SIZE).reverse();
-      setHasOlderMessages(rows.length > OLDER_MESSAGE_PAGE_SIZE);
+      const snapshot = await fetchDialogueSnapshot(roomId, {
+        beforeCreatedAt: oldestCreatedAt,
+        limit: OLDER_MESSAGE_PAGE_SIZE + 1,
+      });
+      const olderMessages = snapshot.messages.slice(-OLDER_MESSAGE_PAGE_SIZE);
+      setHasOlderMessages(snapshot.messages.length > OLDER_MESSAGE_PAGE_SIZE);
       if (olderMessages.length === 0) return;
       setMessages((prev) => [...olderMessages, ...prev]);
       void markMessagesAsRead(olderMessages);
@@ -490,14 +536,14 @@ const ChatDialogue = () => {
       setReadMessageIds(new Set());
       return;
     }
-    const { data } = await supabase
-      .from("message_reads")
-      .select("message_id")
-      .in("message_id", myMessageIds)
-      .neq("user_id", profile.id);
-    if (data) {
-      setReadMessageIds(new Set((data as { message_id: string }[]).map((row) => row.message_id)));
-    }
+    const { data } = await supabase.rpc("get_native_chat_read_receipts", {
+      p_message_ids: myMessageIds,
+    });
+    setReadMessageIds(new Set(
+      ((data || []) as { message_id?: string | null }[])
+        .map((row) => String(row.message_id || "").trim())
+        .filter(Boolean),
+    ));
   }, [messages, profile?.id, roomId]);
 
   const scheduleReadReceiptRefresh = useCallback((delays: number[] = [80, 420]) => {
@@ -511,12 +557,7 @@ const ChatDialogue = () => {
 
   const openUserProfile = useCallback(async (userId: string, fallbackDisplayName: string) => {
     if (!userId || isTeamHuddleIdentity(fallbackDisplayName, null)) return;
-    const { data } = await supabase
-      .from("profiles")
-      .select("*")
-      .eq("id", userId)
-      .maybeSingle();
-    setProfileSheetData((data as Record<string, unknown> | null) ?? null);
+    setProfileSheetUserId(userId);
     setProfileSheetOpen(true);
   }, []);
 
@@ -544,51 +585,27 @@ const ChatDialogue = () => {
 
   const loadCounterpart = useCallback(async (nextRoomId: string, fallbackName: string, hintUserId?: string | null) => {
     if (!profile?.id) return;
-    let counterpartId = hintUserId && hintUserId !== profile.id ? hintUserId : null;
-    if (!counterpartId) {
-      const { data: members, error: membersError } = await supabase
-        .from("chat_room_members")
-        .select("user_id")
-        .eq("chat_id", nextRoomId);
-      if (membersError) throw membersError;
-      counterpartId = (members || [])
-        .map((row: { user_id: string }) => row.user_id)
-        .find((id: string) => id !== profile.id) || null;
-    }
+    const counterpartId = hintUserId && hintUserId !== profile.id ? hintUserId : null;
     if (!counterpartId) return;
 
-    const privateSelectPrimary = "id, display_name, social_id, avatar_url, availability_status, verification_status, is_verified, has_car";
-    const [
-      privateProfileResult,
-      publicProfileResult,
-      blocksResult,
-      unmatchesResult,
-    ] = await Promise.all([
-      supabase
-        .from("profiles")
-        .select(privateSelectPrimary)
-        .eq("id", counterpartId)
-        .maybeSingle(),
-      supabase
-        .from("profiles_public")
-        .select("id, display_name, avatar_url, availability_status, user_role, has_car")
-        .eq("id", counterpartId)
-        .maybeSingle(),
-      supabase
-        .from("user_blocks")
-        .select("blocker_id, blocked_id")
-        .or(`and(blocker_id.eq.${profile.id},blocked_id.eq.${counterpartId}),and(blocker_id.eq.${counterpartId},blocked_id.eq.${profile.id})`)
-        .limit(1),
-      supabase
-        .from("user_unmatches")
-        .select("actor_id, target_id")
-        .or(`and(actor_id.eq.${counterpartId},target_id.eq.${profile.id}),and(actor_id.eq.${profile.id},target_id.eq.${counterpartId})`)
-        .limit(1),
+    const [profiles, relationshipResult] = await Promise.all([
+      // NativeChatDialogueScreen treats profile hydration as enrichment: a
+      // private conversation must still open with the route/inbox identity
+      // when this optional reader is unavailable.
+      fetchChatProfileSummaries([counterpartId]).catch((error) => {
+        console.warn("[chats.dialogue.profile_hydration_failed]", {
+          code: error instanceof Error ? error.message : "unknown_error",
+        });
+        return [] as Record<string, unknown>[];
+      }),
+      supabase.rpc("check_native_direct_relationship", { p_target_user_id: counterpartId }),
     ]);
-
-    const profileRow =
-      ((privateProfileResult.data as Record<string, unknown> | null) ?? null)
-      || ((publicProfileResult.data as Record<string, unknown> | null) ?? null);
+    if (relationshipResult.error) throw relationshipResult.error;
+    const relationship = relationshipResult.data && typeof relationshipResult.data === "object"
+      ? relationshipResult.data as { allowed?: boolean; blocked?: boolean; unmatched?: boolean }
+      : null;
+    if (relationship?.allowed !== true) throw new Error("direct_relationship_unavailable");
+    const profileRow = profiles[0] || null;
 
     const displayName = String(profileRow?.display_name || fallbackName || "Conversation");
     const socialId = typeof profileRow?.social_id === "string" && profileRow.social_id ? String(profileRow.social_id) : null;
@@ -616,25 +633,8 @@ const ChatDialogue = () => {
       isTeamHuddle: isOfficialTeamHuddle,
     });
 
-    const blocks = blocksResult.data;
-    const relation = Array.isArray(blocks) && blocks.length > 0 ? blocks[0] : null;
-    if (relation?.blocker_id === counterpartId && relation?.blocked_id === profile.id) {
-      setBlockState("blocked_by_them");
-    } else if (relation?.blocker_id === profile.id && relation?.blocked_id === counterpartId) {
-      setBlockState("blocked_by_me");
-    } else {
-      setBlockState("none");
-    }
-
-    const unmatches = unmatchesResult.data;
-    const unmatchRelation = Array.isArray(unmatches) && unmatches.length > 0 ? unmatches[0] : null;
-    if (unmatchRelation?.actor_id === counterpartId && unmatchRelation?.target_id === profile.id) {
-      setUnmatchState("unmatched_by_them");
-    } else if (unmatchRelation?.actor_id === profile.id && unmatchRelation?.target_id === counterpartId) {
-      setUnmatchState("unmatched_by_me");
-    } else {
-      setUnmatchState("none");
-    }
+    setBlockState("none");
+    setUnmatchState("none");
   }, [profile?.id]);
 
   const attachmentStorageKey = useCallback((attachment: Attachment) => (
@@ -690,7 +690,7 @@ const ChatDialogue = () => {
 
   useEffect(() => {
     if (!profile?.id) {
-      navigate("/auth", { replace: true });
+      navigate(buildJoinSignInPath(`/chat-dialogue?${searchParams.toString()}`), { replace: true });
       return;
     }
 
@@ -719,24 +719,18 @@ const ChatDialogue = () => {
     setShowScrollToBottom(false);
     if (room) {
       void (async () => {
+        let loadStage = "dialogue_snapshot";
         try {
           setRoomId(room);
-          const { data: membership } = await supabase
-            .from("chat_room_members")
-            .select("chat_id")
-            .eq("chat_id", room)
-            .eq("user_id", profile.id)
-            .maybeSingle();
+          const routeSnapshot = await fetchDialogueSnapshot(room, { limit: 1 });
+          const membership = routeSnapshot.room && routeSnapshot.members.some((member) => member.user_id === profile.id);
 
           if (membership) {
+            loadStage = "group_or_room_identity";
             const grouped = await loadGroupInfo(room);
             let directTargetId: string | null = null;
             if (!grouped) {
-              const { data: directMembers } = await supabase
-                .from("chat_room_members")
-                .select("user_id")
-                .eq("chat_id", room);
-              const otherMemberIds = ((directMembers || []) as Array<{ user_id?: string | null }>)
+              const otherMemberIds = routeSnapshot.members
                 .map((member) => String(member.user_id || "").trim())
                 .filter((userId) => Boolean(userId) && userId !== profile.id);
               const safeHintedUserId = hintedUserId && hintedUserId !== profile.id ? hintedUserId : null;
@@ -745,8 +739,10 @@ const ChatDialogue = () => {
                 : otherMemberIds[0] || null;
             }
             const nextRoomId = room;
+            loadStage = "messages";
             await loadRoomMessages(nextRoomId);
             if (!grouped) {
+              loadStage = "counterpart";
               await loadCounterpart(nextRoomId, name, directTargetId);
             } else if (joinedGroup) {
               joinedGroupHydrationRef.current = nextRoomId;
@@ -757,27 +753,30 @@ const ChatDialogue = () => {
           }
 
           let fallbackTargetId: string | null = null;
-          const { data: matchRow } = await supabase
-            .from("matches")
-            .select("user1_id,user2_id")
-            .eq("chat_id", room)
-            .or(`user1_id.eq.${profile.id},user2_id.eq.${profile.id}`)
-            .eq("is_active", true)
-            .maybeSingle();
-          if (matchRow) {
-            const row = matchRow as { user1_id?: string | null; user2_id?: string | null };
-            fallbackTargetId = row.user1_id === profile.id ? (row.user2_id || null) : (row.user1_id || null);
-          }
+          loadStage = "matched_fallback_target";
+          const { data: fallbackData, error: fallbackError } = await supabase.rpc(
+            "get_native_matched_fallback_target",
+            { p_chat_id: room },
+          );
+          if (fallbackError) throw fallbackError;
+          const fallbackRow = fallbackData && typeof fallbackData === "object"
+            ? fallbackData as { target_user_id?: string | null }
+            : null;
+          fallbackTargetId = String(fallbackRow?.target_user_id || "").trim() || null;
 
           if (!fallbackTargetId || fallbackTargetId === profile.id) {
             throw new Error("room_not_accessible");
           }
 
+          loadStage = "direct_room";
           const nextRoomId = await ensureDirectChatRoom(supabase, profile.id, fallbackTargetId, name);
           setRoomId(nextRoomId);
+          loadStage = "group_or_room_identity";
           const grouped2 = await loadGroupInfo(nextRoomId);
+          loadStage = "messages";
           await loadRoomMessages(nextRoomId);
           if (!grouped2) {
+            loadStage = "counterpart";
             await loadCounterpart(nextRoomId, name, fallbackTargetId);
           } else if (joinedGroup) {
             joinedGroupHydrationRef.current = nextRoomId;
@@ -788,8 +787,12 @@ const ChatDialogue = () => {
             `/chat-dialogue?room=${encodeURIComponent(nextRoomId)}&name=${encodeURIComponent(name)}&with=${encodeURIComponent(fallbackTargetId)}`,
             { replace: true }
           );
-        } catch {
-          toast.error("Unable to load messages right now.");
+        } catch (error) {
+          console.warn("[chats.dialogue.load_failed]", {
+            stage: loadStage,
+            code: error instanceof Error ? error.message : "unknown_error",
+          });
+          toast.error(dialogueLoadToast(loadStage));
           navigate("/chats?tab=chats", { replace: true });
         } finally {
           setLoading((prev) => (roomId ? prev : false));
@@ -806,15 +809,22 @@ const ChatDialogue = () => {
     }
 
     void (async () => {
+      let loadStage = "direct_room";
       try {
         const directRoomId = await ensureDirectChatRoom(supabase, profile.id, targetUserId, targetName);
         setRoomId(directRoomId);
+        loadStage = "messages";
         await loadRoomMessages(directRoomId);
+        loadStage = "counterpart";
         await loadCounterpart(directRoomId, targetName, targetUserId);
         pendingInitialScrollRef.current = true;
         setLoading(false);
-      } catch {
-        toast.error("Unable to open conversation right now.");
+      } catch (error) {
+        console.warn("[chats.dialogue.open_failed]", {
+          stage: loadStage,
+          code: error instanceof Error ? error.message : "unknown_error",
+        });
+        toast.error(dialogueLoadToast(loadStage));
         navigate("/chats?tab=chats", { replace: true });
       } finally {
         setLoading((prev) => (roomId ? prev : false));
@@ -824,33 +834,27 @@ const ChatDialogue = () => {
 
   useEffect(() => {
     if (!roomId) return;
+    let refreshTimer: number | null = null;
+    const reconcile = () => {
+      if (refreshTimer != null) window.clearTimeout(refreshTimer);
+      refreshTimer = window.setTimeout(() => {
+        refreshTimer = null;
+        void loadRoomMessages(roomId);
+      }, 80);
+    };
     const roomChannel = supabase
-      .channel(`chat_dialogue_room_${roomId}`)
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "chat_messages", filter: `chat_id=eq.${roomId}` }, (payload) => {
-        const row = payload.new as ChatMessage | null;
-        if (!row?.id) return;
-        setMessages((prev) => {
-          if (prev.some((message) => message.id === row.id)) return prev;
-          return [...prev, row];
-        });
-        void markMessagesAsRead([row]);
-        requestAnimationFrame(() => {
-          const viewport = messagesViewportRef.current;
-          if (!viewport) return;
-          const nearBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 120;
-          if (nearBottom) {
-            viewport.scrollTop = viewport.scrollHeight;
-            setShowScrollToBottom(false);
-          } else {
-            setShowScrollToBottom(true);
-          }
-        });
+      .channel(`room:${roomId}`, { config: { private: true } })
+      .on("broadcast", { event: "changed" }, () => {
+        reconcile();
       })
-      .subscribe();
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED") reconcile();
+      });
     return () => {
+      if (refreshTimer != null) window.clearTimeout(refreshTimer);
       void supabase.removeChannel(roomChannel);
     };
-  }, [markMessagesAsRead, roomId]);
+  }, [loadRoomMessages, roomId]);
 
   // Initial load of read receipts for my sent messages
   useEffect(() => {
@@ -945,12 +949,13 @@ const ChatDialogue = () => {
     if (unknownIds.length === 0) return;
     unknownIds.forEach((id) => fetchedSenderIdsRef.current.add(id));
     void (async () => {
-      const { data } = await supabase.from("profiles").select("id, display_name").in("id", unknownIds);
-      if (!data) return;
+      const data = await fetchChatProfileSummaries(unknownIds);
       setSenderNames((prev) => {
         const next = { ...prev };
-        (data as { id: string; display_name?: string | null }[]).forEach((p) => {
-          if (p.id && p.display_name) next[p.id] = p.display_name;
+        data.forEach((profileRow) => {
+          const id = String(profileRow.id || "").trim();
+          const displayName = String(profileRow.display_name || "").trim();
+          if (id && displayName) next[id] = displayName;
         });
         return next;
       });
@@ -977,7 +982,10 @@ const ChatDialogue = () => {
         attachments,
         linkPreviewUrl: activeComposerPreviewUrl,
       });
-      const { error } = await supabase.from("chat_messages").insert({ chat_id: roomId, sender_id: profile.id, content: payload });
+      const { error } = await supabase.rpc("send_native_chat_message", {
+        p_chat_id: roomId,
+        p_content: payload,
+      });
       if (error) throw error;
       setChatInput("");
       setComposerUploads([]);
@@ -1026,7 +1034,7 @@ const ChatDialogue = () => {
     const nextMuted = !groupMuted;
     setGroupMuted(nextMuted);
     try {
-      const { error } = await (supabase.rpc as (
+      const { error } = await (supabase.rpc as unknown as (
         fn: string,
         params?: Record<string, unknown>
       ) => Promise<{ error: { message?: string } | null }>)("set_group_mute_state", {
@@ -1034,23 +1042,18 @@ const ChatDialogue = () => {
         p_muted: nextMuted,
       });
       if (error) throw error;
-      if (profile?.id) {
-        await supabase
-          .from("chat_participants")
-          .upsert({ chat_id: roomId, user_id: profile.id, role: "member", is_muted: nextMuted }, { onConflict: "chat_id,user_id" });
-      }
       toast.success(nextMuted ? "Group muted" : "Notifications on");
     } catch {
       setGroupMuted(!nextMuted);
       toast.error("Unable to update notifications right now.");
     }
-  }, [groupMuted, profile?.id, roomId]);
+  }, [groupMuted, roomId]);
 
   const handleBlockToggle = useCallback(async () => {
     if (!counterpart?.id) return;
     try {
       if (blockState === "blocked_by_me") {
-        const { error } = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ error: { message?: string } | null }>)(
+        const { error } = await (supabase.rpc as unknown as (fn: string, args?: Record<string, unknown>) => Promise<{ error: { message?: string } | null }>)(
           "unblock_user",
           { p_blocked_id: counterpart.id }
         );
@@ -1058,7 +1061,7 @@ const ChatDialogue = () => {
         setBlockState("none");
         toast.success("User unblocked");
       } else {
-        const { error } = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ error: { message?: string } | null }>)(
+        const { error } = await (supabase.rpc as unknown as (fn: string, args?: Record<string, unknown>) => Promise<{ error: { message?: string } | null }>)(
           "block_user",
           { p_blocked_id: counterpart.id }
         );
@@ -1076,7 +1079,7 @@ const ChatDialogue = () => {
   const handleUnmatch = useCallback(async () => {
     if (!profile?.id || !counterpart?.id || !roomId) return;
     try {
-      const { error: rpcError } = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ error: { message?: string } | null }>)(
+      const { error: rpcError } = await (supabase.rpc as unknown as (fn: string, args?: Record<string, unknown>) => Promise<{ error: { message?: string } | null }>)(
         "unmatch_user_one_sided",
         { p_other_user_id: counterpart.id }
       );
@@ -1094,81 +1097,21 @@ const ChatDialogue = () => {
     if (!roomId || !profile?.id) return;
     setGroupManageLoading(true);
     try {
-      // Fetch current members with profile data
-      const { data: memberRows } = await supabase
-        .from("chat_room_members")
-        .select("user_id, profiles!chat_room_members_user_id_fkey(id, display_name, avatar_url, social_album)")
-        .eq("chat_id", roomId);
-      const members = (memberRows || []).map((row) => {
-        const p = (Array.isArray(row.profiles) ? row.profiles[0] : row.profiles) as { id?: string; display_name?: string; avatar_url?: string | null; social_album?: unknown } | null;
-        const albumFallback = Array.isArray(p?.social_album)
-          ? String((p!.social_album as unknown[])[0] || "").trim()
-          : "";
-        return { id: row.user_id as string, name: p?.display_name || "User", avatarUrl: p?.avatar_url || albumFallback || null };
+      const { data, error } = await supabase.rpc("get_native_group_manage_snapshot", {
+        p_chat_id: roomId,
       });
-      setGroupManageMembers(members);
-
-      // Fetch addable contacts: mutual matches + direct chat peers, excluding current members
-      const memberIds = new Set(members.map((m) => m.id));
-      const contactIdSet = new Set<string>();
-
-      // 1. Mutual matches
-      const { data: matchRows } = await supabase
-        .from("matches")
-        .select("user1_id, user2_id")
-        .or(`user1_id.eq.${profile.id},user2_id.eq.${profile.id}`)
-        .eq("is_active", true);
-      (matchRows || []).forEach((r) => {
-        const peerId = r.user1_id === profile.id ? r.user2_id : r.user1_id;
-        if (!memberIds.has(peerId as string)) contactIdSet.add(peerId as string);
-      });
-
-      // 2. Direct (1-on-1) chat peers
-      const { data: myRoomRows } = await supabase
-        .from("chat_room_members")
-        .select("chat_id")
-        .eq("user_id", profile.id);
-      const myRoomIds = (myRoomRows || []).map((r) => r.chat_id as string);
-      if (myRoomIds.length > 0) {
-        const { data: directChats } = await supabase
-          .from("chats")
-          .select("id")
-          .in("id", myRoomIds)
-          .eq("type", "direct");
-        const directIds = (directChats || []).map((c) => c.id as string);
-        if (directIds.length > 0) {
-          const { data: peerRows } = await supabase
-            .from("chat_room_members")
-            .select("user_id")
-            .in("chat_id", directIds)
-            .neq("user_id", profile.id);
-          (peerRows || []).forEach((r) => {
-            if (!memberIds.has(r.user_id as string)) contactIdSet.add(r.user_id as string);
-          });
-        }
-      }
-
-      if (contactIdSet.size === 0) {
-        setGroupManageFriends([]);
-        return;
-      }
-      const { data: friendProfiles } = await supabase
-        .from("profiles")
-        .select("id, display_name, avatar_url, social_album")
-        .in("id", [...contactIdSet]);
-      setGroupManageFriends(
-        (friendProfiles || []).map((p) => {
-          const row = p as unknown as { id: string; display_name?: string | null; avatar_url?: string | null; social_album?: unknown };
-          const albumFallback = Array.isArray(row.social_album)
-            ? String((row.social_album as unknown[])[0] || "").trim()
-            : "";
-          return {
-            id: row.id,
-            name: row.display_name || "User",
-            avatarUrl: row.avatar_url || albumFallback || null,
-          };
-        })
-      );
+      if (error) throw error;
+      const snapshot = data && typeof data === "object" ? data as Record<string, unknown> : {};
+      const mapMember = (value: unknown) => {
+        const row = value && typeof value === "object" ? value as Record<string, unknown> : {};
+        return {
+          id: String(row.id || row.user_id || "").trim(),
+          name: String(row.name || row.display_name || "User").trim() || "User",
+          avatarUrl: String(row.avatar_url || "").trim() || null,
+        };
+      };
+      setGroupManageMembers((Array.isArray(snapshot.members) ? snapshot.members : []).map(mapMember).filter((member) => member.id));
+      setGroupManageFriends((Array.isArray(snapshot.friends) ? snapshot.friends : []).map(mapMember).filter((member) => member.id));
     } catch {
       toast.error("Couldn't load group members.");
     } finally {
@@ -1254,7 +1197,7 @@ const ChatDialogue = () => {
     <div className="h-full min-h-0 flex flex-col bg-background">
       <div className="shrink-0 border-b border-border bg-white/88 backdrop-blur-md px-3 py-2">
         <div className="flex items-center gap-2">
-          <button onClick={() => navigate(isGroup ? "/chats?tab=groups" : "/chats?tab=chats")} className="rounded-full p-2 hover:bg-muted" aria-label="Back">
+          <button onClick={() => navigate(returnToInbox)} className="rounded-full p-2 hover:bg-muted" aria-label="Back">
             <ArrowLeft className="h-4 w-4" />
           </button>
           {isGroup ? (
@@ -1668,16 +1611,15 @@ const ChatDialogue = () => {
         </div>
       </div>
 
-      <PublicProfileSheet
-        isOpen={profileSheetOpen}
-        onClose={() => setProfileSheetOpen(false)}
-        loading={false}
-        fallbackName={counterpart?.displayName || roomName}
-        data={profileSheetData}
-        viewedUserId={counterpart?.id || null}
-        hideStartChatAction={true}
-        zIndexBase={12000}
-      />
+      {profileSheetOpen && profileSheetUserId ? (
+        <ProfileShareCard
+          profileId={profileSheetUserId}
+          onClose={() => {
+            setProfileSheetOpen(false);
+            setProfileSheetUserId(null);
+          }}
+        />
+      ) : null}
 
       <Dialog open={confirmUnmatchOpen} onOpenChange={setConfirmUnmatchOpen}>
         <DialogContent className="max-w-sm">
@@ -2124,24 +2066,16 @@ const ChatDialogue = () => {
                 setConfirmLeaveOpen(false);
                 try {
                   const displayName = (profile as unknown as { display_name?: string })?.display_name || "Someone";
-                  // Insert system message BEFORE removing membership (policy checks membership)
-                  // Table is chat_messages (FK target of message_reads); no message_type column
-                  await supabase.from("chat_messages").insert({
-                    chat_id: roomId,
-                    sender_id: profile.id,
-                    content: `${displayName} left the group.`,
+                  const { error: sendError } = await supabase.rpc("send_native_chat_message", {
+                    p_chat_id: roomId,
+                    p_content: `${displayName} left the group.`,
                   });
-                  // Then remove the user from the group
-                  await supabase
-                    .from("chat_room_members")
-                    .delete()
-                    .eq("chat_id", roomId)
-                    .eq("user_id", profile.id);
-                  await supabase
-                    .from("chat_participants")
-                    .delete()
-                    .eq("chat_id", roomId)
-                    .eq("user_id", profile.id);
+                  if (sendError) throw sendError;
+                  const { error: removeError } = await supabase.rpc("remove_native_group_member", {
+                    p_chat_id: roomId,
+                    p_user_id: profile.id,
+                  });
+                  if (removeError) throw removeError;
                   setGroupMemberCount((prev) => Math.max(0, prev - 1));
                   navigate("/chats?tab=groups", { replace: true });
                 } catch {
@@ -2176,7 +2110,7 @@ const ChatDialogue = () => {
                 if (!roomId) return;
                 setConfirmRemoveGroupOpen(false);
                 try {
-                  const { error } = await (supabase.rpc as (
+                  const { error } = await (supabase.rpc as unknown as (
                     fn: string,
                     params?: Record<string, unknown>,
                   ) => Promise<{ error: { message?: string } | null }>)("remove_group_chat", {

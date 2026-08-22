@@ -52,8 +52,8 @@ export const FALLBACK_PRICES: LivePriceMap = {
   gold_monthly: quotaConfig.stripePlans.gold.monthly.amount,
   gold_annual:  quotaConfig.stripePlans.gold.annual.amount,
   // Add-on fallbacks (cents → dollars)
-  superBroadcast:    4.99,
-  topProfileBooster: 2.99,
+  superBroadcast:    19.99,
+  topProfileBooster: 3.99,
   sharePerks:        4.99,
   sharePerksInterval: "month",
   currencyCode: "USD",
@@ -90,7 +90,7 @@ const isFinitePrice = (value: unknown): value is number =>
 const sanitizeLivePriceMap = (value: unknown): LivePriceMap | null => {
   if (!value || typeof value !== "object") return null;
   const input = value as Record<string, unknown>;
-  const currencyCode = normalizeSupportedCurrency(input.currencyCode);
+  const currencyCode = normalizeSupportedCurrency(String(input.currencyCode || ""));
   if (!currencyCode) return null;
   if (!isFinitePrice(input.plus_monthly)) return null;
   if (!isFinitePrice(input.plus_annual)) return null;
@@ -376,7 +376,7 @@ export function fetchLivePrices(input?: { currency?: string; country?: string })
         },
       });
       if (!error && data?.prices) {
-        const p = data.prices as Record<string, { amount?: number; currency?: string }>;
+        const p = data.prices as Record<string, { amount?: number; currency?: string; interval?: string }>;
         const displayCurrency = String(
           (data as { display_currency?: string } | null)?.display_currency ||
           p.plus_monthly?.currency ||

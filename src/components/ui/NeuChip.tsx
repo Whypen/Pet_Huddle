@@ -24,23 +24,21 @@ interface NeuChipProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
 
 const NeuChip = React.forwardRef<HTMLButtonElement, NeuChipProps>(
   ({ className, active, as: Tag = "button", children, ...props }, ref) => {
-    return (
-      // @ts-expect-error dynamic tag
-      <Tag
-        ref={ref}
-        type={Tag === "button" ? "button" : undefined}
-        data-active={active}
-        className={cn(
-          "neu-chip px-3 py-1.5 text-xs font-medium text-[#424965]",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2145CF]",
-          active && "text-white",
-          className,
-        )}
-        {...props}
-      >
-        {children}
-      </Tag>
-    );
+    const sharedProps: React.HTMLAttributes<HTMLElement> & { "data-active"?: string } = {
+      ...(props as React.HTMLAttributes<HTMLElement>),
+      "data-active": active ? "true" : undefined,
+      className: cn(
+        "neu-chip px-3 py-1.5 text-xs font-medium text-[#424965]",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2145CF]",
+        active && "text-white",
+        className,
+      ),
+    };
+    if (Tag === "button") {
+      return <button ref={ref} type="button" {...sharedProps}>{children}</button>;
+    }
+    if (Tag === "span") return <span {...sharedProps}>{children}</span>;
+    return <div {...sharedProps}>{children}</div>;
   },
 );
 NeuChip.displayName = "NeuChip";

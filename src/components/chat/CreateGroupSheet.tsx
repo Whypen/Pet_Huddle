@@ -16,6 +16,7 @@ import { updateGroupChatMetadata } from "@/lib/groupChats";
 import { countWords, resolveCountryByPrecedence } from "@/lib/locationLabels";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { useAuthGate } from "@/components/auth/authGateContext";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -41,7 +42,6 @@ const PET_FOCUS_OPTIONS = [
   "All Pets",
 ] as const;
 
-const roomCodePlaceholder = "— —";
 const DESCRIPTION_WORD_LIMIT = 100;
 const optionCardClass =
   "min-w-0 overflow-hidden rounded-[14px] border border-[rgba(66,73,101,0.14)] bg-white/72 px-3 py-3 shadow-[inset_2px_2px_5px_rgba(163,168,190,0.16),inset_-1px_-1px_4px_rgba(255,255,255,0.82)] transition-colors min-h-[92px]";
@@ -69,6 +69,7 @@ export function CreateGroupSheet({
   onGroupCreated,
 }: CreateGroupSheetProps) {
   const { user } = useAuth();
+  const { requireAuth } = useAuthGate();
 
   // Form state
   const [groupName,        setGroupName]        = useState("");
@@ -200,7 +201,7 @@ export function CreateGroupSheet({
       return;
     }
     if (!user?.id) {
-      toast.error("Sign in to create a group.");
+      requireAuth("create-group", () => {}, { returnTo: "/chats?tab=groups" });
       return;
     }
     if (countWords(description) > DESCRIPTION_WORD_LIMIT) {
@@ -210,20 +211,14 @@ export function CreateGroupSheet({
     setIsCreating(true);
     try {
       const [{ data: liveLocation }, { data: profileLocation }] = await Promise.all([
-        supabase
-          .from("user_locations")
-          .select("location_name")
-          .eq("user_id", user.id)
-          .order("updated_at", { ascending: false })
-          .limit(1)
-          .maybeSingle(),
+        supabase.rpc("get_native_viewer_scope"),
         supabase
           .from("profiles")
           .select("location_country, location_name, location_pinned_until")
           .eq("id", user.id)
           .maybeSingle(),
       ]);
-      const liveLocationRow = (liveLocation || null) as {
+      const liveLocationRow = (Array.isArray(liveLocation) ? liveLocation[0] : null) as {
         location_name?: string | null;
       } | null;
       const profileLocationRow = (profileLocation || null) as {
@@ -246,40 +241,32 @@ export function CreateGroupSheet({
         profileLocationName: profileLocationRow?.location_name || null,
       });
 
-      // 1. Insert chat
-      const { data: chat, error: chatError } = await supabase
-        .from("chats")
-        .insert({
-          type: "group",
-          name: groupName.trim(),
-          visibility,
-          join_method: visibility === "public" ? joinMethod : "request",
-          location_label: locationLabel.trim() || null,
-          location_country: groupCountry,
-          pet_focus: selectedPetFocus.length > 0 ? selectedPetFocus : null,
-          description: description.trim() || null,
-          created_by: user.id,
-        })
-        .select("id, room_code")
-        .single();
-
-      if (chatError || !chat) throw chatError ?? new Error("No chat returned");
-
-      // 2. Add creator to chat_participants (role = admin, drives admin RLS checks)
-      const { error: participantError } = await supabase
-        .from("chat_participants")
-        .insert({ chat_id: chat.id, user_id: user.id, role: "admin" });
-      if (participantError) throw participantError;
-
-      // 2b. Add creator to chat_room_members (primary membership table — drives My Groups listing)
-      const { error: memberError } = await supabase
-        .from("chat_room_members")
-        .insert({ chat_id: chat.id, user_id: user.id });
-      if (memberError) throw memberError;
+      // Keep group creation on the same server-owned boundary as the app. The
+      // RPC creates the room, both membership mirrors, and the system message.
+      const { data: createdRows, error: createError } = await supabase.rpc(
+        "create_native_group_chat",
+        {
+          p_name: groupName.trim(),
+          p_description: description.trim() || null,
+          p_join_method: visibility === "public" ? joinMethod : "request",
+          p_visibility: visibility,
+          p_avatar_url: null,
+          p_location_label: locationLabel.trim() || null,
+          p_location_country: groupCountry,
+          p_pet_focus: selectedPetFocus.length > 0 ? selectedPetFocus : null,
+          p_invite_user_ids: [],
+        },
+      );
+      if (createError) throw createError;
+      const created = (Array.isArray(createdRows) ? createdRows[0] : createdRows) as {
+        id?: string | null;
+      } | null;
+      const chatId = String(created?.id || "").trim();
+      if (!chatId) throw new Error("group_not_created");
 
       if (photoFile) {
         const ext = photoFile.name.split(".").pop() ?? "jpg";
-        const path = `${user.id}/groups/${chat.id}/${Date.now()}.${ext}`;
+        const path = `${user.id}/groups/${chatId}/${Date.now()}.${ext}`;
         const { error: uploadErr } = await supabase.storage
           .from("avatars")
           .upload(path, photoFile, { upsert: true });
@@ -287,36 +274,17 @@ export function CreateGroupSheet({
         const { data: pub } = supabase.storage.from("avatars").getPublicUrl(path);
         if (pub?.publicUrl) {
           await updateGroupChatMetadata({
-            chatId: chat.id,
+            chatId,
             avatarUrl: pub.publicUrl,
             updateAvatar: true,
           });
         }
       }
 
-      // 3. Insert system message into chat_messages (the active message table)
-      const roomCode = (chat as { id: string; room_code?: string | null }).room_code ?? null;
-      const systemText =
-        visibility === "private"
-          ? `Room Code: ${roomCode ?? roomCodePlaceholder}`
-          : joinMethod === "request"
-          ? "This is a public group. People can request to join and you approve them."
-          : "This is a public group. Anyone can join instantly.";
-
-      // Store as JSON so ChatDialogue can identify and render it as a system pill
-      await supabase
-        .from("chat_messages")
-        .insert({
-          chat_id: chat.id,
-          sender_id: user.id,
-          content: JSON.stringify({ kind: "system", text: systemText }),
-        });
-      // Non-blocking — a missing system message doesn't break the group
-
       toast.success("Your group is live!");
       onClose();
       resetForm();
-      onGroupCreated(chat.id);
+      onGroupCreated(chatId);
     } catch (err) {
       console.error("Create group error:", err);
       toast.error("Could not create group. Please try again.");
@@ -466,7 +434,7 @@ export function CreateGroupSheet({
                   </span>
                 ) : null}
                 {selectedPetFocus.length > 0 ? (
-                  <div className="flex gap-[6px] overflow-x-auto scrollbar-none -mx-1 px-1 pb-[2px]">
+                  <div className="flex gap-[6px] overflow-x-auto scrollbar-hide -mx-1 px-1 pb-[2px]">
                     {selectedPetFocus.slice(0, 4).map((tag) => (
                       <span
                         key={tag}

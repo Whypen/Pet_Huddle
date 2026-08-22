@@ -53,11 +53,11 @@ export function SupportRequestForm({
   const supportTurnstile = useTurnstile("support_ticket");
 
   const knownEmail = useMemo(
-    () => String((profile as Record<string, unknown> | null)?.email || user?.email || "").trim(),
+    () => String((profile as unknown as Record<string, unknown> | null)?.email || user?.email || "").trim(),
     [profile, user?.email],
   );
   const knownName = useMemo(
-    () => String((profile as Record<string, unknown> | null)?.display_name || user?.email || "Guest").trim(),
+    () => String((profile as unknown as Record<string, unknown> | null)?.display_name || user?.email || "Guest").trim(),
     [profile, user?.email],
   );
   const defaultWantsReply = Boolean(knownEmail);

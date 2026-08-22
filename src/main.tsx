@@ -5,13 +5,14 @@ import "./index.css";
 if (import.meta.env.DEV && import.meta.env.VITE_UAT_DEBUG === "true") {
   const originalFetch = window.fetch.bind(window);
   window.fetch = async (input, init) => {
-    const url = typeof input === "string" ? input : input.url;
+    const request = input instanceof Request ? input : null;
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     if (url.includes("/rest/v1/broadcast_alerts")) {
-      const headers = new Headers(init?.headers || (typeof input === "string" ? undefined : input.headers));
+      const headers = new Headers(init?.headers || request?.headers);
       const auth = headers.get("Authorization");
       const apikey = headers.get("apikey");
       if (import.meta.env.DEV) console.debug("[UAT_FETCH]", {
-        method: init?.method || (typeof input === "string" ? "GET" : input.method),
+        method: init?.method || request?.method || "GET",
         url,
         hasAuthorizationHeader: Boolean(auth),
         apikeyPrefix: apikey ? apikey.slice(0, 8) : "missing",

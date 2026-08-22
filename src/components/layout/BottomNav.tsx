@@ -7,28 +7,22 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Home, Users, MessageCircle, PawPrint, MapPin } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { resolveCopy } from "@/lib/copy";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { shouldSuppressWebBottomNavForNativeShell } from "@/lib/nativeShell";
+import { HuddleGlyph, HuddleNavIcon } from "@/components/icons/HuddleIcons";
+import { NAV_DESTINATIONS, isNavDestinationActive } from "@/components/layout/navDestinations";
 
-const navItems = [
-  { icon: Home,          label: "Home",          path: "/" },
-  { icon: Users,         label: "nav.social",    path: "/social" },
-  { icon: MessageCircle, label: "nav.chats",     path: "/chats" },
-  { icon: PawPrint,      label: "Service",       path: "/service" },
-  { icon: MapPin,        label: "nav.map",       path: "/map" },
-];
-
+// Care is hidden on web in every form, signed in or out — there is no web build
+// of it. The Service entry is removed outright rather than flag-gated: a flag
+// would imply it can be switched on, which is not the plan.
 /** Height constant for offset calculations (matches glass-nav h-[64px]) */
 export const BOTTOM_NAV_HEIGHT = 80;
 
 export const BottomNav = () => {
   const location = useLocation();
   const navigate = useNavigate();
-  const t = resolveCopy;
   const { profile } = useAuth();
   const unreadStorageKey = useMemo(
     () => `chats_unread_${profile?.id || "anon"}`,
@@ -43,7 +37,7 @@ export const BottomNav = () => {
   const recalcUnreadFromBackend = useMemo(
     () =>
       async (userId: string) => {
-        const { data, error } = await (supabase.rpc as (
+        const { data, error } = await (supabase.rpc as unknown as (
           fn: string,
           params?: Record<string, unknown>
         ) => Promise<{ data: unknown; error: { message?: string } | null }>)("get_chat_inbox_summaries", {
@@ -104,20 +98,18 @@ export const BottomNav = () => {
   return (
     <nav
       data-bottom-nav="true"
-      className="glass-nav fixed left-4 right-4 z-[2600] h-[64px] rounded-[28px]"
+      className="glass-nav fixed left-4 right-4 z-[2600] h-[64px] rounded-[28px] lg:hidden"
       style={{ bottom: "calc(env(safe-area-inset-bottom, 0px) + 8px)" }}
     >
-      <div className="flex items-center justify-around h-full w-full max-w-[430px] mx-auto px-[8px]">
-        {navItems.map(({ icon: Icon, label, path }) => {
-          const isSocialAlias = path === "/social" && (location.pathname.startsWith("/social") || location.pathname.startsWith("/threads"));
-          const isActive =
-            path === "/"
-              ? location.pathname === "/"
-              : isSocialAlias || location.pathname.startsWith(path);
-          const resolvedLabel =
-            label === "Home" ? "Home"
-            : label === "Service" ? "Service"
-            : t(label);
+      {/* Same --app-max-width token as the shell. */}
+      <div className="flex items-center justify-around h-full w-full max-w-[var(--app-max-width,430px)] mx-auto px-[8px]">
+        {NAV_DESTINATIONS.map((destination) => {
+          const { icon, path } = destination;
+          const targetPathname = path.split("?")[0];
+          const targetTab = new URLSearchParams(path.split("?")[1] || "").get("tab");
+          const isSocialAlias = targetPathname === "/social" && (location.pathname.startsWith("/social") || location.pathname.startsWith("/threads"));
+          const isActive = isSocialAlias || isNavDestinationActive(destination, location.pathname, location.search);
+          const resolvedLabel = destination.shortLabel;
 
           return (
             <button
@@ -140,13 +132,10 @@ export const BottomNav = () => {
                   aria-hidden
                 />
               )}
-              <Icon
-                size={20}
-                strokeWidth={1.5}
-                className="relative z-[1]"
-                aria-hidden
-              />
-              {path === "/chats" &&
+              <span className="relative z-[1] grid h-5 w-6 place-items-center" aria-hidden>
+                {icon === "groups" ? <HuddleGlyph name="chatsGroup" size={20} /> : <HuddleNavIcon name={icon} size={20} />}
+              </span>
+              {targetPathname === "/chats" && targetTab === "friends" &&
                 chatUnread > 0 &&
                 !isChatSurface && (
                 <span

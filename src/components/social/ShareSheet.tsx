@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { Loader2, Search, Send, X } from "lucide-react";
+import { Search, Send, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { NeuButton } from "@/components/ui/NeuButton";
@@ -8,6 +8,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import type { ShareModel } from "@/lib/shareModel";
 import { serializeChatShareMessage } from "@/lib/shareModel";
+import { HuddleInlineLoader } from "@/components/social/SocialLoadingState";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 type ShareTarget = {
   chatId: string;
@@ -68,6 +70,7 @@ const getImageShareFile = async (url: string): Promise<File | null> => {
 
 export const ShareSheet = ({ open, onClose, share, onShareAction }: ShareSheetProps) => {
   const { profile } = useAuth();
+  const isMobile = useIsMobile();
   const [searchQuery, setSearchQuery] = useState("");
   const [targets, setTargets] = useState<ShareTarget[]>([]);
   const [loadingTargets, setLoadingTargets] = useState(false);
@@ -389,19 +392,19 @@ export const ShareSheet = ({ open, onClose, share, onShareAction }: ShareSheetPr
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[7000] bg-black/50 backdrop-blur-[4px]"
+          className="fixed inset-0 z-[7000] flex items-end justify-center bg-black/50 backdrop-blur-[4px] md:items-center md:p-6"
           onClick={onClose}
         >
           <motion.div
-            data-huddle-bottom-sheet="true"
-            initial={{ y: "100%" }}
-            animate={{ y: 0 }}
-            exit={{ y: "100%" }}
+            data-huddle-bottom-sheet={isMobile ? "true" : undefined}
+            initial={isMobile ? { y: "100%" } : { y: 24, scale: 0.98, opacity: 0 }}
+            animate={{ y: 0, scale: 1, opacity: 1 }}
+            exit={isMobile ? { y: "100%" } : { y: 16, scale: 0.98, opacity: 0 }}
             transition={{ type: "spring", damping: 28, stiffness: 320 }}
             onClick={(event) => event.stopPropagation()}
-            className="fixed inset-x-0 bottom-0 mx-auto w-full max-w-[var(--app-max-width,430px)] rounded-t-[28px] border border-white/45 bg-[rgba(255,255,255,0.92)] px-4 huddle-sheet-bottom-padding pt-3 shadow-[0_-18px_48px_rgba(36,55,120,0.18)] backdrop-blur-[18px]"
+            className="w-full max-w-[var(--app-max-width,430px)] rounded-t-[28px] border border-white/45 bg-[rgba(255,255,255,0.92)] px-4 huddle-sheet-bottom-padding pt-3 shadow-[0_-18px_48px_rgba(36,55,120,0.18)] backdrop-blur-[18px] md:max-w-[560px] md:rounded-[28px] md:pb-5 md:shadow-elevated"
           >
-            <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-[rgba(163,168,190,0.5)]" />
+            {isMobile ? <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-[rgba(163,168,190,0.5)]" /> : null}
             <div className="mb-3 flex items-center justify-between">
               <h3 className="text-[17px] font-semibold text-[#424965]">Share</h3>
               <button type="button" onClick={onClose} className="rounded-full p-1 text-[#8C93AA] transition-colors hover:bg-white/70">
@@ -409,7 +412,7 @@ export const ShareSheet = ({ open, onClose, share, onShareAction }: ShareSheetPr
               </button>
             </div>
 
-            <div className="relative mb-4">
+            {profile?.id ? <div className="relative mb-4">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#8C93AA]" />
               <input
                 value={searchQuery}
@@ -417,12 +420,12 @@ export const ShareSheet = ({ open, onClose, share, onShareAction }: ShareSheetPr
                 placeholder="Search User name or Social ID"
                 className="h-11 w-full rounded-full border border-[rgba(163,168,190,0.22)] bg-[rgba(244,247,251,0.95)] pl-10 pr-4 text-sm text-[#424965] outline-none shadow-[inset_2px_2px_5px_rgba(163,168,190,0.22),inset_-1px_-1px_4px_rgba(255,255,255,0.8)] placeholder:text-[#9AA0B5] focus:border-[rgba(33,69,207,0.28)]"
               />
-            </div>
+            </div> : null}
 
-            <div className="mb-4 min-h-[110px]">
+            {profile?.id ? <div className="mb-4 min-h-[110px]">
               {loadingTargets ? (
                 <div className="flex h-[92px] items-center justify-center">
-                  <Loader2 className="h-5 w-5 animate-spin text-[#8C93AA]" />
+                  <HuddleInlineLoader className="h-5" label="Loading chats" />
                 </div>
               ) : filteredTargets.length === 0 ? (
                 <div className="flex h-[92px] items-center justify-center rounded-[18px] border border-dashed border-[rgba(163,168,190,0.28)] bg-[rgba(244,247,251,0.55)] px-4 text-center text-sm text-[#8C93AA]">
@@ -462,18 +465,18 @@ export const ShareSheet = ({ open, onClose, share, onShareAction }: ShareSheetPr
                   </div>
                 </div>
               )}
-            </div>
+            </div> : null}
 
-            <div className="grid grid-cols-2 gap-3">
-              <NeuButton
+            <div className={cn("grid gap-3", profile?.id ? "grid-cols-2" : "grid-cols-1")}>
+              {profile?.id ? <NeuButton
                 variant="secondary"
                 className="h-12 rounded-[18px]"
                 onClick={() => void handleShareToChat()}
                 disabled={!selectedTarget || sendingChat || loadingTargets}
               >
-                {sendingChat ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                {sendingChat ? <HuddleInlineLoader className="h-4" label="Sharing to chat" /> : <Send className="h-4 w-4" />}
                 Huddle Chats
-              </NeuButton>
+              </NeuButton> : null}
               <NeuButton
                 variant="secondary"
                 className="h-12 rounded-[18px]"

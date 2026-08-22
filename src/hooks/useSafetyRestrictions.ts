@@ -64,13 +64,11 @@ export function useSafetyRestrictions() {
     setLoading(true);
     const { data, error } = await supabase.rpc("get_my_active_restrictions" as never);
     setLoading(false);
-    if (error) {
-      return restrictions;
-    }
+    if (error) return EMPTY_STATE;
     const next = normalizeState(data);
     setRestrictions(next);
     return next;
-  }, [restrictions, user?.id]);
+  }, [user?.id]);
 
   useEffect(() => {
     void refreshRestrictions();

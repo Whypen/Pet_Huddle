@@ -5,5 +5,5 @@ import { Navigate } from "react-router-dom";
 
 export default function NotificationsPage() {
   if (hasNativeShell()) return null;
-  return <Navigate to="/" replace />;
+  return <Navigate to="/social?notifications=1" replace />;
 }

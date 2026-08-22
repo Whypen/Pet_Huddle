@@ -15,7 +15,7 @@ export async function startStripeCheckout(params: StartStripeCheckoutParams): Pr
   const { data, error } = await invokeAuthedFunction<{ url?: string }>("create-checkout-session", {
     body: {
       ...params,
-      successUrl: params.successUrl ?? `${window.location.origin}/premium`,
+      successUrl: params.successUrl ?? `${window.location.origin}/member`,
       cancelUrl: params.cancelUrl ?? window.location.href,
     },
   });

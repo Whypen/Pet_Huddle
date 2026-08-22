@@ -1,9 +1,10 @@
 import { motion } from "framer-motion";
-import type { ComponentType, CSSProperties, ReactNode } from "react";
+import type { ReactNode } from "react";
+import type { LucideIcon } from "lucide-react";
 import profilePlaceholder from "@/assets/Profile Placeholder.png";
 
 export type PolaroidBadge = {
-  Icon: ComponentType<{ className?: string; strokeWidth?: number; style?: CSSProperties }>;
+  Icon: LucideIcon;
   iconColor: string;
   bg: string;
   key: string;

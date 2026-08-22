@@ -33,9 +33,12 @@ export interface Thread {
     verification_status?: string | null;
     is_verified?: boolean | null;
     location_country?: string | null;
-    last_lat?: number | null;
-    last_lng?: number | null;
     non_social?: boolean | null;
+    engagement?: {
+      tier: "new" | "active" | "trusted" | "pillar";
+      percentileRank: number | null;
+      computedAt: string | null;
+    } | null;
   } | null;
 }
 
@@ -47,10 +50,14 @@ export interface ThreadComment {
   images?: string[] | null;
   created_at: string;
   user_id: string;
+  support_count?: number;
+  viewer_supported?: boolean;
+  mentions?: MentionEntry[];
   author: {
     display_name: string | null;
     social_id?: string | null;
     avatar_url?: string | null;
+    is_verified?: boolean | null;
   } | null;
 }
 
@@ -112,6 +119,7 @@ export type FeedHydrationRpcRow = {
   author_social_id?: string | null;
   author_avatar_url?: string | null;
   author_is_verified?: boolean | null;
+  author_verification_status?: string | null;
   map_id?: string | null;
   alert_type?: string | null;
   alert_district?: string | null;

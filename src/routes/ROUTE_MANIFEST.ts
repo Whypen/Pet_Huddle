@@ -34,6 +34,7 @@ export const ROUTE_MANIFEST: ReadonlyArray<string> = [
   "/social",
   "/threads",
   "/chats",
+  "/groups",
   "/chat-dialogue",
   "/service-chat",
   "/map",
@@ -51,11 +52,14 @@ export const ROUTE_MANIFEST: ReadonlyArray<string> = [
   // ── Settings & Subscription ──────────────────────────────────
   "/settings",
   "/settings/security",
-  "/subscription",       // → wired to /premium as legacy alias
-  "/premium",
-  "/manage-subscription", // → wired to /premium as legacy alias
+  "/member",
+  "/subscription",       // → legacy alias redirected to /member on web
+  "/premium",            // → native membership route; web redirects to /member
+  "/manage-subscription", // → legacy alias redirected to /member on web
   "/verify-identity",
   "/carerprofile",
+  "/carerprofile/stripe-return",
+  "/carerprofile/stripe-refresh",
 
   // ── Legal ───────────────────────────────────────────────────
   "/privacy",
@@ -70,6 +74,7 @@ export const ROUTE_MANIFEST: ReadonlyArray<string> = [
 
   // ── Admin ───────────────────────────────────────────────────
   "/admin",
+  "/admin/growth",
   "/admin/safety",
   "/admin/support",
   "/admin/control-center",
@@ -264,6 +269,28 @@ export const NATIVE_CHROME_ROUTE_MANIFEST = {
     suppressWebBottomNav: true,
     ownership: "native-content",
     notes: "Phase 1 native carer profile owns shared view content, non-wallet editor fields, pet_care_profiles load/save/silent-save, realtime wallet state display, agreement gate, and listing safety. Stripe Connect onboarding remains Phase 2 and is not claimed native yet.",
+  },
+  "/carerprofile/stripe-return": {
+    title: null,
+    header: null,
+    nativeContentOnly: true,
+    nativeBottomNav: false,
+    activeTab: null,
+    suppressWebHeader: true,
+    suppressWebBottomNav: true,
+    ownership: "native-content",
+    notes: "Stripe Connect return alias; web shell redirects to /carerprofile while native handles the universal link.",
+  },
+  "/carerprofile/stripe-refresh": {
+    title: null,
+    header: null,
+    nativeContentOnly: true,
+    nativeBottomNav: false,
+    activeTab: null,
+    suppressWebHeader: true,
+    suppressWebBottomNav: true,
+    ownership: "native-content",
+    notes: "Stripe Connect refresh alias; web shell redirects to /carerprofile while native handles the universal link.",
   },
   "/settings": {
     title: null,

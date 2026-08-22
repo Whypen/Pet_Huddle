@@ -6,7 +6,6 @@ import type {
   MentionEntry,
   Thread,
 } from "@/components/social/noticeboard/types";
-import { isVerifiedProfile } from "@/lib/verification";
 
 type DeriveAlertType = (notice: Thread) => "Stray" | "Lost" | "Caution" | "Others" | null;
 
@@ -14,6 +13,11 @@ type HydrateRowsOptions = {
   deriveAlertTypeFromNoticeData: DeriveAlertType;
   primeMentionDirectory: (values: string[]) => Promise<void>;
 };
+
+const rpc = supabase.rpc.bind(supabase) as unknown as (
+  fn: string,
+  args?: Record<string, unknown>,
+) => Promise<{ data: unknown; error: { message?: string; code?: string } | null }>;
 
 const emptyHydratedRowsResult = (rows: Thread[]): HydratedRowsResult => ({
   rows,
@@ -70,8 +74,6 @@ export const mapFeedRowToThread = (row: Record<string, unknown>): Thread => ({
     verification_status: (row.author_verification_status as string | null) ?? null,
     is_verified: (row.author_is_verified as boolean | null) ?? false,
     location_country: (row.author_location_country as string | null) ?? null,
-    last_lat: typeof row.author_last_lat === "number" ? row.author_last_lat : null,
-    last_lng: typeof row.author_last_lng === "number" ? row.author_last_lng : null,
     non_social: Boolean(row.author_non_social),
   },
 });
@@ -87,7 +89,7 @@ export const fetchFeedPage = async ({
   sortMode: "" | "Trending" | "Latest" | "Saves";
   viewerId: string;
 }) => {
-  const { data, error } = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>)(
+  const { data, error } = await rpc(
     "get_social_feed",
     {
       p_viewer_id: viewerId,
@@ -103,7 +105,6 @@ export const fetchFeedPage = async ({
 
 export const fetchFocusedThreadRow = async (threadId: string) => {
   if (!threadId) return null;
-  const rpc = supabase.rpc as unknown as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>;
   const { data, error } = await rpc(
     "get_native_social_thread_by_id",
     { p_thread_id: threadId },
@@ -113,150 +114,6 @@ export const fetchFocusedThreadRow = async (threadId: string) => {
   return focusedRow ? mapFeedRowToThread(focusedRow) : null;
 };
 
-export const hydrateRowsLegacy = async (
-  rows: Thread[],
-  { deriveAlertTypeFromNoticeData, primeMentionDirectory }: HydrateRowsOptions,
-): Promise<HydratedRowsResult> => {
-  const ids = rows.map((n) => n.id);
-  if (ids.length === 0) return emptyHydratedRowsResult(rows);
-
-  let hydratedRows = rows;
-
-  const { data: shareRows } = await supabase
-    .from("threads" as "profiles")
-    .select("id, clicks")
-    .in("id", ids);
-  if (shareRows && shareRows.length > 0) {
-    const shareMap = new Map<string, number>(
-      (shareRows as Array<{ id: string; clicks: number | null }>).map((row) => [row.id, Number(row.clicks ?? 0)]),
-    );
-    hydratedRows = hydratedRows.map((notice) =>
-      shareMap.has(notice.id) ? { ...notice, share_count: shareMap.get(notice.id) ?? 0 } : notice,
-    );
-  }
-
-  const { data: alertRows, error: alertRowsError } = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>)(
-    "get_social_feed_alert_context",
-    { p_thread_ids: ids },
-  );
-  if (!alertRowsError && Array.isArray(alertRows) && alertRows.length > 0) {
-    const alertMap = new Map(
-      (alertRows as Array<{ thread_id?: string; map_id?: string | null; alert_type?: string | null; location_district?: string | null }>).map((row) => [
-        String(row.thread_id || ""),
-        {
-          map_id: typeof row.map_id === "string" ? row.map_id : null,
-          alert_type: typeof row.alert_type === "string" ? row.alert_type : null,
-          location_district: typeof row.location_district === "string" ? row.location_district : null,
-          has_alert_link:
-            (typeof row.map_id === "string" && row.map_id.trim().length > 0) ||
-            (typeof row.alert_type === "string" && row.alert_type.trim().length > 0) ||
-            (typeof row.location_district === "string" && row.location_district.trim().length > 0),
-        },
-      ]),
-    );
-    hydratedRows = hydratedRows.map((notice) => {
-      const linked = alertMap.get(notice.id);
-      if (!linked) return notice;
-      return {
-        ...notice,
-        map_id: linked.map_id ?? notice.map_id ?? null,
-        alert_type: linked.alert_type ?? notice.alert_type ?? null,
-        alert_district: linked.location_district ?? notice.alert_district ?? null,
-        has_alert_link: linked.has_alert_link || notice.has_alert_link === true,
-      };
-    });
-  }
-
-  const { data: sensitiveRows } = await supabase
-    .from("threads" as "profiles")
-    .select("id,is_sensitive")
-    .in("id", ids);
-  if (sensitiveRows && sensitiveRows.length > 0) {
-    const sensitiveMap = new Map<string, boolean>(
-      (sensitiveRows as Array<{ id: string; is_sensitive?: boolean | null }>).map((row) => [row.id, row.is_sensitive === true]),
-    );
-    hydratedRows = hydratedRows.map((notice) => ({
-      ...notice,
-      is_sensitive: sensitiveMap.get(notice.id) === true,
-    }));
-  } else {
-    hydratedRows = hydratedRows.map((notice) => ({ ...notice, is_sensitive: notice.is_sensitive === true }));
-  }
-
-  const userIds = Array.from(new Set(hydratedRows.map((row) => row.user_id).filter(Boolean)));
-  if (userIds.length > 0) {
-    const { data: profileRows } = await supabase
-      .from("profiles")
-      .select("id, social_id, display_name, avatar_url, is_verified, verification_status")
-      .in("id", userIds);
-    if (profileRows && profileRows.length > 0) {
-      const profileMap = new Map(
-        (profileRows as Array<{ id: string; social_id?: string | null; display_name?: string | null; avatar_url?: string | null; is_verified?: boolean | null; verification_status?: string | null }>).map((row) => [
-          row.id,
-          row,
-        ]),
-      );
-      hydratedRows = hydratedRows.map((notice) => {
-        const author = profileMap.get(notice.user_id);
-        if (!author) return notice;
-        return {
-          ...notice,
-          author: {
-            ...notice.author,
-            display_name: author.display_name ?? notice.author?.display_name ?? null,
-            social_id: author.social_id ?? notice.author?.social_id ?? null,
-            avatar_url: author.avatar_url ?? notice.author?.avatar_url ?? null,
-            is_verified: isVerifiedProfile(author),
-          },
-        };
-      });
-    }
-  }
-
-  const { data: postMentionRows, error: postMentionError } = await supabase
-    .from("post_mentions" as never)
-    .select("post_id, mentioned_user_id, start_idx, end_idx, social_id_at_time")
-    .in("post_id", ids)
-    .order("start_idx", { ascending: true });
-
-  const threadMentions: Record<string, MentionEntry[]> = {};
-  if (!postMentionError) {
-    ((postMentionRows || []) as Array<{ post_id: string; mentioned_user_id: string; start_idx: number; end_idx: number; social_id_at_time: string }>).forEach((row) => {
-      threadMentions[row.post_id] = [
-        ...(threadMentions[row.post_id] || []),
-        {
-          start: Number(row.start_idx),
-          end: Number(row.end_idx),
-          mentionedUserId: row.mentioned_user_id,
-          socialIdAtTime: row.social_id_at_time,
-        },
-      ];
-    });
-  } else if (import.meta.env.DEV) {
-    console.warn("[social.mentions.post] hydrate fallback failed", postMentionError);
-  }
-
-  await primeMentionDirectory([
-    ...hydratedRows.map((row) => row.content || ""),
-  ]);
-
-  const alertTypes: Record<string, "Stray" | "Lost" | "Caution" | "Others"> = {};
-  hydratedRows.forEach((notice) => {
-    const derivedType = deriveAlertTypeFromNoticeData(notice);
-    if (derivedType) {
-      alertTypes[notice.id] = derivedType;
-    }
-  });
-
-  return {
-    rows: hydratedRows,
-    commentsByThread: {},
-    threadMentions,
-    replyMentions: {},
-    alertTypes,
-  };
-};
-
 export const hydrateRows = async (
   rows: Thread[],
   options: HydrateRowsOptions,
@@ -264,19 +121,20 @@ export const hydrateRows = async (
   const ids = rows.map((notice) => notice.id).filter(Boolean);
   if (ids.length === 0) return emptyHydratedRowsResult(rows);
 
-  const { data, error } = await (supabase.rpc as (
-    fn: string,
-    args?: Record<string, unknown>,
-  ) => Promise<{ data: unknown; error: { message?: string; code?: string } | null }>)(
-    "get_social_feed_hydration",
-    { p_thread_ids: ids },
-  );
+  const [{ data, error }, engagementResult] = await Promise.all([
+    rpc("get_social_feed_hydration", { p_thread_ids: ids }),
+    rpc("get_user_engagement_tiers", { p_user_ids: Array.from(new Set(rows.map((row) => row.user_id).filter(Boolean))) }),
+  ]);
 
   if (error || !Array.isArray(data)) {
     if (error) {
-      console.warn("[social.feed] helper hydration unavailable, falling back", error);
+      console.warn("[social.feed] safety hydration unavailable; media remains concealed", error);
     }
-    return hydrateRowsLegacy(rows, options);
+    // `get_social_feed` does not own the safety flag; the app resolves it from
+    // this hydration RPC. If that authority is unavailable, rendering media as
+    // non-sensitive would be a disclosure bug. Keep copy readable but fail the
+    // media treatment closed until a confirmed row arrives.
+    return emptyHydratedRowsResult(rows.map((row) => ({ ...row, is_sensitive: true })));
   }
 
   const hydrationByThreadId = new Map<string, FeedHydrationRpcRow>(
@@ -284,19 +142,40 @@ export const hydrateRows = async (
       .filter((row) => typeof row?.thread_id === "string" && row.thread_id.trim().length > 0)
       .map((row) => [row.thread_id, row]),
   );
+  const engagementByUserId = new Map<string, NonNullable<NonNullable<Thread["author"]>["engagement"]>>();
+  if (!engagementResult.error && Array.isArray(engagementResult.data)) {
+    (engagementResult.data as Array<Record<string, unknown>>).forEach((row) => {
+      const userId = String(row.user_id || "").trim();
+      const tier = String(row.engagement_tier || "").trim().toLowerCase();
+      if (!userId || !["active", "trusted", "pillar"].includes(tier)) return;
+      const percentile = Number(row.engagement_percentile_rank);
+      engagementByUserId.set(userId, {
+        tier: tier as "active" | "trusted" | "pillar",
+        percentileRank: Number.isFinite(percentile) ? percentile : null,
+        computedAt: typeof row.engagement_computed_at === "string" ? row.engagement_computed_at : null,
+      });
+    });
+  }
 
   const threadMentions: Record<string, MentionEntry[]> = {};
 
   const hydratedRows = rows.map((notice) => {
     const hydration = hydrationByThreadId.get(notice.id);
-    if (!hydration) return notice;
+    // A partial hydration response is also unknown, not proof of "safe".
+    if (!hydration) return { ...notice, is_sensitive: true };
 
     threadMentions[notice.id] = parseMentionEntries(hydration.thread_mentions);
 
     return {
       ...notice,
       share_count: Number(hydration.share_count ?? notice.share_count ?? 0),
-      is_sensitive: hydration.is_sensitive === true,
+      // Hydration is optional enrichment. Older deployments can omit this
+      // field; that must never erase the canonical feed row's safety flag and
+      // expose media the app keeps blurred.
+      is_sensitive:
+        typeof hydration.is_sensitive === "boolean"
+          ? hydration.is_sensitive
+          : notice.is_sensitive === true,
       map_id: typeof hydration.map_id === "string" ? hydration.map_id : notice.map_id ?? null,
       alert_type: typeof hydration.alert_type === "string" ? hydration.alert_type : notice.alert_type ?? null,
       alert_district: typeof hydration.alert_district === "string" ? hydration.alert_district : notice.alert_district ?? null,
@@ -323,7 +202,11 @@ export const hydrateRows = async (
           typeof hydration.author_avatar_url === "string"
             ? hydration.author_avatar_url
             : notice.author?.avatar_url ?? null,
-        is_verified: String(hydration.author_verification_status || "").toLowerCase() === "verified",
+        is_verified:
+          hydration.author_is_verified === true ||
+          String(hydration.author_verification_status || "").toLowerCase() === "verified" ||
+          notice.author?.is_verified === true,
+        engagement: engagementByUserId.get(notice.user_id) ?? notice.author?.engagement ?? null,
       },
     };
   });

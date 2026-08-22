@@ -12,8 +12,8 @@ let modelPromise: Promise<{
 
 const getModel = async () => {
   if (!modelPromise) {
-    modelPromise = import("nsfwjs")
-      .then((mod) => mod.load())
+    modelPromise = import("nsfwjs/core")
+      .then((core) => core.load("/models/nsfw/mobilenet_v2/model.json"))
       .catch((error) => {
         modelPromise = null;
         throw error;

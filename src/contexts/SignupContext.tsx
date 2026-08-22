@@ -51,6 +51,7 @@ const defaultPersistedData: PersistedSignupData = {
   social_id: "",
   email: "",
   phone: "",
+  signup_proof: "",
   legal_name: "",
   otp_verified: false,
 };
@@ -245,19 +246,10 @@ export const SignupProvider = ({ children }: { children: React.ReactNode }) => {
     if (draftKey !== SIGNUP_STORAGE_KEY) {
       localStorage.removeItem(SIGNUP_STORAGE_KEY);
     }
-    if (data.password) {
-      sessionStorage.setItem(passwordKey, data.password);
-      localStorage.setItem(passwordKey, data.password);
-      if (passwordKey !== SIGNUP_PASSWORD_SESSION_KEY) {
-        sessionStorage.removeItem(SIGNUP_PASSWORD_SESSION_KEY);
-        localStorage.removeItem(SIGNUP_PASSWORD_SESSION_KEY);
-      }
-    } else {
-      sessionStorage.removeItem(passwordKey);
-      localStorage.removeItem(passwordKey);
-      sessionStorage.removeItem(SIGNUP_PASSWORD_SESSION_KEY);
-      localStorage.removeItem(SIGNUP_PASSWORD_SESSION_KEY);
-    }
+    sessionStorage.removeItem(passwordKey);
+    localStorage.removeItem(passwordKey);
+    sessionStorage.removeItem(SIGNUP_PASSWORD_SESSION_KEY);
+    localStorage.removeItem(SIGNUP_PASSWORD_SESSION_KEY);
     if (data.signup_proof) {
       sessionStorage.setItem(SIGNUP_PROOF_SESSION_KEY, data.signup_proof);
       localStorage.setItem(SIGNUP_PROOF_SESSION_KEY, data.signup_proof);
@@ -274,11 +266,11 @@ export const SignupProvider = ({ children }: { children: React.ReactNode }) => {
   const update = useCallback((next: Partial<SignupData>) => {
     setData((prev) => {
       let changed = false;
-      const merged = { ...prev };
+      const merged: SignupData = { ...prev };
       (Object.keys(next) as Array<keyof SignupData>).forEach((key) => {
         const nextValue = next[key];
         if (typeof nextValue !== "undefined" && prev[key] !== nextValue) {
-          merged[key] = nextValue as SignupData[typeof key];
+          Object.assign(merged, { [key]: nextValue });
           changed = true;
         }
       });

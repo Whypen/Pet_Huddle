@@ -1,11 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import {
   Bell,
   BookOpen,
   ChevronLeft,
   FileText,
-  Heart,
   HelpCircle,
   LogOut,
   Settings,
@@ -17,7 +16,7 @@ import {
   X,
 } from "lucide-react";
 import { useNavigate, useLocation } from "react-router-dom";
-import huddleLogo from "@/assets/huddle-name-transparent.png";
+import { HuddleWordmark } from "@/components/brand/HuddleWordmark";
 import { useAuth } from "@/contexts/AuthContext";
 import { resolveCopy } from "@/lib/copy";
 import { isVerifiedProfile } from "@/lib/verification";
@@ -26,16 +25,15 @@ import { cn } from "@/lib/utils";
 import { Sheet, SheetClose, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { normalizeMembershipTier } from "@/lib/membership";
 import { plusTabRoute } from "@/lib/routes";
-import { getRemainingStarsFromSnapshot } from "@/lib/starQuota";
-import { isRegisteredUserProfile } from "@/lib/signupFlow";
 import { NeuControl } from "@/components/ui/NeuControl";
 import { InsetPanel, InsetDivider, InsetRow } from "@/components/ui/InsetPanel";
 import { EmptyStateCard } from "@/components/ui/EmptyStateCard";
-import { ManageFamilySheet } from "@/components/monetization/ManageFamilySheet";
 import { SettingsProfileSummary } from "@/components/layout/SettingsProfileSummary";
+import { SettingsMenu } from "@/components/layout/SettingsMenu";
 import { GlassModal } from "@/components/ui/GlassModal";
 import { HelpSupportDialog } from "@/components/support/HelpSupportDialog";
 import { shouldSuppressWebHeaderForNativeShell } from "@/lib/nativeShell";
+import { fetchWebNotifications, fetchWebUnreadNotifications, markWebNotificationsRead } from "@/lib/webNotifications";
 
 // ─── Notification types & helpers ────────────────────────────────────────────
 
@@ -87,7 +85,7 @@ const stripLeadingSymbolPrefixes = (text: string) => {
 };
 
 const allowedHref = (href: string) =>
-  /^\/(social|chats|map|threads|chat-dialogue|verify-identity|pet-details|edit-pet-profile|settings|notifications)(\?|$)/.test(
+  /^\/(social|groups|chats|map|threads|chat-dialogue|verify-identity|pet-details|edit-pet-profile|edit-profile|settings|notifications|service-chat|carerprofile|member|premium)(\?|$)/.test(
     href
   );
 
@@ -151,6 +149,14 @@ const normalizeNotificationHref = (
     return focus ? `/social?focus=${encodeURIComponent(focus)}` : "/social";
   }
 
+  // The notification-enqueue DB contract writes a shared `/profile` href for both
+  // platforms, but web's own-profile route is `/edit-profile` — native has a
+  // `/profile` screen, web doesn't, so this remap only exists on this side.
+  if (nextHref === "/profile" || nextHref.startsWith("/profile?")) {
+    const [, rawQuery = ""] = nextHref.split("?");
+    return rawQuery ? `/edit-profile?${rawQuery}` : "/edit-profile";
+  }
+
   if (nextHref.startsWith("/map")) {
     const [, rawQuery = ""] = nextHref.split("?");
     const params = new URLSearchParams(rawQuery);
@@ -178,6 +184,9 @@ interface GlobalHeaderProps {
   onMenuClick?: () => void;
   /** When passed: right side renders X close button instead of Settings gear */
   closeButton?: () => void;
+  desktopRail?: boolean;
+  /** Route-owned controls that sit immediately before the account avatar on mobile. */
+  accountLeadingActions?: ReactNode;
 }
 
 interface Pet {
@@ -189,20 +198,14 @@ interface Pet {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: GlobalHeaderProps) => {
+export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton, desktopRail = false, accountLeadingActions }: GlobalHeaderProps) => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, profile, signOut } = useAuth();
+  const { user, session, profile, signOut, refreshProfile } = useAuth();
   const t = resolveCopy;
-  const [logoFallback, setLogoFallback] = useState<"asset" | "public" | "text">("asset");
   const [pets, setPets] = useState<Pet[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [carerGateOpen, setCarerGateOpen] = useState(false);
-  const [familySheetOpen, setFamilySheetOpen] = useState(false);
-  const [reopenMenuOnFamilyClose, setReopenMenuOnFamilyClose] = useState(false);
-  const [familyUsedCount, setFamilyUsedCount] = useState(0);
-  const [starsRemaining, setStarsRemaining] = useState<number | null>(null);
   const [supportOpen, setSupportOpen] = useState(false);
   const [logoutOpen, setLogoutOpen] = useState(false);
   const [drawerView, setDrawerView] = useState<"main" | "legal">("main");
@@ -214,46 +217,25 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
   const [notifLoading, setNotifLoading] = useState(false);
   const markedOnOpenRef = useRef(false);
   const notifOpenRef = useRef(false);
-  const notifBadgeDebounceRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
-  const notifDrawerDebounceRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const notifBadgeDebounceRef = useRef<number | null>(null);
+  const notifDrawerDebounceRef = useRef<number | null>(null);
   const showUnreadDot = !notifOpen && unreadCount > 0;
 
+  useEffect(() => {
+    if (!user) return;
+    const params = new URLSearchParams(location.search);
+    if (params.get("notifications") !== "1") return;
+    setNotifOpen(true);
+    params.delete("notifications");
+    navigate({ pathname: location.pathname, search: params.toString() ? `?${params.toString()}` : "" }, { replace: true });
+  }, [location.pathname, location.search, navigate, user]);
+
   const isVerified = isVerifiedProfile(profile);
-  const dob = (profile as Record<string, unknown> | null)?.dob as string | null ?? null;
-  const isAge18Plus = dob
-    ? (() => {
-        const birth = new Date(dob);
-        const now = new Date();
-        const age = now.getFullYear() - birth.getFullYear();
-        const m = now.getMonth() - birth.getMonth();
-        return age > 18 || (age === 18 && (m > 0 || (m === 0 && now.getDate() >= birth.getDate())));
-      })()
-    : false;
-  const normalizedTier = normalizeMembershipTier(profile?.effective_tier ?? profile?.tier);
-  const isPlusOrAbove = normalizedTier === "plus" || normalizedTier === "gold";
-  const isGold = normalizedTier === "gold";
-  const onboardingComplete = isRegisteredUserProfile(profile ?? null);
 
   useEffect(() => {
     notifOpenRef.current = notifOpen;
   }, [notifOpen]);
 
-  const requireCompletedProfile = useCallback(
-    (actionLabel: string) => {
-      if (!user) {
-        toast.warning("Please sign in to continue.");
-        navigate("/auth", { replace: true });
-        return false;
-      }
-      if (!onboardingComplete) {
-        toast.warning(`Complete profile to access ${actionLabel}.`);
-        navigate("/set-profile", { replace: true });
-        return false;
-      }
-      return true;
-    },
-    [navigate, onboardingComplete, user],
-  );
   const logoutItem = useMemo(
     () => ({
       label: "Log Out",
@@ -261,36 +243,6 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
     }),
     []
   );
-
-  useEffect(() => {
-    if (!menuOpen || !profile?.id) return;
-    let cancelled = false;
-    const loadStars = async () => {
-      const snapshot = await (supabase.rpc as (fn: string) => Promise<{ data: unknown; error: { message?: string } | null }>)("get_quota_snapshot");
-      if (snapshot.error) {
-        if (!cancelled) setStarsRemaining(0);
-        return;
-      }
-      const row = Array.isArray(snapshot.data) ? snapshot.data[0] : snapshot.data;
-      const typed = (row || {}) as { tier?: string; stars_used_cycle?: number; extra_stars?: number };
-      const nextRemaining = getRemainingStarsFromSnapshot(profile?.tier, typed);
-      if (!cancelled) setStarsRemaining(nextRemaining);
-    };
-    void loadStars();
-    return () => {
-      cancelled = true;
-    };
-  }, [menuOpen, profile?.id, profile?.tier]);
-
-  useEffect(() => {
-    if (!user?.id) return;
-    supabase
-      .from("family_members" as never)
-      .select("id", { count: "exact", head: true })
-      .eq("inviter_user_id", user.id)
-      .neq("status", "declined")
-      .then(({ count }: { count: number | null }) => setFamilyUsedCount(count ?? 0));
-  }, [user?.id, familySheetOpen]);
 
   useEffect(() => {
     const state = location.state as { openSettingsDrawer?: boolean; openSupportModal?: boolean } | null;
@@ -350,13 +302,13 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
         setUnreadCount((prev) => (prev === 0 ? prev : 0));
         return;
       }
-      const res = await supabase
-        .from("notifications" as "profiles")
-        .select("id,message,body,title,metadata,data" as "*")
-        .eq("user_id", user.id)
-        .eq("read" as "user_id", false);
+      let rows: Array<Partial<NotificationRow>> = [];
+      try {
+        rows = await fetchWebUnreadNotifications(user.id, session);
+      } catch (error) {
+        if (import.meta.env.DEV) console.warn("[web.notifications.unread]", error);
+      }
       if (cancelled) return;
-      const rows = (res as { data: Array<Partial<NotificationRow>> | null }).data ?? [];
       const count = rows.filter((r) => !r.data?.skip_history && !r.metadata?.skip_history && !isSuppressedNotification(r)).length;
       setUnreadCount((prev) => (prev === count ? prev : count));
     };
@@ -383,9 +335,10 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
       if (notifBadgeDebounceRef.current !== null) window.clearTimeout(notifBadgeDebounceRef.current);
       supabase.removeChannel(channel);
     };
-    // Only user.id is used inside; intentionally avoid re-subscribing on other user property changes
+    // Re-run when the authenticated access token rotates; the REST projection must
+    // never be queried with the session that preceded the current one.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id]);
+  }, [user?.id, session?.access_token]);
 
   // ── Load notifications when drawer opens ────────────────────────────────────
   useEffect(() => {
@@ -398,13 +351,11 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
       if (!silent) {
         setNotifLoading(true);
       }
-      const res = await supabase
-        .from("notifications" as "profiles")
-        .select("id,message,type,title,body,read,created_at,metadata,data" as "*")
-        .eq("user_id" as "id", user.id)
-        .order("created_at" as "id", { ascending: false })
-        .limit(200);
-      if ((res as { error?: unknown }).error) {
+      let allRows: NotificationRow[] = [];
+      try {
+        allRows = (await fetchWebNotifications(user.id, session, 200)) as NotificationRow[];
+      } catch (error) {
+        if (import.meta.env.DEV) console.warn("[web.notifications.load]", error);
         if (!cancelled) {
           if (!silent) {
             setNotifRows([]);
@@ -415,7 +366,6 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
         return;
       }
       if (cancelled) return;
-      const allRows = (res.data ?? []) as NotificationRow[];
       const rows = allRows.filter(
         (r) => !r.data?.skip_history && !r.metadata?.skip_history && !isSuppressedNotification(r)
       );
@@ -430,11 +380,11 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
       if (!markedOnOpenRef.current && hasAnyUnread) {
         markedOnOpenRef.current = true;
         setNotifRows((prev) => prev.map((r) => ({ ...r, read: true })));
-        await supabase
-          .from("notifications" as "profiles")
-          .update({ read: true } as Record<string, unknown>)
-          .eq("user_id" as "created_at", user.id)
-          .eq("read" as "created_at", false);
+        try {
+          await markWebNotificationsRead(user.id, session);
+        } catch (error) {
+          if (import.meta.env.DEV) console.warn("[web.notifications.mark_all_read]", error);
+        }
         // Refresh unread badge
         setUnreadCount(0);
       }
@@ -464,7 +414,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
     };
     // Only user.id is used inside; intentionally avoid re-subscribing on other user property changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [notifOpen, user?.id]);
+  }, [notifOpen, user?.id, session]);
 
   useEffect(() => {
     if (!notifOpen) return;
@@ -475,24 +425,24 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
   // ── Notification row interaction ─────────────────────────────────────────────
   const handleNotifRowClick = (r: NotificationRow) => {
     setNotifRows((prev) => prev.map((n) => (n.id === r.id ? { ...n, read: true } : n)));
-    void supabase
-      .from("notifications" as "profiles")
-      .update({ read: true } as Record<string, unknown>)
-      .eq("id" as "created_at", r.id)
-      .eq("user_id" as "created_at", user?.id ?? "");
+    if (user?.id) {
+      void markWebNotificationsRead(user.id, session, r.id).catch((error) => {
+        if (import.meta.env.DEV) console.warn("[web.notifications.mark_read]", error);
+      });
+    }
 
     const meta = (r.data ?? r.metadata ?? {}) as Record<string, unknown>;
     const body = String(r.body ?? r.message ?? "");
     const type = String((r.type || "")).toLowerCase();
     const href =
       (typeof meta.href === "string" && meta.href.trim() ? meta.href.trim() : null);
-    const shouldForceDiscover =
+    const removedDiscoverLink =
       type === "wave" ||
-      body.toLowerCase().includes("open discover to find out");
-    const resolvedHref = shouldForceDiscover ? "/chats?tab=discover" : href;
-    const normalizedHref = shouldForceDiscover
-      ? resolvedHref
-      : normalizeNotificationHref(resolvedHref, type, meta);
+      body.toLowerCase().includes("open discover to find out") ||
+      href?.includes("tab=discover");
+    const normalizedHref = removedDiscoverLink
+      ? "/social"
+      : normalizeNotificationHref(href, type, meta);
 
     if (normalizedHref && allowedHref(normalizedHref)) {
       setNotifOpen(false);
@@ -510,7 +460,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
         toast.info("That post is no longer available.");
         return;
       }
-      console.warn("Invalid notification href", { id: r.id, href: normalizedHref, rawHref: resolvedHref });
+      console.warn("Invalid notification href", { id: r.id, href: normalizedHref, rawHref: href });
     }
   };
 
@@ -571,7 +521,6 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
     );
   };
 
-  const handleLogoClick = () => navigate("/");
   const suppressForNativeShell = shouldSuppressWebHeaderForNativeShell();
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -579,7 +528,9 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
 
   return (
     <header className="sticky top-0 z-[1700] bg-background border-b border-border/20">
-      <div className="flex items-center justify-between px-4 w-full max-w-[430px] mx-auto h-14">
+      {/* Same --app-max-width token as the shell, so header content stays
+          aligned with page content at every width. */}
+      <div className="flex h-14 w-full max-w-[var(--app-max-width,430px)] items-center justify-between px-4 mx-auto lg:max-w-none lg:px-6">
 
         {/* ── Left: Notification bell → opens left drawer ── */}
         <Sheet open={notifOpen} onOpenChange={setNotifOpen}>
@@ -588,7 +539,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
               size="icon-md"
               variant="tertiary"
               aria-label={t("Notifications")}
-              className="relative shrink-0"
+              className="relative shrink-0 lg:hidden"
             >
               <Bell size={20} strokeWidth={1.75} aria-hidden />
               {showUnreadDot && (
@@ -675,24 +626,15 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
         </Sheet>
 
         {/* ── Center: Logo ── */}
-        <button
-          onClick={handleLogoClick}
-          className="absolute left-1/2 -translate-x-1/2 hover:opacity-80 transition-opacity"
+        <span
+          className={cn(
+            "absolute left-1/2 -translate-x-1/2 lg:static lg:translate-x-0",
+            desktopRail && "lg:static",
+          )}
           aria-label={t("huddle")}
         >
-          {logoFallback === "text" ? (
-            <span className="block text-[22px] leading-none font-extrabold text-brandBlue tracking-normal">
-              huddle
-            </span>
-          ) : (
-            <img
-              src={logoFallback === "asset" ? huddleLogo : "/huddle-logo.jpg"}
-              alt={t("huddle")}
-              className="h-7 w-auto max-w-[140px] object-contain"
-              onError={() => setLogoFallback((current) => (current === "asset" ? "public" : "text"))}
-            />
-          )}
-        </button>
+          <HuddleWordmark size={28} />
+        </span>
 
         {/* ── Right: X close OR Settings drawer ── */}
         {closeButton ? (
@@ -706,309 +648,48 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
             <X size={20} strokeWidth={1.75} aria-hidden />
           </NeuControl>
         ) : (
-          <Sheet
-            open={menuOpen}
-            onOpenChange={(open) => {
-              setMenuOpen(open);
-              if (!open) setDrawerView("main");
+          /* Lightweight settings drawer. The notification Sheet above remains
+              separate, and Log out still uses the existing confirmation flow. */
+          <div className="ml-auto flex items-center gap-0.5">
+          {accountLeadingActions ? <div className="flex items-center">{accountLeadingActions}</div> : null}
+          <SettingsMenu
+            displayName={profile?.display_name || "User"}
+            avatarUrl={profile?.avatar_url || null}
+            socialId={profile?.social_id || null}
+            accountEmail={user?.email || null}
+            isVerified={isVerified}
+            tierLabel={normalizeMembershipTier(
+              String(profile?.effective_tier || profile?.tier || "free"),
+            )}
+            nonSocial={profile?.discovery_opt_out === true}
+            hideFromMap={profile?.map_precision === "hidden"}
+            onVisibilityChange={async (next) => {
+              if (!user?.id) return;
+              const mapPrecision = next.hideFromMap ? "hidden" : "area";
+              const { error } = await supabase
+                .from("profiles")
+                .update({
+                  discovery_opt_out: next.nonSocial,
+                  map_precision: mapPrecision,
+                  hide_from_map: false,
+                })
+                .eq("id", user.id);
+              if (error) {
+                toast.error("We couldn’t save privacy settings. Please retry.");
+                return;
+              }
+              await refreshProfile();
+              toast.success("Privacy settings updated.");
             }}
-          >
-            <SheetTrigger asChild>
-              <NeuControl
-                size="icon-md"
-                variant="tertiary"
-                aria-label={t("Settings")}
-                onClick={() => {
-                  if (onMenuClick) {
-                    onMenuClick();
-                    return;
-                  }
-                  setMenuOpen(true);
-                }}
-              >
-                <Settings size={20} strokeWidth={1.75} aria-hidden />
-              </NeuControl>
-            </SheetTrigger>
-
-            <SheetContent className="w-[320px] sm:max-w-sm flex flex-col [&>button]:hidden">
-              <SheetHeader className="sr-only">
-                <SheetTitle>{t("Settings")}</SheetTitle>
-                <SheetDescription>{t("Settings drawer")}</SheetDescription>
-              </SheetHeader>
-
-              <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-4 pt-6 px-4 pb-[calc(env(safe-area-inset-bottom,0px)+16px)]">
-
-              {drawerView === "main" && (
-              <>
-              {/* 1. User identity row */}
-              <SheetClose asChild>
-                <SettingsProfileSummary
-                  displayName={profile?.display_name || "User"}
-                  avatarUrl={profile?.avatar_url || null}
-                  isVerified={isVerified}
-                  tierValue={String(profile?.effective_tier || profile?.tier || "free")}
-                  starsLabel={String(Math.max(0, Number(starsRemaining || 0)))}
-                  onStarsClick={() => {
-                    if (!requireCompletedProfile("Manage Membership")) return;
-                    setMenuOpen(false);
-                    sessionStorage.setItem("premium:returnTo", premiumReturnTo);
-                    sessionStorage.setItem("premium:reopenDrawer", "1");
-                    navigate("/premium", {
-                      state: {
-                        returnTo: premiumReturnTo,
-                        reopenDrawerOnClose: true,
-                      },
-                    });
-                  }}
-                  onPress={() => navigate("/edit-profile")}
-                  showChevron
-                  className="px-1 py-0"
-                />
-              </SheetClose>
-
-              {/* 2. Membership panel */}
-              <InsetPanel>
-                <SheetClose asChild>
-                  <InsetRow
-                    label="Manage Membership"
-                    icon={<Star size={16} strokeWidth={1.75} />}
-                    variant="nav"
-                    onClick={() => {
-                      if (!requireCompletedProfile("Manage Membership")) return;
-                      sessionStorage.setItem("premium:returnTo", premiumReturnTo);
-                      sessionStorage.setItem("premium:reopenDrawer", "1");
-                      navigate(isPlusOrAbove ? plusTabRoute("Gold") : plusTabRoute("Plus"), {
-                        state: {
-                          returnTo: premiumReturnTo,
-                          reopenDrawerOnClose: true,
-                        },
-                      });
-                    }}
-                  />
-                </SheetClose>
-                <InsetDivider />
-                <InsetRow
-                  label="Family Account"
-                  icon={<Users size={16} strokeWidth={1.75} />}
-                  variant="nav"
-                  value={familyUsedCount > 0 ? `${familyUsedCount} member${familyUsedCount > 1 ? "s" : ""}` : undefined}
-                  onClick={() => {
-                    if (!requireCompletedProfile("Family Account")) return;
-                    setReopenMenuOnFamilyClose(true);
-                    setMenuOpen(false);
-                    setTimeout(() => setFamilySheetOpen(true), 150);
-                  }}
-                />
-              </InsetPanel>
-
-              {/* 3. Profile & Access panel */}
-              <InsetPanel>
-                <SheetClose asChild>
-                  <InsetRow
-                    label="Identity Verification"
-                    icon={
-                      <span className={`inline-flex h-5 w-5 items-center justify-center rounded-full ${isVerified ? "bg-brandBlue" : "bg-[#A1A4A9]"} text-white`}>
-                        <Shield size={12} strokeWidth={1.75} />
-                      </span>
-                    }
-                    variant="nav"
-                    value={isVerified ? "Verified" : undefined}
-                    onClick={() => navigate("/verify-identity")}
-                  />
-                </SheetClose>
-                {isAge18Plus && (
-                  <>
-                    <InsetDivider />
-                    <SheetClose asChild>
-                      <InsetRow
-                        label="Pet Carer Profile"
-                        icon={<Heart size={16} strokeWidth={1.75} />}
-                        variant="nav"
-                        value={isVerified ? undefined : "Verify first"}
-                        onClick={() => {
-                          if (!requireCompletedProfile("Pet Carer Profile")) return;
-                          if (isVerified) {
-                            navigate("/carerprofile", { state: { from: location.pathname } });
-                          } else {
-                            setTimeout(() => setCarerGateOpen(true), 150);
-                          }
-                        }}
-                      />
-                    </SheetClose>
-                  </>
-                )}
-                <InsetDivider />
-                <SheetClose asChild>
-                  <InsetRow
-                    label="Account Settings"
-                    icon={<UserIcon size={16} strokeWidth={1.75} />}
-                    variant="nav"
-                    onClick={() => {
-                      if (!requireCompletedProfile("Account Settings")) return;
-                      navigate("/settings", { state: { from: location.pathname } });
-                    }}
-                  />
-                </SheetClose>
-              </InsetPanel>
-
-              {/* 4. Support + Legal panel */}
-              <InsetPanel>
-                <InsetRow
-                  label="Help & Support"
-                  icon={<HelpCircle size={16} strokeWidth={1.75} />}
-                  variant="nav"
-                  onClick={() => {
-                    setMenuOpen(false);
-                    setTimeout(() => setSupportOpen(true), 150);
-                  }}
-                />
-                <InsetDivider />
-                <InsetRow
-                  label="Legal Information"
-                  icon={<FileText size={16} strokeWidth={1.75} />}
-                  variant="nav"
-                  onClick={() => setDrawerView("legal")}
-                />
-              </InsetPanel>
-
-              {/* 5. Log out */}
-              <InsetPanel>
-                <InsetRow
-                  label={logoutItem.label}
-                  icon={<LogOut size={16} strokeWidth={1.75} className={logoutItem.iconClassName} />}
-                  variant="danger"
-                  onClick={() => {
-                    setMenuOpen(false);
-                    setLogoutOpen(true);
-                  }}
-                />
-              </InsetPanel>
-              </>
-              )}
-
-              {/* ── Legal sub-screen ─────────────────────────────────────── */}
-              {drawerView === "legal" && (
-                <div className="flex flex-col gap-4">
-                  <button
-                    type="button"
-                    onClick={() => setDrawerView("main")}
-                    className="flex items-center gap-1.5 px-1 py-1 -mx-1 rounded-lg text-left text-[var(--text-primary)] active:bg-black/5"
-                  >
-                    <ChevronLeft size={18} strokeWidth={1.75} className="text-[var(--text-secondary)] shrink-0" />
-                    <span className="text-[15px] font-semibold">Legal Information</span>
-                  </button>
-
-                  <InsetPanel>
-                    <SheetClose asChild>
-                      <InsetRow
-                        label="Privacy Policy"
-                        icon={<ShieldAlert size={16} strokeWidth={1.75} />}
-                        variant="nav"
-                        onClick={() => navigate("/privacy", { state: { openDrawer: true, drawerView: "legal", from: location.pathname } })}
-                      />
-                    </SheetClose>
-                    <InsetDivider />
-                    <SheetClose asChild>
-                      <InsetRow
-                        label="Terms of Service"
-                        icon={<FileText size={16} strokeWidth={1.75} />}
-                        variant="nav"
-                        onClick={() => navigate("/terms", { state: { openDrawer: true, drawerView: "legal", from: location.pathname } })}
-                      />
-                    </SheetClose>
-                    <InsetDivider />
-                    <SheetClose asChild>
-                      <InsetRow
-                        label="Community Guidelines"
-                        icon={<BookOpen size={16} strokeWidth={1.75} />}
-                        variant="nav"
-                        onClick={() => navigate("/community-guidelines", { state: { openDrawer: true, drawerView: "legal", from: location.pathname } })}
-                      />
-                    </SheetClose>
-                    <InsetDivider />
-                    <SheetClose asChild>
-                      <InsetRow
-                        label="Cookies Notice"
-                        icon={<FileText size={16} strokeWidth={1.75} />}
-                        variant="nav"
-                        onClick={() => navigate("/cookies", { state: { openDrawer: true, drawerView: "legal", from: location.pathname } })}
-                      />
-                    </SheetClose>
-                  </InsetPanel>
-
-                  <InsetPanel>
-                    <SheetClose asChild>
-                      <InsetRow
-                        label="Service Provider Agreement"
-                        icon={<FileText size={16} strokeWidth={1.75} />}
-                        variant="nav"
-                        onClick={() => navigate("/service-agreement", { state: { openDrawer: true, drawerView: "legal", from: location.pathname } })}
-                      />
-                    </SheetClose>
-                    <InsetDivider />
-                    <SheetClose asChild>
-                      <InsetRow
-                        label="Service Booking Terms"
-                        icon={<BookOpen size={16} strokeWidth={1.75} />}
-                        variant="nav"
-                        onClick={() => navigate("/booking-terms", { state: { openDrawer: true, drawerView: "legal", from: location.pathname } })}
-                      />
-                    </SheetClose>
-                  </InsetPanel>
-                </div>
-              )}
-              </div>
-
-            </SheetContent>
-          </Sheet>
+            onLogout={() => setLogoutOpen(true)}
+            onEditProfile={() => navigate("/edit-profile", { state: { returnTo: premiumReturnTo } })}
+            onHelp={() => setSupportOpen(true)}
+            onManageMembership={() => navigate("/member", { state: { returnTo: premiumReturnTo } })}
+          />
+          </div>
         )}
 
       </div>
-
-      {/* ── Carer profile gate (outside sheet so it renders after sheet closes) ── */}
-      {carerGateOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-          onClick={() => setCarerGateOpen(false)}
-        >
-          <div
-            className="bg-card rounded-2xl shadow-xl mx-4 p-5 max-w-sm w-full space-y-4"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="space-y-1">
-              <h2 className="text-[16px] font-semibold text-[var(--text-primary)]">Identity verification required</h2>
-              <p className="text-[13px] text-[var(--text-secondary)]">Finish verification to start offering trusted pet-care services.</p>
-            </div>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setCarerGateOpen(false)}
-                className="flex-1 h-10 rounded-xl border border-border text-[14px] font-medium text-[var(--text-secondary)] hover:bg-muted transition-colors"
-              >
-                Not now
-              </button>
-              <button
-                type="button"
-                onClick={() => { setCarerGateOpen(false); navigate("/verify-identity"); }}
-                className="flex-1 h-10 rounded-xl bg-brandBlue text-white text-[14px] font-semibold hover:opacity-90 transition-opacity"
-              >
-                Verify now
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <ManageFamilySheet
-        isOpen={familySheetOpen}
-        onClose={() => {
-          setFamilySheetOpen(false);
-          if (reopenMenuOnFamilyClose) {
-            setTimeout(() => setMenuOpen(true), 120);
-          }
-          setReopenMenuOnFamilyClose(false);
-        }}
-      />
 
       <HelpSupportDialog open={supportOpen} onOpenChange={setSupportOpen} />
 
@@ -1026,7 +707,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
             fullWidth
             onClick={async () => {
               await signOut();
-              navigate("/auth", { replace: true });
+              navigate("/join", { replace: true });
             }}
           >
             Log out

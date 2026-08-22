@@ -10,6 +10,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
+import { useAuthGate } from "@/components/auth/authGateContext";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -24,6 +25,7 @@ interface JoinWithCodeSheetProps {
 
 export function JoinWithCodeSheet({ isOpen, onClose, initialCode }: JoinWithCodeSheetProps) {
   const { user } = useAuth();
+  const { requireAuth } = useAuthGate();
   const navigate = useNavigate();
 
   const [code, setCode]         = useState(initialCode ?? "");
@@ -44,14 +46,14 @@ export function JoinWithCodeSheet({ isOpen, onClose, initialCode }: JoinWithCode
       return;
     }
     if (!user?.id) {
-      toast.error("Sign in to join a group.");
+      requireAuth("join-group", () => {}, { returnTo: "/chats?tab=groups" });
       return;
     }
 
     setInlineError("");
     setIsJoining(true);
     try {
-      const { data, error } = await (supabase.rpc as (
+      const { data, error } = await (supabase.rpc as unknown as (
         fn: string,
         params?: Record<string, unknown>
       ) => Promise<{ data: unknown; error: { message?: string } | null }>)("join_private_group_by_code", {

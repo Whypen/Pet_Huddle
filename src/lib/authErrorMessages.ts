@@ -56,6 +56,25 @@ export function mapAuthFailureMessage(error: ErrorLike | string | null | undefin
     return "We couldn't send that reset email just now. Please try again in a moment.";
   }
 
+  if (normalizedMessage.includes("password_min_8_chars") || normalizedCode.includes("password_min_8_chars")) {
+    return "Password must be at least 8 characters.";
+  }
+  if (normalizedMessage.includes("password_missing_uppercase") || normalizedCode.includes("password_missing_uppercase")) {
+    return "Password must include an uppercase letter.";
+  }
+  if (normalizedMessage.includes("password_missing_number") || normalizedCode.includes("password_missing_number")) {
+    return "Password must include a number.";
+  }
+  if (normalizedMessage.includes("password_missing_special") || normalizedCode.includes("password_missing_special")) {
+    return "Password must include a special character.";
+  }
+  if (normalizedMessage.includes("password_found_in_breach") || normalizedCode.includes("password_found_in_breach")) {
+    return "This password has appeared in a data breach. Choose a different one.";
+  }
+  if (normalizedMessage.includes("password_breach_check_unavailable") || normalizedCode.includes("password_breach_check_unavailable")) {
+    return "We couldn't check this password against known breaches. Please try again.";
+  }
+
   return rawMessage || "Couldn't sign you in.";
 }
 

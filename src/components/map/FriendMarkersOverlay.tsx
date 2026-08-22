@@ -21,8 +21,9 @@ type Props = {
   onSelect: (id: string) => void;
 };
 
-const COMPRESSED_MODE_ENTER_ZOOM = 14.5;
-const COMPRESSED_MODE_EXIT_ZOOM = 15;
+const FRIEND_OVERVIEW_ZOOM = 12;
+const FRIEND_DETAIL_ZOOM = 15.5;
+const MAP_ZOOM_TIER_HYSTERESIS = 0.25;
 const COMPRESSED_GROUP_DISTANCE_PX = 18;
 const EXPANDED_GROUP_DISTANCE_PX = 28;
 const COMPRESSED_NON_VERIFIED_BG = "#E3E7EF";
@@ -36,11 +37,28 @@ type CompressedGroup = {
   y: number;
 };
 
+const resolveZoomTier = (zoom: number, current: "city" | "compact" | "detail") => {
+  if (current === "detail") {
+    if (zoom < FRIEND_OVERVIEW_ZOOM - MAP_ZOOM_TIER_HYSTERESIS) return "city";
+    if (zoom < FRIEND_DETAIL_ZOOM - MAP_ZOOM_TIER_HYSTERESIS) return "compact";
+    return "detail";
+  }
+  if (current === "city") {
+    if (zoom >= FRIEND_DETAIL_ZOOM + MAP_ZOOM_TIER_HYSTERESIS) return "detail";
+    if (zoom >= FRIEND_OVERVIEW_ZOOM + MAP_ZOOM_TIER_HYSTERESIS) return "compact";
+    return "city";
+  }
+  if (zoom >= FRIEND_DETAIL_ZOOM + MAP_ZOOM_TIER_HYSTERESIS) return "detail";
+  if (zoom < FRIEND_OVERVIEW_ZOOM - MAP_ZOOM_TIER_HYSTERESIS) return "city";
+  return "compact";
+};
+
 const FriendMarkersOverlay = ({ map, friends, onSelect }: Props) => {
   const [points, setPoints] = useState<Record<string, { x: number; y: number }>>({});
   const [avatarErrorsById, setAvatarErrorsById] = useState<Record<string, boolean>>({});
   const [groupAssetErrorsByKey, setGroupAssetErrorsByKey] = useState<Record<string, boolean>>({});
-  const [isCompressedMode, setIsCompressedMode] = useState(false);
+  const [zoomTier, setZoomTier] = useState<"city" | "compact" | "detail">("compact");
+  const isCompressedMode = zoomTier !== "detail";
 
   useEffect(() => {
     if (!map || friends.length === 0) {
@@ -50,11 +68,7 @@ const FriendMarkersOverlay = ({ map, friends, onSelect }: Props) => {
 
     const sync = () => {
       const zoom = map.getZoom();
-      setIsCompressedMode((current) => {
-        if (zoom <= COMPRESSED_MODE_ENTER_ZOOM) return true;
-        if (zoom >= COMPRESSED_MODE_EXIT_ZOOM) return false;
-        return current;
-      });
+      setZoomTier((current) => resolveZoomTier(zoom, current));
       const next: Record<string, { x: number; y: number }> = {};
       friends.forEach((f) => {
         if (!Number.isFinite(f.lat) || !Number.isFinite(f.lng)) return;
@@ -112,7 +126,7 @@ const FriendMarkersOverlay = ({ map, friends, onSelect }: Props) => {
 
   const overlapGroups = useMemo<CompressedGroup[]>(() => {
     const groups: CompressedGroup[] = [];
-    const maxDistancePx = isCompressedMode ? COMPRESSED_GROUP_DISTANCE_PX : EXPANDED_GROUP_DISTANCE_PX;
+    const maxDistancePx = zoomTier === "city" ? EXPANDED_GROUP_DISTANCE_PX * 1.5 : zoomTier === "compact" ? COMPRESSED_GROUP_DISTANCE_PX : EXPANDED_GROUP_DISTANCE_PX;
     activeFriends.forEach((friend) => {
       const pt = points[friend.id];
       if (!pt) return;
@@ -131,7 +145,7 @@ const FriendMarkersOverlay = ({ map, friends, onSelect }: Props) => {
       overlappingGroup.ids.push(friend.id);
     });
     return groups;
-  }, [activeFriends, isCompressedMode, points]);
+  }, [activeFriends, points, zoomTier]);
 
   const groupedIds = useMemo(() => {
     const ids = new Set<string>();
@@ -167,7 +181,7 @@ const FriendMarkersOverlay = ({ map, friends, onSelect }: Props) => {
                 style={{
                   left: `${group.x}px`,
                   top: `${group.y}px`,
-                  transform: isCompressedMode ? "translate(-50%, -50%) scale(0.75)" : "translate(-50%, -50%)",
+                  transform: zoomTier === "city" ? "translate(-50%, -50%) scale(0.58)" : zoomTier === "compact" ? "translate(-50%, -50%) scale(0.75)" : "translate(-50%, -50%)",
                 }}
                 aria-label={`${group.ids.length} nearby users`}
               >

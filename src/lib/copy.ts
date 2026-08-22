@@ -23,6 +23,10 @@ const ENGLISH_COPY: Record<string, string> = {
   "nav.chats": "Chats",
   "nav.ai_vet": "AI Vet",
   "nav.map": "Map",
+  "nav.create": "Create",
+  "nav.notifications": "Notifications",
+  // Short form for the mobile bar, where "Notifications" does not fit at 10px.
+  "nav.notifications_short": "Alert",
   "app.name": "huddle",
   "home.wisdom.dog.1": "Keep daily walks predictable; dogs relax faster when exercise, meals, and rest follow a familiar rhythm.",
   "home.wisdom.dog.2": "Check paws after outdoor walks, especially after hot pavement, rain, or rough ground.",
@@ -68,7 +72,7 @@ const humanizeKey = (key: string) => {
 const interpolate = (template: string, vars?: CopyVars) => {
   if (!vars) return template;
   return Object.entries(vars).reduce(
-    (value, [name, replacement]) => value.replaceAll(`{${name}}`, String(replacement)),
+    (value, [name, replacement]) => value.split(`{${name}}`).join(String(replacement)),
     template,
   );
 };

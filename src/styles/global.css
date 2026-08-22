@@ -17,7 +17,18 @@ body,
 }
 
 :root {
+  /* Phone-width by default — the app's native proportions.
+     Past `lg` the column widens to 640px so desktop reads as a designed page
+     rather than a phone screenshot centred in a browser. Threads does the same.
+     Every surface that reads this var — shell, header, nav, sheets, drawers,
+     composer, share sheet — widens together, so nothing misaligns. */
   --app-max-width: 430px;
+}
+
+@media (min-width: 1024px) {
+  :root {
+    --app-max-width: 640px;
+  }
 }
 
 /* RULE 10: Urbanist exclusively */

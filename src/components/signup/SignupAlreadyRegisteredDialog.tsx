@@ -46,10 +46,10 @@ const SignupAlreadyRegisteredDialog = ({
   <Dialog open={open} onOpenChange={onOpenChange}>
     <DialogContent className="max-w-sm">
       <DialogTitle className="text-[18px] font-[600] text-[#424965]">
-        Already Registered
+        Welcome back
       </DialogTitle>
       <DialogDescription className="text-[13px] text-[rgba(74,73,101,0.70)]">
-        This email or phone number is already registered
+        Sign in to continue with your Huddle account.
       </DialogDescription>
 
       <div className="space-y-4 mt-4">

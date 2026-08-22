@@ -17,7 +17,7 @@ export const getThreadShareCount = async (threadId: string): Promise<number | nu
 export const recordThreadShareClick = async (threadId: string): Promise<number | null> => {
   const id = String(threadId || "").trim();
   if (!id) return null;
-  const { data, error } = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: { message?: string } | null }>)(
+  const { data, error } = await (supabase.rpc as unknown as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: { message?: string } | null }>)(
     "record_thread_share_click",
     { p_thread_id: id }
   );

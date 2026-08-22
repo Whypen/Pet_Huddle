@@ -5,6 +5,7 @@ import { useSignup } from "@/contexts/SignupContext";
 import { Loader2 } from "lucide-react";
 import { isRegisteredUserProfile } from "@/lib/signupFlow";
 import { hasSignupDraft } from "@/lib/signupOnboarding";
+import { buildJoinSignInPath, readAuthIntent, resolveAuthReturnTo } from "@/lib/authIntent";
 
 export const PublicRoute = ({
   children,
@@ -85,7 +86,7 @@ export const PublicRoute = ({
       </div>
     );
   }
-  if (session && mfaPending && location.pathname === "/auth") {
+  if (session && mfaPending && (location.pathname === "/auth" || location.pathname === "/join")) {
     return <>{children}</>;
   }
   if (user && !allowSignupFlowWithSession) {
@@ -96,14 +97,20 @@ export const PublicRoute = ({
       // allowSignupFlowWithSession and never reach this block. Token-gated
       // paths have their own early return above. All other public pages are
       // blocked — a partial-auth user has no business on /reset-password etc.
-      if (location.pathname === "/auth") return <>{children}</>;
-      return <Navigate to="/auth" replace />;
+      if (location.pathname === "/join") return <>{children}</>;
+      return <Navigate to={buildJoinSignInPath(`${location.pathname}${location.search}${location.hash}`)} replace />;
     }
     if (onboardingIncomplete) {
       if (allowSignupVerifyDecision) return <>{children}</>;
       return <Navigate to="/set-profile" replace />;
     }
-    return <Navigate to="/" replace />;
+    // A completed account must never fall through an auth-only route into the
+    // legacy Home surface. Preserve the exact surface that opened the auth
+    // flow; resolveAuthReturnTo also rejects cross-origin/protocol-relative
+    // values and provides the single approved product fallback.
+    const nextPath = new URLSearchParams(location.search).get("next");
+    const destination = resolveAuthReturnTo(readAuthIntent()?.returnTo, nextPath);
+    return <Navigate to={destination} replace />;
   }
   return <>{children}</>;
 };

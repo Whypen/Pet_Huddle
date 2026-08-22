@@ -1,17 +1,21 @@
 import { motion, AnimatePresence } from "framer-motion";
 import { X } from "lucide-react";
 import { resolveCopy } from "@/lib/copy";
-import { LegalContent } from "@/components/legal/LegalContent";
+import { LegalContent, type LegalType } from "@/components/legal/LegalContent";
 
 interface LegalModalProps {
   isOpen: boolean;
   onClose: () => void;
-  type: "privacy" | "terms";
+  type: Extract<LegalType, "privacy" | "terms" | "cookies">;
 }
 
 export const LegalModal = ({ isOpen, onClose, type }: LegalModalProps) => {
   const t = resolveCopy;
-  const title = type === "privacy" ? t("settings.privacy_policy") : t("settings.terms");
+  const title = type === "privacy"
+    ? t("settings.privacy_policy")
+    : type === "cookies"
+      ? "Cookies Policy"
+      : t("settings.terms");
 
   return (
     <AnimatePresence>
@@ -19,6 +23,9 @@ export const LegalModal = ({ isOpen, onClose, type }: LegalModalProps) => {
         <>
           {/* Backdrop */}
           <motion.div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="legal-modal-title"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -36,8 +43,10 @@ export const LegalModal = ({ isOpen, onClose, type }: LegalModalProps) => {
           >
             {/* Header */}
             <div className="flex items-center justify-between p-4 border-b border-border">
-              <h2 className="text-lg font-semibold">{title}</h2>
+              <h2 id="legal-modal-title" className="text-lg font-semibold">{title}</h2>
               <button
+                type="button"
+                aria-label="Close"
                 onClick={onClose}
                 className="p-2 rounded-full hover:bg-muted transition-colors"
               >

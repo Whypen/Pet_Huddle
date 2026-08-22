@@ -89,6 +89,9 @@
     { "src": "^/legal/privacy-choices/?$", "dest": "/brandweb/privacy-choices.html" },
     { "src": "^/legal/collection-notice/?$", "dest": "/brandweb/collection-notice.html" },
     { "src": "^/share/([^/]+)$", "dest": "/api/share?id=$1" },
+    { "src": "^/share/?$", "dest": "/api/open-app" },
+    { "src": "^/add-friend/?$", "dest": "/api/add-friend" },
+    { "src": "^/(threads|profile|carerprofile)/?$", "dest": "/api/open-app" },
     { "src": "^/api/waitlist/?$", "dest": "/api/waitlist" },
     {
       "src": "^/turnstile-native\\.html$",
@@ -126,6 +129,11 @@
     { "src": "^/security/secure/?$", "dest": "/index.html" },
     { "src": "^/signup(?:/.*)?$", "dest": "/index.html" },
     { "src": "^/join/[^/]+/?$", "dest": "/index.html" },
+    {
+      "src": "^/(join|social|map|groups|chats|chat-dialogue|notifications|member|premium|subscription|manage-subscription)(?:/)?$",
+      "dest": "/index.html"
+    },
+    { "src": "^/settings(?:/security)?/?$", "dest": "/index.html" },
     { "src": "^/admin(?:/.*)?$", "dest": "/index.html" },
     { "src": "^/assets/.*$", "status": 404 },
     { "src": "^/fonts/.*$", "status": 404 },

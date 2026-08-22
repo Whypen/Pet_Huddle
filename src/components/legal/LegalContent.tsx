@@ -7,7 +7,7 @@ import collectionHtml from "@/legal/collection-notice.html?raw";
 import serviceAgreementHtml from "@/legal/service-provider-agreement.html?raw";
 import bookingTermsHtml from "@/legal/service-requester-agreement.html?raw";
 
-type LegalType = "privacy" | "terms" | "community-guidelines" | "cookies" | "privacy-choices" | "collection-notice" | "service-agreement" | "booking-terms";
+export type LegalType = "privacy" | "terms" | "community-guidelines" | "cookies" | "privacy-choices" | "collection-notice" | "service-agreement" | "booking-terms";
 
 const HTML_MAP: Record<LegalType, string> = {
   "privacy": privacyHtml,
@@ -40,19 +40,19 @@ function withAppStyles(html: string): string {
   return Object.entries(LEGAL_ROUTE_MAP).reduce(
     (acc, [from, to]) =>
       acc
-        .replaceAll(`href="${from}"`, `href="${to}"`)
-        .replaceAll(`href='${from}'`, `href='${to}'`),
+        .split(`href="${from}"`).join(`href="${to}"`)
+        .split(`href='${from}'`).join(`href='${to}'`),
     withTopTarget,
   );
 }
 
-export const LegalContent = ({ type }: { type: LegalType }) => {
+export const LegalContent = ({ type, compact = false }: { type: LegalType; compact?: boolean }) => {
   const html = withAppStyles(HTML_MAP[type] ?? privacyHtml);
   return (
     <iframe
       srcDoc={html}
       className="w-full border-0"
-      style={{ minHeight: "calc(100vh - 96px)" }}
+      style={{ minHeight: compact ? 420 : "calc(100vh - 96px)", height: compact ? 420 : undefined }}
       title={type}
       sandbox="allow-same-origin allow-scripts allow-top-navigation-by-user-activation"
     />

@@ -32,7 +32,8 @@ export type FormFieldType =
   | "password"
   | "tel"
   | "number"
-  | "search";
+  | "search"
+  | "date";
 
 export interface FormFieldProps
   extends Omit<React.InputHTMLAttributes<HTMLInputElement>, "type" | "size"> {
@@ -52,6 +53,15 @@ export interface FormFieldProps
   clearable?: boolean;
   /** Callback when clear button is pressed. */
   onClear?: () => void;
+  /**
+   * Reserve the message line's height even when there is no message, so an error
+   * appearing on blur does not push the rest of the form down.
+   *
+   * Opt-in and off by default: existing callers collapse the slot when empty,
+   * and turning that on everywhere would add a blank line under every field in
+   * the app.
+   */
+  reserveMessageSpace?: boolean;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -67,6 +77,7 @@ const FormField = React.forwardRef<HTMLInputElement, FormFieldProps>(
       trailingSlot,
       clearable,
       onClear,
+      reserveMessageSpace,
       className,
       disabled,
       id: providedId,
@@ -187,7 +198,10 @@ const FormField = React.forwardRef<HTMLInputElement, FormFieldProps>(
         </div>
 
         {/* ── Message slot ── */}
-        <div style={{ marginTop: "var(--field-gap-cm, 6px)" }}>
+        <div
+          className={cn(reserveMessageSpace && "min-h-[16px]")}
+          style={{ marginTop: "var(--field-gap-cm, 6px)" }}
+        >
           {hasError && (
             <p
               id={`${fieldId}-error`}

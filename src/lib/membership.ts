@@ -3,14 +3,14 @@ export type MembershipTier = "free" | "plus" | "gold";
 const TIER_LABELS: Record<MembershipTier, string> = {
   free: "Free",
   plus: "Huddle+",
-  gold: "Huddle Gold",
+  gold: "huddle＊",
 };
 
 export const normalizeMembershipTier = (value?: string | null): MembershipTier => {
   const normalized = String(value ?? "").trim().toLowerCase();
   if (
     normalized === "gold" ||
-    normalized === "huddle gold" ||
+    normalized === "huddle＊" ||
     normalized.startsWith("gold_")
   ) {
     return "gold";

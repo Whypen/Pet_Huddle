@@ -276,7 +276,7 @@ export const PublicProfileSheet = ({ isOpen, onClose, loading, fallbackName, dat
         type: `${starUpgradeTier}_${starUpgradeBilling === "annual" ? "annual" : "monthly"}`,
         lookupKey: selectedPlan.lookupKey,
         priceId: selectedPlan.priceId,
-        successUrl: `${window.location.origin}/premium`,
+        successUrl: `${window.location.origin}/member`,
         cancelUrl: window.location.href,
       }, "profile-star-upgrade");
     } catch {

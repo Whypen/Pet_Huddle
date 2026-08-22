@@ -32,6 +32,7 @@ import {
   Trash2,
   MoreHorizontal,
   Camera,
+  BadgeCheck,
 } from "lucide-react";
 import { NeuButton } from "@/components/ui/NeuButton";
 import { Input } from "@/components/ui/input";
@@ -43,6 +44,7 @@ import { cn } from "@/lib/utils";
 import { useNavigate } from "react-router-dom";
 import { PostMediaCarousel } from "@/components/social/PostMediaCarousel";
 import { ShareSheet } from "@/components/social/ShareSheet";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { areUsersBlocked } from "@/lib/blocking";
 import { MediaThumb } from "@/components/media/MediaThumb";
 import { buildShareModel, type ShareModel } from "@/lib/shareModel";
@@ -106,8 +108,11 @@ interface MapAlert {
   social_status?: string | null;
   social_url?: string | null;
   is_sensitive?: boolean;
+  verified_only?: boolean;
+  share_access_token?: string | null;
   location_street?: string | null;
   location_district?: string | null;
+  is_demo?: boolean;
   creator: {
     display_name: string | null;
     social_id?: string | null;
@@ -123,7 +128,8 @@ interface PinDetailModalProps {
   onOpenProfile?: (userId: string, fallbackName: string) => void;
 }
 
-  const PinDetailModal = ({ alert, onClose, onHide, onRefresh, onOpenProfile }: PinDetailModalProps) => {
+const PinDetailModal = ({ alert, onClose, onHide, onRefresh, onOpenProfile }: PinDetailModalProps) => {
+  const isMobile = useIsMobile();
   const { user, profile } = useAuth();
   const navigate = useNavigate();
 
@@ -139,8 +145,24 @@ interface PinDetailModalProps {
   const [editMedia, setEditMedia] = useState<EditableBroadcastMedia[]>([]);
   const [shareOpen, setShareOpen] = useState(false);
   const [sharePayload, setSharePayload] = useState<ShareModel | null>(null);
+  const [verifiedOnly, setVerifiedOnly] = useState(alert?.verified_only === true);
 
   const [supportCount, setSupportCount] = useState(0);
+
+  useEffect(() => {
+    setVerifiedOnly(alert?.verified_only === true);
+    if (!alert?.id || alert.verified_only === true || !user?.id) return;
+    let active = true;
+    void (supabase.rpc as unknown as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>)(
+      "get_broadcast_alert_verified_only",
+      { p_alert_id: alert.id },
+    ).then(({ data, error }) => {
+      if (active && !error) setVerifiedOnly(data === true);
+    });
+    return () => {
+      active = false;
+    };
+  }, [alert?.id, alert?.verified_only, user?.id]);
 
   // Sync support count from alert prop
   useEffect(() => {
@@ -156,14 +178,8 @@ interface PinDetailModalProps {
         if (!cancelled) setLiked(false);
         return;
       }
-      const { data } = await supabase
-        .from("broadcast_alert_interactions" as "profiles")
-        .select("id")
-        .eq("alert_id", alert.id)
-        .eq("user_id", user.id)
-        .eq("interaction_type", "support")
-        .maybeSingle();
-      if (!cancelled) setLiked(Boolean(data));
+      const { data, error } = await supabase.rpc("native_map_alert_supported", { p_alert_id: alert.id });
+      if (!cancelled && !error) setLiked(Boolean(data));
     };
     void loadSupportState();
     return () => {
@@ -173,18 +189,14 @@ interface PinDetailModalProps {
 
   const syncSupportCount = useCallback(async () => {
     if (!alert) return;
-    const { count } = await supabase
-      .from("broadcast_alert_interactions" as "profiles")
-      .select("id", { count: "exact", head: true })
-      .eq("alert_id", alert.id)
-      .eq("interaction_type", "support");
-    setSupportCount(Number(count ?? 0));
+    const { data, error } = await supabase.rpc("native_map_alert_support_count", { p_alert_id: alert.id });
+    if (!error) setSupportCount(Number(data ?? 0));
   }, [alert]);
 
   const enqueueSupportNotification = useCallback(async () => {
     if (!alert?.creator_id || !user?.id) return;
     if (alert.creator_id === user.id) return;
-    await (supabase.rpc as (fn: string, params?: Record<string, unknown>) => Promise<{ error: { message?: string } | null }>)(
+    await (supabase.rpc as unknown as (fn: string, params?: Record<string, unknown>) => Promise<{ error: { message?: string } | null }>)(
       "upsert_notification_window",
       {
         p_owner_user_id: alert.creator_id,
@@ -216,12 +228,10 @@ interface PinDetailModalProps {
     if (liked) {
       // Already liked → remove support
       try {
-        const { error } = await supabase
-          .from("broadcast_alert_interactions" as "profiles")
-          .delete()
-          .eq("alert_id", alert.id)
-          .eq("user_id", user.id)
-          .eq("interaction_type", "support");
+        const { error } = await supabase.rpc("native_map_remove_alert_interaction", {
+          p_alert_id: alert.id,
+          p_interaction_type: "support",
+        });
         if (error) throw error;
 
         setLiked(false);
@@ -235,16 +245,15 @@ interface PinDetailModalProps {
 
     // Not yet liked → add support
     try {
-      const { error } = await (supabase.from("broadcast_alert_interactions" as "profiles") as unknown as {
-        upsert: (v: object, o: object) => Promise<{ error: unknown }>;
-      }).upsert(
-        { alert_id: alert.id, user_id: user.id, interaction_type: "support" },
-        { onConflict: "alert_id,user_id,interaction_type", ignoreDuplicates: true },
-      );
+      const { data, error } = await supabase.rpc("native_map_upsert_alert_interaction", {
+        p_alert_id: alert.id,
+        p_interaction_type: "support",
+      });
       if (error) throw error;
 
       setLiked(true);
-      await syncSupportCount();
+      const result = Array.isArray(data) ? data[0] : data;
+      setSupportCount(Number(result?.support_count ?? supportCount + 1));
       await enqueueSupportNotification();
       onRefresh();
     } catch {
@@ -276,12 +285,10 @@ interface PinDetailModalProps {
   const handleReportSubmitSuccess = useCallback(async () => {
     if (!user || !alert) return;
     try {
-      const { error } = await (supabase.from("broadcast_alert_interactions" as "profiles") as unknown as {
-        upsert: (v: object, o: object) => Promise<{ error: unknown }>;
-      }).upsert(
-        { alert_id: alert.id, user_id: user.id, interaction_type: "report" },
-        { onConflict: "alert_id,user_id,interaction_type", ignoreDuplicates: true },
-      );
+      const { error } = await supabase.rpc("native_map_upsert_alert_interaction", {
+        p_alert_id: alert.id,
+        p_interaction_type: "report",
+      });
       if (error) throw error;
 
       onRefresh();
@@ -292,7 +299,7 @@ interface PinDetailModalProps {
 
   const handleBlockUser = async () => {
     if (!alert?.creator_id) return;
-    const { error } = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ error: { message?: string } | null }>)(
+    const { error } = await (supabase.rpc as unknown as (fn: string, args?: Record<string, unknown>) => Promise<{ error: { message?: string } | null }>)(
       "block_user",
       { p_blocked_id: alert.creator_id }
     );
@@ -318,7 +325,7 @@ interface PinDetailModalProps {
   // Creator: Remove alert
   const handleRemoveAlert = async () => {
     if (!alert || !user) return;
-    const { error } = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ error: { message?: string } | null }>)(
+    const { error } = await (supabase.rpc as unknown as (fn: string, args?: Record<string, unknown>) => Promise<{ error: { message?: string } | null }>)(
       "delete_broadcast_alert",
       {
         p_alert_id: alert.id,
@@ -364,7 +371,7 @@ interface PinDetailModalProps {
     );
     const nextImages = [...existingUrls, ...newUploads].filter(Boolean);
 
-    const { data, error } = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ data: Record<string, unknown> | null; error: { message?: string } | null }>)(
+    const { data, error } = await (supabase.rpc as unknown as (fn: string, args?: Record<string, unknown>) => Promise<{ data: Record<string, unknown> | null; error: { message?: string } | null }>)(
       "update_broadcast_alert",
       {
         p_alert_id: alert.id,
@@ -398,45 +405,10 @@ interface PinDetailModalProps {
   const openShareSheet = useCallback(async () => {
     if (!alert?.id) return;
 
-    let displayName = alert?.creator?.display_name || null;
-    let socialId = alert?.creator?.social_id || null;
-    const creatorId = String(alert?.creator_id || "").trim();
-
-    if (creatorId && (!displayName || !socialId)) {
-      try {
-        const { data: creatorProfile } = await (supabase
-          .from("profiles")
-          .select("display_name,social_id")
-          .eq("id", creatorId)
-          .maybeSingle() as Promise<{ data: { display_name?: string | null; social_id?: string | null } | null; error: { message?: string } | null }>);
-        displayName = creatorProfile?.display_name || displayName;
-        socialId = creatorProfile?.social_id || socialId;
-      } catch {
-        // Non-blocking: continue with next fallback.
-      }
-    }
-
-    if (socialThreadId && (!displayName || !socialId)) {
-      try {
-        const { data: threadRow } = await (supabase
-          .from("threads")
-          .select("user_id")
-          .eq("id", socialThreadId)
-          .maybeSingle() as Promise<{ data: { user_id?: string | null } | null; error: { message?: string } | null }>);
-        const authorId = String(threadRow?.user_id || "").trim();
-        if (authorId) {
-          const { data: profileRow } = await (supabase
-            .from("profiles")
-            .select("display_name,social_id")
-            .eq("id", authorId)
-            .maybeSingle() as Promise<{ data: { display_name?: string | null; social_id?: string | null } | null; error: { message?: string } | null }>);
-          displayName = profileRow?.display_name || displayName;
-          socialId = profileRow?.social_id || socialId;
-        }
-      } catch {
-        // Keep share UX non-blocking if enrichment query fails.
-      }
-    }
+    const displayName = alert?.creator?.display_name || null;
+    const socialId = alert?.creator?.social_id || null;
+    // The audience-safe alert-detail RPC owns creator identity. A Map share
+    // must not widen that projection with raw profiles or threads reads.
 
     const firstAlertImage = (
       Array.isArray(alert.media_urls)
@@ -445,8 +417,7 @@ interface PinDetailModalProps {
     ) || (alert.photo_url ? String(alert.photo_url).trim() : null);
 
     const origin = typeof window !== "undefined" ? window.location.origin : "";
-    setSharePayload(
-      buildShareModel({
+    const baseShare = buildShareModel({
         origin,
         contentType: "alert",
         contentId: alert.id,
@@ -456,26 +427,43 @@ interface PinDetailModalProps {
         socialId,
         contentSnippet: alert?.description || alert?.title || null,
         imagePath: firstAlertImage,
-      }),
-    );
+      });
+    const existingShareToken = String(alert.share_access_token || "").trim();
+    if (existingShareToken) {
+      const directUrl = `${origin}/map?alert=${encodeURIComponent(alert.id)}&access=${encodeURIComponent(existingShareToken)}`;
+      setSharePayload({ ...baseShare, appUrl: directUrl, canonicalUrl: directUrl });
+    } else if (verifiedOnly) {
+      const { data: token, error } = await (supabase.rpc as unknown as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: { message?: string } | null }>)(
+        "create_broadcast_alert_share_link",
+        { p_alert_id: alert.id },
+      );
+      if (error || typeof token !== "string" || !token.trim()) {
+        toast.error("Unable to create a private alert link.");
+        return;
+      }
+      const directUrl = `${origin}/map?alert=${encodeURIComponent(alert.id)}&access=${encodeURIComponent(token.trim())}`;
+      setSharePayload({ ...baseShare, appUrl: directUrl, canonicalUrl: directUrl });
+    } else {
+      setSharePayload(baseShare);
+    }
     setShareOpen(true);
   }, [
     alert?.creator?.display_name,
     alert?.creator?.social_id,
-    alert?.creator_id,
     alert?.description,
     alert?.id,
     alert?.media_urls,
     alert?.photo_url,
     alert?.title,
-    socialThreadId,
+    alert?.share_access_token,
+    verifiedOnly,
   ]);
 
   const handleShareAction = useCallback(async () => {
     if (!socialThreadId) return;
 
     try {
-      await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: { message?: string } | null }>)(
+      await (supabase.rpc as unknown as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: { message?: string } | null }>)(
         "record_thread_share_click",
         { p_thread_id: socialThreadId },
       );
@@ -538,17 +526,17 @@ interface PinDetailModalProps {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[5000] bg-black/50 flex items-end justify-center"
+          className="fixed inset-0 z-[5000] bg-black/50 flex items-end justify-center md:items-center md:p-6"
           onClick={onClose}
         >
           <motion.div
-            data-huddle-bottom-sheet="true"
-            initial={{ y: "100%" }}
-            animate={{ y: 0 }}
-            exit={{ y: "100%" }}
+            data-huddle-bottom-sheet={isMobile ? "true" : undefined}
+            initial={isMobile ? { y: "100%" } : { y: 24, scale: 0.98, opacity: 0 }}
+            animate={{ y: 0, scale: 1, opacity: 1 }}
+            exit={isMobile ? { y: "100%" } : { y: 16, scale: 0.98, opacity: 0 }}
             transition={{ type: "spring", damping: 25, stiffness: 300 }}
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-[var(--app-max-width,430px)] bg-card rounded-t-3xl max-h-[calc(100svh-env(safe-area-inset-bottom,0px)-8px)] overflow-hidden flex min-h-0 flex-col"
+            className="w-full max-w-[var(--app-max-width,430px)] bg-card rounded-t-3xl max-h-[calc(100svh-env(safe-area-inset-bottom,0px)-8px)] overflow-hidden flex min-h-0 flex-col md:max-w-[620px] md:rounded-3xl md:border md:border-border"
           >
             {/* Content area */}
             <div className="min-h-0 max-h-[calc(100svh-env(safe-area-inset-bottom,0px)-120px)] overflow-y-auto p-6 pb-4 overscroll-contain">
@@ -561,6 +549,12 @@ interface PinDetailModalProps {
                   >
                     {alert.alert_type} · {timeAgo(alert.created_at)}
                   </span>
+                  {verifiedOnly && (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-emerald-400/50 bg-emerald-50/70 px-2 py-1 text-xs font-medium text-emerald-700 backdrop-blur-md">
+                      <BadgeCheck className="h-3.5 w-3.5" />
+                      Verified User only
+                    </span>
+                  )}
                 </div>
                 <div className="flex items-center gap-2">
                   {canRemove && (
@@ -769,16 +763,16 @@ interface PinDetailModalProps {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[3000] bg-black/50 flex items-end"
+          className="fixed inset-0 z-[3000] bg-black/50 flex items-end justify-center md:items-center md:p-6"
           onClick={() => setIsEditing(false)}
         >
           <motion.div
-            data-huddle-bottom-sheet="true"
-            initial={{ y: "100%" }}
-            animate={{ y: 0 }}
-            exit={{ y: "100%" }}
+            data-huddle-bottom-sheet={isMobile ? "true" : undefined}
+            initial={isMobile ? { y: "100%" } : { y: 24, scale: 0.98, opacity: 0 }}
+            animate={{ y: 0, scale: 1, opacity: 1 }}
+            exit={isMobile ? { y: "100%" } : { y: 16, scale: 0.98, opacity: 0 }}
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-[var(--app-max-width,430px)] bg-card rounded-t-3xl px-6 pt-6 huddle-sheet-bottom-padding max-h-[calc(100svh-env(safe-area-inset-bottom,0px)-8px)] overflow-y-auto"
+            className="w-full max-w-[var(--app-max-width,430px)] bg-card rounded-t-3xl px-6 pt-6 huddle-sheet-bottom-padding max-h-[calc(100svh-env(safe-area-inset-bottom,0px)-8px)] overflow-y-auto md:max-w-[620px] md:rounded-3xl md:border md:border-border md:pb-6"
           >
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-bold text-brandText">Edit Alert</h3>

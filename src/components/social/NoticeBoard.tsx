@@ -4,14 +4,12 @@ import {
   X,
   Image,
   Search,
-  Loader2,
   MessageSquare,
   Heart,
   MessageCircle,
   Send,
   ArrowUp,
   Pin,
-  ThumbsUp,
   Flag,
   EyeOff,
   Ban,
@@ -21,6 +19,8 @@ import {
   Trash2,
   BadgeCheck
 } from "lucide-react";
+import { HuddlePawIcon } from "@/components/icons/HuddlePawIcon";
+import { SettingsAvatar } from "@/components/layout/SettingsAvatar";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { NeuButton } from "@/components/ui/NeuButton";
@@ -30,14 +30,12 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { isVerifiedProfile } from "@/lib/verification";
 import { resolveCopy } from "@/lib/copy";
-import { useUpsellBanner } from "@/contexts/UpsellBannerContext";
 // browser-image-compression is dynamically imported inside prepareComposerMedia
 // so the ~50 KB lib stays out of the initial Social bundle.
 import { useNavigate, useSearchParams, useParams } from "react-router-dom";
 import { MediaThumb } from "@/components/media/MediaThumb";
 import { areUsersBlocked, loadBlockedUserIdsFor } from "@/lib/blocking";
 import { PostMediaCarousel } from "@/components/social/PostMediaCarousel";
-import { quotaConfig } from "@/config/quotaConfig";
 import { buildShareModel, type ShareModel } from "@/lib/shareModel";
 import { detectSensitiveImage } from "@/lib/sensitiveContent";
 import {
@@ -49,9 +47,17 @@ import {
   uploadSocialVideoToBunny,
   type SocialVideoMetadata,
 } from "@/lib/socialVideo";
-import emptyChatImage from "@/assets/Notifications/Empty Chat.png";
 import { useSafetyRestrictions } from "@/hooks/useSafetyRestrictions";
 import { NoticeBoardComposerModal } from "@/components/social/noticeboard/NoticeBoardComposerModal";
+
+const callRpc = supabase.rpc.bind(supabase) as unknown as (
+  fn: string,
+  args?: Record<string, unknown>,
+) => Promise<{ data: unknown; error: { message?: string } | null }>;
+import { SocialComposerBar } from "@/components/social/SocialComposerBar";
+import { SOCIAL_SECTIONS, SOCIAL_SECTION_ALIASES, type SocialSection } from "@/components/social/socialSections";
+import { SocialSectionList } from "@/components/social/SocialSectionList";
+import { HuddleInlineLoader, SocialFeedSkeleton } from "@/components/social/SocialLoadingState";
 import { NoticeBoardOverlays } from "@/components/social/noticeboard/NoticeBoardOverlays";
 import { ExternalLinkPreviewCard } from "@/components/ui/ExternalLinkPreviewCard";
 import { stripExternalUrlFromText } from "@/lib/externalLinkPreview";
@@ -60,6 +66,21 @@ import {
   fetchFocusedThreadRow as fetchFocusedThreadRowData,
   hydrateRows as hydrateFeedRows,
 } from "@/components/social/noticeboard/feedData";
+import { readSocialFeedCache, writeSocialFeedCache } from "@/components/social/noticeboard/socialFeedCache";
+import {
+  createSocialComment,
+  deleteSocialComment,
+  fetchSocialComments,
+  fetchSupportedSocialThreadIds,
+  getSocialViewerScope,
+  registerSocialMediaAsset,
+  requestSocialMediaCleanup,
+  replaceSocialPostMentions,
+  replaceSocialReplyMentions,
+  setSocialCommentSupport,
+  setSocialThreadSupport,
+  updateSocialComment,
+} from "@/components/social/noticeboard/socialParityApi";
 import type {
   ActiveMentionQuery,
   ComposerMedia,
@@ -75,29 +96,23 @@ import type {
 } from "@/components/social/noticeboard/types";
 
 
-const tags = [
-  { id: "Pets", label: "Pets" },
-  { id: "Social", label: "Social" },
-  { id: "Health", label: "Health" },
-  { id: "News", label: "News" },
-  { id: "Marketplace", label: "Marketplace" },
-  { id: "Adoption", label: "Adoption" },
-  { id: "Meetup", label: "Meetup" },
-];
+const tags = SOCIAL_SECTIONS.map((section) => ({ id: section, label: section }));
 
 const AuthorHandle = ({
   displayName,
   socialId,
   className = "",
   socialClassName = "",
+  isPillar = false,
 }: {
   displayName?: string | null;
   socialId?: string | null;
   className?: string;
   socialClassName?: string;
+  isPillar?: boolean;
 }) => (
   <span className={cn("flex min-w-0 items-baseline gap-1.5", className)}>
-    <span className="truncate font-semibold text-brandText">{displayName || "Anonymous"}</span>
+    <span className={cn("truncate font-semibold", isPillar ? "text-[var(--engagement-pillar)]" : "text-brandText")}>{displayName || "Anonymous"}</span>
     {socialId ? (
       <span className={cn("truncate text-xs font-medium text-[rgba(74,73,101,0.52)]", socialClassName)}>
         @{socialId}
@@ -177,10 +192,17 @@ type MentionSeed = MentionSuggestion & {
 };
 
 interface NoticeBoardProps {
-  onPremiumClick: () => void;
   composeSignal: number;
   scrollContainerRef: RefObject<HTMLDivElement>;
+  selectedTopic?: SocialSection | null;
+  onSelectedTopicChange?: (topic: SocialSection | null) => void;
+  searchQuery?: string;
+  onSearchQueryChange?: (value: string) => void;
+  sortMode?: SocialSortMode;
+  onSortModeChange?: (value: SocialSortMode) => void;
 }
+
+export type SocialSortMode = "Trending" | "Latest" | "Saves";
 
 type SocialFeedEventType =
   | "impression"
@@ -198,8 +220,8 @@ type SocialFeedEventType =
 const MAX_COMPOSER_WORDS = 500;
 const MAX_COMPOSER_MEDIA = 10;
 const MENTION_LIVE_SUGGESTIONS_ENABLED = true;
-const MIN_SOCIAL_MEDIA_ASPECT = 3 / 4;
-const MAX_SOCIAL_MEDIA_ASPECT = 16 / 9;
+const MIN_SOCIAL_MEDIA_ASPECT = 9 / 16;
+const MAX_SOCIAL_MEDIA_ASPECT = 1.91;
 const clampSocialMediaAspect = (aspect: number) =>
   Math.min(Math.max(aspect || 1, MIN_SOCIAL_MEDIA_ASPECT), MAX_SOCIAL_MEDIA_ASPECT);
 
@@ -331,6 +353,10 @@ const formatInlineMarkup = (value: string) => {
 
 const mentionTokenMatcher = /@([A-Za-z0-9_.-]{2,24})\b/g;
 const urlMatcher = /\bhttps?:\/\/[^\s<>"')]+/gi;
+const bareDomainMatcher = /(?:^|[\s(])((?:www\.)?(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}(?:\/[^\s<>"')\]]*)?)/i;
+const HUDDLE_PREVIEW_IMAGE = "https://huddle.pet/brandweb/og-card.png";
+const HUDDLE_PREVIEW_TITLE = "huddle — Pet safety, community & care";
+const HUDDLE_PREVIEW_DESCRIPTION = "One app for lost pets, trusted carers, local pet community, and organised pet records. No pet left behind.";
 
 const normalizeHttpUrl = (value: string) => {
   try {
@@ -345,9 +371,13 @@ const normalizeHttpUrl = (value: string) => {
 const extractFirstHttpUrl = (value: string) => {
   if (!value) return null;
   const match = value.match(urlMatcher);
-  if (!match || match.length === 0) return null;
-  const trimmedCandidate = match[0].replace(/[|.,!?;:)\]]+$/g, "");
-  return normalizeHttpUrl(trimmedCandidate);
+  if (match && match.length > 0) {
+    const trimmedCandidate = match[0].replace(/[|.,!?;:)\]]+$/g, "");
+    return normalizeHttpUrl(trimmedCandidate);
+  }
+  const bareDomainMatch = value.match(bareDomainMatcher);
+  const bareDomainUrl = bareDomainMatch?.[1]?.replace(/[|.,!?;:)\]]+$/g, "");
+  return bareDomainUrl ? normalizeHttpUrl(`https://${bareDomainUrl}`) : null;
 };
 
 const formatUrlLabel = (url: string) => {
@@ -389,6 +419,23 @@ const parseYouTubeVideoId = (url: string) => {
 };
 
 const buildIntrinsicLinkPreview = (url: string): LinkPreview | null => {
+  try {
+    const parsed = new URL(/^https?:\/\//i.test(url) ? url : `https://${url}`);
+    if (parsed.hostname.replace(/^www\./, "").toLowerCase() === "huddle.pet") {
+      return {
+        url,
+        title: HUDDLE_PREVIEW_TITLE,
+        description: HUDDLE_PREVIEW_DESCRIPTION,
+        image: HUDDLE_PREVIEW_IMAGE,
+        siteName: "huddle",
+        loading: false,
+        failed: false,
+        resolved: true,
+      };
+    }
+  } catch {
+    // Non-URL values fall through to the external preview path.
+  }
   const youtubeId = parseYouTubeVideoId(url);
   if (!youtubeId) return null;
   return {
@@ -539,15 +586,25 @@ const buildFeedCursor = (thread?: Thread | null): FeedCursor | null => {
   return { created_at: thread.created_at, id: thread.id, score: thread.score ?? null };
 };
 
-export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef }: NoticeBoardProps) => {
+export const NoticeBoard = ({
+  composeSignal,
+  scrollContainerRef,
+  selectedTopic,
+  onSelectedTopicChange,
+  searchQuery: controlledSearchQuery,
+  onSearchQueryChange,
+  sortMode: controlledSortMode,
+  onSortModeChange,
+}: NoticeBoardProps) => {
   const t = resolveCopy;
   const { user, profile } = useAuth();
   const { isActive } = useSafetyRestrictions();
-  const { showUpsellBanner } = useUpsellBanner();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const params = useParams();
   const virtuosoRef = useRef<VirtuosoHandle | null>(null);
+  const composerShellRef = useRef<HTMLDivElement | null>(null);
+  const composerInlineHostRef = useRef<HTMLDivElement | null>(null);
   const [scrollerEl, setScrollerEl] = useState<HTMLElement | null>(null);
   useEffect(() => {
     setScrollerEl(scrollContainerRef?.current ?? null);
@@ -555,6 +612,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   const [notices, setNotices] = useState<Thread[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [feedError, setFeedError] = useState("");
   const [pullRefreshing, setPullRefreshing] = useState(false);
   const [pullOffset, setPullOffset] = useState(0);
   const [hasMore, setHasMore] = useState(true);
@@ -608,9 +666,36 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   // SPRINT 3: Track liked notices for green (#22c55e) button state
   const [likedNotices, setLikedNotices] = useState<Set<string>>(new Set());
   const [likedComments, setLikedComments] = useState<Set<string>>(new Set());
-  const [searchQuery, setSearchQuery] = useState("");
-  const [topicFilters, setTopicFilters] = useState<string[]>([]);
-  const [sortMode, setSortMode] = useState<"" | "Trending" | "Latest" | "Saves">("Latest");
+  const [internalSearchQuery, setInternalSearchQuery] = useState("");
+  const searchQuery = controlledSearchQuery ?? internalSearchQuery;
+  const setSearchQuery = useCallback((value: string) => {
+    if (controlledSearchQuery !== undefined) onSearchQueryChange?.(value);
+    else setInternalSearchQuery(value);
+  }, [controlledSearchQuery, onSearchQueryChange]);
+  const [internalTopicFilters, setInternalTopicFilters] = useState<string[]>([]);
+  const topicFilters = useMemo(
+    () => selectedTopic === undefined
+      ? internalTopicFilters
+      : selectedTopic
+        ? [selectedTopic]
+        : [],
+    [internalTopicFilters, selectedTopic],
+  );
+  const setTopicFilters = useCallback((next: string[] | ((previous: string[]) => string[])) => {
+    const resolved = typeof next === "function" ? next(topicFilters) : next;
+    const first = resolved[0];
+    if (selectedTopic !== undefined) {
+      onSelectedTopicChange?.(SOCIAL_SECTIONS.includes(first as SocialSection) ? first as SocialSection : null);
+      return;
+    }
+    setInternalTopicFilters(first ? [first] : []);
+  }, [onSelectedTopicChange, selectedTopic, topicFilters]);
+  const [internalSortMode, setInternalSortMode] = useState<SocialSortMode>("Latest");
+  const sortMode = controlledSortMode ?? internalSortMode;
+  const setSortMode = useCallback((value: SocialSortMode) => {
+    if (controlledSortMode !== undefined) onSortModeChange?.(value);
+    else setInternalSortMode(value);
+  }, [controlledSortMode, onSortModeChange]);
   const noticesRef = useRef<Thread[]>([]);
   const commentsByThreadRef = useRef<Record<string, ThreadComment[]>>({});
   const filtersRowRef = useRef<HTMLDivElement | null>(null);
@@ -655,7 +740,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   const linkPreviewQueueRef = useRef<string[]>([]);
   const linkPreviewActiveCountRef = useRef(0);
   const linkPreviewAccessRef = useRef<Map<string, number>>(new Map());
-  const composerUploadTickerRef = useRef<ReturnType<typeof window.setInterval> | null>(null);
+  const composerUploadTickerRef = useRef<number | null>(null);
   const nativeWebModeAppliedRef = useRef<string | null>(null);
   const effectiveTier = (profile?.effective_tier || profile?.tier || "free").toLowerCase();
   const isGoldUser = effectiveTier === "gold";
@@ -709,7 +794,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       p_metadata: metadata ?? {},
     };
     try {
-      const { data, error } = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: { message?: string } | null }>)(
+      const { data, error } = await callRpc(
         "record_social_feed_event",
         payload,
       );
@@ -1339,15 +1424,30 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 
   const fetchNotices = useCallback(async (reset: boolean = false) => {
     const requestToken = ++feedRequestTokenRef.current;
+    if (reset) setFeedError("");
     try {
-      if (reset) setLoading(true);
-      else setLoadingMore(true);
-
       if (!user?.id) {
         setNotices([]);
         resetHydrationState();
         setHasMore(false);
         return;
+      }
+
+      if (reset) {
+        const cached = readSocialFeedCache(user.id, sortMode);
+        if (cached?.rows.length) {
+          resetHydrationState();
+          noticesRef.current = cached.rows;
+          setNotices(cached.rows);
+          lastCursorRef.current = buildFeedCursor(cached.rows[cached.rows.length - 1]);
+          setHasMore(cached.hasMore);
+          setLoading(false);
+          if (cached.reusable && !focusThreadId) return;
+        } else {
+          setLoading(true);
+        }
+      } else {
+        setLoadingMore(true);
       }
 
       if (reset) {
@@ -1367,8 +1467,12 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
         }
 
         resetHydrationState();
-        noticesRef.current = nextRows;
-        setNotices(nextRows);
+        // The feed RPC does not own `is_sensitive`. Match native Social by
+        // concealing unknown media until the authoritative safety hydration
+        // resolves instead of briefly painting it unblurred.
+        const concealedRows = nextRows.map((row) => ({ ...row, is_sensitive: true }));
+        noticesRef.current = concealedRows;
+        setNotices(concealedRows);
         lastCursorRef.current = buildFeedCursor(nextRows[nextRows.length - 1]);
         setHasMore(pageRows.length === 20);
         setLoading(false);
@@ -1379,6 +1483,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
           noticesRef.current = hydrated.rows;
           setNotices(hydrated.rows);
           applyHydratedRows(hydrated, { reset: true });
+          writeSocialFeedCache(user.id, sortMode, hydrated.rows, pageRows.length === 20);
         })();
         return;
       } else {
@@ -1397,15 +1502,26 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       }
     } catch (error) {
       console.error("Error fetching notices:", error);
+      if (reset && noticesRef.current.length === 0) {
+        setFeedError("Unable to load Social right now.");
+      }
     } finally {
       setLoading(false);
       setLoadingMore(false);
     }
-  }, [applyHydratedRows, fetchFeedPage, fetchFocusedThreadRow, focusThreadId, hydrateRows, resetHydrationState, user?.id]);
+  }, [applyHydratedRows, fetchFeedPage, fetchFocusedThreadRow, focusThreadId, hydrateRows, resetHydrationState, sortMode, user?.id]);
 
   useEffect(() => {
     fetchNotices(true);
   }, [fetchNotices]);
+
+  useEffect(() => {
+    if (!user?.id || notices.length === 0) return undefined;
+    const timeout = window.setTimeout(() => {
+      writeSocialFeedCache(user.id, sortMode, notices, hasMore);
+    }, 120);
+    return () => window.clearTimeout(timeout);
+  }, [hasMore, notices, sortMode, user?.id]);
 
   const fetchNewerNotices = useCallback(async () => {
     if (!user?.id) return false;
@@ -1445,16 +1561,11 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       return;
     }
     void (async () => {
-      const { data, error } = await supabase
-        .from("thread_supports" as "profiles")
-        .select("thread_id")
-        .eq("user_id", user.id)
-        .in("thread_id", ids);
-      if (error) return;
-      const next = new Set(
-        (((data || []) as Array<{ thread_id?: string | null }>).map((row) => row.thread_id).filter(Boolean)) as string[]
-      );
-      setLikedNotices(next);
+      try {
+        setLikedNotices(await fetchSupportedSocialThreadIds(ids));
+      } catch (error) {
+        console.error("[social.support_state.load_failed]", error);
+      }
     })();
   }, [noticeIdsKey, user?.id]);
 
@@ -1475,7 +1586,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     if (focusThreadId) {
       setTopicFilters([]);
     }
-  }, [focusThreadId]);
+  }, [focusThreadId, setTopicFilters]);
 
   useEffect(() => {
     if (!focusedThreadId) return;
@@ -1635,24 +1746,6 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     [scrollContainerRef]
   );
 
-  const openThreadQuotaDialog = () => {
-    const tier = (profile?.effective_tier || profile?.tier || "free").toLowerCase();
-    if (tier === "gold" || tier === "plus" || tier === "free") {
-      const ctaRequired = tier !== "gold";
-      showUpsellBanner({
-        message: quotaConfig.copy.threads.exhausted[tier],
-        ctaLabel: ctaRequired ? "See plans" : undefined,
-        onCta: ctaRequired ? onPremiumClick : undefined,
-      });
-      return;
-    }
-    showUpsellBanner({
-      message: quotaConfig.copy.threads.exhausted.free,
-      ctaLabel: "See plans",
-      onCta: onPremiumClick,
-    });
-  };
-
   const revokeComposerMedia = useCallback((items: ComposerMedia[]) => {
     items.forEach((item) => URL.revokeObjectURL(item.previewUrl));
   }, []);
@@ -1744,7 +1837,8 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
           const { default: imageCompression } = await import("browser-image-compression");
           nextFile = await imageCompression(file, {
             maxSizeMB: 0.8,
-            maxWidthOrHeight: 1800,
+            maxWidthOrHeight: 1600,
+            initialQuality: 0.86,
             useWebWorker: true,
           });
           aspectRatio = await readImageAspect(nextFile);
@@ -1823,6 +1917,12 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
         const fileName = `${user.id}/${scope}/${Date.now()}-${index}-${Math.random().toString(36).slice(2, 8)}.${fileExt}`;
         const { error: uploadError } = await supabase.storage.from("notices").upload(fileName, item.file);
         if (uploadError) throw uploadError;
+        try {
+          await registerSocialMediaAsset(fileName, scope);
+        } catch (registrationError) {
+          await requestSocialMediaCleanup(fileName, "register_social_media_failed").catch(() => undefined);
+          throw registrationError;
+        }
         const { data: publicData } = supabase.storage.from("notices").getPublicUrl(fileName);
         uploadedUrls.push(publicData.publicUrl);
         const ratio = (index + 1) / items.length;
@@ -1889,7 +1989,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       href: string;
       data?: Record<string, unknown>;
     }) => {
-      const result = await (supabase.rpc as (fn: string, params?: Record<string, unknown>) => Promise<{ data: unknown; error: { message?: string } | null }>)(
+      const result = await callRpc(
         "enqueue_notification",
         {
           p_user_id: args.userId,
@@ -1926,7 +2026,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       actorId: string;
       actorName: string;
     }) => {
-      const result = await (supabase.rpc as (fn: string, params?: Record<string, unknown>) => Promise<{ data: unknown; error: { message?: string } | null }>)(
+      const result = await callRpc(
         "upsert_notification_window",
         {
           p_owner_user_id: args.ownerUserId,
@@ -1951,43 +2051,23 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   );
 
   const persistPostMentions = useCallback(async (postId: string, entries: MentionEntry[]) => {
-    if (!postId || entries.length === 0) return;
-    const rows = dedupeMentionEntries(entries).map((entry) => ({
-      post_id: postId,
-      mentioned_user_id: entry.mentionedUserId,
-      start_idx: entry.start,
-      end_idx: entry.end,
-      social_id_at_time: entry.socialIdAtTime,
-    }));
-    const { error } = await supabase.from("post_mentions" as never).insert(rows);
-    if (error) {
-      console.error("[social.mentions.persist_post_failed]", { postId, error: error.message, rows });
-      throw error;
-    }
-    setThreadMentionsById((prev) => ({ ...prev, [postId]: dedupeMentionEntries(entries) }));
+    if (!postId) return;
+    const mentions = dedupeMentionEntries(entries);
+    await replaceSocialPostMentions(postId, mentions);
+    setThreadMentionsById((prev) => ({ ...prev, [postId]: mentions }));
   }, []);
 
   const persistReplyMentions = useCallback(async (replyId: string, entries: MentionEntry[]) => {
-    if (!replyId || entries.length === 0) return;
-    const rows = dedupeMentionEntries(entries).map((entry) => ({
-      reply_id: replyId,
-      mentioned_user_id: entry.mentionedUserId,
-      start_idx: entry.start,
-      end_idx: entry.end,
-      social_id_at_time: entry.socialIdAtTime,
-    }));
-    const { error } = await supabase.from("reply_mentions" as never).insert(rows);
-    if (error) {
-      console.error("[social.mentions.persist_reply_failed]", { replyId, error: error.message, rows });
-      throw error;
-    }
-    setReplyMentionsById((prev) => ({ ...prev, [replyId]: dedupeMentionEntries(entries) }));
+    if (!replyId) return;
+    const mentions = dedupeMentionEntries(entries);
+    await replaceSocialReplyMentions(replyId, mentions);
+    setReplyMentionsById((prev) => ({ ...prev, [replyId]: mentions }));
   }, []);
 
   const createMentionNotifications = useCallback(
     async (threadId: string, recipientIds: string[]) => {
       if (!user?.id || !threadId || recipientIds.length === 0) return;
-      const rpc = await (supabase.rpc as (fn: string, params?: Record<string, unknown>) => Promise<{ error: { message?: string } | null }>)(
+      const rpc = await callRpc(
         "create_thread_mention_notifications",
         {
           p_actor_id: user.id,
@@ -2018,6 +2098,18 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     setIsCreateOpen(false);
   };
 
+  const collapseEmptyCreateComposerAfterBlur = useCallback(() => {
+    setCreateComposerFocused(false);
+    window.setTimeout(() => {
+      setCreateMentionQuery(null);
+      const focusStayedInComposer = composerShellRef.current?.contains(document.activeElement) === true;
+      if (focusStayedInComposer) return;
+      if (title.trim() || content.trim() || createMediaFiles.length > 0 || editingNoticeId) return;
+      setCreateErrors({});
+      setIsCreateOpen(false);
+    }, 120);
+  }, [content, createMediaFiles.length, editingNoticeId, title]);
+
   const handleStartEditNotice = (notice: Thread) => {
     setEditingNoticeId(notice.id);
     setTitle(notice.title || "");
@@ -2047,12 +2139,10 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     const previous = notices;
     setNotices((prev) => prev.filter((item) => item.id !== notice.id));
     try {
-      const { error } = await supabase
-        .from("threads" as "profiles")
-        .delete()
-        .eq("id", notice.id)
-        .eq("user_id", user.id);
+      const { data: deleted, error } = await supabase.rpc("delete_social_thread" as never, { p_thread_id: notice.id } as never);
       if (error) throw error;
+      const deletionConfirmed = deleted === true || (typeof deleted === "object" && deleted !== null && (deleted as { deleted?: boolean }).deleted === true);
+      if (!deletionConfirmed) throw new Error("Unable to delete post.");
       if (notice.provider_video_id) {
         void deleteSocialVideo(notice.provider_video_id);
       }
@@ -2107,27 +2197,18 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       const parentComment = submittedParentCommentId
         ? (commentsByThreadRef.current[thread.id] || []).find((comment) => comment.id === submittedParentCommentId) || null
         : null;
-      const { data: createdReply, error } = await supabase
-        .from("thread_comments" as "profiles")
-        .insert({
-          thread_id: thread.id,
-          parent_comment_id: submittedParentCommentId,
-          user_id: user.id,
-          content: replyText,
-          text: replyText,
-          images: uploadedUrls,
-        } as Record<string, unknown>)
-        .select("id")
-        .single();
-      if (error) {
-        toast.error(error.message);
-        return;
-      }
+      const createdReplyId = await createSocialComment({
+        threadId: thread.id,
+        parentCommentId: submittedParentCommentId,
+        content: replyText,
+        images: uploadedUrls,
+      });
+      if (!createdReplyId) throw new Error("Unable to post reply.");
 
       try {
         const finalMentions = await resolveMentionsFromText(replyText, replyMentions);
-        if (createdReply?.id && finalMentions.length > 0) {
-          await persistReplyMentions(String(createdReply.id), finalMentions);
+        await persistReplyMentions(createdReplyId, finalMentions);
+        if (finalMentions.length > 0) {
           await createMentionNotifications(
             thread.id,
             Array.from(new Set(finalMentions.map((entry) => entry.mentionedUserId)))
@@ -2136,7 +2217,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       } catch (mentionError) {
         console.error("[social.reply_mentions.failed]", {
           threadId: thread.id,
-          replyId: createdReply?.id,
+          replyId: createdReplyId,
           error: mentionError,
         });
         toast.error("Reply posted, but mention syncing failed.");
@@ -2172,10 +2253,10 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
         });
       }
 
-	      if (createdReply?.id) {
+	      if (createdReplyId) {
         void recordSocialFeedEvent(thread.id, "comment");
 	        const optimisticReply: ThreadComment = {
-          id: String(createdReply.id),
+          id: createdReplyId,
           thread_id: thread.id,
           parent_comment_id: submittedParentCommentId,
           content: replyText,
@@ -2413,32 +2494,34 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
         const uploadedVideo = await uploadCreateVideo(createMediaFiles);
         pendingVideoCleanup = uploadedVideo;
         const mergedImages = [...existingImages, ...uploadedUrls];
-        const { data: updatedThread, error } = await supabase
-          .from("threads" as "profiles")
-          .update({
-            title: title.trim(),
-            content: composedContent,
-            tags: [category],
-            images: mergedImages,
-            is_sensitive: createIsSensitive,
-            ...(uploadedVideo
-              ? {
-                  video_provider: uploadedVideo.provider,
-                  provider_video_id: uploadedVideo.providerVideoId,
-                  video_playback_url: uploadedVideo.playbackUrl,
-                  video_embed_url: uploadedVideo.embedUrl,
-                  video_thumbnail_url: uploadedVideo.thumbnailUrl,
-                  video_preview_url: uploadedVideo.previewUrl,
-                  video_duration_seconds: uploadedVideo.duration,
-                  video_status: uploadedVideo.status,
-                }
-              : {}),
-          } as Record<string, unknown>)
-          .eq("id", editingNoticeId)
-          .eq("user_id", user.id)
-          .select("id, title, content, tags, hashtags, images, map_id, likes, created_at, user_id")
-          .single();
+        const { data: updatedResult, error } = await supabase.rpc("update_native_social_thread" as never, {
+          p_thread_id: editingNoticeId,
+          p_title: title.trim(),
+          p_content: composedContent,
+          p_category: category || "Social",
+          p_images: mergedImages,
+          p_image_metadata: [],
+          p_is_sensitive: createIsSensitive,
+          p_post_language: null,
+          p_video: uploadedVideo ?? null,
+        } as never);
         if (error) throw error;
+        const updatedRow = (updatedResult && Array.isArray(updatedResult) ? updatedResult[0] : updatedResult) as { id?: unknown } | string | null;
+        const updatedId = typeof updatedRow === "string"
+          ? updatedRow
+          : updatedRow && typeof updatedRow === "object"
+            ? String(updatedRow.id || "")
+            : "";
+        if (!updatedId) throw new Error("Unable to update post.");
+        const updatedThread = {
+          id: updatedId,
+          title: title.trim(),
+          content: composedContent,
+          tags: [category],
+          hashtags: editingNotice?.hashtags ?? [],
+          images: mergedImages,
+          map_id: editingNotice?.map_id ?? null,
+        };
 
         if (updatedThread) {
           setNotices((prev) =>
@@ -2475,19 +2558,9 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
             pendingVideoCleanup = null;
           }
 
-          {
-            const { error: deleteMentionsError } = await supabase
-              .from("post_mentions" as never)
-              .delete()
-              .eq("post_id", String(updatedThread.id));
-            if (deleteMentionsError) {
-              console.error("[social.mentions.clear_failed]", deleteMentionsError);
-            }
-          }
-
           const finalMentions = await resolveMentionsFromText(String(updatedThread.content ?? ""), createMentions);
+          await persistPostMentions(String(updatedThread.id), finalMentions);
           if (finalMentions.length > 0) {
-            await persistPostMentions(String(updatedThread.id), finalMentions);
             await createMentionNotifications(
               String(updatedThread.id),
               Array.from(new Set(finalMentions.map((entry) => entry.mentionedUserId)))
@@ -2497,38 +2570,44 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 
         toast.success(t("Post updated"));
       } else {
+        const viewerScopePromise = getSocialViewerScope().catch(() => null);
         const uploadedUrls = await uploadComposerMedia(createMediaFiles, "thread");
         const uploadedVideo = await uploadCreateVideo(createMediaFiles);
+        const viewerScope = await viewerScopePromise;
         pendingVideoCleanup = uploadedVideo;
 
-        const { data: createdThread, error } = await supabase
-          .from("threads" as "profiles")
-          .insert({
-            user_id: user.id,
-            title: title.trim(),
-            content: composedContent,
-            tags: [category],
-            hashtags: [],
-            images: uploadedUrls,
-            likes: 0,
-            is_sensitive: createIsSensitive,
-            ...(uploadedVideo
-              ? {
-                  video_provider: uploadedVideo.provider,
-                  provider_video_id: uploadedVideo.providerVideoId,
-                  video_playback_url: uploadedVideo.playbackUrl,
-                  video_embed_url: uploadedVideo.embedUrl,
-                  video_thumbnail_url: uploadedVideo.thumbnailUrl,
-                  video_preview_url: uploadedVideo.previewUrl,
-                  video_duration_seconds: uploadedVideo.duration,
-                  video_status: uploadedVideo.status,
-                }
-              : {}),
-          } as Record<string, unknown>)
-          .select("id, title, content, tags, hashtags, images, map_id, likes, created_at, user_id")
-          .single();
+        const { data: createdResult, error } = await supabase.rpc("create_native_social_thread" as never, {
+          p_title: title.trim(),
+          p_content: composedContent,
+          p_category: category || "Social",
+          p_images: uploadedUrls,
+          p_image_metadata: [],
+          p_is_sensitive: createIsSensitive,
+          p_post_language: null,
+          p_post_scope: viewerScope,
+          p_video: uploadedVideo ?? null,
+        } as never);
 
         if (error) throw error;
+        const createdRow = (createdResult && Array.isArray(createdResult) ? createdResult[0] : createdResult) as { id?: unknown } | string | null;
+        const createdId = typeof createdRow === "string"
+          ? createdRow
+          : createdRow && typeof createdRow === "object"
+            ? String(createdRow.id || "")
+            : "";
+        if (!createdId) throw new Error("Unable to create post.");
+        const createdThread = {
+          id: createdId,
+          title: title.trim(),
+          content: composedContent,
+          tags: [category],
+          hashtags: [],
+          images: uploadedUrls,
+          map_id: null,
+          likes: 0,
+          created_at: new Date().toISOString(),
+          user_id: user.id,
+        };
 
         if (createdThread) {
           const optimisticThread: Thread = {
@@ -2569,8 +2648,8 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
             pendingVideoCleanup = null;
           }
           const finalMentions = await resolveMentionsFromText(String(createdThread.content ?? ""), createMentions);
+          await persistPostMentions(String(createdThread.id), finalMentions);
           if (finalMentions.length > 0) {
-            await persistPostMentions(String(createdThread.id), finalMentions);
             await createMentionNotifications(
               String(createdThread.id),
               Array.from(new Set(finalMentions.map((entry) => entry.mentionedUserId)))
@@ -2630,44 +2709,14 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
             item.id === noticeId ? { ...item, likes: Math.max(0, Number(item.likes ?? 0) + delta) } : item
           )
         );
-        if (isRemoving) {
-          const { error: removeErr } = await supabase
-            .from("thread_supports" as "profiles")
-            .delete()
-            .eq("thread_id", noticeId)
-            .eq("user_id", user.id);
-          if (removeErr) {
-            toast.error(removeErr.message || "Unable to update support.");
-            void fetchNotices(true);
-            return;
-          }
-        } else {
-          const { error: addErr } = await supabase.from("thread_supports" as "profiles").insert({
-            thread_id: noticeId,
-            user_id: user.id,
-          });
-          if (addErr) {
-            const code = String((addErr as { code?: string }).code || "");
-            const message = String((addErr as { message?: string }).message || "").toLowerCase();
-            if (code === "23505" || message.includes("duplicate") || message.includes("conflict")) {
-              setLikedNotices((prev) => {
-                const next = new Set(prev);
-                next.add(noticeId);
-                return next;
-              });
-            } else {
-              toast.error(addErr.message || "Unable to update support.");
-            }
-            void fetchNotices(true);
-            return;
-          }
+        let resolvedCount: number;
+        try {
+          resolvedCount = await setSocialThreadSupport(noticeId, isRemoving);
+        } catch (error) {
+          toast.error(getErrorMessage(error, "Unable to update support."));
+          void fetchNotices(true);
+          return;
         }
-
-        const { count } = await supabase
-          .from("thread_supports" as "profiles")
-          .select("id", { count: "exact", head: true })
-          .eq("thread_id", noticeId);
-        const resolvedCount = Number(count ?? 0);
         setNotices((prev) => prev.map((item) => (item.id === noticeId ? { ...item, likes: resolvedCount } : item)));
 	        if (!isRemoving && target.user_id !== user.id) {
 	          await upsertNotificationWindow({
@@ -2731,6 +2780,41 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     toast.success(t("Reply hidden"));
   };
 
+  const handleCommentSupport = useCallback(async (threadId: string, comment: ThreadComment) => {
+    const supportedBefore = likedComments.has(comment.id);
+    setLikedComments((previous) => {
+      const next = new Set(previous);
+      if (supportedBefore) next.delete(comment.id);
+      else next.add(comment.id);
+      return next;
+    });
+    try {
+      const result = await setSocialCommentSupport(comment.id, !supportedBefore);
+      setLikedComments((previous) => {
+        const next = new Set(previous);
+        if (result.supported) next.add(comment.id);
+        else next.delete(comment.id);
+        return next;
+      });
+      setCommentsByThread((previous) => ({
+        ...previous,
+        [threadId]: (previous[threadId] || []).map((entry) =>
+          entry.id === comment.id
+            ? { ...entry, support_count: result.supportCount, viewer_supported: result.supported }
+            : entry,
+        ),
+      }));
+    } catch (error) {
+      setLikedComments((previous) => {
+        const next = new Set(previous);
+        if (supportedBefore) next.add(comment.id);
+        else next.delete(comment.id);
+        return next;
+      });
+      toast.error(getErrorMessage(error, "Unable to update comment support."));
+    }
+  }, [likedComments]);
+
   const handleEditComment = async (threadId: string, comment: ThreadComment) => {
     if (!user?.id || comment.user_id !== user.id) return;
     const nextContent = window.prompt(t("Edit reply"), comment.content || "");
@@ -2745,13 +2829,10 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       return;
     }
 
-    const { error } = await supabase
-      .from("thread_comments" as "profiles")
-      .update({ content: trimmed, text: trimmed } as Record<string, unknown>)
-      .eq("id", comment.id)
-      .eq("user_id", user.id);
-    if (error) {
-      toast.error(error.message || t("Unable to edit reply"));
+    try {
+      await updateSocialComment(comment, trimmed);
+    } catch (error) {
+      toast.error(getErrorMessage(error, t("Unable to edit reply")));
       return;
     }
 
@@ -2769,13 +2850,10 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     const confirmed = window.confirm(t("Delete this reply permanently?"));
     if (!confirmed) return;
 
-    const { error } = await supabase
-      .from("thread_comments" as "profiles")
-      .delete()
-      .eq("id", comment.id)
-      .eq("user_id", user.id);
-    if (error) {
-      toast.error(error.message || t("Unable to delete reply"));
+    try {
+      await deleteSocialComment(comment.id);
+    } catch (error) {
+      toast.error(getErrorMessage(error, t("Unable to delete reply")));
       return;
     }
 
@@ -2795,7 +2873,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 
   const handleBlockUser = async (authorId: string) => {
     const relatedNotice = notices.find((notice) => notice.user_id === authorId);
-    const { error } = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ error: { message?: string } | null }>)(
+    const { error } = await callRpc(
       "block_user",
       { p_blocked_id: authorId }
     );
@@ -2881,44 +2959,19 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       });
 
       try {
-        const { data, error } = await supabase
-          .from("thread_comments" as "profiles")
-          .select(`
-            id,
-            thread_id,
-            parent_comment_id,
-            content,
-            images,
-            created_at,
-            user_id,
-            author:profiles!thread_comments_user_id_fkey(display_name, social_id, avatar_url, is_verified, verification_status)
-          `)
-          .eq("thread_id", threadId)
-          .order("created_at", { ascending: true });
-
-        if (error) throw error;
-
-        const comments = (((data || []) as unknown) as Array<Record<string, unknown>>).map((comment) => {
-          const authorObj = Array.isArray(comment.author) ? comment.author[0] : comment.author;
-          return {
-            id: String(comment.id),
-            thread_id: String(comment.thread_id || threadId),
-            parent_comment_id: typeof comment.parent_comment_id === "string" ? comment.parent_comment_id : null,
-            content: String(comment.content || ""),
-            images: (comment.images as string[] | null) ?? null,
-            created_at: String(comment.created_at || new Date().toISOString()),
-            user_id: String(comment.user_id || ""),
-            author:
-              typeof authorObj === "object" && authorObj !== null
-                ? {
-                    display_name: ((authorObj as Record<string, unknown>).display_name as string | null) ?? null,
-                    social_id: ((authorObj as Record<string, unknown>).social_id as string | null) ?? null,
-                    avatar_url: ((authorObj as Record<string, unknown>).avatar_url as string | null) ?? null,
-                    is_verified: isVerifiedProfile(authorObj),
-                  }
-                : null,
-          } as ThreadComment;
+        const comments = await fetchSocialComments(threadId);
+        setLikedComments((previous) => {
+          const next = new Set(previous);
+          comments.forEach((comment) => {
+            if (comment.viewer_supported) next.add(comment.id);
+            else next.delete(comment.id);
+          });
+          return next;
         });
+        setReplyMentionsById((previous) => ({
+          ...previous,
+          ...Object.fromEntries(comments.map((comment) => [comment.id, comment.mentions || []])),
+        }));
 
         setCommentsByThread((prev) => ({ ...prev, [threadId]: comments }));
         setNotices((prev) =>
@@ -2929,44 +2982,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
           )
         );
 
-        setCommentsLoadingThreads((prev) => {
-          const next = new Set(prev);
-          next.delete(threadId);
-          return next;
-        });
-
-        void (async () => {
-          const commentIds = comments.map((comment) => comment.id).filter(Boolean);
-          if (commentIds.length > 0) {
-            const { data: mentionRows, error: mentionError } = await supabase
-              .from("reply_mentions" as never)
-              .select("reply_id, mentioned_user_id, start_idx, end_idx, social_id_at_time")
-              .in("reply_id", commentIds)
-              .order("start_idx", { ascending: true });
-
-            if (mentionError) {
-              console.error("[social.comments.mentions_load_failed]", { threadId, error: mentionError.message });
-            } else {
-              const nextMentions: Record<string, MentionEntry[]> = {};
-              (((mentionRows || []) as unknown) as Array<Record<string, unknown>>).forEach((row) => {
-                const replyId = String(row.reply_id || "");
-                if (!replyId) return;
-                nextMentions[replyId] = [
-                  ...(nextMentions[replyId] || []),
-                  {
-                    start: Number(row.start_idx ?? 0),
-                    end: Number(row.end_idx ?? 0),
-                    mentionedUserId: String(row.mentioned_user_id || ""),
-                    socialIdAtTime: String(row.social_id_at_time || ""),
-                  },
-                ];
-              });
-              setReplyMentionsById((prev) => ({ ...prev, ...nextMentions }));
-            }
-          }
-
-          await primeMentionDirectory(comments.map((comment) => comment.content || ""));
-        })();
+        void primeMentionDirectory(comments.map((comment) => comment.content || ""));
       } catch (error) {
         console.error("[social.comments.load_failed]", { threadId, error });
         setCommentLoadErrors((prev) => ({
@@ -3211,7 +3227,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     );
 
     try {
-      const { data, error } = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: { message?: string } | null }>)(
+      const { data, error } = await callRpc(
         "record_thread_share_click",
         { p_thread_id: threadId }
       );
@@ -3288,7 +3304,10 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     );
     const topicFiltered = topicFilters.length === 0
       ? base
-      : base.filter((notice) => topicFilters.some((t) => (notice.tags || []).includes(t)));
+      : base.filter((notice) => topicFilters.some((topic) => {
+          const aliases = SOCIAL_SECTION_ALIASES[topic as SocialSection] ?? [topic];
+          return aliases.some((candidate) => (notice.tags || []).includes(candidate));
+        }));
     const filtered = (sortMode === "Saves" ? topicFiltered.filter((notice) => savedNotices.has(notice.id)) : topicFiltered).filter((notice) => {
       if (!normalizedSearch) return true;
       const comments = commentsByThread[notice.id] || [];
@@ -3788,6 +3807,29 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       onTouchEnd={handleTopPullEnd}
       onTouchCancel={handleTopPullEnd}
     >
+      <div ref={composerShellRef} className="sticky top-0 z-[1200] bg-background/95 backdrop-blur-xl">
+        <SocialComposerBar
+          avatarUrl={profile?.avatar_url || null}
+          displayName={profile?.display_name || null}
+          isVerified={isVerifiedProfile(profile)}
+          onOpen={() => setIsCreateOpen(true)}
+          value={content}
+          expanded={isCreateOpen && !editingNoticeId}
+          inputRef={editingNoticeId ? undefined : createInputRef}
+          onContentChange={handleCreateInputChange}
+          onContentFocus={() => setCreateComposerFocused(true)}
+          onContentBlur={collapseEmptyCreateComposerAfterBlur}
+          onMediaChange={handleCreateMediaChange}
+          onSubmit={handleCreateNotice}
+          submitDisabled={creating || remainingCreateWords < 0}
+        />
+        <div ref={composerInlineHostRef} />
+        <SocialSectionList
+          selected={(topicFilters[0] as SocialSection | undefined) ?? null}
+          onSelect={(section) => setTopicFilters(section ? [section] : [])}
+        />
+      </div>
+
       {/* Filters + Sorting */}
       <div className="space-y-2">
         <div
@@ -3795,87 +3837,20 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
           style={{ height: pullRefreshing ? 30 : pullOffset > 0 ? Math.max(16, Math.min(30, pullOffset * 0.5)) : 0, opacity: pullRefreshing || pullOffset > 0 ? 1 : 0 }}
         >
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Loader2 className={cn("h-3.5 w-3.5", (pullRefreshing || pullOffset >= PULL_REFRESH_THRESHOLD) && "animate-spin")} />
+            <HuddleInlineLoader className="h-3.5" label="Refreshing social feed" />
             <span>{pullRefreshing ? "Refreshing..." : pullOffset >= PULL_REFRESH_THRESHOLD ? "Release to refresh" : "Pull to refresh"}</span>
           </div>
         </div>
-      <div ref={filtersRowRef} className="flex flex-col gap-2 w-full max-w-full">
-        {/* Row 1: Topic tabs */}
-        <div className="flex gap-4 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
-          <button
-            onClick={() => setTopicFilters([])}
-            className={cn(
-              "pb-1.5 text-sm whitespace-nowrap shrink-0 transition-all border-b-2",
-              topicFilters.length === 0
-                ? "font-semibold text-foreground border-accent"
-                : "font-normal text-muted-foreground border-transparent"
-            )}
-          >
-            {t("All")}
-          </button>
-          {tags.map((tg) => (
-            <button
-              key={tg.id}
-              onClick={() =>
-                setTopicFilters((prev) =>
-                  prev.includes(tg.id) ? prev.filter((t) => t !== tg.id) : [...prev, tg.id]
-                )
-              }
-              className={cn(
-                "pb-1.5 text-sm whitespace-nowrap shrink-0 transition-all border-b-2",
-                topicFilters.includes(tg.id)
-                  ? "font-semibold text-foreground border-accent"
-                  : "font-normal text-muted-foreground border-transparent"
-              )}
-            >
-              {t(tg.label)}
-            </button>
-          ))}
-        </div>
-        {/* Row 2: Search + Sort */}
-        <div className="flex items-center gap-2">
-          <div className="form-field-rest relative flex flex-1 min-w-0 items-center !h-11 !rounded-[22px] px-3">
-            <Search className="h-4 w-4 text-[var(--text-tertiary)]" />
-            <input
-              type="search"
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder=""
-              className="field-input-core pl-2 text-sm"
-            />
-          </div>
-          <div className="relative min-w-[104px] shrink-0">
-            <select
-              value={sortMode}
-              onChange={(e) => setSortMode(e.target.value as "" | "Trending" | "Latest" | "Saves")}
-              className="form-field-rest !h-11 !rounded-[22px] appearance-none bg-[rgba(255,255,255,0.72)] px-2.5 pr-7 text-sm"
-            >
-              <option value="Latest">{t("Latest")}</option>
-              <option value="Trending">{t("Trending")}</option>
-              <option value="Saves">{t("Saves")}</option>
-            </select>
-            <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]">⌄</span>
-          </div>
-        </div>
-      </div>
+      <div ref={filtersRowRef} />
       </div>
 
             {loading ? (
-              <div className="flex justify-center py-8">
-                <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-              </div>
-            ) : visibleNotices.length === 0 ? (
-              <div className="mx-auto flex w-full max-w-md flex-col items-center py-4">
-                <img
-                  src={emptyChatImage}
-                  alt="No posts yet"
-                  className="w-full max-w-[360px] object-contain"
-                />
-                <p className="mt-2 px-2 text-center text-[15px] leading-relaxed text-[rgba(74,73,101,0.70)]">
-                  Looks like the floor is yours. Post something fun, real, or random - every great discussion starts with one person.
-                </p>
-              </div>
-            ) : (
+              <SocialFeedSkeleton />
+            ) : feedError && visibleNotices.length === 0 ? (
+              <p className="px-4 py-12 text-center text-sm text-muted-foreground" role="status">
+                {feedError}
+              </p>
+            ) : visibleNotices.length === 0 ? null : (
               <Virtuoso
                 ref={virtuosoRef}
                 customScrollParent={scrollerEl ?? undefined}
@@ -4067,28 +4042,17 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                       </div>
                       <button
                         type="button"
-                        className={cn(
-                          "relative w-10 h-10 rounded-full bg-transparent border-[1.5px] flex items-center justify-center overflow-hidden flex-shrink-0",
-                          isVerifiedProfile(notice.author)
-                            ? "border-[rgba(33,69,207,1)]"
-                            : "border-[rgba(74,73,101,0.28)]"
-                        )}
+                        className="relative h-10 w-10 flex-shrink-0 rounded-full bg-transparent"
 	                        onClick={() => openProfile(notice.user_id, notice.author?.display_name || "User", notice.id)}
 	                      >
-                        <span className="absolute inset-[1px] rounded-full bg-muted/20" />
-                        {notice.author?.avatar_url ? (
-                          <img 
-                            src={notice.author.avatar_url} 
-                            alt="" 
-                            width={40}
-                            height={40}
-                            className="relative z-[1] w-full h-full object-cover" 
-                          />
-                        ) : (
-                          <span className="relative z-[1] text-sm font-semibold">
-                            {notice.author?.display_name?.charAt(0) || t("Unknown").charAt(0)}
-                          </span>
-                        )}
+                        <SettingsAvatar
+                          avatarUrl={notice.author?.avatar_url}
+                          displayName={notice.author?.display_name || t("Anonymous")}
+                          isVerified={isVerifiedProfile(notice.author)}
+                          loading="lazy"
+                          showVerifiedBadge={isVerifiedProfile(notice.author)}
+                          size={40}
+                        />
                       </button>
                       <div className="flex-1 min-w-0">
                         <div className="pr-[76px]">
@@ -4101,6 +4065,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                             <AuthorHandle
                               displayName={notice.author?.display_name || t("Anonymous")}
                               socialId={notice.author?.social_id || null}
+                              isPillar={notice.author?.engagement?.tier === "pillar"}
                               className="max-w-full text-sm"
                             />
                           </button>
@@ -4219,6 +4184,9 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                             className="mt-2"
                             isSensitive={notice.is_sensitive === true}
                             items={getNoticeMediaItems(notice)}
+                            onDoubleTap={() => {
+                              if (!likedNotices.has(notice.id)) handleSupport(notice.id);
+                            }}
                           />
                         )}
                         <div className="mt-3 flex items-center">
@@ -4237,14 +4205,21 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                               onClick={() => handleSupport(notice.id)}
                               className={cn(
                                 "relative h-8 w-8 inline-flex items-center justify-center rounded-full p-1.5 transition-all",
-                                likedNotices.has(notice.id) ? "bg-primary/10" : "hover:bg-muted"
+                                likedNotices.has(notice.id) ? "bg-[var(--support-coral-soft)]" : "hover:bg-muted"
                               )}
                               title={t("Support")}
                             >
-                              <ThumbsUp
+                              {/* Support is a paw, not a thumbs-up — a generic
+                                  social-network glyph on a pet product. Coral,
+                                  which is the support colour, not the primary
+                                  blue. */}
+                              <HuddlePawIcon
+                                filled={likedNotices.has(notice.id)}
                                 className={cn(
                                   "w-4 h-4 transition-colors",
-                                  likedNotices.has(notice.id) ? "text-primary fill-primary" : "text-muted-foreground"
+                                  likedNotices.has(notice.id)
+                                    ? "text-[var(--support-coral)]"
+                                    : "text-muted-foreground"
                                 )}
                               />
                               {Math.max(0, Number(notice.likes ?? 0)) > 0 ? (
@@ -4260,7 +4235,10 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                              }}
                               className={cn(
                                 "relative h-8 w-8 inline-flex items-center justify-center rounded-full p-1.5 transition-all hover:bg-muted",
-                                expandedReplies.has(notice.id) && "bg-primary/10 text-primary"
+                                // Coral when active, matching native
+                                // (NativeSocialScreen.tsx:3818). Blue here read as
+                                // the primary action colour, which reply is not.
+                                expandedReplies.has(notice.id) && "bg-[var(--support-coral-soft)] text-[var(--support-coral)]"
                               )}
                               title={t("Replies")}
                               aria-label="Toggle replies"
@@ -4472,7 +4450,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                                     aria-label="Send reply"
                                   >
                                     {replySubmittingByThread.has(notice.id) ? (
-                                      <Loader2 className="h-4 w-4 animate-spin" />
+                                      <HuddleInlineLoader className="h-4" label="Posting reply" />
                                     ) : (
                                       <ArrowUp className="h-4 w-4" />
                                     )}
@@ -4631,7 +4609,6 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                                     {c.images && c.images.length > 0 && (
                                       <PostMediaCarousel
                                         className="mt-3"
-                                        isSensitive={notice.is_sensitive === true}
                                         items={c.images.map((src, index) => ({
                                           src,
                                           alt: `${c.content.slice(0, 40) || "Reply"} ${index + 1}`,
@@ -4671,7 +4648,12 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                                          }}
 	                                          className={cn(
                                             "relative inline-flex h-8 w-8 items-center justify-center rounded-full p-1.5 transition-all hover:bg-muted",
-                                            replyFor === notice.id && replyTargetCommentId === c.id && "bg-primary/10 text-primary"
+                                            // Native's condition exactly — coral
+                                            // when this comment is the reply
+                                            // target (NativeSocialScreen.tsx:3818).
+                                            replyFor === notice.id &&
+                                              replyTargetCommentId === c.id &&
+                                              "bg-[var(--support-coral-soft)] text-[var(--support-coral)]"
                                           )}
                                           title={canExpandBranch ? `${replyBadgeCount} ${replyBadgeCount === 1 ? "reply" : "replies"}` : "Reply"}
                                           aria-label={
@@ -4689,21 +4671,28 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                                         </button>
                                         <button
                                           type="button"
-                                          onClick={() =>
-                                            setLikedComments((prev) => {
-                                              const next = new Set(prev);
-                                              if (next.has(c.id)) next.delete(c.id);
-                                              else next.add(c.id);
-                                              return next;
-                                            })
-                                          }
+                                          onClick={() => void handleCommentSupport(notice.id, c)}
                                           className={cn(
                                             "inline-flex h-8 w-8 items-center justify-center rounded-full p-1.5 transition-all",
-                                            likedComments.has(c.id) ? "bg-primary/10 text-primary" : "hover:bg-muted"
+                                            likedComments.has(c.id)
+                                              ? "bg-[var(--support-coral-soft)] text-[var(--support-coral)]"
+                                              : "hover:bg-muted"
                                           )}
                                           title={t("Support")}
                                         >
-                                          <ThumbsUp className={cn("h-4 w-4", likedComments.has(c.id) && "fill-primary")} />
+                                          {/* Same paw as the post-level button.
+                                              Native switches "paw" ↔ "paw-outline"
+                                              (NativeSocialScreen.tsx:3811-3812); the
+                                              web equivalent is fill vs no fill. */}
+                                          <HuddlePawIcon
+                                            filled={likedComments.has(c.id)}
+                                            className={cn(
+                                              "h-4 w-4 transition-colors",
+                                              likedComments.has(c.id)
+                                                ? "text-[var(--support-coral)]"
+                                                : "text-muted-foreground"
+                                            )}
+                                          />
                                         </button>
                                         <DropdownMenu>
                                           <DropdownMenuTrigger asChild>
@@ -4769,7 +4758,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       {loadingMore ? (
         <div className="flex justify-center pt-2">
           <div className="inline-flex items-center gap-2 rounded-full bg-[rgba(255,255,255,0.72)] px-4 py-2 text-sm text-muted-foreground shadow-sm">
-            <Loader2 className="h-4 w-4 animate-spin" />
+            <HuddleInlineLoader className="h-4" label="Loading more posts" />
             <span>Loading more posts...</span>
           </div>
         </div>
@@ -4790,6 +4779,8 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
         creating={creating}
         editingNoticeId={editingNoticeId}
         isOpen={isCreateOpen}
+        presentation={editingNoticeId ? "sheet" : "inline"}
+        inlineTarget={composerInlineHostRef.current}
         mentionSuggestionsContent={
           MENTION_LIVE_SUGGESTIONS_ENABLED
             ? renderMentionSuggestions(
@@ -4809,10 +4800,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
         }
         onCategoryChange={setCategory}
         onClose={closeCreateComposer}
-        onContentBlur={() => {
-          setCreateComposerFocused(false);
-          window.setTimeout(() => setCreateMentionQuery(null), 120);
-        }}
+        onContentBlur={collapseEmptyCreateComposerAfterBlur}
         onContentChange={handleCreateInputChange}
         onContentFocus={() => setCreateComposerFocused(true)}
         onDismissPreview={dismissCreatePreview}

@@ -1,12 +1,13 @@
 import { memo, type ChangeEvent, type ReactNode, type RefObject } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { createPortal } from "react-dom";
-import { Image, Loader2, Play, Scissors, X } from "lucide-react";
+import { Image, Play, Scissors, X } from "lucide-react";
 
 import { MediaThumb } from "@/components/media/MediaThumb";
 import { NeuButton } from "@/components/ui/NeuButton";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { HuddleInlineLoader } from "@/components/social/SocialLoadingState";
 import type { ComposerMedia, ComposerUploadState, LinkPreview, MentionEntry } from "@/components/social/noticeboard/types";
 
 type TagOption = {
@@ -29,6 +30,9 @@ type NoticeBoardComposerModalProps = {
   creating: boolean;
   editingNoticeId: string | null;
   isOpen: boolean;
+  /** Web Social uses an inline composer; native/legacy callers retain the sheet. */
+  presentation?: "sheet" | "inline";
+  inlineTarget?: Element | null;
   mentionSuggestionsContent: ReactNode;
   onCategoryChange: (value: string) => void;
   onClose: () => void;
@@ -65,6 +69,8 @@ export const NoticeBoardComposerModal = memo(({
   creating,
   editingNoticeId,
   isOpen,
+  presentation = "sheet",
+  inlineTarget = null,
   mentionSuggestionsContent,
   onCategoryChange,
   onClose,
@@ -87,30 +93,33 @@ export const NoticeBoardComposerModal = memo(({
 }: NoticeBoardComposerModalProps) => {
   if (typeof document === "undefined") return null;
 
-  return createPortal(
+  const isInline = presentation === "inline";
+  const composer = (
     <AnimatePresence>
       {isOpen ? (
         <motion.div
-          initial={{ opacity: 0 }}
+          initial={{ opacity: 0, y: isInline ? -8 : 0 }}
           animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[5000] bg-black/50"
-          onClick={onClose}
+          exit={{ opacity: 0, y: isInline ? -8 : 0 }}
+          className={isInline ? "relative z-10 w-full border-b border-border/70 bg-background/95 backdrop-blur-xl" : "fixed inset-0 z-[5000] bg-black/50"}
+          onClick={isInline ? undefined : onClose}
         >
           <motion.div
-            data-huddle-bottom-sheet="true"
-            initial={{ y: "100%" }}
+            data-huddle-bottom-sheet={isInline ? undefined : "true"}
+            initial={{ y: isInline ? 0 : "100%" }}
             animate={{ y: 0 }}
-            exit={{ y: "100%" }}
-            onClick={(event) => event.stopPropagation()}
-            className="fixed bottom-0 left-0 right-0 mx-auto max-h-[calc(100svh-env(safe-area-inset-bottom,0px)-8px)] w-full max-w-[var(--app-max-width,430px)] overflow-y-auto rounded-t-3xl bg-card px-6 pt-6 huddle-sheet-bottom-padding"
+            exit={{ y: isInline ? 0 : "100%" }}
+            onClick={isInline ? undefined : (event) => event.stopPropagation()}
+            className={isInline
+              ? "relative mx-auto w-full max-w-none overflow-visible bg-background px-0 py-3"
+              : "fixed bottom-0 left-0 right-0 mx-auto max-h-[calc(100svh-env(safe-area-inset-bottom,0px)-8px)] w-full max-w-[var(--app-max-width,430px)] overflow-y-auto rounded-t-3xl bg-card px-6 pt-6 huddle-sheet-bottom-padding"}
           >
-            <div className="mb-4 flex items-center justify-between">
+            {!isInline ? <div className="mb-4 flex items-center justify-between">
               <h3 className="text-lg font-semibold">{editingNoticeId ? translate("Edit Post") : translate("Create Post")}</h3>
               <button onClick={onClose}>
                 <X className="h-6 w-6" />
               </button>
-            </div>
+            </div> : null}
 
             <div className="space-y-3">
               <div className="form-field-rest relative flex items-center">
@@ -142,7 +151,7 @@ export const NoticeBoardComposerModal = memo(({
               </div>
 
               <div>
-                <div className={cn("form-field-rest relative h-auto min-h-[132px] py-3", createErrors.content && "form-field-error")}>
+                {!isInline ? <div className={cn("form-field-rest relative h-auto min-h-[132px] py-3", createErrors.content && "form-field-error")}>
                   <div className="relative min-h-[108px]">
                     <div className="pointer-events-none min-h-[108px] whitespace-pre-wrap break-words text-sm leading-5">
                       {renderComposerTextWithMentions(content, createMentions, translate("What's on your mind?"), "create-composer")}
@@ -157,7 +166,7 @@ export const NoticeBoardComposerModal = memo(({
                       aria-invalid={Boolean(createErrors.content)}
                     />
                   </div>
-                </div>
+                </div> : null}
                 {activePreviewUrl ? (
                   <div className="relative mt-2">
                     <button
@@ -292,7 +301,7 @@ export const NoticeBoardComposerModal = memo(({
               </div>
             ) : null}
 
-            <div className="mt-3 flex items-center gap-3 pb-2">
+            {!isInline ? <div className="mt-3 flex items-center gap-3 pb-2">
               <label className="cursor-pointer rounded-full bg-muted p-2 hover:bg-muted/80">
                 <Image className="h-5 w-5 text-muted-foreground" />
                 <input
@@ -306,18 +315,20 @@ export const NoticeBoardComposerModal = memo(({
 
               <NeuButton
                 onClick={onSubmit}
-                disabled={creating || !content.trim() || !title.trim() || remainingCreateWords < 0}
+                disabled={creating || remainingCreateWords < 0}
                 className="h-12 flex-1 rounded-xl bg-primary text-white hover:bg-primary/90"
               >
-                {creating ? <Loader2 className="h-5 w-5 animate-spin" /> : "Post"}
+                {creating ? <HuddleInlineLoader className="h-5" label="Posting" /> : "Post"}
               </NeuButton>
-            </div>
+            </div> : null}
           </motion.div>
         </motion.div>
       ) : null}
-    </AnimatePresence>,
-    document.body,
+    </AnimatePresence>
   );
+
+  if (!isInline) return createPortal(composer, document.body);
+  return inlineTarget ? createPortal(composer, inlineTarget) : composer;
 });
 
 NoticeBoardComposerModal.displayName = "NoticeBoardComposerModal";

@@ -5,11 +5,12 @@ import {
   MapPin,
   RefreshCw,
   WifiOff,
-  Eye,
   EyeOff,
-  Bell,
-  Users,
+  Eye,
   PenSquare,
+  Plus,
+  Minus,
+  Navigation,
 } from "lucide-react";
 import privacyImage from "@/assets/Notifications/Privacy.jpg";
 import mapboxgl from "mapbox-gl";
@@ -23,6 +24,11 @@ const UpsellModal = lazy(() => import("@/components/monetization/UpsellModal").t
 import { useAuth } from "@/contexts/AuthContext";
 import { resolveCopy } from "@/lib/copy";
 import { supabase } from "@/integrations/supabase/client";
+
+const callRpc = supabase.rpc.bind(supabase) as unknown as (
+  fn: string,
+  args?: Record<string, unknown>,
+) => Promise<{ data: unknown; error: unknown }>;
 import { NeuControl } from "@/components/ui/NeuControl";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -35,15 +41,19 @@ const PinDetailModal = lazy(() => import("@/components/map/PinDetailModal"));
 import BlueDotMarker from "@/components/map/BlueDotMarker";
 import BroadcastMarker from "@/components/map/BroadcastMarker";
 import AlertMarkersOverlay from "@/components/map/AlertMarkersOverlay";
+import BroadcastRangeOverlay from "@/components/map/BroadcastRangeOverlay";
 import FriendMarkersOverlay, { type FriendOverlayPin } from "@/components/map/FriendMarkersOverlay";
 import { normalizeGenderBucket } from "@/components/map/maskedPinAssets";
 import { loadBlockedUserIdsFor } from "@/lib/blocking";
-import { PublicProfileSheet } from "@/components/profile/PublicProfileSheet";
+import { ProfileShareCard } from "@/components/profile/ProfileShareCard";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { useSafetyRestrictions } from "@/hooks/useSafetyRestrictions";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { openExternalUrl } from "@/lib/nativeShell";
 import { isVerifiedProfile } from "@/lib/verification";
+import { HuddleGlyph } from "@/components/icons/HuddleIcons";
+import { publishVisibleUserPinIds } from "@/lib/visibleMapPinCache";
+import { useAuthGate } from "@/components/auth/authGateContext";
 
 const extractDistrictFromPlaceLabel = (label: string): string => {
   const parts = label.split(",").map((part) => part.trim()).filter(Boolean);
@@ -54,7 +64,6 @@ const extractDistrictFromPlaceLabel = (label: string): string => {
 // Zoom Level 16.5 ≈ ~500m proximity
 const PROXIMITY_ZOOM = 16.5;
 const MAP_BOTTOM_CHROME_OFFSET = "calc(var(--nav-height,64px) + env(safe-area-inset-bottom,0px) + 68px)";
-const MAP_ZOOM_NAV_STACK_OFFSET = "calc(var(--nav-height,64px) + env(safe-area-inset-bottom,0px) + 32px)";
 
 // Set the access token
 mapboxgl.accessToken = MAPBOX_ACCESS_TOKEN;
@@ -86,6 +95,8 @@ interface MapAlert {
   location_street?: string | null;
   location_district?: string | null;
   is_sensitive?: boolean;
+  verified_only?: boolean;
+  share_access_token?: string | null;
   marker_state?: "active" | "expired_dot";
   is_demo?: boolean;
   creator: {
@@ -112,6 +123,64 @@ interface FriendPin {
   location_pinned_until: string | null;
   location_retention_until?: string | null;
   marker_state?: "active" | "expired_dot";
+}
+
+type VisibleMapPinShellRow = {
+  pin_id?: string | null;
+  lat?: number | null;
+  lng?: number | null;
+  pin_type?: string | null;
+  updated_at?: string | null;
+  is_alert?: boolean | null;
+  alert_type?: string | null;
+  creator_id?: string | null;
+  range_meters?: number | null;
+  range_km?: number | null;
+  marker_state?: string | null;
+  display_name?: string | null;
+  avatar_url?: string | null;
+  is_verified?: boolean | null;
+  is_invisible?: boolean | null;
+  gender_genre?: string | null;
+  verified_only?: boolean | null;
+};
+
+function mapVisibleAlertShellToMapAlert(row: VisibleMapPinShellRow): MapAlert | null {
+  const latitude = Number(row.lat);
+  const longitude = Number(row.lng);
+  const id = String(row.pin_id || "").trim();
+  if (!id || !Number.isFinite(latitude) || !Number.isFinite(longitude) || row.marker_state === "hidden") return null;
+  return {
+    id,
+    latitude,
+    longitude,
+    alert_type: String(row.alert_type || row.pin_type || "Others"),
+    title: null,
+    description: null,
+    photo_url: null,
+    media_urls: [],
+    support_count: 0,
+    report_count: 0,
+    created_at: String(row.updated_at || new Date().toISOString()),
+    expires_at: null,
+    duration_hours: null,
+    range_meters: row.range_meters ?? null,
+    range_km: row.range_km ?? null,
+    creator_id: row.creator_id ?? null,
+    has_thread: false,
+    thread_id: null,
+    posted_to_threads: false,
+    post_on_social: false,
+    social_post_id: null,
+    social_status: null,
+    social_url: null,
+    location_street: null,
+    location_district: null,
+    is_sensitive: false,
+    verified_only: row.verified_only === true,
+    marker_state: row.marker_state === "expired_dot" ? "expired_dot" : "active",
+    creator: { display_name: null, social_id: null, avatar_url: null },
+  };
 }
 
 type VisibleMapAlertRow = {
@@ -198,8 +267,20 @@ type OwnPinState = {
   isInvisible: boolean;
 };
 
+// The native public control exposes Area and Incognito only. Historical values
+// are normalized to Area by the shared backend/native contract; web never
+// exposes a separate exact-location mode.
+type MapPrecision = "area" | "hidden";
+const MAP_PRECISION_DEFAULT: MapPrecision = "area";
+const MAP_SHARE_HOURS_DEFAULT = 2;
+const AREA_CELL_DEG = 0.0045;
+const coarsenToCellCenter = (lng: number, lat: number): [number, number] => [
+  Math.floor(lng / AREA_CELL_DEG) * AREA_CELL_DEG + AREA_CELL_DEG / 2,
+  Math.floor(lat / AREA_CELL_DEG) * AREA_CELL_DEG + AREA_CELL_DEG / 2,
+];
+
 const UUID_V4ISH = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const USER_PIN_ACTIVE_HOURS = 24;
+const USER_PIN_ACTIVE_HOURS = 2;
 const USER_PIN_RETENTION_HOURS = 24 * 7;
 
 // ==========================================================================
@@ -207,6 +288,7 @@ const USER_PIN_RETENTION_HOURS = 24 * 7;
 // ==========================================================================
 const MapPage = () => {
   const { user, profile, refreshProfile } = useAuth();
+  const { requireAuth } = useAuthGate();
   const { isActive } = useSafetyRestrictions();
   const t = resolveCopy;
   const location = useLocation();
@@ -269,7 +351,6 @@ const MapPage = () => {
   }, [pinAddressSnapshot]);
   const { upsellModal, closeUpsellModal, buyAddOn } = useUpsell();
   const defaultCenter = useMemo<[number, number]>(() => [114.1583, 22.2828], []);
-  const hideFromMap = Boolean(profile?.hide_from_map);
   const ownMarkerCacheKey = useMemo(() => (user?.id ? `huddle:last-own-coords:${user.id}` : null), [user?.id]);
   const alertsCacheKey = useMemo(() => (user?.id ? `huddle:map-alerts:${user.id}` : null), [user?.id]);
   const activePinGpsRefreshSessionKey = useMemo(
@@ -406,43 +487,30 @@ const MapPage = () => {
   }, [alertsCacheKey]);
 
   const deriveOwnPinState = useCallback((profileRecord: Record<string, unknown> | null): OwnPinState | null => {
-    const lat = typeof profileRecord?.last_lat === "number" ? profileRecord.last_lat : null;
-    const lng = typeof profileRecord?.last_lng === "number" ? profileRecord.last_lng : null;
-    if (lat === null || lng === null) return null;
-    const pinnedUntil = typeof profileRecord?.location_pinned_until === "string"
-      ? String(profileRecord.location_pinned_until)
+    const point = profileRecord?.own_pin_point && typeof profileRecord.own_pin_point === "object"
+      ? profileRecord.own_pin_point as { lat?: unknown; lng?: unknown }
       : null;
+    const lat = Number(point?.lat);
+    const lng = Number(point?.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    const pinnedUntil = typeof profileRecord?.map_visible_until === "string"
+      ? profileRecord.map_visible_until
+      : typeof profileRecord?.location_pinned_until === "string"
+        ? profileRecord.location_pinned_until
+        : typeof profile?.map_visible_until === "string"
+          ? profile.map_visible_until
+          : null;
+    const visibleUntilMs = pinnedUntil ? Date.parse(pinnedUntil) : NaN;
+    if (!Number.isFinite(visibleUntilMs) || visibleUntilMs <= Date.now()) return null;
+    const precision: MapPrecision = profileRecord?.map_precision === "hidden" || profile?.map_precision === "hidden" ? "hidden" : "area";
     return {
       lat,
       lng,
       pinnedAt: pinnedUntil,
       markerState: "active",
-      isInvisible: Boolean(profileRecord?.hide_from_map),
+      isInvisible: profileRecord?.is_invisible === true || profile?.hide_from_map === true || precision === "hidden",
     };
-  }, []);
-
-  const profilePinLastLat = profile?.last_lat;
-  const profilePinLastLng = profile?.last_lng;
-  const profilePinPinnedUntil = profile?.location_pinned_until;
-  const profilePinHideFromMap = profile?.hide_from_map;
-  const profilePinRecord = useMemo(() => profilePinLastLat !== undefined || profilePinLastLng !== undefined ? {
-    last_lat: profilePinLastLat,
-    last_lng: profilePinLastLng,
-    location_pinned_until: profilePinPinnedUntil,
-    hide_from_map: profilePinHideFromMap,
-  } : null, [
-    profilePinHideFromMap,
-    profilePinLastLat,
-    profilePinLastLng,
-    profilePinPinnedUntil,
-  ]);
-
-  const getProfileActivePin = useCallback((): OwnPinState | null => {
-    return deriveOwnPinState(profilePinRecord);
-  // Read only the four fields deriveOwnPinState actually consumes so that
-  // unrelated profile mutations (display_name edits, avatar uploads, etc.)
-  // don't recreate this callback and cascade into downstream useEffects.
-  }, [deriveOwnPinState, profilePinRecord]);
+  }, [profile?.hide_from_map, profile?.map_precision, profile?.map_visible_until]);
 
   useEffect(() => {
     dbAlertsRef.current = dbAlerts;
@@ -496,8 +564,10 @@ const MapPage = () => {
   // Styled confirmation modals
   const [showUnpinConfirm, setShowUnpinConfirm] = useState(false);
   const [showGpsModal, setShowGpsModal] = useState(false);
-  // Invisible mode — Eye toggle
-  const [isInvisible, setIsInvisible] = useState(false);
+  const [gpsFailureReason, setGpsFailureReason] = useState<"permission" | "unavailable" | "timeout" | "unsupported" | "insecure" | null>(null);
+  const [mapPrecision, setMapPrecision] = useState<MapPrecision>(() => profile?.map_precision === "hidden" ? "hidden" : MAP_PRECISION_DEFAULT);
+  const [mapShareHours, setMapShareHours] = useState(MAP_SHARE_HOURS_DEFAULT);
+  const isInvisible = mapPrecision === "hidden";
   useEffect(() => {
     (window as typeof window & { __HUDDLE_MAP__?: { initialized: boolean; fallback: boolean } }).__HUDDLE_MAP__ = {
       initialized: mapLoaded && !mapFallback,
@@ -505,25 +575,9 @@ const MapPage = () => {
     };
   }, [mapFallback, mapLoaded]);
 
-  // Restore persisted pin only from DB for authenticated sessions.
-  useEffect(() => {
-    if (!user) return;
-    (async () => {
-      const activePin = getProfileActivePin();
-      if (!activePin) return;
-      const next = { lat: activePin.lat, lng: activePin.lng };
-      setUserLocation(next);
-      persistOwnMarkerCoords(next);
-      setVisibleEnabled(true);
-      setIsInvisible(activePin.isInvisible);
-      setPinPersistedAt(activePin.pinnedAt);
-      setOwnMarkerState(activePin.markerState);
-    })();
-  }, [getProfileActivePin, persistOwnMarkerCoords, user]);
-
   const effectiveTier = profile?.effective_tier || profile?.tier || "free";
   const isPremium = effectiveTier === "plus" || effectiveTier === "gold";
-  const viewRadiusMeters = 50000;
+  const viewRadiusMeters = 25000;
 
   const isPinned = useMemo(() => Boolean(userLocation), [userLocation]);
 
@@ -576,10 +630,11 @@ const MapPage = () => {
     setVisibleEnabled(false);
   }, [userLocation]);
 
-  // Privacy is an independent flag and must not drive pin/unpin state.
+  // Native contract: Incognito is the hidden precision tier. Area is the
+  // default for every fresh pin; the legacy hide_from_map switch is not used.
   useEffect(() => {
-    setIsInvisible(hideFromMap);
-  }, [hideFromMap]);
+    setMapPrecision(profile?.map_precision === "hidden" ? "hidden" : MAP_PRECISION_DEFAULT);
+  }, [profile?.map_precision]);
 
   // URL params: open broadcast mode / deep-link alert focus.
   useEffect(() => {
@@ -597,7 +652,7 @@ const MapPage = () => {
   // Default center (Hong Kong)
 
   const flyToWithDebug = useCallback(
-    (source: string, options: mapboxgl.FlyToOptions) => {
+    (source: string, options: Parameters<mapboxgl.Map["flyTo"]>[0]) => {
       const isLikelyUserAction =
         source.startsWith("marker.") ||
         source.startsWith("refresh.") ||
@@ -645,27 +700,47 @@ const MapPage = () => {
 
 
   // Pin button re-centers on live GPS when already pinned
-  const reCenterOnGPS = useCallback(() => {
-    if (!navigator.geolocation || !map.current) return;
-    if (import.meta.env.DEV) console.debug("[PIN] Re-centering on live GPS...");
-    navigator.geolocation.getCurrentPosition(
+  const reCenterOnGPS = useCallback(async () => {
+    if (!map.current) return;
+    if (userLocation) {
+      flyToWithDebug("reCenterOnGPS.pin", { center: [userLocation.lng, userLocation.lat], zoom: 15.5 });
+      return;
+    }
+    if (!navigator.geolocation) {
+      setGpsFailureReason("unsupported");
+      setShowGpsModal(true);
+      return;
+    }
+    const requestCurrentPosition = () => navigator.geolocation.getCurrentPosition(
       (pos) => {
         const lat = pos.coords.latitude;
         const lng = pos.coords.longitude;
         if (import.meta.env.DEV) console.debug(`[PIN] Re-center GPS Success: lat=${lat}, lng=${lng}`);
         flyToWithDebug("reCenterOnGPS.success", { center: [lng, lat], zoom: 15.5 });
       },
-      () => {
-        // Fall back to existing user location
-        if (userLocation && map.current) {
-          flyToWithDebug("reCenterOnGPS.fallback", {
-            center: [userLocation.lng, userLocation.lat],
-            zoom: 15.5,
-          });
-        }
+      (error) => {
+        setGpsFailureReason(error.code === 1 ? "permission" : error.code === 3 ? "timeout" : "unavailable");
+        setShowGpsModal(true);
       },
       { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
     );
+
+    if (!navigator.permissions?.query) {
+      requestCurrentPosition();
+      return;
+    }
+    try {
+      const permission = await navigator.permissions.query({ name: "geolocation" });
+      if (permission.state === "denied") {
+        setGpsFailureReason("permission");
+        setShowGpsModal(true);
+        return;
+      }
+      // "prompt" deliberately invokes the browser-owned permission request.
+      requestCurrentPosition();
+    } catch {
+      requestCurrentPosition();
+    }
   }, [flyToWithDebug, userLocation]);
 
   // ==========================================================================
@@ -698,10 +773,10 @@ const MapPage = () => {
   // ============================================================
   // GPS pin workflow (spec): live GPS only, no production mock fallback
   // ============================================================
-  const applyPinLocation = useCallback(async (lat: number, lng: number, source: string) => {
+  const applyPinLocation = useCallback(async (lat: number, lng: number, source: string, requestedPrecision: MapPrecision = MAP_PRECISION_DEFAULT) => {
     if (import.meta.env.DEV) console.debug(`[PIN] applyPinLocation — source=${source}, lat=${lat}, lng=${lng}`);
     if (!user?.id) {
-      toast.error("Please login to pin location");
+      toast.error("Please sign in again to pin your location.");
       setPinning(false);
       return;
     }
@@ -710,28 +785,20 @@ const MapPage = () => {
     if (resolvedAddress) setPinAddressSnapshot(resolvedAddress);
 
     if (import.meta.env.DEV) console.debug("[PIN] Saving to DB — set_user_location RPC...");
-    const { error: profileVisibilityError } = await supabase
-      .from("profiles")
-      .update({ hide_from_map: false } as Record<string, unknown>)
-      .eq("id", user.id);
-    if (profileVisibilityError) {
-      if (import.meta.env.DEV) console.error("[PIN] profile hide_from_map update failed", profileVisibilityError);
-      setPinning(false);
-      toast.error("Failed to pin location");
-      return;
-    }
-
-    const { error: setLocationError } = await supabase.rpc("set_user_location", {
+    const precision: MapPrecision = requestedPrecision === "hidden" ? "hidden" : "area";
+    const { error: setLocationError } = await callRpc("set_user_location", {
       p_lat: lat,
       p_lng: lng,
       p_pin_hours: USER_PIN_ACTIVE_HOURS,
       p_retention_hours: USER_PIN_RETENTION_HOURS,
       p_address: resolvedAddress,
+      p_precision: precision,
+      p_visible_hours: mapShareHours,
     });
     if (setLocationError) {
       if (import.meta.env.DEV) console.error("[PIN] set_user_location failed", setLocationError);
       setPinning(false);
-      toast.error("Failed to pin location");
+      toast.error("We couldn't update your map pin. Try again in a moment.");
       return;
     }
 
@@ -746,12 +813,12 @@ const MapPage = () => {
     lastGpsSnapRef.current = { lat, lng };
 
     setVisibleEnabled(true);
-    setIsInvisible(false);
+    setMapPrecision(precision);
     setPinning(false);
     void refreshProfile();
     if (import.meta.env.DEV) console.debug(`[PIN] ✅ Pin State Updated: pinned=true, visible=true (via ${source})`);
     toast.success(`Location pinned (${source})`);
-  }, [flyToWithDebug, lookupBroadcastAddress, persistOwnMarkerCoords, pinAddressSnapshot, refreshProfile, user?.id]);
+  }, [flyToWithDebug, lookupBroadcastAddress, mapShareHours, persistOwnMarkerCoords, pinAddressSnapshot, refreshProfile, user?.id]);
 
   const refreshActivePinFromGrantedGps = useCallback(async () => {
     if (!user?.id || !navigator.geolocation || !navigator.permissions?.query) return null;
@@ -769,12 +836,14 @@ const MapPage = () => {
           const lng = pos.coords.longitude;
           const resolvedAddress = pinAddressSnapshotRef.current || (await lookupBroadcastAddress(lat, lng)) || null;
           if (resolvedAddress) setPinAddressSnapshot(resolvedAddress);
-          const { error } = await supabase.rpc("set_user_location", {
+          const { error } = await callRpc("set_user_location", {
             p_lat: lat,
             p_lng: lng,
             p_pin_hours: USER_PIN_ACTIVE_HOURS,
             p_retention_hours: USER_PIN_RETENTION_HOURS,
             p_address: resolvedAddress,
+            p_precision: mapPrecision === "hidden" ? "hidden" : "area",
+            p_visible_hours: mapShareHours,
           });
           if (error) {
             resolve(null);
@@ -798,16 +867,18 @@ const MapPage = () => {
         { enableHighAccuracy: true, timeout: 7000, maximumAge: 60_000 }
       );
     });
-  }, [lookupBroadcastAddress, persistOwnMarkerCoords, refreshProfile, snapToGpsChange, user?.id]);
+  }, [lookupBroadcastAddress, mapPrecision, mapShareHours, persistOwnMarkerCoords, refreshProfile, snapToGpsChange, user?.id]);
 
   const requestPinFromLiveGps = useCallback(() => {
     // No secure context — GPS cannot work at all.
     if (!window.isSecureContext) {
+      setGpsFailureReason("insecure");
       setShowGpsModal(true);
       return;
     }
     // Browser does not support Geolocation API.
     if (!navigator.geolocation) {
+      setGpsFailureReason("unsupported");
       setShowGpsModal(true);
       return;
     }
@@ -818,7 +889,7 @@ const MapPage = () => {
       navigator.geolocation.getCurrentPosition(
         async (pos) => {
           if (import.meta.env.DEV) console.debug(`[PIN] GPS Success: lat=${pos.coords.latitude}, lng=${pos.coords.longitude}, accuracy=${pos.coords.accuracy}m`);
-          await applyPinLocation(pos.coords.latitude, pos.coords.longitude, "GPS");
+          await applyPinLocation(pos.coords.latitude, pos.coords.longitude, "GPS", MAP_PRECISION_DEFAULT);
         },
         (err) => {
           if (import.meta.env.DEV) console.debug(`[PIN] GPS Error: code=${err.code}, message=${err.message}`);
@@ -826,7 +897,7 @@ const MapPage = () => {
           // PERMISSION_DENIED (1) — user blocked location for this app.
           // POSITION_UNAVAILABLE (2) — device location services off.
           // TIMEOUT (3) — no GPS fix within timeout; treat as unavailable.
-          // All cases: show GPS required modal. No silent fallback, no stale pin.
+          setGpsFailureReason(err.code === 1 ? "permission" : err.code === 3 ? "timeout" : "unavailable");
           setShowGpsModal(true);
         },
         { enableHighAccuracy: true, timeout: 7000, maximumAge: 0 }
@@ -839,6 +910,7 @@ const MapPage = () => {
         .then((status) => {
           if (status.state === "denied") {
             // Permission already denied — show modal immediately, skip API call.
+            setGpsFailureReason("permission");
             setShowGpsModal(true);
             return;
           }
@@ -866,23 +938,14 @@ const MapPage = () => {
   const confirmUnpinLocation = async () => {
     setShowUnpinConfirm(false);
     if (!user) return;
-    const { error: clearProfilePinError } = await supabase.rpc("clear_user_location_pin");
-    const { error: pinDeleteError } = await supabase.from("pins").delete().eq("user_id", user.id).is("thread_id", null);
-    const { error: userLocationError } = await supabase
-      .from("user_locations")
-      .update({
-        is_public: false,
-        expires_at: new Date().toISOString(),
-      } as Record<string, unknown>)
-      .eq("user_id", user.id);
-    const unpinError = clearProfilePinError ?? pinDeleteError ?? userLocationError;
-    if (unpinError) {
+    const { error } = await supabase.rpc("clear_user_location_pin");
+    if (error) {
       toast.error(t("Failed to unpin location"));
       return;
     }
     setPinPersistedAt(null);
     setOwnMarkerState(null);
-    setIsInvisible(false);
+    setMapPrecision(MAP_PRECISION_DEFAULT);
     setUserLocation(null);
     clearOwnMarkerCoordsCache();
     setFriendPins([]);
@@ -896,6 +959,10 @@ const MapPage = () => {
 
   // Single green button toggle: ON = pinned (green), OFF = grey
   const handlePinToggle = () => {
+    if (!user) {
+      requireAuth("map-location", () => {}, { returnTo: "/map" });
+      return;
+    }
     if (isPinned || visibleEnabled) {
       handleUnpinMyLocation();
     } else {
@@ -904,25 +971,27 @@ const MapPage = () => {
     }
   };
 
-  // Invisible mode toggle — Brand Blue eye icon
-  const toggleInvisible = async () => {
-    if (!user) return;
-    const newInvisible = !isInvisible;
-    setIsInvisible(newInvisible);
-    if (import.meta.env.DEV) console.debug(`[PIN] Invisible mode toggled: ${newInvisible ? "INVISIBLE" : "VISIBLE"}`);
-    await supabase
-      .from("profiles")
-      .update({ hide_from_map: newInvisible } as Record<string, unknown>)
-      .eq("id", user.id);
-    await refreshProfile();
-    void fetchFriendPins();
-    void fetchAlerts();
-    if (newInvisible) {
-      toast.info("Masked as Incognito");
-    } else {
-      toast.success("Incognito disabled");
+  const toggleInvisible = useCallback(async () => {
+    if (!user?.id || !userLocation) return;
+    const previous = mapPrecision;
+    const next: MapPrecision = previous === "hidden" ? "area" : "hidden";
+    setMapPrecision(next);
+    const { error } = await callRpc("set_user_location", {
+      p_lat: userLocation.lat,
+      p_lng: userLocation.lng,
+      p_pin_hours: USER_PIN_ACTIVE_HOURS,
+      p_retention_hours: USER_PIN_RETENTION_HOURS,
+      p_address: pinAddressSnapshotRef.current,
+      p_precision: next,
+      p_visible_hours: mapShareHours,
+    });
+    if (error) {
+      setMapPrecision(previous);
+      toast.error("Could not update map privacy.");
+      return;
     }
-  };
+    void refreshProfile();
+  }, [mapPrecision, mapShareHours, refreshProfile, user?.id, userLocation]);
 
   // ==========================================================================
   // Map Initialization (singleton + one-time auto-snap)
@@ -962,7 +1031,9 @@ const MapPage = () => {
       try {
         map.current = new mapboxgl.Map({
           container: mapContainer.current,
-          style: "mapbox://styles/mapbox/streets-v11",
+          // huddle's branded style. The stock streets-v11 basemap is what made
+          // web read as a different product from the app.
+          style: "mapbox://styles/whypen/cmpx5mu4m000l01sb5fmm2imv",
           center: initialCenter,
           zoom: PROXIMITY_ZOOM,
           failIfMajorPerformanceCaveat: false,
@@ -1020,7 +1091,6 @@ const MapPage = () => {
         if (import.meta.env.DEV) console.debug("[PLACE_SELECTED]", { lat: next.lat, lng: next.lng });
       });
 
-      map.current.addControl(new mapboxgl.NavigationControl(), "bottom-right");
     };
 
     observer = new ResizeObserver(() => {
@@ -1073,8 +1143,7 @@ const MapPage = () => {
 
   // First viewport priority:
   // 1) existing pin/userLocation — always wins, even overrides a fallback already applied
-  // 2) last known profile coordinates — applied once if pin not yet available
-  // 3) profile location text geocoded to area — applied once if no coords either
+  // 2) profile location text geocoded to area — applied once if no pin exists
   useEffect(() => {
     if (!map.current || !mapLoaded) return;
     const apply = async () => {
@@ -1089,11 +1158,6 @@ const MapPage = () => {
       }
       // Fallback: only apply once, while pin hasn't arrived yet
       if (initialViewportAppliedRef.current) return;
-      if (typeof profile?.last_lat === "number" && typeof profile?.last_lng === "number") {
-        flyToWithDebug("init.profileLast", { center: [profile.last_lng, profile.last_lat], zoom: 14.5 });
-        initialViewportAppliedRef.current = true;
-        return;
-      }
       const geocoded = await resolveProfileLocationCenter();
       if (geocoded) {
         flyToWithDebug("init.profileStreet", { center: [geocoded.lng, geocoded.lat], zoom: 14.5 });
@@ -1104,28 +1168,9 @@ const MapPage = () => {
   }, [
     flyToWithDebug,
     mapLoaded,
-    profile?.last_lat,
-    profile?.last_lng,
     resolveProfileLocationCenter,
     userLocation,
   ]);
-
-  useEffect(() => {
-    const applyControlOffset = () => {
-      const node = document.querySelector<HTMLElement>(".mapboxgl-ctrl-bottom-right");
-      if (!node) return;
-      node.style.right = "12px";
-      node.style.bottom = MAP_ZOOM_NAV_STACK_OFFSET;
-      const zoomGroup = node.querySelector<HTMLElement>(".mapboxgl-ctrl-group");
-      if (zoomGroup) zoomGroup.style.transform = "none";
-    };
-    // One-shot on mount/change, then watch for the node to appear via MutationObserver
-    // instead of polling every 500 ms (which caused continuous reflows).
-    applyControlOffset();
-    const observer = new MutationObserver(applyControlOffset);
-    observer.observe(document.body, { childList: true, subtree: true, attributes: false });
-    return () => observer.disconnect();
-  }, [isBroadcastOpen, mapLoaded]);
 
   // NOTE: Do not auto-fly on userLocation changes to prevent map blinking.
 
@@ -1143,26 +1188,48 @@ const MapPage = () => {
     })();
   }, [profile?.id]);
 
+  // NativeMapData owns one audience-safe shell fetch for alerts and people,
+  // cached for 60 seconds. Keep the web surface on that same data path so
+  // mounting both overlays never pays for the same RPC twice.
+  const visibleShellCacheRef = useRef<{ key: string; rows: VisibleMapPinShellRow[]; at: number } | null>(null);
+  const visibleShellInFlightRef = useRef<Promise<VisibleMapPinShellRow[]> | null>(null);
+  const fetchVisibleShells = useCallback(async (force = false): Promise<VisibleMapPinShellRow[]> => {
+    const lat = userLocation?.lat ?? defaultCenter[1];
+    const lng = userLocation?.lng ?? defaultCenter[0];
+    const key = `${lng.toFixed(3)}|${lat.toFixed(3)}|${viewRadiusMeters}|${user?.id || "anon"}`;
+    const cached = visibleShellCacheRef.current;
+    if (!force && cached?.key === key && Date.now() - cached.at < 60_000) return cached.rows;
+    if (visibleShellInFlightRef.current) return visibleShellInFlightRef.current;
+    const promise = (async () => {
+      const { data, error } = await callRpc("get_visible_map_pin_shells_with_audience", {
+        p_lat: lat,
+        p_lng: lng,
+        p_radius_m: viewRadiusMeters,
+      });
+      if (error) throw error;
+      const rows = (Array.isArray(data) ? data : []) as VisibleMapPinShellRow[];
+      visibleShellCacheRef.current = { key, rows, at: Date.now() };
+      return rows;
+    })();
+    visibleShellInFlightRef.current = promise;
+    try {
+      return await promise;
+    } finally {
+      visibleShellInFlightRef.current = null;
+    }
+  }, [defaultCenter, user?.id, userLocation?.lat, userLocation?.lng, viewRadiusMeters]);
+
   // Request coalescing: when N callers fire fetchAlerts() in the same tick,
   // they all await the same in-flight Promise instead of triggering N RPCs.
-  // Pure perf win; behaviorally identical (every caller still resolves with
-  // the same result they'd have gotten from an independent call).
   const fetchAlertsInFlightRef = useRef<Promise<MapAlert[]> | null>(null);
   const fetchAlerts = useCallback(async (): Promise<MapAlert[]> => {
     if (fetchAlertsInFlightRef.current) return fetchAlertsInFlightRef.current;
     const promise = (async (): Promise<MapAlert[]> => {
       try {
-        const lat = userLocation?.lat ?? (profile?.last_lat ?? defaultCenter[1]);
-        const lng = userLocation?.lng ?? (profile?.last_lng ?? defaultCenter[0]);
-        const { data, error } = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>)(
-          "get_visible_broadcast_alerts",
-          {
-            p_lat: lat,
-            p_lng: lng,
-          }
-        );
-        if (error) throw error;
-        const mapped = (Array.isArray(data) ? (data as VisibleMapAlertRow[]) : []).map(mapVisibleAlertRowToMapAlert);
+        const mapped = (await fetchVisibleShells())
+          .filter((row) => row.is_alert === true)
+          .map(mapVisibleAlertShellToMapAlert)
+          .filter((row): row is MapAlert => row !== null);
         const nowMs = Date.now();
         const graceMs = 7 * 24 * 60 * 60 * 1000;
         const rpcIds = new Set(mapped.map((item) => item.id));
@@ -1177,7 +1244,6 @@ const MapPage = () => {
             marker_state: "expired_dot",
           }));
         const visibleOnly = dedupeById(mapped.concat(fallbackDots))
-          .filter((row): row is MapAlert => row.marker_state !== "hidden")
           .filter((row) => !(row.creator_id && blockedUserIds.has(row.creator_id)));
         setDbAlerts(visibleOnly);
         writeCachedAlerts(visibleOnly);
@@ -1197,32 +1263,36 @@ const MapPage = () => {
     })();
     fetchAlertsInFlightRef.current = promise;
     return promise;
-  }, [blockedUserIds, defaultCenter, profile?.last_lat, profile?.last_lng, readCachedAlerts, userLocation?.lat, userLocation?.lng, writeCachedAlerts]);
+  }, [blockedUserIds, fetchVisibleShells, readCachedAlerts, writeCachedAlerts]);
 
   const fetchAlertByIdForDeepLink = useCallback(async (alertId: string): Promise<MapAlert | null> => {
     const trimmedAlertId = String(alertId || "").trim();
     if (!trimmedAlertId) return null;
     if (!UUID_V4ISH.test(trimmedAlertId)) return null;
     try {
-      const { data, error } = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>)(
-        "get_broadcast_alert_by_id",
-        { p_alert_id: trimmedAlertId },
+      const shareToken = String(new URLSearchParams(location.search).get("access") || "").trim();
+      const { data, error } = await callRpc(
+        shareToken ? "get_broadcast_alert_by_share_token" : "get_broadcast_alert_by_id_with_audience",
+        shareToken
+          ? { p_alert_id: trimmedAlertId, p_share_token: shareToken }
+          : { p_alert_id: trimmedAlertId },
       );
       if (error) throw error;
       const row = Array.isArray(data) ? (data[0] as VisibleMapAlertRow | undefined) : undefined;
       if (!row || !row.id) return null;
-      return mapVisibleAlertRowToMapAlert(row);
+      const mapped = mapVisibleAlertRowToMapAlert(row);
+      return shareToken ? { ...mapped, verified_only: true, share_access_token: shareToken } : mapped;
     } catch (error) {
       if (import.meta.env.DEV) console.error("[DEEPLINK_ALERT_FETCH_ERROR]", error);
       return null;
     }
-  }, []);
+  }, [location.search]);
 
   const fetchAlertByThreadForDeepLink = useCallback(async (threadId: string): Promise<MapAlert | null> => {
     const trimmedThreadId = String(threadId || "").trim();
     if (!trimmedThreadId) return null;
     try {
-      const { data, error } = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>)(
+      const { data, error } = await callRpc(
         "get_social_feed_alert_context",
         { p_thread_ids: [trimmedThreadId] },
       );
@@ -1264,64 +1334,37 @@ const MapPage = () => {
     m.boxZoom.enable();
   }, [isBroadcastOpen, mapLoaded]);
 
-  // Fetch friend pins — with demo fallback. Coalesced: concurrent callers
+  // Fetch friend pins from the canonical audience-safe projection. Coalesced: concurrent callers
   // share the in-flight Promise, eliminating duplicate RPCs.
   const fetchFriendPinsInFlightRef = useRef<Promise<void> | null>(null);
   const fetchFriendPins = useCallback(async (): Promise<void> => {
     if (fetchFriendPinsInFlightRef.current) return fetchFriendPinsInFlightRef.current;
     const promise = (async (): Promise<void> => {
       try {
-        if (!user) { setFriendPins([]); return; }
-        const lat = userLocation?.lat ?? (profile?.last_lat ?? defaultCenter[1]);
-        const lng = userLocation?.lng ?? (profile?.last_lng ?? defaultCenter[0]);
-        const { data, error } = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>)("get_friend_pins_nearby", {
-          p_lat: lat,
-          p_lng: lng,
-          p_radius_m: viewRadiusMeters,
-        });
-        if (error) throw error;
-        const dbPins = (Array.isArray(data) ? data : []) as FriendPin[];
-        let nextPins: FriendPin[] = [];
-        if (dbPins.length > 0) {
-          const visiblePins = dbPins.filter((pin) => pin.marker_state !== "expired_dot");
-          const friendIds = visiblePins.map((pin) => pin.id).filter(Boolean);
-          if (friendIds.length > 0) {
-            const { data: profileRows } = await supabase
-              .from("profiles")
-              .select("id,is_verified,verification_status,gender_genre,hide_from_map")
-              .in("id", friendIds);
-            const profileById = new Map<
-              string,
-              { is_verified: boolean; gender_genre: string | null; hide_from_map: boolean }
-            >(
-              (
-                (profileRows || []) as Array<{
-                  id: string;
-                  is_verified?: boolean | null;
-                  verification_status?: string | null;
-                  gender_genre?: string | null;
-                  hide_from_map?: boolean | null;
-                }>
-              ).map((row) => [
-                row.id,
-                {
-                  is_verified: isVerifiedProfile(row),
-                  gender_genre: row.gender_genre ?? null,
-                  hide_from_map: row.hide_from_map === true,
-                },
-              ])
-            );
-            nextPins = visiblePins.map((pin) => ({
-                ...pin,
-                is_verified: profileById.get(pin.id)?.is_verified ?? false,
-                gender_genre: profileById.get(pin.id)?.gender_genre ?? null,
-                is_invisible: profileById.get(pin.id)?.hide_from_map ?? false,
-              }));
-          } else {
-            nextPins = visiblePins;
-          }
-        }
+        if (!user) { setFriendPins([]); publishVisibleUserPinIds([]); return; }
+        const nextPins: FriendPin[] = (await fetchVisibleShells())
+          .filter((row) => row.is_alert !== true && row.marker_state !== "expired_dot")
+          .filter((row) => Number.isFinite(Number(row.lat)) && Number.isFinite(Number(row.lng)))
+          .map((row) => ({
+            id: String(row.pin_id || ""),
+            display_name: row.display_name ?? null,
+            avatar_url: row.avatar_url ?? null,
+            is_verified: row.is_verified === true,
+            is_invisible: row.is_invisible === true,
+            gender_genre: row.gender_genre ?? null,
+            dob: null,
+            relationship_status: null,
+            owns_pets: null,
+            pet_species: null,
+            location_name: null,
+            last_lat: Number(row.lat),
+            last_lng: Number(row.lng),
+            location_pinned_until: null,
+            marker_state: "active" as const,
+          }))
+          .filter((row) => row.id.length > 0);
         setFriendPins(nextPins);
+        publishVisibleUserPinIds(nextPins.map((pin) => pin.id));
         if (friendPinsSessionKey) {
           sessionStorage.setItem(friendPinsSessionKey, JSON.stringify(nextPins));
         }
@@ -1333,7 +1376,7 @@ const MapPage = () => {
     })();
     fetchFriendPinsInFlightRef.current = promise;
     return promise;
-  }, [defaultCenter, friendPinsSessionKey, profile?.last_lat, profile?.last_lng, user, userLocation?.lat, userLocation?.lng, viewRadiusMeters]);
+  }, [fetchVisibleShells, friendPinsSessionKey, user]);
 
   // Coalesced: the inbox-mount effect and refresh callback can both trigger
   // this in the same tick — share the in-flight Promise so we hit the
@@ -1350,19 +1393,18 @@ const MapPage = () => {
           setPinPersistedAt(null);
           setOwnMarkerState(null);
           setPinAddressSnapshot(null);
-          setIsInvisible(false);
+          setMapPrecision(MAP_PRECISION_DEFAULT);
           return null;
         }
-        const { data, error } = await supabase
-          .from("profiles")
-          .select("last_lat,last_lng,location_pinned_until,location_retention_until,hide_from_map")
-          .eq("id", user.id)
-          .maybeSingle();
+        const { data, error } = await callRpc(
+          "get_native_viewer_scope",
+        );
         if (error) {
           // Keep current UI pin state on transient fetch failure.
           return userLocationRef.current;
         }
-        const activePin = deriveOwnPinState((data || null) as Record<string, unknown> | null);
+        const row = Array.isArray(data) ? data[0] : data;
+        const activePin = deriveOwnPinState((row || null) as Record<string, unknown> | null);
         if (!activePin) {
           setUserLocation(null);
           clearOwnMarkerCoordsCache();
@@ -1370,7 +1412,7 @@ const MapPage = () => {
           setPinPersistedAt(null);
           setOwnMarkerState(null);
           setPinAddressSnapshot(null);
-          setIsInvisible(false);
+          setMapPrecision(profile?.map_precision === "hidden" ? "hidden" : MAP_PRECISION_DEFAULT);
           return null;
         }
         const next = { lat: activePin.lat, lng: activePin.lng };
@@ -1378,7 +1420,7 @@ const MapPage = () => {
         persistOwnMarkerCoords(next);
         snapToGpsChange(next, "gps.savedPin");
         setVisibleEnabled(true);
-        setIsInvisible(activePin.isInvisible);
+        setMapPrecision(profile?.map_precision === "hidden" ? "hidden" : MAP_PRECISION_DEFAULT);
         setPinPersistedAt(activePin.pinnedAt);
         setOwnMarkerState(activePin.markerState);
         return next;
@@ -1388,7 +1430,7 @@ const MapPage = () => {
     })();
     fetchCurrentPinStateInFlightRef.current = promise;
     return promise;
-  }, [clearOwnMarkerCoordsCache, deriveOwnPinState, persistOwnMarkerCoords, snapToGpsChange, user?.id]);
+  }, [clearOwnMarkerCoordsCache, deriveOwnPinState, persistOwnMarkerCoords, profile?.map_precision, snapToGpsChange, user?.id]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -1414,6 +1456,13 @@ const MapPage = () => {
     if (!alertFocusId && !alertFocusThreadId) return;
     const focusKey = alertFocusId || alertFocusThreadId || "";
     if (!focusKey) return;
+    const hasShareAccess = Boolean(new URLSearchParams(location.search).get("access"));
+    if (!user && !hasShareAccess) {
+      requireAuth("see-alert", () => {}, { targetId: focusKey, returnTo: location.pathname + location.search });
+      setAlertFocusId(null);
+      setAlertFocusThreadId(null);
+      return;
+    }
     const target = dbAlerts.find((item) => item.id === alertFocusId);
     if (target) {
       setShowAlerts(true);
@@ -1462,7 +1511,7 @@ const MapPage = () => {
       })();
     }, 800);
     return () => window.clearTimeout(timer);
-  }, [alertFocusId, alertFocusThreadId, dbAlerts, fetchAlertByIdForDeepLink, fetchAlertByThreadForDeepLink, fetchAlerts, focusMapTarget]);
+  }, [alertFocusId, alertFocusThreadId, dbAlerts, fetchAlertByIdForDeepLink, fetchAlertByThreadForDeepLink, fetchAlerts, focusMapTarget, location.pathname, location.search, requireAuth, user]);
 
   const openPublicProfileSheet = useCallback(
     async (userId: string, fallbackName: string) => {
@@ -1501,7 +1550,18 @@ const MapPage = () => {
     if (!selectedAlert) return;
     const updated = dbAlerts.find((row) => row.id === selectedAlert.id) || null;
     if (updated) {
-      if (updated !== selectedAlert) setSelectedAlert(updated);
+      // The map projection is a shell; never let its refresh replace the
+      // audience-gated full detail loaded after a marker press.
+      const hasFullDetail = Boolean(
+        selectedAlert.title ||
+        selectedAlert.description ||
+        selectedAlert.photo_url ||
+        (selectedAlert.media_urls?.length ?? 0) > 0 ||
+        selectedAlert.creator_id ||
+        selectedAlert.creator?.display_name ||
+        selectedAlert.creator?.avatar_url,
+      );
+      if (!hasFullDetail && updated !== selectedAlert) setSelectedAlert(updated);
     }
   }, [dbAlerts, selectedAlert]);
 
@@ -1511,7 +1571,9 @@ const MapPage = () => {
       const localPinSnapshot = userLocation;
       setBroadcastPreviewPin(null);
       setSelectedAlert(null);
-      const [pinState] = await Promise.all([fetchCurrentPinState(), fetchAlerts(), fetchFriendPins()]);
+      visibleShellCacheRef.current = null;
+      const [pinState] = await Promise.all([fetchCurrentPinState(), fetchVisibleShells(true)]);
+      await Promise.all([fetchAlerts(), fetchFriendPins()]);
       if (pinState) {
         const refreshedPin = await refreshActivePinFromGrantedGps();
         const focusPin = refreshedPin ?? pinState;
@@ -1531,8 +1593,6 @@ const MapPage = () => {
         if (geocoded) {
           flyToWithDebug("refresh.visibleProfileStreet", { center: [geocoded.lng, geocoded.lat], zoom: 14.5 });
         }
-      } else if (typeof profile?.last_lat === "number" && typeof profile?.last_lng === "number") {
-        flyToWithDebug("refresh.profileLast", { center: [profile.last_lng, profile.last_lat], zoom: 14.5 });
       } else {
         const geocoded = await resolveProfileLocationCenter();
         if (geocoded) {
@@ -1546,10 +1606,9 @@ const MapPage = () => {
     fetchAlerts,
     fetchCurrentPinState,
     fetchFriendPins,
+    fetchVisibleShells,
     flyToWithDebug,
     isPinned,
-    profile?.last_lat,
-    profile?.last_lng,
     refreshActivePinFromGrantedGps,
     resolveProfileLocationCenter,
     userLocation,
@@ -1566,6 +1625,10 @@ const MapPage = () => {
   // Broadcast: start a NEW draft pin flow every time
   // ==========================================================================
   const openBroadcast = () => {
+    if (!user) {
+      requireAuth("broadcast", () => {}, { returnTo: "/map" });
+      return;
+    }
     if (isActive("map_disabled")) {
       setMapRestrictionModalOpen(true);
       return;
@@ -1604,9 +1667,11 @@ const MapPage = () => {
   }, [friendPins, showFriends, user?.id]);
 
   const ownMarkerCoords = useMemo<{ lat: number; lng: number } | null>(() => {
-    if (userLocation) return userLocation;
-    return lastKnownOwnCoords;
-  }, [lastKnownOwnCoords, userLocation]);
+    const source = userLocation || lastKnownOwnCoords;
+    if (!source) return null;
+    const [lng, lat] = coarsenToCellCenter(source.lng, source.lat);
+    return { lat, lng };
+  }, [lastKnownOwnCoords, mapPrecision, userLocation]);
 
   const filteredPins = useMemo(
     () =>
@@ -1629,14 +1694,6 @@ const MapPage = () => {
     });
   }, [dbAlerts, filteredPins.length, renderPinsSource.length]);
 
-  const unpinnedHint = useMemo(() => {
-    if (pinningActive || isPinned) return null;
-    if (showAlerts && showFriends) return "Pin location to see happenings and friends nearby.";
-    if (showAlerts) return "Pin location to see accurate happenings nearby.";
-    if (showFriends) return "Pin location to see friends nearby.";
-    return null;
-  }, [isPinned, pinningActive, showAlerts, showFriends]);
-
   // ==========================================================================
   // Stable marker-overlay callbacks — defined here (not inline in JSX) so
   // they don't trigger child rerenders on every parent state update.
@@ -1654,16 +1711,28 @@ const MapPage = () => {
   const handleAlertSelect = useCallback((alertId: string) => {
     const alert = filteredPins.find((pin) => pin.id === alertId);
     if (!alert) return;
+    const hasShareAccess = Boolean(new URLSearchParams(location.search).get("access"));
+    if (!user && !hasShareAccess) {
+      requireAuth("see-alert", () => {}, { targetId: alert.id, returnTo: "/map" });
+      return;
+    }
     focusMapTarget(alert.is_demo ? "marker.demoAlert.click" : "marker.alert.click", alert.latitude, alert.longitude);
     setSelectedAlert(alert);
-  }, [filteredPins, focusMapTarget]);
+    // The shell projection intentionally contains only marker-safe fields. The
+    // native map hydrates the full alert after every real marker press; do the
+    // same with the existing audience-gated detail RPC instead of opening a
+    // shell as if it were complete alert data.
+    void fetchAlertByIdForDeepLink(alert.id).then((detail) => {
+      if (detail) setSelectedAlert(detail);
+    });
+  }, [fetchAlertByIdForDeepLink, filteredPins, focusMapTarget, location.search, requireAuth, user]);
 
   // ==========================================================================
   // RENDER
   // ==========================================================================
   return (
     <div className="relative h-full w-full overflow-hidden flex flex-col">
-      <GlobalHeader />
+      <GlobalHeader desktopRail />
       {/* Map canvas — below GlobalHeader */}
       <div
         className="flex-1 relative overflow-hidden"
@@ -1734,10 +1803,10 @@ const MapPage = () => {
         {/* ================================================================ */}
         {/* FLOATING CONTROL ROW — Alerts / Friends / Actions                */}
         {/* ================================================================ */}
-        <div className="absolute inset-x-0 z-[1600] flex items-center justify-center pointer-events-none px-4"
+        {user ? <div className="absolute inset-x-0 z-[1600] flex items-center justify-center pointer-events-none px-4"
           style={{ top: "calc(env(safe-area-inset-top, 0px) + 12px)" }}
         >
-          <div className="w-full max-w-[440px] px-1 flex items-center pointer-events-none">
+          <div className="flex w-full max-w-[440px] items-center px-1 pointer-events-none lg:max-w-none lg:px-5">
             <div className="rounded-full bg-white/30 backdrop-blur-md border border-white/40 px-1 py-1 flex items-center gap-1 pointer-events-auto shadow-md">
               <NeuControl
                 size="icon-md"
@@ -1746,7 +1815,7 @@ const MapPage = () => {
                 aria-label="Alerts"
                 onClick={() => setShowAlerts((v) => !v)}
               >
-                <Bell />
+                <HuddleGlyph name="mapAlert" size={20} />
               </NeuControl>
               <NeuControl
                 size="icon-md"
@@ -1755,7 +1824,7 @@ const MapPage = () => {
                 aria-label="Friends"
                 onClick={() => setShowFriends((v) => !v)}
               >
-                <Users />
+                <HuddleGlyph name="mapUser" size={20} />
               </NeuControl>
             </div>
             <div className="ml-2 flex items-center pointer-events-auto">
@@ -1768,28 +1837,22 @@ const MapPage = () => {
               </button>
             </div>
             <div className="ml-auto flex items-center gap-1 pointer-events-auto">
-              {(isPinned || visibleEnabled) && (
+              {(isPinned || visibleEnabled) ? (
                 <button
-                  onClick={toggleInvisible}
-                  className={cn(
-                    "w-11 h-11 rounded-full bg-white/30 backdrop-blur-md border border-white/40 shadow-md flex items-center justify-center touch-manipulation transition-colors"
-                  )}
+                  onClick={() => void toggleInvisible()}
+                  className="w-11 h-11 rounded-full bg-white/30 backdrop-blur-md border border-white/40 shadow-md flex items-center justify-center touch-manipulation transition-colors"
                   aria-label={isInvisible ? "Incognito enabled (tap to disable)" : "Incognito disabled (tap to enable)"}
                 >
-                  {isInvisible ? (
-                    <EyeOff className="w-5 h-5 text-[var(--text-secondary)]" />
-                  ) : (
-                    <Eye className="w-5 h-5 text-[#2145CF]" />
-                  )}
+                  {isInvisible ? <EyeOff className="w-5 h-5 text-[var(--text-secondary)]" /> : <Eye className="w-5 h-5 text-brandBlue" />}
                 </button>
-              )}
+              ) : null}
               <button
                 onClick={handlePinToggle}
                 disabled={pinning}
                 className={cn(
                   "w-11 h-11 rounded-full flex items-center justify-center shadow-md transition-colors touch-manipulation",
                   isPinned || visibleEnabled
-                    ? "bg-[#A6D539]"
+                    ? "bg-[var(--lime-green)]"
                     : "bg-white/30 backdrop-blur-md border border-white/40"
                 )}
                 aria-label={isPinned ? "Pinned (tap to unpin)" : "Pin my location"}
@@ -1802,7 +1865,7 @@ const MapPage = () => {
               </button>
             </div>
           </div>
-        </div>
+        </div> : null}
 
         {/* ================================================================ */}
         {/* SECOND ROW: Invisible Subtext (RIGHT)                            */}
@@ -1838,35 +1901,17 @@ const MapPage = () => {
           <BroadcastMarker map={map.current} coords={broadcastPreviewPin} alertType={draftBroadcastType} />
         )}
         {map.current && !isPickingBroadcastLocation && showAlerts && (
-          <AlertMarkersOverlay
-            map={map.current}
-            alerts={filteredPins}
-            onSelect={handleAlertSelect}
-          />
-        )}
-
-        {/* ================================================================ */}
-        {/* BOTTOM: Broadcast CTA + Unpinned Hint                            */}
-        {/* ================================================================ */}
-        {!isBroadcastOpen && (
           <>
-            <div
-              className="absolute left-1/2 -translate-x-1/2 w-[calc(100%-32px)] max-w-[440px] z-[1700] pointer-events-none"
-              style={{ top: "calc(env(safe-area-inset-top, 0px) + 72px)" }}
-            >
-              <div className="min-h-[30px]">
-                {unpinnedHint && !isPickingBroadcastLocation && (
-                  <p className="text-xs text-center text-muted-foreground bg-card/80 backdrop-blur-sm rounded-lg px-3 py-1.5">
-                    {unpinnedHint}
-                  </p>
-                )}
-              </div>
-            </div>
+            <BroadcastRangeOverlay map={map.current} alerts={filteredPins} viewerId={user?.id || null} />
+            <AlertMarkersOverlay map={map.current} alerts={filteredPins} viewerId={user?.id || null} onSelect={handleAlertSelect} />
           </>
         )}
 
+        {/* ================================================================ */}
+        {/* BOTTOM: Broadcast CTA                                            */}
+        {/* ================================================================ */}
         {!isBroadcastOpen && (
-          <div className="absolute left-1/2 -translate-x-1/2 bottom-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom)+68px)] z-[1700] w-[calc(100%-32px)] max-w-[440px] pointer-events-none">
+          <div className="absolute left-1/2 -translate-x-1/2 bottom-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom)+68px)] z-[1700] w-[calc(100%-32px)] max-w-[440px] pointer-events-none lg:left-6 lg:bottom-6 lg:w-auto lg:max-w-none lg:translate-x-0">
             <button
               className="h-14 w-14 rounded-full border border-white/40 bg-white/30 shadow-md backdrop-blur-md flex items-center justify-center pointer-events-auto"
               aria-label={t("map.broadcast")}
@@ -1876,6 +1921,20 @@ const MapPage = () => {
             </button>
           </div>
         )}
+
+        <div className="absolute bottom-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom)+68px)] right-4 z-[1700] flex flex-col overflow-hidden rounded-[14px] border border-white/70 bg-white/80 shadow-elevated backdrop-blur-xl lg:bottom-6 lg:right-6">
+          <button type="button" aria-label="Zoom in" onClick={() => map.current?.zoomIn()} className="grid h-[42px] w-[42px] place-items-center text-brandText hover:bg-white/70">
+            <Plus className="h-5 w-5" />
+          </button>
+          <span className="mx-2 h-px bg-border" />
+          <button type="button" aria-label="Zoom out" onClick={() => map.current?.zoomOut()} className="grid h-[42px] w-[42px] place-items-center text-brandText hover:bg-white/70">
+            <Minus className="h-5 w-5" />
+          </button>
+          <span className="mx-2 h-px bg-border" />
+          <button type="button" aria-label="Recenter on my location" onClick={reCenterOnGPS} className="grid h-[42px] w-[42px] place-items-center text-brandBlue hover:bg-white/70">
+            <Navigation className="h-4 w-4" />
+          </button>
+        </div>
       </div>
 
       {/* ================================================================ */}
@@ -2009,7 +2068,15 @@ const MapPage = () => {
             </div>
 
             <p className="text-sm text-muted-foreground mb-6">
-              Enable location to see friends and alerts. You can stay incognito in Settings.
+              {gpsFailureReason === "permission"
+                ? "Location is blocked for this site. Allow it in your browser settings, then try again."
+                : gpsFailureReason === "unsupported"
+                  ? "This browser does not support location services."
+                  : gpsFailureReason === "insecure"
+                    ? "Location requires a secure browser connection."
+                    : gpsFailureReason === "timeout" || gpsFailureReason === "unavailable"
+                      ? "We couldn’t get a location fix. Check Location Services and try again."
+                      : "Enable location to see friends and alerts. You can stay incognito in Settings."}
             </p>
 
             <div className="flex gap-3">
@@ -2026,11 +2093,17 @@ const MapPage = () => {
                 size="md"
                 onClick={() => {
                   setShowGpsModal(false);
-                  openDeviceLocationSettings();
+                  if (navigator.permissions?.query) {
+                    void navigator.permissions.query({ name: "geolocation" as PermissionName })
+                      .then((status) => status.state === "denied" ? openDeviceLocationSettings() : requestPinFromLiveGps())
+                      .catch(() => requestPinFromLiveGps());
+                    return;
+                  }
+                  requestPinFromLiveGps();
                 }}
                 className="flex-1"
               >
-                Enable Location
+                Try location
               </NeuControl>
             </div>
           </div>
@@ -2083,14 +2156,7 @@ const MapPage = () => {
         </div>
       )}
 
-      <PublicProfileSheet
-        isOpen={publicProfileOpen}
-        onClose={() => setPublicProfileOpen(false)}
-        loading={publicProfileLoading}
-        fallbackName={publicProfileName}
-        viewedUserId={publicProfileUserId}
-        data={publicProfileData as never}
-      />
+      {publicProfileOpen && publicProfileUserId ? <ProfileShareCard profileId={publicProfileUserId} onClose={() => setPublicProfileOpen(false)} /> : null}
 
       <Suspense fallback={null}>
         <PremiumUpsell isOpen={isPremiumOpen} onClose={() => setIsPremiumOpen(false)} />
@@ -2100,17 +2166,6 @@ const MapPage = () => {
         @keyframes pulse {
           0%, 100% { transform: scale(1); opacity: 1; }
           50% { transform: scale(1.1); opacity: 0.8; }
-        }
-        .mapboxgl-ctrl-top-right {
-          top: 124px !important;
-          right: 12px !important;
-        }
-        .mapboxgl-ctrl-bottom-left,
-        .mapboxgl-ctrl-bottom-right {
-          bottom: ${MAP_ZOOM_NAV_STACK_OFFSET} !important;
-        }
-        .mapboxgl-ctrl-bottom-right .mapboxgl-ctrl-group {
-          transform: none !important;
         }
       `}</style>
 

@@ -1,7 +1,7 @@
 import type { Profile } from "@/contexts/AuthContext";
 
 export const SIGNUP_PUBLIC_PATHS = [
-  "/auth",
+  "/join",
   "/signup/dob",
   "/signup/credentials",
   "/signup/verify-email",
@@ -27,7 +27,7 @@ export function isRegisteredUserProfile(
 }
 
 export function getSignupResumePath(profile: Profile | null): string {
-  if (!profile) return "/auth";
+  if (!profile) return "/join";
 
   const prefs = (profile.prefs ?? {}) as Record<string, unknown>;
   const verifyDecisionComplete = prefs.signup_verify_decided === true;
@@ -35,5 +35,5 @@ export function getSignupResumePath(profile: Profile | null): string {
 
   if (!isRegisteredUserProfile(profile)) return "/set-profile";
 
-  return "/";
+  return "/social";
 }

@@ -100,6 +100,9 @@
     --premium-gold:        #CFAB21;
     --premium-gold-light:  #E0BC2A;
     --coral-orange:        #FF7F50;
+    --support-coral:       #FF751F;   /* native Social paw/support token */
+    --support-coral-soft:  rgba(255, 117, 31, 0.10);
+    --engagement-pillar:   #C8861A;
     --lime-green:          #BFFF00;
     --text-primary:        #424965;
     --text-subtext:        #4a4a4a;
@@ -236,6 +239,92 @@
    4. Tailwind utilities layer — MUST BE LAST
    ============================================ */
 @tailwind utilities;
+
+/* Web mirror of app/src/components/NativeToast.tsx. Sonner remains the event
+   host; Huddle owns the rail geometry, tint, veil and visible lifetime. */
+.toaster:has([data-sonner-toast])::before {
+  background: rgba(20, 24, 38, 0.10);
+  content: "";
+  inset: 0;
+  pointer-events: none;
+  position: fixed;
+  z-index: -1;
+}
+
+.huddle-native-toast {
+  --huddle-toast-wash-a: rgba(33, 69, 207, 0.26);
+  --huddle-toast-wash-b: rgba(33, 69, 207, 0.07);
+  --huddle-toast-disc: #2145CF;
+  --huddle-toast-disc-ink: #FFFFFF;
+  background:
+    linear-gradient(135deg, var(--huddle-toast-wash-a), var(--huddle-toast-wash-b)),
+    rgba(255, 255, 255, 0.94) !important;
+}
+
+.huddle-native-toast__disc {
+  background: var(--huddle-toast-disc) !important;
+  color: var(--huddle-toast-disc-ink) !important;
+}
+
+.huddle-native-toast::before {
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.95), transparent);
+  content: "";
+  height: 1px;
+  left: 12%;
+  pointer-events: none;
+  position: absolute;
+  right: 12%;
+  top: 0;
+}
+
+.huddle-native-toast::after {
+  animation: huddle-toast-progress 4200ms linear forwards;
+  background: #2145CF;
+  bottom: 0;
+  content: "";
+  height: 3px;
+  left: 0;
+  pointer-events: none;
+  position: absolute;
+  transform-origin: left center;
+  width: 100%;
+}
+
+.huddle-native-toast--done {
+  --huddle-toast-wash-a: rgba(191, 255, 0, 0.42);
+  --huddle-toast-wash-b: rgba(191, 255, 0, 0.13);
+  --huddle-toast-disc: #BFFF00;
+  --huddle-toast-disc-ink: #1F2510;
+}
+
+.huddle-native-toast--system {
+  --huddle-toast-wash-a: rgba(33, 69, 207, 0.26);
+  --huddle-toast-wash-b: rgba(33, 69, 207, 0.07);
+  --huddle-toast-disc: #2145CF;
+  --huddle-toast-disc-ink: #FFFFFF;
+}
+
+.huddle-native-toast--limit {
+  --huddle-toast-wash-a: rgba(255, 117, 31, 0.30);
+  --huddle-toast-wash-b: rgba(255, 117, 31, 0.08);
+  --huddle-toast-disc: #FF751F;
+  --huddle-toast-disc-ink: #FFFFFF;
+}
+
+.huddle-native-toast--failed {
+  --huddle-toast-wash-a: rgba(239, 68, 68, 0.26);
+  --huddle-toast-wash-b: rgba(239, 68, 68, 0.07);
+  --huddle-toast-disc: #EF4444;
+  --huddle-toast-disc-ink: #FFFFFF;
+}
+
+@keyframes huddle-toast-progress {
+  to { transform: scaleX(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .huddle-native-toast::after { animation: none; }
+}
 
 
 /* ============================================
@@ -575,6 +664,27 @@ input.huddle-date-input::-webkit-calendar-picker-indicator {
   }
 }
 
+/* Bottom sheets are a phone interaction. On desktop every scoped sheet becomes
+   a centred dialog while keeping the exact same content and action contract. */
+@media (min-width: 768px) {
+  .fixed:has(> [data-huddle-bottom-sheet="true"]) {
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 24px !important;
+  }
+
+  [data-huddle-bottom-sheet="true"] {
+    position: relative !important;
+    inset: auto !important;
+    margin: auto !important;
+    width: min(620px, calc(100vw - 48px)) !important;
+    max-width: 620px !important;
+    max-height: calc(100svh - 48px) !important;
+    border: 1px solid hsl(var(--border)) !important;
+    border-radius: 24px !important;
+  }
+}
+
 /* ============================================
    7. Keyframe animations
    ============================================ */
@@ -582,6 +692,68 @@ input.huddle-date-input::-webkit-calendar-picker-indicator {
 @keyframes skeleton-shimmer {
   0%   { transform: translateX(-100%); }
   100% { transform: translateX(100%); }
+}
+
+@keyframes huddle-gather {
+  0%, 100% { transform: translateY(2px) scale(0.72); opacity: 0.34; }
+  45% { transform: translateY(-2px) scale(1); opacity: 1; }
+  72% { transform: translateY(0) scale(0.84); opacity: 0.68; }
+}
+
+/* Auth wall interior tint.
+   Painted as the panel's own background rather than as blurred child elements:
+   a blurred child inside an `overflow-hidden` parent has its halo clipped, and
+   that clip is visible as a hard rectangle of tint — the exact artefact this is
+   meant to avoid. Two radial gradients, no extra DOM, nothing to clip. */
+.auth-wall-bloom {
+  background-image:
+    radial-gradient(120% 90% at 108% -12%, hsl(var(--ring) / 0.16), transparent 60%),
+    radial-gradient(120% 90% at -12% 112%, rgba(191, 255, 0, 0.20), transparent 60%);
+}
+
+/* Native select arrow, restored.
+   `appearance: none` removes the platform chevron, so anything styling a
+   <select> must draw its own or the control looks like a dead text field.
+   Defined here rather than as a Tailwind arbitrary value: a data-URI in an
+   arbitrary class does not survive the class parser and silently compiles to
+   `background-image: none`. */
+.select-chevron {
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234a4a4a' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  background-size: 16px 16px;
+  padding-right: 2.5rem;
+}
+
+/* /join — the form ↔ verify morph. 150ms cross-fade, per WEB_UX_SPEC.md:168.
+   Only the content cross-fades; the container is not resized abruptly because
+   both states render inside the same fixed-width column. */
+@keyframes join-morph-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.join-morph {
+  animation: join-morph-in 150ms ease-out both;
+}
+
+/* The waiting indicator on the verify state. */
+@keyframes join-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.35; transform: scale(0.8); }
+}
+
+.join-pulse {
+  animation: join-pulse 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* The state still changes and still reads as "working" — it just does not
+     move. */
+  .join-morph,
+  .join-pulse {
+    animation: none;
+  }
 }
 
 @keyframes dot-pulse {
@@ -612,3 +784,56 @@ input.huddle-date-input::-webkit-calendar-picker-indicator {
 .dot-pulse span:nth-child(1) { animation-delay: 0s; }
 .dot-pulse span:nth-child(2) { animation-delay: 0.2s; }
 .dot-pulse span:nth-child(3) { animation-delay: 0.4s; }
+
+/* ── Holographic foil — profile share card ────────────────────────────────────
+   Ports the native card's `Holo` (NativeShareCard.tsx:204-214): the same
+   five-colour cycle, laid at the same 115°, drifting slowly across the face.
+
+   Driven by CSS keyframes rather than requestAnimationFrame on purpose. The
+   flip on this card was once tied to a rAF loop and silently did nothing
+   wherever rAF is throttled — a background tab, a low-power device. A CSS
+   animation runs on the compositor and has no such failure mode.
+
+   `overlay` blending tints the artwork underneath instead of veiling it, which
+   is what keeps the photo legible — the same reason native dialled its own
+   double-wash back. */
+@keyframes huddle-holo-drift {
+  from { background-position: 0% 50%; }
+  to   { background-position: 100% 50%; }
+}
+
+.huddle-holo {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.17;
+  mix-blend-mode: overlay;
+  background-image: repeating-linear-gradient(
+    115deg,
+    #FF3C78 0%, #FFC828 4%, #50FF8C 8%, #3CB4FF 12%, #B45AFF 16%, #FF3C78 20%
+  );
+  background-size: 280% 280%;
+  animation: huddle-holo-drift 7.5s ease-in-out infinite alternate;
+}
+
+/* A shine that reads as a moving highlight rather than colour. */
+.huddle-holo-sheen {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.22;
+  mix-blend-mode: screen;
+  background-image: linear-gradient(
+    115deg,
+    transparent 38%,
+    rgba(255, 255, 255, 0.55) 50%,
+    transparent 62%
+  );
+  background-size: 300% 300%;
+  animation: huddle-holo-drift 7.5s ease-in-out infinite alternate-reverse;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .huddle-holo,
+  .huddle-holo-sheen { animation: none; }
+}

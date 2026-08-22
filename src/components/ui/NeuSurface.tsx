@@ -21,18 +21,11 @@ interface NeuSurfaceProps extends React.HTMLAttributes<HTMLElement> {
 
 const NeuSurface = React.forwardRef<HTMLElement, NeuSurfaceProps>(
   ({ className, as: Tag = "div", noPadding = false, ...props }, ref) => {
-    return (
-      // @ts-expect-error dynamic tag
-      <Tag
-        ref={ref}
-        className={cn(
-          "card-e1",
-          !noPadding && "p-4",
-          className,
-        )}
-        {...props}
-      />
-    );
+    return React.createElement(Tag, {
+      ...props,
+      ref,
+      className: cn("card-e1", !noPadding && "p-4", className),
+    });
   },
 );
 NeuSurface.displayName = "NeuSurface";

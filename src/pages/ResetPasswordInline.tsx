@@ -4,12 +4,12 @@ import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { CheckCircle2, ChevronLeft, Mail } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { buildJoinSignInPath } from "@/lib/authIntent";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { authResetPassword } from "@/lib/publicAuthApi";
 import { getClientEnv } from "@/lib/env";
-import { supabase } from "@/integrations/supabase/client";
 
 declare global {
   interface Window {
@@ -29,8 +29,8 @@ declare global {
           theme?: "light" | "dark" | "auto";
         },
       ) => string;
-      remove?: (widgetId?: string) => void;
-      reset?: (widgetId?: string) => void;
+      reset: (widgetId?: string) => void;
+      remove: (widgetId?: string) => void;
     };
   }
 }
@@ -76,12 +76,8 @@ const ResetPasswordInline = () => {
   const [token, setToken] = useState("");
   const [widgetReady, setWidgetReady] = useState(false);
   const [widgetError, setWidgetError] = useState<string | null>(null);
-  const [registeredEmail, setRegisteredEmail] = useState(false);
-  const [checkingEmail, setCheckingEmail] = useState(false);
   const [emailCheckError, setEmailCheckError] = useState<string | null>(null);
   const [requestState, setRequestState] = useState<RequestState>("idle");
-  const [submittedEmail, setSubmittedEmail] = useState("");
-  const duplicateCheckRef = useRef(0);
   const { register, watch, handleSubmit, formState: { errors, isValid } } = useForm<FormData>({
     resolver: zodResolver(schema),
     mode: "onChange",
@@ -138,52 +134,7 @@ const ResetPasswordInline = () => {
   }, [siteKey]);
 
   useEffect(() => {
-    const trimmedEmail = email.trim().toLowerCase();
     setRequestState("idle");
-    setSubmittedEmail("");
-    if (!schema.safeParse({ email: trimmedEmail }).success) {
-      setRegisteredEmail(false);
-      setCheckingEmail(false);
-      setEmailCheckError(null);
-      return;
-    }
-    const checkId = ++duplicateCheckRef.current;
-    const timer = window.setTimeout(async () => {
-      try {
-        setCheckingEmail(true);
-        setEmailCheckError(null);
-        const { data, error } = await supabase.rpc("check_identifier_registered", {
-          p_email: trimmedEmail,
-          p_phone: "",
-        });
-        if (checkId !== duplicateCheckRef.current) return;
-        if (error) {
-          setRegisteredEmail(false);
-          setEmailCheckError("We couldn't check this email right now. Please try again.");
-          return;
-        }
-        if (data?.blocked) {
-          setRegisteredEmail(false);
-          setEmailCheckError(String(data?.public_message || "This account is unavailable."));
-          return;
-        }
-        if (data?.review_required) {
-          setRegisteredEmail(false);
-          setEmailCheckError("This account is temporarily unavailable.");
-          return;
-        }
-        const exists = Boolean(data?.registered);
-        setRegisteredEmail(exists);
-        setEmailCheckError(exists ? null : "We couldn't find an account with that email.");
-      } catch {
-        if (checkId !== duplicateCheckRef.current) return;
-        setRegisteredEmail(false);
-        setEmailCheckError("We couldn't check this email right now. Please try again.");
-      } finally {
-        if (checkId === duplicateCheckRef.current) setCheckingEmail(false);
-      }
-    }, 350);
-    return () => window.clearTimeout(timer);
   }, [email]);
 
   const onSubmit = async (values: FormData) => {
@@ -212,7 +163,6 @@ const ResetPasswordInline = () => {
       setEmailCheckError("We couldn't send that reset email just now. Please try again in a moment.");
       return;
     }
-    setSubmittedEmail(normalizedEmail);
     setEmailCheckError(null);
     setRequestState("sent");
   };
@@ -221,7 +171,7 @@ const ResetPasswordInline = () => {
     <div className="min-h-screen bg-background px-6 pt-10">
       <button
         type="button"
-        onClick={() => navigate("/auth")}
+        onClick={() => navigate(buildJoinSignInPath("/social"), { replace: true })}
         className="mb-4 inline-flex h-9 w-9 items-center justify-center rounded-full border border-border text-brandText"
         aria-label="Back to sign in"
       >
@@ -237,7 +187,7 @@ const ResetPasswordInline = () => {
             <div>
               <p className="font-medium">Check your inbox</p>
               <p className="mt-1 leading-6 text-emerald-800">
-                We&apos;ve sent a password reset link to <span className="font-medium">{submittedEmail}</span>.
+                If that email is in Huddle, we&apos;ve sent a reset link.
                 If it doesn&apos;t arrive in a few minutes, check your spam folder or try again.
               </p>
             </div>
@@ -261,9 +211,9 @@ const ResetPasswordInline = () => {
         <Button
           type="submit"
           className="h-10 w-full"
-          disabled={!isValid || !registeredEmail || checkingEmail || requestState === "sending" || !widgetReady || !token}
+          disabled={!isValid || requestState === "sending" || !widgetReady || !token}
         >
-          {checkingEmail ? "Checking…" : requestState === "sending" ? "Sending…" : "Send reset link"}
+          {requestState === "sending" ? "Sending…" : "Send reset link"}
         </Button>
       </form>
 

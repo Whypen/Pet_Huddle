@@ -124,7 +124,7 @@ export const PremiumFooter = ({ isOpen, onClose, triggerReason = "default" }: Pr
               <div className="flex gap-3">
                 <button
                   onClick={() => {
-                    navigate("/premium");
+                    navigate("/member");
                     onClose();
                   }}
                   className="flex-1 bg-brandBlue font-bold py-3 rounded-xl text-sm shadow-md hover:shadow-lg transition-shadow text-white"

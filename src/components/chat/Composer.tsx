@@ -89,7 +89,7 @@ export const Composer: React.FC<ComposerProps> = ({
       data-testid="composer-dock"
     >
       <div
-        className="mx-auto flex w-full max-w-[430px] items-end gap-[12px] px-[16px] pt-[10px]"
+        className="mx-auto flex w-full max-w-[var(--app-max-width,430px)] items-end gap-[12px] px-[16px] pt-[10px]"
         style={{ paddingBottom: `calc(env(safe-area-inset-bottom, 0px) + 10px)` }}
       >
         {/* Attach icon */}

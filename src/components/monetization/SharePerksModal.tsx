@@ -64,8 +64,8 @@ export function SharePerksModal({ isOpen, onClose, tier }: Props) {
     return target.startsWith("/") ? target : "/";
   }, [location.pathname, location.search]);
   const encodedReturnTo = encodeURIComponent(returnTo);
-  const successUrl = `${window.location.origin}/premium?addon_done=1&return_to=${encodedReturnTo}&reopen_drawer=1`;
-  const cancelUrl = `${window.location.origin}/premium?tab=addons&return_to=${encodedReturnTo}&reopen_drawer=1`;
+  const successUrl = `${window.location.origin}/member?addon_done=1&return_to=${encodedReturnTo}&reopen_drawer=1`;
+  const cancelUrl = `${window.location.origin}/member?tab=addons&return_to=${encodedReturnTo}&reopen_drawer=1`;
 
   useEffect(() => {
     if (!isOpen) return;

@@ -99,7 +99,7 @@ export const credentialsSchema = z
       .min(8, "Minimum 8 characters")
       .regex(/[A-Z]/, "Must include uppercase letter")
       .regex(/[0-9]/, "Must include number")
-      .regex(/[!@#$%^&*]/, "Must include special character"),
+      .regex(/[^A-Za-z0-9]/, "Must include special character"),
     confirmPassword: z.string(),
   })
   .refine((data) => data.password === data.confirmPassword, {

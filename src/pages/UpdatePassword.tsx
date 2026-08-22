@@ -6,7 +6,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { FormField } from "@/components/ui";
 import { NeuButton } from "@/components/ui/NeuButton";
 import { authChangePassword } from "@/lib/publicAuthApi";
+import { passwordPolicyError } from "@/lib/passwordStrength";
 import { consumeSupabaseAuthRedirect } from "@/lib/supabaseAuthRedirect";
+import { buildJoinSignInPath } from "@/lib/authIntent";
 
 const UpdatePassword = () => {
   const [ready, setReady] = useState(false);
@@ -38,6 +40,11 @@ const UpdatePassword = () => {
   }, [navigate]);
 
   const updatePassword = async () => {
+    const policyError = passwordPolicyError(password);
+    if (policyError) {
+      toast.error(policyError);
+      return;
+    }
     setSubmitting(true);
     const { error } = await authChangePassword({
       password,
@@ -48,7 +55,7 @@ const UpdatePassword = () => {
       return;
     }
     toast.success("Password updated");
-    navigate("/auth", { replace: true });
+    navigate(buildJoinSignInPath("/social"), { replace: true });
   };
 
   if (!ready) return null;
@@ -69,7 +76,7 @@ const UpdatePassword = () => {
         <NeuButton
           className="w-full h-10"
           onClick={updatePassword}
-          disabled={password.length < 8 || submitting}
+          disabled={Boolean(passwordPolicyError(password)) || submitting}
         >
           Update password
         </NeuButton>

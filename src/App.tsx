@@ -2,6 +2,7 @@ import { AppBackground } from "@/components/ui/AppBackground";
 import { ErrorBoundary } from "@/components/error/ErrorBoundary";
 import { NativeRuntimeBridge } from "@/components/native/NativeRuntimeBridge";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { AuthGateProvider } from "@/components/auth/AuthGateProvider";
 import { SignupProvider } from "@/contexts/SignupContext";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { BrowserRouter, useLocation } from "react-router-dom";
@@ -56,8 +57,13 @@ const App = () => {
       >
         <AuthProvider>
           <SignupProvider>
-            <NativeRuntimeBridge />
-            <RuntimeRoutes />
+            {/* AuthGateProvider must sit inside AuthProvider (it reads the
+                session) and inside BrowserRouter (the wall navigates to /join).
+                One instance wraps every route so exactly one wall can be open. */}
+            <AuthGateProvider>
+              <NativeRuntimeBridge />
+              <RuntimeRoutes />
+            </AuthGateProvider>
           </SignupProvider>
         </AuthProvider>
       </BrowserRouter>

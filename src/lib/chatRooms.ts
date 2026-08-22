@@ -8,7 +8,7 @@ export async function ensureDirectChatRoom(
 ): Promise<string> {
   // Canonical path: security-definer RPC that bypasses client-side membership insert restrictions.
   const callRpc = async (fn: string, params?: Record<string, unknown>) =>
-    (supabase.rpc as (fnName: string, payload?: Record<string, unknown>) => Promise<{ data: unknown; error: { message?: string } | null }>)(
+    (supabase.rpc as unknown as (fnName: string, payload?: Record<string, unknown>) => Promise<{ data: unknown; error: { message?: string } | null }>)(
       fn,
       params
     );

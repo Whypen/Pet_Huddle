@@ -4420,6 +4420,7 @@ export type Database = {
       service_care_events: {
         Row: {
           actor_id: string
+          case_id: string | null
           created_at: string
           event_type: string
           id: string
@@ -4430,6 +4431,7 @@ export type Database = {
         }
         Insert: {
           actor_id: string
+          case_id?: string | null
           created_at?: string
           event_type: string
           id?: string
@@ -4440,6 +4442,7 @@ export type Database = {
         }
         Update: {
           actor_id?: string
+          case_id?: string | null
           created_at?: string
           event_type?: string
           id?: string
@@ -4449,6 +4452,20 @@ export type Database = {
           service_chat_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "service_care_events_case_id_fkey"
+            columns: ["case_id"]
+            isOneToOne: false
+            referencedRelation: "service_disputes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_care_events_case_id_fkey"
+            columns: ["case_id"]
+            isOneToOne: false
+            referencedRelation: "view_admin_service_disputes_queue"
+            referencedColumns: ["dispute_id"]
+          },
           {
             foreignKeyName: "service_care_events_actor_id_fkey"
             columns: ["actor_id"]
@@ -8323,6 +8340,7 @@ export type Database = {
         Args: never
         Returns: {
           cached_device_point: Json
+          city: string
           country: string
           district: string
           location_name: string

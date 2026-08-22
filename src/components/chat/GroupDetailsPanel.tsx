@@ -16,6 +16,7 @@ import { Camera, ImageIcon, Loader2, Trash2, Users } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { updateGroupChatMetadata } from "@/lib/groupChats";
+import { useAuthGate } from "@/components/auth/authGateContext";
 
 type GroupDetailsAction = {
   key: string;
@@ -58,6 +59,7 @@ export function GroupDetailsPanel({
   createdBy = null,
   onAvatarUpdated,
 }: GroupDetailsPanelProps) {
+  const { requireAuth } = useAuthGate();
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
   const descriptionRef = useRef<HTMLParagraphElement | null>(null);
   const [canExpandDescription, setCanExpandDescription] = useState(false);
@@ -111,7 +113,7 @@ export function GroupDetailsPanel({
     const { data: authData, error: authErr } = await supabase.auth.getUser();
     const authUid = authData?.user?.id ?? null;
     if (authErr || !authUid) {
-      toast.error("Sign in to update the cover.");
+      requireAuth("manage-group", () => {}, { targetId: chatId });
       return null;
     }
     if (createdBy && authUid !== createdBy) {

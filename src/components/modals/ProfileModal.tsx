@@ -107,7 +107,6 @@ export const ProfileModal = ({
                 locationName=""
                 languages={[]}
                 socialAlbum={[]}
-                socialAlbumUrls={{}}
                 petHeads={(profile.pets || []).map((pet) => ({
                   id: pet.id,
                   name: pet.name,

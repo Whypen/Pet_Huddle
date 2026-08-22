@@ -29,8 +29,21 @@ export const buildScopedStorageKey = (base: string, owner: string | null | undef
   return normalizedOwner ? `${base}:${normalizedOwner}` : base;
 };
 
+const clearLegacySignupPasswordKeys = () => {
+  localStorage.removeItem(SIGNUP_PASSWORD_SESSION_KEY);
+  sessionStorage.removeItem(SIGNUP_PASSWORD_SESSION_KEY);
+  const scopedPasswordPrefix = `${SIGNUP_PASSWORD_SESSION_KEY}:`;
+  Object.keys(localStorage)
+    .filter((key) => key.startsWith(scopedPasswordPrefix))
+    .forEach((key) => localStorage.removeItem(key));
+  Object.keys(sessionStorage)
+    .filter((key) => key.startsWith(scopedPasswordPrefix))
+    .forEach((key) => sessionStorage.removeItem(key));
+};
+
 export const loadSignupDraft = (ownerHint?: string | null): LoadedSignupDraft | null => {
   try {
+    clearLegacySignupPasswordKeys();
     const candidates: string[] = [];
     const pushCandidate = (value?: string | null) => {
       const normalized = normalizeStorageOwner(value);
@@ -59,12 +72,10 @@ export const loadSignupDraft = (ownerHint?: string | null): LoadedSignupDraft | 
       const rawDraft = localStorage.getItem(draftKey);
       if (!rawDraft) continue;
       const passwordKey = buildScopedStorageKey(SIGNUP_PASSWORD_SESSION_KEY, owner);
-      const password =
-        sessionStorage.getItem(passwordKey) ||
-        localStorage.getItem(passwordKey) ||
-        sessionStorage.getItem(SIGNUP_PASSWORD_SESSION_KEY) ||
-        localStorage.getItem(SIGNUP_PASSWORD_SESSION_KEY) ||
-        "";
+      localStorage.removeItem(passwordKey);
+      localStorage.removeItem(SIGNUP_PASSWORD_SESSION_KEY);
+      sessionStorage.removeItem(passwordKey);
+      sessionStorage.removeItem(SIGNUP_PASSWORD_SESSION_KEY);
       const signupProofKey = buildScopedStorageKey(SIGNUP_PROOF_STORAGE_KEY, owner);
       const signupProof =
         localStorage.getItem(signupProofKey) ||
@@ -75,7 +86,7 @@ export const loadSignupDraft = (ownerHint?: string | null): LoadedSignupDraft | 
       return {
         owner,
         data: JSON.parse(rawDraft) as Record<string, unknown>,
-        password,
+        password: "",
         signupProof,
       };
     }
@@ -85,10 +96,7 @@ export const loadSignupDraft = (ownerHint?: string | null): LoadedSignupDraft | 
     return {
       owner: "",
       data: JSON.parse(baseDraft) as Record<string, unknown>,
-      password:
-        sessionStorage.getItem(SIGNUP_PASSWORD_SESSION_KEY) ||
-        localStorage.getItem(SIGNUP_PASSWORD_SESSION_KEY) ||
-        "",
+      password: "",
       signupProof:
         localStorage.getItem(SIGNUP_PROOF_STORAGE_KEY) ||
         sessionStorage.getItem(SIGNUP_PROOF_STORAGE_KEY) ||
