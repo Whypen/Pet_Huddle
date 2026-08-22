@@ -6,7 +6,6 @@ import {
   type ResponseShape,
 } from "./_publicRead";
 import { checkDistributedRateLimit } from './_distributedRateLimit';
-import { isPubliclyVisiblePost } from "./_publicProjectionVisibility.mjs";
 
 type MaybeString = string | string[] | undefined;
 type RequestShape = {
@@ -71,8 +70,8 @@ export default async function handler(req: RequestShape, res: ResponseShape) {
 
   setPublicCacheHeaders(res);
   res.status(200).json({
-    posts: rows
-      .filter(isPubliclyVisiblePost)
-      .map((row) => ({ ...row, is_sensitive: row.is_sensitive === true })),
+    // The existing RPC is the canonical public/safety boundary. A second
+    // word-based web filter split this feed from the app's visible feed.
+    posts: rows.map((row) => ({ ...row, is_sensitive: row.is_sensitive === true })),
   });
 }

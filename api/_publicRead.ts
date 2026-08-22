@@ -56,7 +56,9 @@ export const fetchPublicProjection = async <T>(
 };
 
 export const setPublicCacheHeaders = (res: ResponseShape) => {
-  res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=300");
+  // Results vary by Vercel's coarse visitor-country headers. Browser caching
+  // is safe; a shared CDN entry could serve one country's feed to another.
+  res.setHeader("Cache-Control", "private, max-age=60, stale-while-revalidate=300");
 };
 
 export const clampLimit = (raw: unknown, fallback: number, max: number): number => {

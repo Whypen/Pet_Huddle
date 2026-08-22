@@ -4,10 +4,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import publicFeed from "../../api/public-feed";
 import publicAlerts from "../../api/public-alerts";
 import publicGroups from "../../api/public-groups";
-import {
-  isPubliclyVisibleGroup,
-  isPubliclyVisiblePost,
-} from "../../api/_publicProjectionVisibility.mjs";
 
 type Captured = { code: number; body: Record<string, unknown> };
 type SeenRequest = { url: string; body: Record<string, unknown>; headers: Record<string, string> };
@@ -99,19 +95,6 @@ describe("anonymous projection boundary", () => {
 });
 
 describe("public Social", () => {
-  it("removes internal labels from every visible public post field", () => {
-    const base = {
-      id: "t", title: "Found a cat", content: "Safe near the lobby", images: [],
-      likes: 0, created_at: "2026-08-01T00:00:00Z", category: "Pets",
-      author_name: "Priya", author_avatar_url: null, author_social_id: "priya01",
-    };
-
-    expect(isPubliclyVisiblePost(base)).toBe(true);
-    expect(isPubliclyVisiblePost({ ...base, title: "[UAT] final check" })).toBe(false);
-    expect(isPubliclyVisiblePost({ ...base, content: "Demo only" })).toBe(false);
-    expect(isPubliclyVisiblePost({ ...base, author_name: "Seed account" })).toBe(false);
-  });
-
   it("uses only get_public_social_feed and emits its narrow shape", async () => {
     const captured = {} as Captured;
     await publicFeed({ query: {}, headers: { "x-vercel-ip-country": "HK" } }, makeRes(captured));
@@ -163,20 +146,6 @@ describe("public Map", () => {
 });
 
 describe("public Chats", () => {
-  it("removes internal labels from every visible public group field", () => {
-    const base = {
-      id: "g", name: "Victoria Park Dogs", description: "Sunday walks", cover_url: null,
-      area: "Causeway Bay", country: "Hong Kong", pet_focus: ["Dogs"], member_count: 2,
-      next_event_title: "Morning walk", next_event_starts_at: null, next_event_ends_at: null,
-    };
-
-    expect(isPubliclyVisibleGroup(base)).toBe(true);
-    expect(isPubliclyVisibleGroup({ ...base, name: "[UAT] Central Walk Club" })).toBe(false);
-    expect(isPubliclyVisibleGroup({ ...base, name: "Hipen test" })).toBe(false);
-    expect(isPubliclyVisibleGroup({ ...base, description: "Demo group" })).toBe(false);
-    expect(isPubliclyVisibleGroup({ ...base, next_event_title: "Staging event" })).toBe(false);
-  });
-
   it("uses only get_public_groups_nearby and returns covers/events without chat data", async () => {
     const captured = {} as Captured;
     await publicGroups(
@@ -189,7 +158,7 @@ describe("public Chats", () => {
       "area", "country", "cover_url", "description", "id", "member_count", "name",
       "next_event_ends_at", "next_event_starts_at", "next_event_title", "pet_focus",
     ]);
-    expect(captured.body.groups).toHaveLength(1);
+    expect(captured.body.groups).toHaveLength(2);
     expect((captured.body.groups as Record<string, unknown>[])[0].name).toBe("Sheung Wan Dogs");
   });
 });

@@ -13,32 +13,24 @@
     <meta property="og:description" content="Your pet care super-app" />
     <meta property="og:type" content="website" />
 
+    <!-- The Map route is code-split, but its branded style still crosses the
+         network. Warm only the connection; do not preload Mapbox code on
+         Social or Chats. -->
+    <link rel="preconnect" href="https://api.mapbox.com" crossorigin />
+    <link rel="dns-prefetch" href="https://api.mapbox.com" />
+
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:site" content="@huddlepets" />
 
     <!-- PWA meta tags -->
-    <meta name="theme-color" content="#3283ff" />
+    <meta name="theme-color" content="#ffffff" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <link rel="manifest" href="/manifest.json" />
 
-    <!-- Image CDN warm-up for instant link preview thumbnails -->
-    <link rel="preconnect" href="https://i.ytimg.com" crossorigin />
-    <link rel="preconnect" href="https://i.scdn.co" crossorigin />
-    <link rel="dns-prefetch" href="https://i.ytimg.com" />
-    <link rel="dns-prefetch" href="https://i.scdn.co" />
-
-    <!-- Stripe connection warm-up: pre-resolve DNS and open TCP connections so
-         the card iframe does not hit a cold ERR_CONNECTION_CLOSED on first mount -->
-    <link rel="preconnect" href="https://js.stripe.com" crossorigin />
-    <link rel="preconnect" href="https://m.stripe.com" crossorigin />
-    <link rel="preconnect" href="https://m.stripe.network" crossorigin />
-    <link rel="dns-prefetch" href="https://js.stripe.com" />
-    <link rel="dns-prefetch" href="https://m.stripe.com" />
-    <link rel="dns-prefetch" href="https://m.stripe.network" />
   </head>
 
-  <body style="background-color:#D5DFEF;">
+  <body style="background-color:#ffffff;">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

@@ -5,7 +5,7 @@
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",
-  "theme_color": "#3283ff",
+  "theme_color": "#ffffff",
   "icons": [
     {
       "src": "/huddle-icon-192-v5.png",

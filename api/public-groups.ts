@@ -5,7 +5,6 @@ import {
   type ResponseShape,
 } from "./_publicRead";
 import { checkDistributedRateLimit } from './_distributedRateLimit';
-import { isPubliclyVisibleGroup } from "./_publicProjectionVisibility.mjs";
 
 type MaybeString = string | string[] | undefined;
 type RequestShape = { headers?: Record<string, MaybeString> };
@@ -47,7 +46,9 @@ export default async function handler(req: RequestShape, res: ResponseShape) {
     return;
   }
 
-  const p_country = header(req, "x-vercel-ip-country-region");
+  // Hong Kong and other country-level regions may not receive a separate
+  // country-region header. The native projection accepts ISO country codes.
+  const p_country = header(req, "x-vercel-ip-country-region") || header(req, "x-vercel-ip-country");
   if (!p_country) {
     setPublicCacheHeaders(res);
     res.status(200).json({ groups: [] });
@@ -65,5 +66,6 @@ export default async function handler(req: RequestShape, res: ResponseShape) {
   }
 
   setPublicCacheHeaders(res);
-  res.status(200).json({ groups: rows.filter(isPubliclyVisibleGroup) });
+  // The RPC owns public visibility and the narrow anonymous response shape.
+  res.status(200).json({ groups: rows });
 }

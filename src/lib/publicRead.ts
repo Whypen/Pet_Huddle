@@ -85,6 +85,11 @@ const readCached = <T,>(id: string): T[] | null => {
   return cached.data as T[];
 };
 
+const readStored = <T,>(id: string): T[] | null => {
+  const cached = resourceCache.get(id);
+  return cached ? cached.data as T[] : null;
+};
+
 const fetchResource = <T,>(path: string, key: string): Promise<T[]> => {
   const id = resourceId(path, key);
   const existing = pendingResources.get(id);
@@ -109,9 +114,10 @@ const fetchResource = <T,>(path: string, key: string): Promise<T[]> => {
 const usePublicResource = <T,>(path: string, key: string): State<T> => {
   const id = resourceId(path, key);
   const cached = readCached<T>(id);
+  const stored = readStored<T>(id);
   const [state, setState] = useState<ResourceState<T>>({
-    data: cached ?? [],
-    loading: cached === null,
+    data: cached ?? stored ?? [],
+    loading: cached === null && stored === null,
     failed: false,
   });
 
@@ -122,8 +128,9 @@ const usePublicResource = <T,>(path: string, key: string): State<T> => {
       return;
     }
 
+    const stale = readStored<T>(id);
     let cancelled = false;
-    setState({ data: [], loading: true, failed: false });
+    setState({ data: stale ?? [], loading: stale === null, failed: false });
     void fetchResource<T>(path, key)
       .then((rows) => {
         if (!cancelled) setState({ data: rows, loading: false, failed: false });
@@ -133,7 +140,7 @@ const usePublicResource = <T,>(path: string, key: string): State<T> => {
         // Distinguished from "empty" on purpose: an empty district is a normal,
         // encouraging state; a failed fetch is not, and must not be dressed up
         // as one.
-        setState({ data: [], loading: false, failed: true });
+        setState((current) => ({ ...current, loading: false, failed: true }));
       });
     return () => {
       cancelled = true;
@@ -147,7 +154,7 @@ const usePublicResource = <T,>(path: string, key: string): State<T> => {
       const rows = await fetchResource<T>(path, key);
       setState({ data: rows, loading: false, failed: false });
     } catch {
-      setState({ data: [], loading: false, failed: true });
+      setState((current) => ({ ...current, loading: false, failed: true }));
     }
   }, [id, key, path]);
 
