@@ -3,8 +3,8 @@ import {
   resolvePublicReadConfig,
   setPublicCacheHeaders,
   type ResponseShape,
-} from "./_publicRead";
-import { checkDistributedRateLimit } from './_distributedRateLimit';
+} from "./_publicRead.js";
+import { checkDistributedRateLimit } from './_distributedRateLimit.js';
 import { isPubliclyVisibleGroup } from "./_publicProjectionVisibility.mjs";
 
 type MaybeString = string | string[] | undefined;

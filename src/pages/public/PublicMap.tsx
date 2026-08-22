@@ -12,7 +12,8 @@
  * No friend pins, no self pin, no alert-type segment control. These are not
  * hidden with CSS — this component never fetches or renders them at all.
  *
- * Every tap except pan/zoom opens the auth wall. Never a silent no-op.
+ * Reading and navigation remain public. Alert detail and every write still
+ * open the auth wall.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -68,7 +69,23 @@ const PublicMap = () => {
 
   const recenter = () => {
     setLocationNotice("");
-    requireAuth("map-location", () => {}, { returnTo: "/map" });
+    if (!navigator.geolocation) {
+      setLocationNotice("Current location is not available in this browser.");
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      ({ coords }) => {
+        map.current?.flyTo({ center: [coords.longitude, coords.latitude], zoom: 13.5 });
+      },
+      (error) => {
+        setLocationNotice(
+          error.code === error.PERMISSION_DENIED
+            ? "Allow location for huddle in your browser settings, then try again."
+            : "Current location is unavailable right now. Try again.",
+        );
+      },
+      { enableHighAccuracy: false, maximumAge: 300_000, timeout: 10_000 },
+    );
   };
 
   useEffect(() => {

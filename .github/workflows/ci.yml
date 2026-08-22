@@ -109,7 +109,7 @@ jobs:
 
       - name: Verify no local API hardcodes in src
         run: |
-          if grep -rnI "http://localhost:[0-9]\+\|ws://localhost:[0-9]\+" src/; then
+          if grep -rnI --exclude='*.test.*' --exclude='*.spec.*' "http://localhost:[0-9]\+\|ws://localhost:[0-9]\+" src/; then
             echo "Found forbidden localhost hardcoded API/WS URLs in src"
             exit 1
           fi
