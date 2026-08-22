@@ -25,9 +25,11 @@ export async function checkDistributedRateLimit(req: RequestShape, scope: Ingres
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 2_000);
   try {
+    const headers: Record<string, string> = { apikey: serviceKey, 'content-type': 'application/json' };
+    if (!serviceKey.startsWith('sb_secret_')) headers.authorization = `Bearer ${serviceKey}`;
     const response = await fetch(`${url}/rest/v1/rpc/consume_public_ingress_rate_limit`, {
       method: 'POST',
-      headers: { apikey: serviceKey, authorization: `Bearer ${serviceKey}`, 'content-type': 'application/json' },
+      headers,
       body: JSON.stringify({ p_scope: scope, p_key_hash: keyHash, p_limit: limit, p_window_seconds: 60 }),
       signal: controller.signal,
     });

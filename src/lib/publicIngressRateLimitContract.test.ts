@@ -26,6 +26,13 @@ describe('distributed public ingress rate limit contract', () => {
     expect(limiter).toContain("setTimeout(() => controller.abort(), 2_000)");
   });
 
+  it('uses modern Supabase secret keys only in the apikey header', () => {
+    const limiter = api('_distributedRateLimit.ts');
+    expect(limiter).toContain("const headers: Record<string, string> = { apikey: serviceKey");
+    expect(limiter).toContain("if (!serviceKey.startsWith('sb_secret_')) headers.authorization = `Bearer ${serviceKey}`");
+    expect(limiter).not.toContain("headers: { apikey: serviceKey, authorization:");
+  });
+
   it('has no per-instance Map limiter', () => {
     expect(api('share.ts')).not.toContain('REQUEST_RATE_BUCKETS');
     expect(api('_distributedRateLimit.ts')).toContain("createHmac('sha256', serviceKey)");
