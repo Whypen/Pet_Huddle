@@ -82,6 +82,13 @@ describe("web surface release contract", () => {
     expect(projection).not.toContain("and coalesce(t.is_sensitive, false) = false");
   });
 
+  it("does not blank Group Explore when Vercel omits a country-region header", () => {
+    const publicGroups = source("api/public-groups.ts");
+    expect(publicGroups).toContain(
+      'header(req, "x-vercel-ip-country-region") || header(req, "x-vercel-ip-country")',
+    );
+  });
+
   it("coarsens logged-out Map alerts through the native area-cell geometry", () => {
     const projection = source("supabase/migrations/20260821170000_coarsen_public_alert_projection.sql");
     expect(projection).toContain("public.map_area_cell_v2(a.latitude, a.longitude)");

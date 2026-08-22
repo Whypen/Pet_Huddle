@@ -47,7 +47,11 @@ export default async function handler(req: RequestShape, res: ResponseShape) {
     return;
   }
 
-  const p_country = header(req, "x-vercel-ip-country-region");
+  // Hong Kong and other country-level regions may not receive a separate
+  // country-region header from Vercel. The native projection already accepts
+  // ISO country codes, so fall back to the canonical country header instead of
+  // returning an artificial empty Explore surface.
+  const p_country = header(req, "x-vercel-ip-country-region") || header(req, "x-vercel-ip-country");
   if (!p_country) {
     setPublicCacheHeaders(res);
     res.status(200).json({ groups: [] });
