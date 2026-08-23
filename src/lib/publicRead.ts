@@ -162,7 +162,7 @@ const usePublicResource = <T,>(path: string, key: string): State<T> => {
 };
 
 export const usePublicFeed = (sort: "Latest" | "Trending" = "Latest") =>
-  usePublicResource<PublicPost>(`/api/public-feed?sort=${encodeURIComponent(sort)}`, "posts");
+  usePublicResource<PublicPost>(`/api/public-feed?sort=${encodeURIComponent(sort)}&limit=50`, "posts");
 export const usePublicAlerts = () => usePublicResource<PublicAlert>("/api/public-alerts", "alerts");
 export const usePublicGroups = () => usePublicResource<PublicGroup>("/api/public-groups", "groups");
 

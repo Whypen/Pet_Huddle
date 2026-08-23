@@ -33,6 +33,20 @@ describe("Social section navigation", () => {
     expect(onSelect).toHaveBeenCalledWith("Events");
   });
 
+  it("keeps mobile taps selectable instead of treating touch jitter as a drag", () => {
+    const onSelect = vi.fn();
+    render(<SocialSectionList selected={null} onSelect={onSelect} />);
+    const pets = screen.getByRole("button", { name: "Pets" });
+
+    fireEvent.pointerDown(pets, { pointerId: 7, pointerType: "touch", clientX: 160 });
+    fireEvent.pointerMove(pets, { pointerId: 7, pointerType: "touch", clientX: 154 });
+    fireEvent.pointerUp(pets, { pointerId: 7, pointerType: "touch", clientX: 154 });
+    fireEvent.click(pets);
+
+    expect(onSelect).toHaveBeenCalledOnce();
+    expect(onSelect).toHaveBeenCalledWith("Pets");
+  });
+
   it("shows directional overflow affordances as the topic rail scrolls", () => {
     render(<SocialSectionList selected={null} onSelect={vi.fn()} />);
     const rail = screen.getByRole("navigation", { name: "Social topics" });

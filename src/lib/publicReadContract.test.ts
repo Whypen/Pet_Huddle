@@ -95,6 +95,11 @@ describe("anonymous projection boundary", () => {
 });
 
 describe("public Social", () => {
+  it("loads the bounded topic window needed by the app-parity client filters", () => {
+    const source = readFileSync(join(__dirname, "publicRead.ts"), "utf8");
+    expect(source).toContain("/api/public-feed?sort=${encodeURIComponent(sort)}&limit=50");
+  });
+
   it("uses only get_public_social_feed and emits its narrow shape", async () => {
     const captured = {} as Captured;
     await publicFeed({ query: {}, headers: { "x-vercel-ip-country": "HK" } }, makeRes(captured));
