@@ -14,7 +14,7 @@
  */
 
 import QRCode from "qrcode";
-import { escapeHtml } from "./_shareHtml";
+import { escapeHtml } from "./_shareHtml.js";
 
 /**
  * QR for the desktop CTA. Rendered to inline SVG at request time and embedded

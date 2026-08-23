@@ -499,7 +499,7 @@ describe("web surface release contract", () => {
     expect(editPetProfile).not.toContain('window.location.replace("/")');
   });
 
-  it("uses native map interaction RPCs and gates public map recenter while leaving area search open", () => {
+  it("uses native map interaction RPCs and keeps public map navigation open", () => {
     const detail = source("src/components/map/PinDetailModal.tsx");
     const publicMap = source("src/pages/public/PublicMap.tsx");
     const signedInMap = source("src/pages/Map.tsx");
@@ -512,7 +512,8 @@ describe("web surface release contract", () => {
     expect(publicMap).toContain('onClick={recenter}');
     expect(publicMap).toContain('id="public-map-search-error"');
     expect(publicMap).not.toContain('setLocationNotice("No matching area found.');
-    expect(publicMap).toContain('requireAuth("map-location"');
+    expect(publicMap).toContain("requestPublicMapLocation");
+    expect(publicMap).not.toContain('requireAuth("map-location"');
     expect(publicMap).toContain("initialAlertViewportApplied");
     expect(signedInMap).toContain('const MAP_PRECISION_DEFAULT: MapPrecision = "area"');
     expect(signedInMap).toContain('requireAuth("see-alert"');

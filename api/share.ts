@@ -26,8 +26,8 @@ type AlertRow = {
   verified_only?: boolean | null;
 };
 
-import { cappedOgImage, OG_SQUARE, OG_WIDE, renderAlertPage, renderOgImageTags, renderQrSvg, resolveStaticMapImage, type AlertPageData } from "./_alertPage";
-import { checkDistributedRateLimit } from './_distributedRateLimit';
+import { cappedOgImage, OG_SQUARE, OG_WIDE, renderAlertPage, renderOgImageTags, renderQrSvg, resolveStaticMapImage, type AlertPageData } from "./_alertPage.js";
+import { checkDistributedRateLimit } from './_distributedRateLimit.js';
 
 /** One column list, so the two alert lookups cannot drift apart. */
 const ALERT_COLS = "id,title,description,creator_id,thread_id,type,pet_type,incident_district,incident_city,archived_at,images,photo_url,is_sensitive,verified_only";

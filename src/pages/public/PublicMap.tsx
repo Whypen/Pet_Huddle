@@ -12,7 +12,8 @@
  * No friend pins, no self pin, no alert-type segment control. These are not
  * hidden with CSS — this component never fetches or renders them at all.
  *
- * Every tap except pan/zoom opens the auth wall. Never a silent no-op.
+ * Navigation controls stay public. Alert details and every write open the auth
+ * wall; moving around the map never does.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -22,6 +23,7 @@ import "mapbox-gl/dist/mapbox-gl.css";
 import { MAPBOX_ACCESS_TOKEN } from "@/lib/constants";
 import { useAuthGate } from "@/components/auth/authGateContext";
 import { usePublicAlerts } from "@/lib/publicRead";
+import { requestPublicMapLocation } from "@/lib/publicMapLocation";
 import { PublicTopBar, PublicFailed } from "./PublicChrome";
 import AlertMarkersOverlay from "@/components/map/AlertMarkersOverlay";
 import { supabase } from "@/integrations/supabase/client";
@@ -66,9 +68,21 @@ const PublicMap = () => {
     }
   };
 
-  const recenter = () => {
+  const recenter = async () => {
     setLocationNotice("");
-    requireAuth("map-location", () => {}, { returnTo: "/map" });
+    if (!map.current) return;
+    const result = await requestPublicMapLocation();
+    if ("latitude" in result) {
+      map.current.flyTo({ center: [result.longitude, result.latitude], zoom: 13.5 });
+      return;
+    }
+    setLocationNotice(
+      result.reason === "denied"
+        ? "Allow location access in your browser to reposition the map."
+        : result.reason === "unsupported"
+          ? "Location is not available in this browser."
+          : "Current location is unavailable. Search an area instead.",
+    );
   };
 
   useEffect(() => {
