@@ -231,6 +231,14 @@ export const PostMediaCarousel = ({ items, className, mode = "full", isSensitive
   const handlePointerEnd = (event: React.PointerEvent<HTMLDivElement>) => {
     const node = scrollRef.current;
     if (node?.hasPointerCapture?.(event.pointerId)) node.releasePointerCapture?.(event.pointerId);
+    // Mobile Safari can suppress the synthetic click after pointer capture on
+    // a horizontally scrollable rail. Reveal on a stationary pointer release
+    // as well, while preserving drag-to-swipe and the existing click/keyboard
+    // paths. Calling revealSensitive again from the following click is
+    // idempotent; the second deliberate tap still opens fullscreen.
+    if (!dragMovedRef.current && isSensitive && sensitiveTapStage === "toggle") {
+      revealSensitive();
+    }
     dragStartXRef.current = null;
     window.setTimeout(() => {
       dragMovedRef.current = false;

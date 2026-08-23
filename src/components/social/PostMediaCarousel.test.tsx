@@ -108,4 +108,21 @@ describe("PostMediaCarousel", () => {
     fireEvent.click(media);
     expect(screen.getByRole("button", { name: "Close media viewer" })).toBeInTheDocument();
   });
+
+  it("reveals sensitive media on a stationary mobile pointer release", () => {
+    render(
+      <PostMediaCarousel
+        isSensitive
+        items={[{ src: "https://images.example/sensitive-mobile.jpg", alt: "Sensitive mobile" }]}
+      />,
+    );
+
+    const media = screen.getByAltText("Sensitive mobile").parentElement as HTMLElement;
+    fireEvent.pointerDown(media, { pointerId: 7, clientX: 120 });
+    fireEvent.pointerUp(media, { pointerId: 7, clientX: 120 });
+
+    expect(screen.queryByText("Tap to view")).not.toBeInTheDocument();
+    expect(screen.getByText("Tap again to enlarge")).toBeInTheDocument();
+    expect(screen.getByAltText("Sensitive mobile")).toHaveStyle({ filter: "blur(0px)" });
+  });
 });
