@@ -126,6 +126,18 @@ describe("public Social", () => {
     await publicFeed({ query: { limit: "100000" }, headers: {} }, makeRes({} as Captured));
     expect(projectionRequest().body.p_limit).toBe(50);
   });
+
+  it("ranks the visitor country like native Social without hiding global posts", () => {
+    const migration = readFileSync(
+      join(__dirname, "..", "..", "supabase", "migrations", "20260823123601_align_public_social_global_relevance.sql"),
+      "utf8",
+    );
+    expect(migration).toContain("then 3");
+    expect(migration).toContain("when 3 then 0.40::numeric else 0.15::numeric");
+    expect(migration).toContain("when 3 then 21600::numeric else 0::numeric");
+    const eligibilityWhere = migration.split("where coalesce(t.is_public, true) = true")[1]?.split("),\n  scored as")[0] ?? "";
+    expect(eligibilityWhere).not.toContain("normalize_country_key(t.post_country)");
+  });
 });
 
 describe("public Map", () => {

@@ -85,6 +85,13 @@ describe("AuthWall", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
+  it("always provides a visible close button", () => {
+    const onClose = vi.fn();
+    renderWall({ intent: "post", onClose });
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
   it("traps Tab inside the dialog — aria-modal alone does not do this", () => {
     renderWall({ intent: "post" });
     const dialog = screen.getByRole("dialog");

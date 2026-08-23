@@ -16,11 +16,12 @@ import { useMemo, useRef, useState, type TouchEvent } from "react";
 import { ArrowDownUp, Check, Loader2, Search, X } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 import { useAuthGate } from "@/components/auth/authGateContext";
-import { usePublicFeed, relativeTime } from "@/lib/publicRead";
+import { usePublicFeed, usePublicPostById, relativeTime, type PublicPost } from "@/lib/publicRead";
 import { ThreadCard } from "@/components/social/ThreadCard";
 import { SocialComposerBar } from "@/components/social/SocialComposerBar";
 import { PublicTopBar, PublicFailed, PublicSkeleton } from "./PublicChrome";
 import { SocialSectionList } from "@/components/social/SocialSectionList";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   SOCIAL_SECTION_ALIASES,
   type SocialSection,
@@ -38,6 +39,18 @@ const PublicSocial = () => {
   const [query, setQuery] = useState("");
   const [sortMode, setSortMode] = useState<"Latest" | "Trending">("Latest");
   const { data: posts, loading, failed, refresh } = usePublicFeed(sortMode);
+  /**
+   * `?focus=` — a shared post link.
+   *
+   * Fetched by id rather than searched for in the page above: a shared post is
+   * frequently far below the first 50 ranked rows, and a link that lands on
+   * "the feed" instead of "the post you were sent" is the reason this exists.
+   * It is pinned to the top and is exempt from the section and search filters,
+   * because the visitor asked for THIS post.
+   */
+  const focusId = new URLSearchParams(search).get("focus")?.trim() || null;
+  const { data: focusedRows } = usePublicPostById<PublicPost>(focusId);
+  const focusedPost = focusedRows[0] ?? null;
   const [activeControl, setActiveControl] = useState<"search" | "sort" | null>(null);
   const scrollStartY = useRef<number | null>(null);
   const [pullOffset, setPullOffset] = useState(0);
@@ -53,8 +66,9 @@ const PublicSocial = () => {
     // Ordering is owned by the same database ranking contract as the app.
     // Client filtering must preserve that order instead of inventing another
     // Trending formula over only the first page.
-    return filtered;
-  }, [posts, query, selectedSection]);
+    if (!focusedPost) return filtered;
+    return [focusedPost, ...filtered.filter((post) => post.id !== focusedPost.id)];
+  }, [focusedPost, posts, query, selectedSection]);
 
   const sharePost = async (post: (typeof posts)[number]) => {
     const url = new URL(`/social?focus=${encodeURIComponent(post.id)}`, window.location.origin).toString();
@@ -105,25 +119,26 @@ const PublicSocial = () => {
         mobileActions={
           <div className="flex items-center">
             <button type="button" aria-label="Search" aria-expanded={activeControl === "search"} onClick={() => setActiveControl((current) => current === "search" ? null : "search")} className="grid h-11 w-11 place-items-center rounded-full hover:bg-muted"><Search className="h-5 w-5" /></button>
-            <button type="button" aria-label="Sort" aria-expanded={activeControl === "sort"} onClick={() => setActiveControl((current) => current === "sort" ? null : "sort")} className="grid h-11 w-11 place-items-center rounded-full hover:bg-muted"><ArrowDownUp className="h-5 w-5" /></button>
+            <Popover open={activeControl === "sort"} onOpenChange={(open) => setActiveControl(open ? "sort" : null)}>
+              <PopoverTrigger asChild>
+                <button type="button" aria-label="Sort" aria-expanded={activeControl === "sort"} className="grid h-11 w-11 place-items-center rounded-full hover:bg-muted"><ArrowDownUp className="h-5 w-5" /></button>
+              </PopoverTrigger>
+              <PopoverContent align="end" sideOffset={8} className="w-[220px] rounded-[14px] border-border bg-background p-1.5 shadow-lg" role="menu" aria-label="Sort social posts">
+                {(["Latest", "Trending"] as const).map((option) => <button key={option} type="button" role="menuitemradio" aria-checked={sortMode === option} onClick={() => { setSortMode(option); setActiveControl(null); }} className={sortMode === option ? "flex h-10 w-full items-center justify-between rounded-[10px] bg-brandBlue/[0.08] px-3 text-[13px] font-bold text-brandBlue" : "flex h-10 w-full items-center justify-between rounded-[10px] px-3 text-[13px] font-semibold text-brandText hover:bg-muted"}>{option}{sortMode === option ? <Check className="h-4 w-4" /> : null}</button>)}
+              </PopoverContent>
+            </Popover>
           </div>
         }
       />
 
-      {activeControl ? (
+      {activeControl === "search" ? (
         <div className="border-b border-border/60 bg-background px-4 py-2">
-          {activeControl === "search" ? (
-            <label className="form-field-rest mx-auto flex h-11 w-full items-center rounded-[22px] px-3 lg:max-w-none">
+          <label className="form-field-rest mx-auto flex h-11 w-full items-center rounded-[22px] px-3 lg:max-w-none">
               <Search className="h-4 w-4 shrink-0 text-[var(--text-tertiary)]" />
               <span className="sr-only">Search social posts</span>
               <input autoFocus type="text" inputMode="search" value={query} onChange={(event) => setQuery(event.target.value)} className="field-input-core min-w-0 flex-1 pl-2 text-sm" />
               <button type="button" aria-label="Close search" onClick={() => setActiveControl(null)} className="grid h-11 w-11 place-items-center rounded-full hover:bg-muted"><X className="h-4 w-4" /></button>
-            </label>
-          ) : (
-            <div className="mx-auto max-w-[320px] rounded-[14px] border border-border bg-background p-1.5 shadow-lg" role="menu" aria-label="Sort social posts">
-              {(["Latest", "Trending"] as const).map((option) => <button key={option} type="button" role="menuitemradio" aria-checked={sortMode === option} onClick={() => { setSortMode(option); setActiveControl(null); }} className={sortMode === option ? "flex h-10 w-full items-center justify-between rounded-[10px] bg-brandBlue/[0.08] px-3 text-[13px] font-bold text-brandBlue" : "flex h-10 w-full items-center justify-between rounded-[10px] px-3 text-[13px] font-semibold text-brandText hover:bg-muted"}>{option}{sortMode === option ? <Check className="h-4 w-4" /> : null}</button>)}
-            </div>
-          )}
+          </label>
         </div>
       ) : null}
 
@@ -145,9 +160,9 @@ const PublicSocial = () => {
           <SocialSectionList selected={selectedSection} onSelect={setSelectedSection} />
         </div>
 
-        {loading ? (
+        {loading && !focusedPost ? (
           <PublicSkeleton rows={4} />
-        ) : failed ? (
+        ) : failed && !focusedPost ? (
           <PublicFailed what="posts" />
         ) : visiblePosts.length === 0 ? (
           null

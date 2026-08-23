@@ -93,7 +93,14 @@ export const SocialSectionList = ({ selected, onSelect, className }: SocialSecti
               key={label}
               type="button"
               aria-current={active ? "page" : undefined}
-              onClick={() => { if (!dragRef.current?.moved) onSelect(section); }}
+              onPointerDown={(event) => {
+                // A tab press is selection, not the start of desktop rail
+                // dragging. Touch remains native-scrollable through the rail's
+                // `touch-pan-x`; stopping this mouse event prevents pointer
+                // capture from swallowing the subsequent click.
+                if (event.pointerType === "mouse") event.stopPropagation();
+              }}
+              onClick={() => onSelect(section)}
               className={cn(
                 "relative flex h-12 min-w-11 shrink-0 items-center justify-center px-1 text-[14px] transition-colors",
                 active

@@ -18,6 +18,7 @@
 import { useEffect, useId, useRef, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { GlassModal } from "@/components/ui/GlassModal";
+import { X } from "lucide-react";
 import { writeAuthIntent, writeAuthReturnTo, type AuthIntent, type AuthIntentType } from "@/lib/authIntent";
 import { resolveAuthWallCopy } from "./authWallCopy";
 
@@ -148,6 +149,14 @@ export function AuthWall({ isOpen, onClose, intent, targetId, returnTo, context 
       aria-describedby={descriptionId}
       className="relative flex flex-col"
     >
+      <button
+        type="button"
+        onClick={onClose}
+        aria-label="Close"
+        className="absolute right-0 top-0 z-10 grid h-11 w-11 place-items-center rounded-full text-brandText/65 transition-colors hover:bg-black/5 hover:text-brandText"
+      >
+        <X className="h-5 w-5" aria-hidden />
+      </button>
       {/* Brand bloom behind the content, inside the glass rather than on the
           page, so it moves with the panel and tints what shows through it. */}
 
