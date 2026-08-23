@@ -4,6 +4,7 @@ import {
   requestNativePhoneOtp,
   verifyNativePhoneOtp,
 } from "./nativePhoneOtp";
+import { getNativeVerifyIdentityAccessToken } from "./nativeVerifyIdentity";
 
 export type NativeVerifyIdentityPhoneOtpStateName =
   | "idle"
@@ -66,11 +67,11 @@ const toModelFailure = (
 ): NativeVerifyIdentityPhoneOtpFailure => {
   if (failureKind === "provider_unavailable") return "provider_unavailable";
   if (failureKind === "country_unavailable" || unavailable) return "country_unavailable";
-  if (failureKind === "wrong_code") return "wrong_code";
+  if (failureKind === "wrong_code" || failureKind === "invalid_code") return "wrong_code";
   if (failureKind === "expired_code") return "expired_code";
-  if (failureKind === "rate_limit") return "rate_limit";
-  if (failureKind === "session_expired") return "session_expired";
-  if (failureKind === "challenge_expired") return "challenge_expired";
+  if (failureKind === "rate_limit" || failureKind === "too_many_incorrect_attempts") return "rate_limit";
+  if (failureKind === "session_expired" || failureKind === "session_missing") return "session_expired";
+  if (failureKind === "challenge_expired" || failureKind === "challenge_missing" || failureKind === "code_already_used" || failureKind === "phone_mismatch") return "challenge_expired";
   if (failureKind === "verification_required") return "verification_required";
   if (failureKind === "invalid_phone" || failureKind === "phone_in_use" || failureKind === "already_verified") return "invalid_phone";
   if (failureKind === "network") return "network";
@@ -150,7 +151,19 @@ export const sendNativeVerifyIdentityPhoneOtp = async (
   accessToken?: string | null,
 ): Promise<NativeVerifyIdentityPhoneOtpState> => {
   const started = reduceNativeVerifyIdentityPhoneOtpState(state, { type: "send_started", phone });
-  const result = await requestNativePhoneOtp(phone, turnstileToken, accessToken) as {
+  let provenAccessToken = String(accessToken || "").trim();
+  if (!provenAccessToken) {
+    try {
+      provenAccessToken = await getNativeVerifyIdentityAccessToken();
+    } catch {
+      return reduceNativeVerifyIdentityPhoneOtpState(started, {
+        type: "send_failed",
+        error: "Please sign in again and try once more.",
+        failure: "session_expired",
+      });
+    }
+  }
+  const result = await requestNativePhoneOtp(phone, turnstileToken, provenAccessToken, { verificationContext: "verify_identity" }) as {
     ok: boolean;
     cooldownSeconds?: number;
     retryAfterSeconds?: number;
@@ -185,7 +198,19 @@ export const verifyNativeVerifyIdentityPhoneOtpCode = async (
   accessToken?: string | null,
 ): Promise<NativeVerifyIdentityPhoneOtpState> => {
   const started = reduceNativeVerifyIdentityPhoneOtpState(state, { type: "verify_started" });
-  const result = await verifyNativePhoneOtp(state.phone, code, accessToken) as {
+  let provenAccessToken = String(accessToken || "").trim();
+  if (!provenAccessToken) {
+    try {
+      provenAccessToken = await getNativeVerifyIdentityAccessToken();
+    } catch {
+      return reduceNativeVerifyIdentityPhoneOtpState(started, {
+        type: "verify_failed",
+        error: "Your verification session expired. Request a new code.",
+        failure: "session_expired",
+      });
+    }
+  }
+  const result = await verifyNativePhoneOtp(state.phone, code, provenAccessToken) as {
     ok: boolean;
     retryAfterSeconds?: number;
     failureKind?: unknown;

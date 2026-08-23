@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { readNativeDisplayCacheItem } from "./nativeDisplayCacheStorage";
 import { supabase } from "./supabase";
 
 const ACTIVITY_TOUCH_INTERVAL_MS = 30 * 60 * 1000;
@@ -11,7 +12,7 @@ const activityTouchKey = (userId: string) => `native-last-active-touch:${userId}
 const readLastTouch = async (userId: string) => {
   const memory = activityTouchMemory.get(userId);
   if (typeof memory === "number") return memory;
-  const raw = await AsyncStorage.getItem(activityTouchKey(userId)).catch(() => null);
+  const raw = await readNativeDisplayCacheItem(activityTouchKey(userId));
   const parsed = Number(raw);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 };
@@ -34,12 +35,7 @@ export async function touchNativeLastActive(userId: string | null | undefined) {
 
   const request = (async () => {
     activityTouchMemory.set(cleanUserId, now);
-    const { error } = await supabase
-      .from("profiles")
-      .update({
-        last_active_at: new Date(now).toISOString(),
-      } as Record<string, unknown>)
-      .eq("id", cleanUserId);
+    const { error } = await supabase.rpc("touch_profile_activity");
     if (error) {
       activityTouchMemory.delete(cleanUserId);
       return false;

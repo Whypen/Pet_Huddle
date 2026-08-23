@@ -28,11 +28,11 @@ export function NativeProfileVitals({ intro = null, rows, title = "Key info" }: 
 
   return (
     <View style={styles.section}>
-      {title ? <Text style={styles.title}>{title}</Text> : null}
+      {title ? <Text ellipsizeMode="tail" numberOfLines={1} style={styles.title}>{title}</Text> : null}
       {intro ? (
         <View style={styles.intro}>
-          {intro.socialId ? <Text style={styles.socialId}>@{intro.socialId}</Text> : null}
-          <Text style={styles.introLabel}>{intro.socialId ? "• " : ""}{intro.label}</Text>
+          {intro.socialId ? <Text ellipsizeMode="tail" numberOfLines={1} style={styles.socialId}>@{intro.socialId}</Text> : null}
+          <Text ellipsizeMode="tail" numberOfLines={1} style={styles.introLabel}>{intro.socialId ? "• " : ""}{intro.label}</Text>
         </View>
       ) : null}
       <View>
@@ -48,7 +48,7 @@ export function NativeProfileVitals({ intro = null, rows, title = "Key info" }: 
               ) : null}
             </View>
             <Text accessibilityLabel={row.label} style={styles.hiddenLabel}>{row.label}</Text>
-            <Text style={styles.value}>{row.value}</Text>
+            <Text numberOfLines={2} style={styles.value}>{row.value}</Text>
           </View>
         ))}
       </View>
@@ -73,17 +73,21 @@ const styles = StyleSheet.create({
   intro: {
     marginBottom: huddleSpacing.x4,
     flexDirection: "row",
-    flexWrap: "wrap",
+    flexWrap: "nowrap",
     alignItems: "baseline",
     columnGap: huddleSpacing.x2,
   },
   socialId: {
+    flexShrink: 1,
+    minWidth: 0,
     fontFamily: "Urbanist-600Italic",
     fontSize: 17,
     lineHeight: 27,
     color: huddleColors.text,
   },
   introLabel: {
+    flexShrink: 1,
+    minWidth: 0,
     fontFamily: "Urbanist-800",
     fontSize: huddleType.label,
     lineHeight: huddleType.labelLine,

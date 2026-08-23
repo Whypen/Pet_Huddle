@@ -2,8 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Feather from "@expo/vector-icons/Feather";
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import * as ImagePicker from "expo-image-picker";
+import { launchNativeImageLibraryAsync } from "../../lib/nativeMediaPermissions";
 import { Image as ExpoImage } from "expo-image";
-import { AccessibilityInfo, ActivityIndicator, Animated as RNAnimated, Image, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { AccessibilityInfo, Animated as RNAnimated, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
+import { NativeSpinner } from "../NativeSpinner";
+import { NativeNavIcon } from "../NativeNavIcons";
 import { GestureDetector, Gesture } from "react-native-gesture-handler";
 import Animated, { useSharedValue, useAnimatedStyle, withSpring, runOnJS } from "react-native-reanimated";
 import {
@@ -11,11 +14,10 @@ import {
   getNativeBroadcastPinColor,
   getNativeBroadcastActiveConcurrentLimit,
   NATIVE_BROADCAST_CAPS_BY_TIER,
-  NATIVE_BROADCAST_DURATION_STEPS,
-  NATIVE_BROADCAST_RANGE_STEPS,
   NATIVE_BROADCAST_ACTIVE_CONCURRENT_CAPS_BY_TIER,
   NATIVE_SUPER_BROADCAST_CAPS,
   cleanupNativeBroadcastImages,
+  nativeBroadcastRequiresPetType,
   normalizeNativeBroadcastAlertType,
   normalizeNativeBroadcastTier,
   uploadNativeBroadcastImage,
@@ -24,16 +26,36 @@ import {
 import { createNativeProtectedActionError, getNativeProtectedActionResult, logNativeProtectedActionFailure, type NativeProtectedActionCleanupResult } from "../../lib/nativeStorageCleanup";
 import { lookupNativeMapAddress } from "../../lib/nativeMapMutations";
 import { haptic } from "../../lib/nativeHaptics";
+import { nativeSafeErrorCopy } from "../../lib/nativeSafeErrorCopy";
+import { nativeFreshImageKey, nativeFreshImageUri } from "../../lib/nativeImageFreshness";
 import type { NativeMapAlert } from "../../lib/nativeMapData";
-import { fetchNativeProfileSummary, type NativeProfileSummary } from "../../lib/nativeProfileSummary";
+import {
+  extractCompletedNativeSocialPreviewUrl,
+  buildNativeSocialImageMetadata,
+  fetchNativeSocialLinkPreviews,
+  stripNativeSocialExternalUrlFromText,
+  type NativeSocialLinkPreview,
+} from "../../lib/nativeSocial";
+import { fetchNativeProfileSummary, subscribeNativeProfileSummary, type NativeProfileSummary } from "../../lib/nativeProfileSummary";
+import { getFreshNativeAccessToken } from "../../lib/nativeFunctionClient";
 import { isNativeVerifiedProfile } from "../../lib/nativeVerificationGate";
 import { useLanguage } from "../../lib/nativeLanguage";
-import { huddleColors, huddleFieldStates, huddleFormFields, huddleLayout, huddleMapBroadcastFooter, huddleRadii, huddleSpacing, huddleType } from "../../theme/huddleDesignTokens";
-import { springTab, useShakeAnimation } from "../../lib/nativeAnimations";
-import { AppBottomSheet, AppBottomSheetFooter, AppBottomSheetHeader, AppBottomSheetScroll, AppConfirmModal, AppModalCloseButton } from "../nativeModalPrimitives";
+import { nativePetEmojiForLabel, nativePetFocusLabels, normalizeNativePetFocusLabel } from "../../lib/nativePetTaxonomy";
+import { huddleColors, huddleFieldStates, huddleFormControls, huddleFormFields, huddleGlassControls, huddleLayout, huddleMapBroadcastFooter, huddleRadii, huddleSpacing, huddleType } from "../../theme/huddleDesignTokens";
+import { springTab } from "../../lib/nativeAnimations";
+import {
+  averageNativeUploadProgress,
+  NATIVE_UPLOAD_PROGRESS_READ_READY,
+  NATIVE_UPLOAD_PROGRESS_START,
+  nextNativeUploadProgress,
+} from "../../lib/nativeUploadProgress";
+import { AppBottomSheet, AppBottomSheetFooter, AppBottomSheetHeader, AppBottomSheetScroll, AppConfirmModal, AppKeyboardAvoidingView as KeyboardAvoidingView, AppModalCloseButton } from "../nativeModalPrimitives";
 import { nativeModalStyles } from "../nativeModalPrimitives.styles";
+import { NativeSocialExternalLinkPreview } from "../social/NativeSocialFeedPrimitives";
+import { NativeFormChoiceField } from "../NativeFormField";
 import { HuddleSingleRangeControl } from "../HuddleRangeControl";
-import { quotaConfig } from "../../lib/quotaConfig_v1";
+import { useErrorShake } from "../motion/useErrorShake";
+import { formatNativeAddonPrice, loadNativeStoreProducts, nativeMembershipPriceDisplay, type NativeStoreProductId, type NativeStoreProductState } from "../../lib/nativeStoreSubscriptions";
 
 type NativeBroadcastLocation = {
   lat: number;
@@ -44,6 +66,7 @@ type NativeBroadcastMedia = {
   error: string | null;
   height?: number | null;
   id: string;
+  progress: number;
   status: "queued" | "uploading" | "uploaded" | "error";
   uploadedUrl: string | null;
   uri: string;
@@ -60,20 +83,24 @@ type NativeBroadcastModalProps = {
   onClose: () => void;
   onCreated: (created?: { alertId: string; threadId: string | null; alert: NativeMapAlert }) => Promise<void> | void;
   onOpenPremium?: (target?: "plus" | "gold" | "addons" | "super") => void;
+  onOpenSupport?: () => void;
+  onPetTypeChange?: (next: string | null) => void;
   onRequestPinLocation: () => void;
   onRestricted?: () => void;
   selectedAddress?: string | null;
   selectedLocation: NativeBroadcastLocation | null;
+  selectedPetType?: string | null;
+  sessionKey?: string | null;
   userId: string | null;
   visible: boolean;
 };
 
 const ALERT_TYPES: NativeBroadcastAlertType[] = ["Stray", "Lost", "Caution", "Others"];
 const MAX_BROADCAST_MEDIA = 10;
+const DEFAULT_BROADCAST_RANGE_KM = 1;
+const DEFAULT_BROADCAST_DURATION_HOURS = 1;
 const MIN_BROADCAST_THUMB_ASPECT = 9 / 16;
 const MAX_BROADCAST_THUMB_ASPECT = 1.91;
-const SUPER_BROADCAST_FALLBACK_PRICE = 4.99;
-const SUPER_BROADCAST_FALLBACK_CURRENCY = "USD$";
 const broadcastThumbAspect = (media: NativeBroadcastMedia) => Math.min(Math.max(
   typeof media.width === "number" && typeof media.height === "number" && media.width > 0 && media.height > 0
     ? media.width / media.height
@@ -81,16 +108,20 @@ const broadcastThumbAspect = (media: NativeBroadcastMedia) => Math.min(Math.max(
   MIN_BROADCAST_THUMB_ASPECT,
 ), MAX_BROADCAST_THUMB_ASPECT);
 
+const extractCompletedBroadcastPreviewUrl = (value: string) => {
+  return extractCompletedNativeSocialPreviewUrl(value);
+};
+
 const humanBroadcastError = (error: unknown) => {
-  if (error instanceof Error && error.message.trim()) return error.message.trim();
+  if (error instanceof Error && error.message.trim()) return nativeSafeErrorCopy(error, "Please try again.");
   if (error && typeof error === "object") {
     const record = error as Record<string, unknown>;
     const message = [record.message, record.error_description, record.details, record.hint]
       .map((value) => (typeof value === "string" ? value.trim() : ""))
       .find(Boolean);
-    if (message) return message;
+    if (message) return nativeSafeErrorCopy(message, "Please try again.");
   }
-  if (typeof error === "string" && error.trim()) return error.trim();
+  if (typeof error === "string" && error.trim()) return nativeSafeErrorCopy(error, "Please try again.");
   return "Please try again.";
 };
 
@@ -178,7 +209,7 @@ function SlideToPublish({
         <Text style={[slideToPublishStyles.label, disabled ? slideToPublishStyles.labelDisabled : null]}>Slide to publish</Text>
         <Animated.View style={[slideToPublishStyles.thumb, thumbStyle]}>
           {busy ? (
-            <ActivityIndicator color={huddleColors.premiumGold} size="small" />
+            <NativeSpinner tone="muted" />
           ) : (
             <MaterialCommunityIcons color={huddleColors.premiumGold} name="alert" size={20} />
           )}
@@ -227,6 +258,68 @@ const slideToPublishStyles = StyleSheet.create({
   },
 });
 
+function BroadcastPetTypeSelect({
+  error,
+  focused,
+  onFocus,
+  onSelect,
+  open,
+  selectedPetType,
+}: {
+  error?: string;
+  focused: boolean;
+  onFocus: () => void;
+  onSelect: (value: string) => void;
+  open: boolean;
+  selectedPetType: string | null;
+}) {
+  const selectedLabel = normalizeNativePetFocusLabel(selectedPetType);
+  return (
+    <View style={open ? styles.petTypeDropdownLayer : null}>
+      <NativeFormChoiceField error={error} focused={focused || open} label="">
+        <Pressable
+          accessibilityRole="button"
+          onPress={onFocus}
+          style={styles.petTypeSelectTrigger}
+        >
+          <View style={styles.petTypeSelectValueRow}>
+            {selectedLabel ? <Text style={styles.petTypeEmoji}>{nativePetEmojiForLabel(selectedLabel)}</Text> : null}
+            <Text numberOfLines={1} style={[styles.petTypeSelectValue, !selectedLabel ? styles.petTypePlaceholder : null]}>
+              {selectedLabel || "Pet Type"}
+            </Text>
+          </View>
+          <Feather color={huddleColors.iconMuted} name={open ? "chevron-up" : "chevron-down"} size={16} />
+        </Pressable>
+        {open ? (
+          <ScrollView nestedScrollEnabled style={styles.petTypeSelectMenu}>
+            {nativePetFocusLabels.map((option) => {
+              const selected = selectedLabel === option;
+              return (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityState={{ checked: selected }}
+                  key={option}
+                  onPress={() => onSelect(option)}
+                  style={({ pressed }) => [
+                    styles.petTypeSelectOption,
+                    pressed ? styles.petTypeSelectOptionPressed : null,
+                  ]}
+                >
+                  <View style={styles.petTypeOptionLabelRow}>
+                    <Text style={styles.petTypeEmoji}>{nativePetEmojiForLabel(option)}</Text>
+                    <Text ellipsizeMode="tail" numberOfLines={1} style={styles.petTypeSelectOptionText}>{option}</Text>
+                  </View>
+                  {selected ? <Feather color={huddleColors.blue} name="check" size={16} /> : <View style={styles.petTypeSelectCheckSlot} />}
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        ) : null}
+      </NativeFormChoiceField>
+    </View>
+  );
+}
+
 export function NativeBroadcastModal({
   accessToken,
   alertType,
@@ -237,41 +330,52 @@ export function NativeBroadcastModal({
   onClose,
   onCreated,
   onOpenPremium,
+  onOpenSupport,
+  onPetTypeChange,
   onRequestPinLocation,
   onRestricted,
   selectedAddress,
   selectedLocation,
+  selectedPetType,
+  sessionKey,
   userId,
   visible,
 }: NativeBroadcastModalProps) {
   const { t } = useLanguage();
-  const [createShakeAnim, triggerCreateShake] = useShakeAnimation();
+  const { height } = useWindowDimensions();
+  const broadcastSheetMaxHeight = height * 0.82;
+  const { shake: triggerCreateShake, shakeStyle: createShakeStyle } = useErrorShake();
   // SS4: pull-down-to-dismiss — shared values (hooks must be at top level)
   const dragY = useSharedValue(0);
   const dragStyle = useAnimatedStyle(() => ({ transform: [{ translateY: dragY.value }] }));
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [linkPreviews, setLinkPreviews] = useState<Record<string, NativeSocialLinkPreview>>({});
+  const [lockedPreviewUrl, setLockedPreviewUrl] = useState<string | null>(null);
+  const [dismissedPreviewUrls, setDismissedPreviewUrls] = useState<Set<string>>(new Set());
   const [creating, setCreating] = useState(false);
   const [errorText, setErrorText] = useState<string | null>(null);
   const [mediaFiles, setMediaFiles] = useState<NativeBroadcastMedia[]>([]);
-  const [postOnThreads, setPostOnThreads] = useState(false);
+  const [postOnThreads, setPostOnThreads] = useState(true);
+  const [verifiedOnly, setVerifiedOnly] = useState(false);
   const [isSensitive, setIsSensitive] = useState(false);
   const [extraBroadcast72h, setExtraBroadcast72h] = useState(0);
   const [activeBroadcastLimit, setActiveBroadcastLimit] = useState(NATIVE_BROADCAST_ACTIVE_CONCURRENT_CAPS_BY_TIER.free);
   const [activeBroadcastUsed, setActiveBroadcastUsed] = useState(0);
   const [tier, setTier] = useState<"free" | "plus" | "gold">("free");
   const [showUpsell, setShowUpsell] = useState(false);
-  const [upsellLocked, setUpsellLocked] = useState(false);
   const [broadcastUpsellTarget, setBroadcastUpsellTarget] = useState<"plus" | "gold" | "super" | null>(null);
   const [typeMenuOpen, setTypeMenuOpen] = useState(false);
-  const [focusedField, setFocusedField] = useState<"title" | "description" | null>(null);
-  const [validationErrors, setValidationErrors] = useState<{ description?: boolean; location?: boolean }>({});
+  const [petTypeMenuOpen, setPetTypeMenuOpen] = useState(false);
+  const [focusedField, setFocusedField] = useState<"title" | "description" | "petType" | null>(null);
+  const [validationErrors, setValidationErrors] = useState<{ description?: boolean; location?: boolean; petType?: boolean }>({});
   const [resolvedUserId, setResolvedUserId] = useState<string | null>(userId);
   const [creatorProfile, setCreatorProfile] = useState<NativeProfileSummary | null>(null);
   const composerScrollRef = useRef<ScrollView | null>(null);
-  const composerFieldOffsetsRef = useRef<Record<"title" | "description", number>>({ title: 0, description: 0 });
-  const lastFocusedComposerFieldRef = useRef<"title" | "description" | null>(null);
+  const composerFieldOffsetsRef = useRef<Record<"title" | "description" | "petType", number>>({ title: 0, description: 0, petType: 0 });
+  const lastFocusedComposerFieldRef = useRef<"title" | "description" | "petType" | null>(null);
   const publishBusy = useRef(false);
+  const upsellShownThisOpenRef = useRef(false);
   const descriptionInputRef = useRef<TextInput | null>(null);
   const [reducedMotion, setReducedMotion] = useState(false);
   const [screenReaderOn, setScreenReaderOn] = useState(false);
@@ -283,16 +387,19 @@ export function NativeBroadcastModal({
   const capDurationHours = extraBroadcast72h > 0 ? NATIVE_SUPER_BROADCAST_CAPS.durationHours : baseCaps.durationHours;
   const visualRangeMaxKm = extraBroadcast72h > 0 ? NATIVE_SUPER_BROADCAST_CAPS.radiusKm : NATIVE_BROADCAST_CAPS_BY_TIER.gold.radiusKm;
   const visualDurationMaxHours = extraBroadcast72h > 0 ? NATIVE_SUPER_BROADCAST_CAPS.durationHours : NATIVE_BROADCAST_CAPS_BY_TIER.gold.durationHours;
-  const [rangeKm, setRangeKm] = useState(baseCaps.radiusKm);
-  const [durationHours, setDurationHours] = useState(baseCaps.durationHours);
+  const [rangeKm, setRangeKm] = useState(DEFAULT_BROADCAST_RANGE_KM);
+  const [durationHours, setDurationHours] = useState(DEFAULT_BROADCAST_DURATION_HOURS);
   const pinColor = useMemo(() => getNativeBroadcastPinColor(alertType), [alertType]);
-  const uploadProgress = useMemo(() => {
-    if (mediaFiles.length === 0) return 0;
-    const uploaded = mediaFiles.filter((item) => item.status === "uploaded").length;
-    return Math.round((uploaded / mediaFiles.length) * 100);
-  }, [mediaFiles]);
+  const uploadProgress = useMemo(() => averageNativeUploadProgress(mediaFiles) ?? 0, [mediaFiles]);
   const effectiveUserId = userId ?? resolvedUserId;
+  const typedPreviewUrl = extractCompletedBroadcastPreviewUrl(description);
+  const activePreviewUrl = lockedPreviewUrl || (typedPreviewUrl && !dismissedPreviewUrls.has(typedPreviewUrl) ? typedPreviewUrl : null);
   const hasActiveBroadcastSlot = activeBroadcastLimit <= 0 || activeBroadcastUsed < activeBroadcastLimit;
+  const oneBroadcastRemaining = activeBroadcastLimit > 0 && activeBroadcastLimit - activeBroadcastUsed === 1;
+  const isGoldMember = tier === "gold";
+  const isVerified = isNativeVerifiedProfile(creatorProfile);
+  const petTypeRequired = nativeBroadcastRequiresPetType(alertType);
+  const normalizedSelectedPetType = normalizeNativePetFocusLabel(selectedPetType);
 
   const coerceQuotaNumber = (value: unknown) => {
     const parsed = Number(value);
@@ -300,13 +407,20 @@ export function NativeBroadcastModal({
     return Math.max(0, Math.floor(parsed));
   };
 
-  const isUserVerified = (row: { is_verified?: boolean | null; verification_status?: unknown } | null) => {
+  const isUserVerified = (row: NativeProfileSummary | null) => {
     return isNativeVerifiedProfile(row);
   };
 
   useEffect(() => {
     setResolvedUserId(userId);
   }, [userId, visible]);
+
+  useEffect(() => {
+    if (!visible) return;
+    upsellShownThisOpenRef.current = false;
+    setShowUpsell(false);
+    setBroadcastUpsellTarget(null);
+  }, [visible]);
 
   useEffect(() => {
     if (!visible) return;
@@ -334,6 +448,17 @@ export function NativeBroadcastModal({
   }, [accessToken, effectiveUserId, visible]);
 
   useEffect(() => {
+    if (!visible || !effectiveUserId) return undefined;
+    return subscribeNativeProfileSummary(effectiveUserId, ({ profile, quota }) => {
+      setCreatorProfile(profile);
+      const nextTier = normalizeNativeBroadcastTier(String(profile?.effective_tier || profile?.tier || quota?.effective_tier || quota?.tier || "free"));
+      const nextIsVerified = isNativeVerifiedProfile(profile);
+      setTier(nextTier);
+      setActiveBroadcastLimit((current) => Math.max(current, getNativeBroadcastActiveConcurrentLimit(nextTier, nextIsVerified)));
+    }, { sessionKey });
+  }, [effectiveUserId, sessionKey, visible]);
+
+  useEffect(() => {
     if (!visible) return;
     setRangeKm((current) => Math.min(current, capRangeKm));
     setDurationHours((current) => Math.min(current, capDurationHours));
@@ -347,20 +472,32 @@ export function NativeBroadcastModal({
   const resetComposer = () => {
     setTitle("");
     setDescription("");
+    setLockedPreviewUrl(null);
+    setDismissedPreviewUrls(new Set());
     setMediaFiles([]);
-    setPostOnThreads(false);
+    setPostOnThreads(true);
+    setVerifiedOnly(false);
     setIsSensitive(false);
-    setRangeKm(baseCaps.radiusKm);
-    setDurationHours(baseCaps.durationHours);
+    setRangeKm(DEFAULT_BROADCAST_RANGE_KM);
+    setDurationHours(DEFAULT_BROADCAST_DURATION_HOURS);
     setErrorText(null);
     setValidationErrors({});
     setShowUpsell(false);
-    setUpsellLocked(false);
     setBroadcastUpsellTarget(null);
+    setPetTypeMenuOpen(false);
+    onPetTypeChange?.(null);
     lastFocusedComposerFieldRef.current = null;
   };
 
-  const scrollComposerFieldIntoView = useCallback((field: "title" | "description") => {
+  useEffect(() => {
+    if (petTypeRequired) return;
+    setVerifiedOnly(false);
+    setPetTypeMenuOpen(false);
+    setValidationErrors((current) => ({ ...current, petType: false }));
+    onPetTypeChange?.(null);
+  }, [onPetTypeChange, petTypeRequired]);
+
+  const scrollComposerFieldIntoView = useCallback((field: "title" | "description" | "petType") => {
     lastFocusedComposerFieldRef.current = field;
     const scroll = () => {
       composerScrollRef.current?.scrollTo({
@@ -378,9 +515,25 @@ export function NativeBroadcastModal({
     setTimeout(scroll, 180);
   }, []);
 
+  useEffect(() => {
+    if (!activePreviewUrl || linkPreviews[activePreviewUrl]) return;
+    void fetchNativeSocialLinkPreviews([activePreviewUrl], accessToken).then((previews) => {
+      setLinkPreviews((current) => ({ ...current, ...previews }));
+    });
+  }, [accessToken, activePreviewUrl, linkPreviews]);
+
+  useEffect(() => {
+    if (!typedPreviewUrl || dismissedPreviewUrls.has(typedPreviewUrl)) return;
+    const preview = linkPreviews[typedPreviewUrl];
+    if (!preview || preview.loading) return;
+    setLockedPreviewUrl(typedPreviewUrl);
+    setDescription((current) => stripNativeSocialExternalUrlFromText(current, typedPreviewUrl));
+  }, [dismissedPreviewUrls, linkPreviews, typedPreviewUrl]);
+
   const pickMedia = async () => {
     if (creating) return;
-    if (!effectiveUserId || !accessToken) {
+    const freshAccessToken = await getFreshNativeAccessToken(accessToken);
+    if (!effectiveUserId || !freshAccessToken) {
       setErrorText("Please login to upload images.");
       return;
     }
@@ -390,23 +543,26 @@ export function NativeBroadcastModal({
       setErrorText(`You can upload up to ${MAX_BROADCAST_MEDIA} photos.`);
       return;
     }
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      setErrorText("Photo library permission is required to add images.");
+    let result: Awaited<ReturnType<typeof ImagePicker.launchImageLibraryAsync>>;
+    try {
+      // Best-effort request; PHPicker presents regardless, so never hard-block.
+      result = await launchNativeImageLibraryAsync({
+        allowsMultipleSelection: true,
+        mediaTypes: ["images"],
+        preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
+        quality: 0.9,
+        selectionLimit: availableSlots,
+      });
+    } catch (error) {
+      setErrorText(nativeSafeErrorCopy(error, "Couldn't open your photo library. Try again."));
       return;
     }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      allowsMultipleSelection: true,
-      mediaTypes: ["images"],
-      preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
-      quality: 0.9,
-      selectionLimit: availableSlots,
-    });
     if (result.canceled) return;
     const prepared = result.assets.slice(0, availableSlots).map((asset) => ({
       error: null,
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
       height: asset.height,
+      progress: 0,
       status: "queued" as const,
       uploadedUrl: null,
       uri: asset.uri,
@@ -426,15 +582,26 @@ export function NativeBroadcastModal({
     });
     const uploadOne = async (item: NativeBroadcastMedia) => {
       const asset = result.assets.find((candidate) => candidate.uri === item.uri);
-      setMediaFiles((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: "uploading", error: null } : entry));
+      setMediaFiles((current) => current.map((entry) => entry.id === item.id ? { ...entry, progress: Math.max(entry.progress, NATIVE_UPLOAD_PROGRESS_START), status: "uploading", error: null } : entry));
+      let progressTimer: ReturnType<typeof setInterval> | null = null;
       try {
-        const uploadedUrl = await uploadNativeBroadcastImage(effectiveUserId, item.uri, asset?.fileName, asset?.mimeType, accessToken);
-        setMediaFiles((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: "uploaded", uploadedUrl, error: null } : entry));
+        progressTimer = setInterval(() => {
+          setMediaFiles((current) => current.map((entry) => (
+            entry.id === item.id && entry.status === "uploading"
+              ? { ...entry, progress: nextNativeUploadProgress(entry.progress) }
+              : entry
+          )));
+        }, 450);
+        setMediaFiles((current) => current.map((entry) => entry.id === item.id && entry.status === "uploading" ? { ...entry, progress: Math.max(entry.progress, NATIVE_UPLOAD_PROGRESS_READ_READY) } : entry));
+        const uploadedUrl = await uploadNativeBroadcastImage(effectiveUserId, item.uri, asset?.fileName, asset?.mimeType, freshAccessToken, sessionKey);
+        setMediaFiles((current) => current.map((entry) => entry.id === item.id ? { ...entry, progress: 100, status: "uploaded", uploadedUrl, error: null } : entry));
       } catch (error) {
         logNativeProtectedActionFailure("[map.broadcastModal] upload_media_failed", error);
         const message = humanBroadcastError(error);
-        setMediaFiles((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: "error", uploadedUrl: null, error: message } : entry));
-        setErrorText(`Image upload failed: ${message}`);
+        setMediaFiles((current) => current.map((entry) => entry.id === item.id ? { ...entry, progress: 0, status: "error", uploadedUrl: null, error: message } : entry));
+        setErrorText(nativeSafeErrorCopy(error, `Couldn't upload that image. ${message}`));
+      } finally {
+        if (progressTimer) clearInterval(progressTimer);
       }
     };
     const uploadQueue = async () => {
@@ -471,19 +638,20 @@ export function NativeBroadcastModal({
     return "super";
   };
 
-  const showUpsellOncePerDrag = () => {
-    const target = upsellTargetForTier();
-    if (!target || upsellLocked) return;
-    setUpsellLocked(true);
-    setShowUpsell(true);
+  const triggerUpsellForLimit = (target: "plus" | "gold" | "super" | null) => {
+    if (!target) return;
+    if (upsellShownThisOpenRef.current) {
+      setShowUpsell(true);
+      return;
+    }
+    upsellShownThisOpenRef.current = true;
     setBroadcastUpsellTarget(target);
-    setTimeout(() => setUpsellLocked(false), 1000);
   };
 
   const handleRangeChange = (nextValue: number) => {
     if (nextValue >= capRangeKm && extraBroadcast72h <= 0) {
       setRangeKm(capRangeKm);
-      showUpsellOncePerDrag();
+      triggerUpsellForLimit(upsellTargetForTier());
       return;
     }
     setRangeKm(Math.min(nextValue, capRangeKm));
@@ -492,7 +660,7 @@ export function NativeBroadcastModal({
   const handleDurationChange = (nextValue: number) => {
     if (nextValue >= capDurationHours && extraBroadcast72h <= 0) {
       setDurationHours(capDurationHours);
-      showUpsellOncePerDrag();
+      triggerUpsellForLimit(upsellTargetForTier());
       return;
     }
     setDurationHours(Math.min(nextValue, capDurationHours));
@@ -505,11 +673,13 @@ export function NativeBroadcastModal({
 
   // SS4: pull-down-to-dismiss gesture (defined after handleClose so closure captures it)
   const pullDownGesture = Gesture.Pan()
-    .activeOffsetY([4, 9999])
+    .activeOffsetY([-9999, 28])
+    .failOffsetX([-24, 24])
     .onUpdate((e) => { dragY.value = Math.max(0, e.translationY); })
-    .onEnd(() => {
-      if (dragY.value > 120) {
-        dragY.value = withSpring(600, { damping: 20, stiffness: 300 });
+    .onEnd((event) => {
+      const shouldClose = dragY.value > 180 || (dragY.value > 96 && event.velocityY > 1200);
+      if (shouldClose) {
+        dragY.value = 0;
         runOnJS(handleClose)();
       } else {
         dragY.value = withSpring(0, { damping: 20, stiffness: 300 });
@@ -517,19 +687,21 @@ export function NativeBroadcastModal({
     });
 
   const handleCreate = async (): Promise<boolean> => {
-    if (!effectiveUserId || !accessToken) {
+    const freshAccessToken = await getFreshNativeAccessToken(accessToken);
+    if (!effectiveUserId || !freshAccessToken) {
       setErrorText("Please login to broadcast alerts.");
       return false;
     }
     const nextValidationErrors = {
       location: !selectedLocation,
-      description: !description.trim(),
+      petType: petTypeRequired && !normalizedSelectedPetType,
+      description: !description.trim() && !activePreviewUrl,
     };
     setValidationErrors(nextValidationErrors);
-    if (nextValidationErrors.location || nextValidationErrors.description) {
-      haptic.error();
+    if (nextValidationErrors.location || nextValidationErrors.petType || nextValidationErrors.description) {
       triggerCreateShake();
       if (nextValidationErrors.location) scrollComposerToTop();
+      else if (nextValidationErrors.petType) scrollComposerFieldIntoView("petType");
       else scrollComposerFieldIntoView("description");
       return false;
     }
@@ -558,6 +730,7 @@ export function NativeBroadcastModal({
       setErrorText("Some uploaded images are missing. Please reselect them.");
       return false;
     }
+    const imageMetadata = buildNativeSocialImageMetadata(mediaFiles.map((item) => ({ ...item, uri: item.uploadedUrl || item.uri })));
     const publishLocation = selectedLocation;
     if (!publishLocation) return false;
     setCreating(true);
@@ -568,18 +741,23 @@ export function NativeBroadcastModal({
         resolvedAddress = await lookupNativeMapAddress(publishLocation.lat, publishLocation.lng);
       }
       const created = await createNativeBroadcastNoMedia({
-        accessToken,
+        accessToken: freshAccessToken,
         address: resolvedAddress,
         alertType,
-        description: description || null,
+        description: activePreviewUrl ? [stripNativeSocialExternalUrlFromText(description, activePreviewUrl), activePreviewUrl].filter(Boolean).join("\n") || null : description || null,
         durationHours,
+        imageMetadata,
         images,
         isSensitive,
         lat: publishLocation.lat,
         lng: publishLocation.lng,
+        petType: normalizedSelectedPetType,
         postOnThreads,
+        verifiedOnly,
         rangeKm,
+        sessionKey,
         title: title || null,
+        userId: effectiveUserId,
       });
       const createdAt = new Date().toISOString();
       const createdAlert: NativeMapAlert = {
@@ -587,17 +765,19 @@ export function NativeBroadcastModal({
         latitude: publishLocation.lat,
         longitude: publishLocation.lng,
         alert_type: alertType,
+        pet_type: petTypeRequired ? normalizedSelectedPetType : null,
         title: title.trim() || null,
-        description: description.trim() || null,
+        description: activePreviewUrl ? [stripNativeSocialExternalUrlFromText(description, activePreviewUrl), activePreviewUrl].filter(Boolean).join("\n") || null : description.trim() || null,
         photo_url: images[0] || null,
         media_urls: images,
         support_count: 0,
+        share_count: 0,
         report_count: 0,
         created_at: createdAt,
         expires_at: created.expiresAt,
-        duration_hours: durationHours,
+        duration_hours: created.durationHours,
         range_meters: created.rangeMeters,
-        range_km: rangeKm,
+        range_km: created.rangeKm,
         creator_id: effectiveUserId,
         has_thread: Boolean(created.threadId),
         thread_id: created.threadId,
@@ -607,6 +787,7 @@ export function NativeBroadcastModal({
         social_status: created.threadId ? "posted" : null,
         social_url: created.threadId ? `/threads?focus=${created.threadId}` : null,
         is_sensitive: isSensitive,
+        verified_only: verifiedOnly,
         is_demo: false,
         location_street: resolvedAddress,
         location_district: null,
@@ -624,7 +805,7 @@ export function NativeBroadcastModal({
       haptic.error();
       logNativeProtectedActionFailure("[map.broadcastModal] create_alert_failed", error);
       if (images.length > 0) {
-        const cleanupResult: NativeProtectedActionCleanupResult = await cleanupNativeBroadcastImages(images, effectiveUserId, accessToken).catch(() => "failed" as const);
+        const cleanupResult: NativeProtectedActionCleanupResult = await cleanupNativeBroadcastImages(images, effectiveUserId, freshAccessToken, sessionKey).catch(() => "failed" as const);
         logNativeProtectedActionFailure("[map.broadcastModal] create_alert_orphan_cleanup", createNativeProtectedActionError({
           ok: false,
           stage: getNativeProtectedActionResult(error)?.stage || "domain_save",
@@ -683,12 +864,14 @@ export function NativeBroadcastModal({
     <Modal presentationStyle="overFullScreen" animationType="slide" onRequestClose={handleClose} transparent visible={visible}>
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={0} style={[nativeModalStyles.appModalBackdrop, nativeModalStyles.appModalBottomSafeArea]}>
         <Pressable accessibilityLabel="Close broadcast composer" accessibilityRole="button" onPress={handleClose} style={StyleSheet.absoluteFill} />
-        <Animated.View style={[nativeModalStyles.appBottomSheetEventBoundary, dragStyle]}>
-        <AppBottomSheet mode="autoMax" onClose={handleClose}>
+        <Animated.View style={[styles.bottomSheetBoundary, { maxHeight: broadcastSheetMaxHeight }, dragStyle]}>
+          <AppBottomSheet disableSwipeToClose mode="autoMax" onClose={handleClose} style={{ maxHeight: broadcastSheetMaxHeight }}>
           <GestureDetector gesture={pullDownGesture}>
             <View collapsable={false}>
               <AppBottomSheetHeader>
-                <Text style={styles.title}>{t("Broadcast Alert")}</Text>
+                <View style={styles.titleBlock}>
+                  <Text style={styles.title}>{t("Broadcast Alert")}</Text>
+                </View>
                 <AppModalCloseButton onPress={handleClose} />
               </AppBottomSheetHeader>
             </View>
@@ -733,49 +916,79 @@ export function NativeBroadcastModal({
                   ) : null}
                 </View>
               </View>
-              <Pressable accessibilityRole="switch" accessibilityState={{ checked: postOnThreads }} onPress={() => setPostOnThreads((value) => !value)} style={styles.socialToggle}>
-                <Text style={styles.socialToggleText}>On Social</Text>
-                <View style={[styles.switchTrack, postOnThreads ? styles.switchTrackOn : null]}>
-                  <View style={[styles.switchThumb, postOnThreads ? styles.switchThumbOn : null]} />
-                </View>
-              </Pressable>
             </View>
             {typeMenuOpen ? <View pointerEvents="none" style={styles.typeMenuSpacer} /> : null}
             {!selectedLocation && !validationErrors.location ? <Text style={styles.pinHint}>Tap the Pin icon to place your alert.</Text> : null}
 
+            {petTypeRequired ? (
+              <View
+                onLayout={(event) => {
+                  composerFieldOffsetsRef.current.petType = event.nativeEvent.layout.y;
+                }}
+                style={styles.petTypeFieldWrap}
+              >
+                <BroadcastPetTypeSelect
+                  error={validationErrors.petType ? "Select a pet type for lost or stray alerts." : undefined}
+                  focused={focusedField === "petType"}
+                  open={petTypeMenuOpen}
+                  selectedPetType={normalizedSelectedPetType}
+                  onFocus={() => {
+                    const nextOpen = !petTypeMenuOpen;
+                    setFocusedField(nextOpen ? "petType" : null);
+                    setPetTypeMenuOpen(nextOpen);
+                    if (nextOpen) scrollComposerFieldIntoView("petType");
+                  }}
+                  onSelect={(option) => {
+                    const normalized = normalizeNativePetFocusLabel(option);
+                    onPetTypeChange?.(normalized);
+                    setValidationErrors((current) => ({ ...current, petType: false }));
+                    setPetTypeMenuOpen(false);
+                    setFocusedField(null);
+                  }}
+                />
+              </View>
+            ) : null}
+
             <View style={styles.rangeCard}>
-              <View style={styles.quotaChipRow}>
-                <Text style={styles.quotaChipText}>Active broadcasts</Text>
-                <Text style={styles.quotaChipValue}>
-                  {activeBroadcastUsed} / {activeBroadcastLimit}
-                </Text>
-              </View>
-              <View style={styles.sharedSliderControl}>
-                <View style={styles.sliderHeader}>
-                  <Text style={styles.stepLabel}>Reach</Text>
+              <View style={styles.sliderRow}>
+                <View style={styles.sliderLabelCol}>
+                  <Feather color={huddleColors.blue} name="radio" size={18} />
+                  <Text style={styles.sliderInlineLabel}>Reach</Text>
                 </View>
-                <HuddleSingleRangeControl
-                  max={visualRangeMaxKm}
-                  min={1}
-                  step={1}
-                  suffix=" km"
-                  value={rangeKm}
-                  onChange={handleRangeChange}
-                />
-              </View>
-              <View style={styles.sharedSliderControl}>
-                <View style={styles.sliderHeader}>
-                  <Text style={styles.stepLabel}>Duration</Text>
+                <View style={styles.sliderInlineTrack}>
+                  <HuddleSingleRangeControl
+                    max={visualRangeMaxKm}
+                    min={1}
+                    step={1}
+                    suffix=" km"
+                    showValue={false}
+                    thumbSize={16}
+                    value={rangeKm}
+                    onChange={handleRangeChange}
+                  />
                 </View>
-                <HuddleSingleRangeControl
-                  max={visualDurationMaxHours}
-                  min={1}
-                  step={1}
-                  suffix=" hrs"
-                  value={durationHours}
-                  onChange={handleDurationChange}
-                />
+                <Text style={styles.sliderInlineValue}>{rangeKm} km</Text>
               </View>
+              <View style={styles.sliderRow}>
+                <View style={styles.sliderLabelCol}>
+                  <Feather color={huddleColors.blue} name="zap" size={18} />
+                  <Text style={styles.sliderInlineLabel}>Boost</Text>
+                </View>
+                <View style={styles.sliderInlineTrack}>
+                  <HuddleSingleRangeControl
+                    max={visualDurationMaxHours}
+                    min={1}
+                    step={1}
+                    suffix={durationHours === 1 ? " hr" : " hrs"}
+                    showValue={false}
+                    thumbSize={16}
+                    value={durationHours}
+                    onChange={handleDurationChange}
+                  />
+                </View>
+                <Text style={styles.sliderInlineValue}>{durationHours} {durationHours === 1 ? "hr" : "hrs"}</Text>
+              </View>
+              <Text style={styles.boostSubtext}>Live on the map for 7 days after the priority boost ends.</Text>
               {activeBroadcastUsed >= activeBroadcastLimit ? (
                 <Pressable
                   accessibilityRole="button"
@@ -784,16 +997,19 @@ export function NativeBroadcastModal({
                   style={styles.upsellRow}
                 >
                   <Text style={styles.upsellText}>
-                    {tier === "gold" ? "All broadcast slots in use. Wait for one to expire." : "See plans to get wider reach and longer duration!"}
+                    {tier === "gold" ? "All broadcast slots in use. Wait for one to expire." : "Upgrade for wider reach + longer boost"}
                   </Text>
                 </Pressable>
               ) : showUpsell ? (
                 <Pressable
                   accessibilityRole="button"
-                  onPress={() => setBroadcastUpsellTarget(upsellTargetForTier())}
+                  onPress={() => {
+                    const target = upsellTargetForTier();
+                    if (target) onOpenPremium?.(target === "super" ? "addons" : target);
+                  }}
                   style={styles.upsellRow}
                 >
-                  <Text style={styles.upsellText}>See plans to get wider reach and longer duration!</Text>
+                  <Text style={styles.upsellText}>Upgrade for wider reach + longer boost</Text>
                 </Pressable>
               ) : null}
             </View>
@@ -805,6 +1021,10 @@ export function NativeBroadcastModal({
               style={[styles.field, focusedField === "title" ? styles.inputFocused : null]}
             >
               <TextInput
+                multiline={false}
+                scrollEnabled
+                numberOfLines={1} lineBreakModeIOS="tail" lineBreakStrategyIOS="none"
+                textBreakStrategy="simple"
                 maxLength={100}
                 onBlur={() => {
                   setFocusedField(null);
@@ -836,11 +1056,11 @@ export function NativeBroadcastModal({
                 multiline
                 onBlur={() => {
                   setFocusedField(null);
-                  setValidationErrors((current) => ({ ...current, description: description.trim() ? false : current.description }));
+                  setValidationErrors((current) => ({ ...current, description: description.trim() || activePreviewUrl ? false : current.description }));
                 }}
                 onChangeText={(nextDescription) => {
                   setDescription(nextDescription);
-                  if (nextDescription.trim()) setValidationErrors((current) => ({ ...current, description: false }));
+                  if (nextDescription.trim() || activePreviewUrl) setValidationErrors((current) => ({ ...current, description: false }));
                 }}
                 onFocus={() => {
                   setFocusedField("description");
@@ -848,20 +1068,62 @@ export function NativeBroadcastModal({
                 }}
                 placeholder={t("Details help everyone stay connected")}
                 placeholderTextColor={huddleColors.mutedText}
+                scrollEnabled
                 style={[styles.input, styles.textAreaInput]}
                 textAlignVertical="top"
                 value={description}
               />
             </View>
+            {petTypeRequired ? (
+              <Pressable
+                accessibilityRole="switch"
+                accessibilityState={{ checked: verifiedOnly }}
+                onPress={() => setVerifiedOnly((value) => !value)}
+                style={styles.socialToggle}
+              >
+                <Text style={styles.socialToggleText}>Visible to verified users only</Text>
+                <View style={[styles.verifiedSwitchTrack, verifiedOnly ? styles.verifiedSwitchTrackOn : null]}>
+                  {verifiedOnly ? <Feather color={huddleColors.onPrimary} name="check-circle" size={14} style={styles.verifiedSwitchBadge} /> : null}
+                  <View style={[styles.switchThumb, verifiedOnly ? styles.verifiedSwitchThumbOn : null]} />
+                </View>
+              </Pressable>
+            ) : null}
+            <Pressable accessibilityRole="switch" accessibilityState={{ checked: postOnThreads }} onPress={() => setPostOnThreads((value) => !value)} style={styles.socialToggle}>
+              <View style={styles.socialToggleCopy}>
+                <View style={styles.socialToggleTitleRow}>
+                  <Text style={styles.socialToggleText}>Post on</Text>
+                  <NativeNavIcon color={huddleColors.text} size={19} tab="social" />
+                </View>
+              </View>
+              <View style={[styles.switchTrack, postOnThreads ? styles.switchTrackOn : null]}>
+                <View style={[styles.switchThumb, postOnThreads ? styles.switchThumbOn : null]} />
+              </View>
+            </Pressable>
+            {activePreviewUrl ? (
+              <NativeSocialExternalLinkPreview
+                linkPreview={linkPreviews[activePreviewUrl] || null}
+                url={activePreviewUrl}
+                onOpen={() => undefined}
+                onRemove={() => {
+                  setDescription((current) => stripNativeSocialExternalUrlFromText(current, activePreviewUrl));
+                  setDismissedPreviewUrls((current) => {
+                    const next = new Set(current);
+                    next.add(activePreviewUrl);
+                    return next;
+                  });
+                  if (lockedPreviewUrl === activePreviewUrl) setLockedPreviewUrl(null);
+                }}
+              />
+            ) : null}
 
             {mediaFiles.length > 0 ? (
               <ScrollView bounces={false} directionalLockEnabled horizontal keyboardShouldPersistTaps="handled" nestedScrollEnabled showsHorizontalScrollIndicator={false} contentContainerStyle={styles.mediaThumbRow}>
                 {mediaFiles.map((item, index) => (
                   <View key={item.id} style={[styles.mediaThumbWrap, { aspectRatio: broadcastThumbAspect(item) }]}>
-                    <ExpoImage cachePolicy="memory-disk" contentFit="cover" source={{ uri: item.uri }} style={styles.mediaThumb} transition={120} />
+                    <ExpoImage cachePolicy="memory-disk" contentFit="cover" key={nativeFreshImageKey(item.uri, item.id)} source={{ uri: nativeFreshImageUri(item.uri, item.id) }} style={styles.mediaThumb} transition={120} />
                     {item.status === "uploading" ? (
                       <View pointerEvents="none" style={styles.mediaUploadingOverlay}>
-                        <ActivityIndicator color={huddleColors.onPrimary} size="small" />
+                        <NativeSpinner tone="primary" />
                         <Text style={styles.mediaUploadingText}>{uploadProgress}%</Text>
                       </View>
                     ) : null}
@@ -886,7 +1148,7 @@ export function NativeBroadcastModal({
           </AppBottomSheetScroll>
 
           <AppBottomSheetFooter>
-            <RNAnimated.View style={[styles.footerRow, { transform: [{ translateX: createShakeAnim }] }]}>
+            <RNAnimated.View style={[styles.footerRow, createShakeStyle]}>
               <Pressable accessibilityLabel="Add image" accessibilityRole="button" onPress={() => void pickMedia()} style={styles.mediaButton}>
                 <Feather color={huddleColors.mutedText} name="camera" size={16} />
               </Pressable>
@@ -901,7 +1163,7 @@ export function NativeBroadcastModal({
                   ]}
                 >
                   {creating ? (
-                    <ActivityIndicator color={huddleColors.onPrimary} size="small" />
+                    <NativeSpinner tone="primary" />
                   ) : (
                     <>
                       <MaterialCommunityIcons color={!isSliderDisabled ? huddleColors.onPrimary : huddleColors.mutedText} name="alert" size={20} />
@@ -920,8 +1182,24 @@ export function NativeBroadcastModal({
                   />
               )}
             </RNAnimated.View>
+            {oneBroadcastRemaining ? (
+              <View style={styles.broadcastRemainingNotice}>
+                <Text style={styles.broadcastRemainingText}>You have 1 broadcast remaining.</Text>
+                {!isGoldMember ? (
+                  <Text style={styles.broadcastRemainingText}>
+                    Need more? {isVerified ? "Upgrade your membership." : "Verify your identity or upgrade your membership."}
+                  </Text>
+                ) : null}
+                <View style={styles.broadcastSupportRow}>
+                  <Text style={styles.broadcastRemainingText}>From a charity or volunteer group? </Text>
+                  <Pressable accessibilityRole="link" onPress={onOpenSupport}>
+                    <Text style={styles.broadcastSupportLink}>Contact Support</Text>
+                  </Pressable>
+                </View>
+              </View>
+            ) : null}
           </AppBottomSheetFooter>
-        </AppBottomSheet>
+          </AppBottomSheet>
         </Animated.View>
       </KeyboardAvoidingView>
 
@@ -960,19 +1238,30 @@ function BroadcastUpsellModal({
   onUpgrade?: (target: "plus" | "gold" | "super") => void;
   target: "plus" | "gold" | "super" | null;
 }) {
+  const [storeProducts, setStoreProducts] = useState<Record<NativeStoreProductId, NativeStoreProductState> | null>(null);
+  useEffect(() => {
+    if (!target) return undefined;
+    let active = true;
+    void loadNativeStoreProducts({ allowCache: true }).then((products) => {
+      if (active) setStoreProducts(products);
+    }).catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [target]);
   if (!target) return null;
 
   const isGold = target === "gold";
   const isSuper = target === "super";
   const themeColor = isSuper ? huddleColors.lime : isGold ? huddleColors.membershipUpgradeGold : huddleColors.membershipUpgradePlus;
-  const title = isSuper ? "Super Broadcast (50km．72h)" : isGold ? "Upgrade to Huddle Gold" : "Upgrade to Huddle+";
+  const title = isSuper ? "Super Broadcast (50km．72h)" : isGold ? "Upgrade to huddle＊" : "Upgrade to huddle+";
   const meta = isSuper
-    ? `${SUPER_BROADCAST_FALLBACK_CURRENCY}${SUPER_BROADCAST_FALLBACK_PRICE.toFixed(2)}/mo`
-    : `USD$${quotaConfig.stripePlans[isGold ? "gold" : "plus"].monthly.amount.toFixed(2)}/mo`;
+    ? formatNativeAddonPrice("huddle_super_broadcast", storeProducts?.huddle_super_broadcast)
+    : `${nativeMembershipPriceDisplay(isGold ? "gold" : "plus", "monthly", storeProducts).price}/mo`;
   const features = isSuper
     ? ["50km broadcast reach", "72h alert visibility", "Built for urgent wide-area searches"]
     : isGold
-      ? ["20km broadcast reach", "48h alert visibility", "Gold discovery and profile perks"]
+      ? ["20km broadcast reach", "48h alert visibility", "huddle＊ discovery and profile perks"]
       : ["10km broadcast reach", "24h alert visibility", "More ways to reach nearby members"];
 
   return (
@@ -981,8 +1270,8 @@ function BroadcastUpsellModal({
         <Pressable onPress={(event) => event.stopPropagation()} style={[nativeModalStyles.appModalCard, styles.broadcastUpsellCard]}>
           <View style={[styles.broadcastUpsellStripe, { backgroundColor: themeColor }]}>
             <Feather color={huddleColors.onPrimary} name="radio" size={18} />
-            <Text style={styles.broadcastUpsellTitle}>{title}</Text>
-            <Text style={styles.broadcastUpsellMeta}>{meta}</Text>
+            <Text ellipsizeMode="tail" numberOfLines={2} style={styles.broadcastUpsellTitle}>{title}</Text>
+            <Text ellipsizeMode="tail" numberOfLines={1} style={styles.broadcastUpsellMeta}>{meta}</Text>
           </View>
           <View style={styles.broadcastUpsellBody}>
             {features.map((feature) => (
@@ -990,7 +1279,7 @@ function BroadcastUpsellModal({
                 <View style={[styles.broadcastUpsellCheck, { backgroundColor: themeColor }]}>
                   <Feather color={huddleColors.onPrimary} name="check" size={10} />
                 </View>
-                <Text style={styles.broadcastUpsellFeatureText}>{feature}</Text>
+                <Text ellipsizeMode="tail" numberOfLines={2} style={styles.broadcastUpsellFeatureText}>{feature}</Text>
               </View>
             ))}
             <Pressable
@@ -1015,6 +1304,15 @@ function BroadcastUpsellModal({
 
 
 const styles = StyleSheet.create({
+  bottomSheetBoundary: {
+    width: "100%",
+    flex: 1,
+    alignSelf: "stretch",
+    justifyContent: "flex-end",
+  },
+  titleBlock: {
+    flex: 1,
+  },
   title: {
     fontFamily: "Urbanist-700",
     fontSize: huddleType.h4,
@@ -1037,9 +1335,14 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     borderWidth: 1,
-    borderColor: huddleColors.fieldBorderSoft,
+    borderColor: huddleColors.glassBorder,
     borderRadius: huddleRadii.field,
     backgroundColor: huddleColors.canvas,
+    shadowColor: huddleColors.neutralShadow,
+    shadowOpacity: huddleFormFields.shadowOpacity,
+    shadowRadius: 6,
+    shadowOffset: { width: huddleFormFields.shadowOffset, height: huddleFormFields.shadowOffset },
+    elevation: 1,
   },
   compoundRowError: {
     ...huddleFieldStates.error,
@@ -1063,14 +1366,32 @@ const styles = StyleSheet.create({
     zIndex: 3,
   },
   socialToggle: {
-    flexShrink: 0,
-    minHeight: 44,
+    alignSelf: "stretch",
+    minHeight: 52,
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "space-between",
     gap: huddleSpacing.x2,
+    marginTop: huddleSpacing.x3,
+    borderWidth: 1,
+    borderColor: huddleColors.glassBorder,
     borderRadius: huddleRadii.field,
-    paddingHorizontal: huddleSpacing.x3,
-    backgroundColor: huddleColors.divider,
+    paddingHorizontal: huddleSpacing.x4,
+    backgroundColor: huddleColors.glassChrome,
+    shadowColor: huddleColors.neutralShadow,
+    shadowOpacity: huddleFormFields.shadowOpacity,
+    shadowRadius: 6,
+    shadowOffset: { width: huddleFormFields.shadowOffset, height: huddleFormFields.shadowOffset },
+    elevation: 1,
+  },
+  socialToggleCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  socialToggleTitleRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: huddleSpacing.x1,
   },
   socialToggleText: {
     fontFamily: "Urbanist-600",
@@ -1079,24 +1400,47 @@ const styles = StyleSheet.create({
     color: huddleColors.text,
   },
   switchTrack: {
-    width: 38,
-    height: 22,
+    ...huddleGlassControls.toggleSurface,
+    width: 50,
+    height: 28,
+    flexShrink: 0,
     justifyContent: "center",
-    borderRadius: 11,
-    backgroundColor: huddleColors.tabActive,
+    borderRadius: huddleRadii.pill,
+    paddingHorizontal: 3,
   },
   switchTrackOn: {
     backgroundColor: huddleColors.blue,
   },
+  verifiedSwitchTrack: {
+    ...huddleGlassControls.toggleSurface,
+    width: 50,
+    height: 28,
+    flexShrink: 0,
+    justifyContent: "center",
+    borderRadius: huddleRadii.pill,
+    paddingHorizontal: 3,
+  },
+  verifiedSwitchTrackOn: {
+    backgroundColor: huddleColors.success,
+  },
+  verifiedSwitchBadge: {
+    position: "absolute",
+    left: 5,
+  },
+  verifiedSwitchThumbOn: {
+    transform: [{ translateX: 22 }],
+  },
+  socialToggleDisabled: {
+    opacity: 0.5,
+  },
   switchThumb: {
-    width: 18,
-    height: 18,
-    marginLeft: 2,
-    borderRadius: 9,
+    width: 22,
+    height: 22,
+    borderRadius: huddleRadii.pill,
     backgroundColor: huddleColors.canvas,
   },
   switchThumbOn: {
-    marginLeft: 18,
+    transform: [{ translateX: 22 }],
   },
   typeSelect: {
     minHeight: 42,
@@ -1142,6 +1486,84 @@ const styles = StyleSheet.create({
     lineHeight: 16,
     color: huddleColors.caption,
   },
+  petTypeFieldWrap: {
+    marginTop: huddleSpacing.x3,
+    zIndex: 18,
+  },
+  petTypeDropdownLayer: {
+    zIndex: 30,
+    elevation: 8,
+  },
+  petTypeSelectTrigger: {
+    minHeight: huddleLayout.fieldHeight - 2,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: huddleSpacing.x2,
+  },
+  petTypeSelectValueRow: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: huddleSpacing.x2,
+  },
+  petTypeEmoji: {
+    fontSize: 17,
+    lineHeight: 20,
+  },
+  petTypeSelectValue: {
+    flex: 1,
+    fontFamily: "Urbanist-500",
+    fontSize: 15,
+    lineHeight: huddleFormFields.valueLine,
+    color: huddleColors.text,
+  },
+  petTypePlaceholder: {
+    color: huddleColors.mutedText,
+  },
+  petTypeSelectMenu: {
+    marginTop: huddleSpacing.x2,
+    maxHeight: huddleFormControls.select.menuMaxHeight,
+    borderRadius: huddleFormControls.select.menuRadius,
+    backgroundColor: huddleColors.canvas,
+    padding: huddleFormControls.select.menuPadding,
+    shadowColor: huddleColors.neutralShadow,
+    shadowOpacity: 0.18,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 6,
+  },
+  petTypeSelectOption: {
+    minHeight: huddleFormControls.select.optionMinHeight,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: huddleSpacing.x2,
+    borderRadius: huddleFormControls.select.optionRadius,
+    paddingHorizontal: huddleFormControls.select.optionPaddingHorizontal,
+    paddingVertical: huddleFormControls.select.optionPaddingVertical,
+  },
+  petTypeSelectOptionPressed: {
+    opacity: 0.78,
+  },
+  petTypeOptionLabelRow: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: huddleSpacing.x2,
+  },
+  petTypeSelectOptionText: {
+    flex: 1,
+    fontFamily: "Urbanist-500",
+    fontSize: 14,
+    lineHeight: 18,
+    color: huddleColors.text,
+  },
+  petTypeSelectCheckSlot: {
+    width: huddleFormControls.select.checkSlot,
+    height: huddleFormControls.select.checkSlot,
+  },
   rangeCard: {
     gap: huddleSpacing.x3,
     marginTop: huddleSpacing.x4,
@@ -1151,25 +1573,6 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: huddleSpacing.x4,
     backgroundColor: huddleColors.canvas,
-  },
-  quotaChipRow: {
-    minHeight: 36,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: huddleSpacing.x2,
-  },
-  quotaChipText: {
-    fontFamily: "Urbanist-500",
-    fontSize: huddleType.helper,
-    lineHeight: 16,
-    color: huddleColors.mutedText,
-  },
-  quotaChipValue: {
-    fontFamily: "Urbanist-700",
-    fontSize: huddleType.label,
-    lineHeight: huddleType.labelLine,
-    color: huddleColors.blue,
   },
   upsellRow: {
     minHeight: 54,
@@ -1187,74 +1590,41 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     color: huddleColors.blue,
   },
-  upsellButton: {
-    minHeight: 28,
-    justifyContent: "center",
-    borderRadius: huddleRadii.pill,
-    paddingHorizontal: huddleSpacing.x3,
-    backgroundColor: huddleColors.blue,
-  },
-  upsellButtonText: {
-    fontFamily: "Urbanist-700",
-    fontSize: huddleType.meta,
-    lineHeight: 13,
-    color: huddleColors.onPrimary,
-  },
-  sharedSliderControl: {
-    minHeight: 56,
-    justifyContent: "center",
-  },
-  sliderBlock: {
-    minHeight: 56,
-    justifyContent: "center",
-  },
-  sliderHeader: {
-    marginBottom: huddleSpacing.x2,
+  sliderRow: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
+    gap: huddleSpacing.x3,
+    minHeight: 44,
   },
-  stepLabel: {
-    fontFamily: "Urbanist-600",
-    fontSize: huddleType.helper,
-    lineHeight: 16,
-    color: huddleColors.mutedText,
+  sliderLabelCol: {
+    width: 96,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: huddleSpacing.x2,
   },
-  stepValue: {
-    fontFamily: "Urbanist-700",
-    fontSize: huddleType.label,
-    lineHeight: huddleType.labelLine,
+  sliderInlineTrack: {
+    flex: 1,
+  },
+  sliderInlineLabel: {
+    fontFamily: "Urbanist-800",
+    fontSize: huddleType.body,
+    lineHeight: huddleType.body,
     color: huddleColors.blue,
   },
-
-  sliderTrack: {
-    height: 22,
-    justifyContent: "center",
+  sliderInlineValue: {
+    minWidth: 56,
+    textAlign: "right",
+    fontFamily: "Urbanist-800",
+    fontSize: huddleType.body,
+    lineHeight: huddleType.body,
+    color: huddleColors.blue,
   },
-  sliderFill: {
-    position: "absolute",
-    left: 0,
-    height: 8,
-    borderRadius: huddleRadii.pill,
-    backgroundColor: huddleColors.blue,
-  },
-  sliderTrackBase: {
-    height: 8,
-    borderRadius: huddleRadii.pill,
-    backgroundColor: huddleColors.mutedCanvas,
-  },
-  sliderThumb: {
-    position: "absolute",
-    width: 36,
-    height: 36,
-    marginLeft: -18,
-    borderRadius: 18,
-    backgroundColor: huddleColors.canvas,
-    shadowColor: huddleColors.text,
-    shadowOpacity: 0.18,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 4,
+  boostSubtext: {
+    marginTop: -huddleSpacing.x1,
+    fontFamily: "Urbanist-500",
+    fontSize: huddleType.helper,
+    lineHeight: huddleType.helperLine,
+    color: huddleColors.mutedText,
   },
   field: {
     minHeight: huddleLayout.fieldHeight,
@@ -1279,12 +1649,15 @@ const styles = StyleSheet.create({
     ...huddleFieldStates.error,
   },
   textArea: {
-    minHeight: huddleLayout.fieldHeight * 2,
+    height: huddleFormFields.multilineHeight,
+    maxHeight: huddleFormFields.multilineHeight,
     justifyContent: "flex-start",
     backgroundColor: huddleColors.canvas,
     paddingTop: huddleSpacing.x2,
   },
   input: {
+    flexShrink: 1,
+    minWidth: 0,
     height: huddleLayout.fieldHeight - 2,
     padding: 0,
     fontFamily: "Urbanist-500",
@@ -1293,10 +1666,11 @@ const styles = StyleSheet.create({
     includeFontPadding: false,
     textAlignVertical: "center",
     color: huddleColors.text,
+    overflow: "hidden",
   },
   textAreaInput: {
-    height: undefined,
-    minHeight: huddleLayout.fieldHeight * 2 - huddleSpacing.x3,
+    height: huddleFormFields.multilineHeight - huddleSpacing.x3,
+    maxHeight: huddleFormFields.multilineHeight - huddleSpacing.x3,
     paddingTop: 0,
     textAlignVertical: "top",
   },
@@ -1376,6 +1750,28 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: huddleMapBroadcastFooter.gap,
+  },
+  broadcastRemainingNotice: {
+    gap: 2,
+    marginTop: huddleSpacing.x2,
+    paddingHorizontal: huddleSpacing.x1,
+  },
+  broadcastRemainingText: {
+    color: huddleColors.mutedText,
+    fontFamily: "Urbanist-500",
+    fontSize: huddleType.helper,
+    lineHeight: 16,
+  },
+  broadcastSupportRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    flexWrap: "wrap",
+  },
+  broadcastSupportLink: {
+    color: huddleColors.blue,
+    fontFamily: "Urbanist-700",
+    fontSize: huddleType.helper,
+    lineHeight: 16,
   },
   mediaButton: {
     width: huddleMapBroadcastFooter.cameraButtonSize,

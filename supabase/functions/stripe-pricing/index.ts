@@ -1,30 +1,76 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import Stripe from "https://esm.sh/stripe@14.11.0?target=deno";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
+import { pickStripeRuntimeSecret, resolveStripeRuntimeMode } from "../stripeModeContract.ts";
 
-const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") as string, {
-  apiVersion: "2023-10-16",
-  httpClient: Stripe.createFetchHttpClient(),
-});
 const supabaseUrl = Deno.env.get("SUPABASE_URL") as string;
 const supabaseServiceKey = (Deno.env.get("HUDDLE_SUPABASE_SERVICE_KEY") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")) as string;
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
-const stripeSecret = Deno.env.get("STRIPE_SECRET_KEY") || "";
-const stripeMode = stripeSecret.startsWith("sk_live_") ? "live" : "test";
+const stripeDefaultSecret = Deno.env.get("STRIPE_SECRET_KEY") || "";
+const stripeTestSecret = Deno.env.get("STRIPE_TEST_SECRET_KEY") || "";
+const stripeLiveSecret = Deno.env.get("STRIPE_LIVE_SECRET_KEY") || "";
+const stripeModeHint = String(Deno.env.get("STRIPE_MODE") || "").trim().toLowerCase();
 
-const PRICE_IDS: Record<string, string | undefined> = {
-  plus_monthly: Deno.env.get("STRIPE_PRICE_PLUS_MONTHLY"),
-  plus_annual: Deno.env.get("STRIPE_PRICE_PLUS_ANNUAL"),
-  gold_monthly: Deno.env.get("STRIPE_PRICE_GOLD_MONTHLY"),
-  gold_annual: Deno.env.get("STRIPE_PRICE_GOLD_ANNUAL"),
-  star_pack: Deno.env.get("STRIPE_PRICE_STAR_PACK"),
-  emergency_alert: Deno.env.get("STRIPE_PRICE_BROADCAST_ALERT"),
-  vet_media: Deno.env.get("STRIPE_PRICE_MEDIA_10"),
-  superBroadcast: Deno.env.get("STRIPE_PRICE_SUPER_BROADCAST"),
-  topProfileBooster: Deno.env.get("STRIPE_PRICE_TOP_PROFILE"),
-  sharePerks: Deno.env.get("STRIPE_PRICE_FAMILY_MEMBER"),
-  family_member: Deno.env.get("STRIPE_PRICE_FAMILY_MEMBER"),
-  Family_Member: Deno.env.get("STRIPE_PRICE_FAMILY_MEMBER"),
+const pickStripeSecret = (mode: "test" | "live"): string =>
+  pickStripeRuntimeSecret(mode, {
+    defaultSecret: stripeDefaultSecret,
+    testSecret: stripeTestSecret,
+    liveSecret: stripeLiveSecret,
+  });
+
+const createStripeClient = (secret: string): Stripe =>
+  new Stripe(secret, {
+    apiVersion: "2023-10-16",
+    httpClient: Stripe.createFetchHttpClient(),
+  });
+
+const PRICE_ENV_NAMES: Record<string, string> = {
+  plus_monthly: "STRIPE_PRICE_PLUS_MONTHLY",
+  plus_annual: "STRIPE_PRICE_PLUS_ANNUAL",
+  gold_monthly: "STRIPE_PRICE_GOLD_MONTHLY",
+  gold_annual: "STRIPE_PRICE_GOLD_ANNUAL",
+  star_pack: "STRIPE_PRICE_STAR_PACK",
+  emergency_alert: "STRIPE_PRICE_BROADCAST_ALERT",
+  vet_media: "STRIPE_PRICE_MEDIA_10",
+  superBroadcast: "STRIPE_PRICE_SUPER_BROADCAST",
+  topProfileBooster: "STRIPE_PRICE_TOP_PROFILE",
+  sharePerks: "STRIPE_PRICE_FAMILY_MEMBER",
+  family_member: "STRIPE_PRICE_FAMILY_MEMBER",
+  Family_Member: "STRIPE_PRICE_FAMILY_MEMBER",
+};
+
+const PRICE_IDS_BY_MODE: Record<"test" | "live", Record<string, string | undefined>> = {
+  test: {
+    plus_monthly: "price_1U41ca5QcAjQDse0JTnyQZe9",
+    plus_annual: "price_1U41cd5QcAjQDse0C2dddaPO",
+    gold_monthly: "price_1U41cj5QcAjQDse0LVTEFy8t",
+    gold_annual: "price_1U41cp5QcAjQDse0s4iaEPIz",
+    star_pack: "price_1T3k8X5QcAjQDse0XxZV4WpN",
+    emergency_alert: "price_1T3k8a5QcAjQDse07dq9nmR1",
+    vet_media: "price_1T3k8d5QcAjQDse0nFuWHXK5",
+    superBroadcast: "price_1U6pw55QcAjQDse0huM8TvG3",
+    topProfileBooster: "price_1U6pw75QcAjQDse0tTznPuEY",
+    sharePerks: "price_1U6pw85QcAjQDse000uiuDWu",
+    family_member: "price_1U6pw85QcAjQDse000uiuDWu",
+    Family_Member: "price_1U6pw85QcAjQDse000uiuDWu",
+  },
+  live: {
+    plus_monthly: "price_1T926a5QcAjQDse0QEYva3ZH",
+    plus_annual: "price_1T92355QcAjQDse0BAnwV7PU",
+    gold_monthly: "price_1T92Cp5QcAjQDse0W4wT20OX",
+    gold_annual: "price_1T92Cp5QcAjQDse0jvWohWoJ",
+    superBroadcast: "price_1T9Ohz5QcAjQDse0pWymLfQz",
+    topProfileBooster: "price_1SwQuF5QcAjQDse0RIOnO9cF",
+    sharePerks: "price_1SwQsp5QcAjQDse0RaD0z8nh",
+    family_member: "price_1SwQsp5QcAjQDse0RaD0z8nh",
+    Family_Member: "price_1SwQsp5QcAjQDse0RaD0z8nh",
+  },
+};
+
+const resolveConfiguredPriceId = (key: string, stripeMode: "test" | "live"): string | undefined => {
+  const envName = PRICE_ENV_NAMES[key];
+  if (!envName) return undefined;
+  return PRICE_IDS_BY_MODE[stripeMode][key] || Deno.env.get(envName) || undefined;
 };
 
 const CORE_PREMIUM_KEYS = new Set([
@@ -42,8 +88,8 @@ const DEFAULTS: Record<string, { amount: number; currency: string; interval?: st
   star_pack: { amount: 4.99, currency: "usd" },
   emergency_alert: { amount: 2.99, currency: "usd" },
   vet_media: { amount: 3.99, currency: "usd" },
-  superBroadcast: { amount: 4.99, currency: "usd" },
-  topProfileBooster: { amount: 2.99, currency: "usd" },
+  superBroadcast: { amount: 19.99, currency: "usd" },
+  topProfileBooster: { amount: 3.99, currency: "usd" },
   sharePerks: { amount: 4.99, currency: "usd" },
   family_member: { amount: 4.99, currency: "usd" },
   Family_Member: { amount: 4.99, currency: "usd" },
@@ -159,7 +205,7 @@ async function resolveLookupKeyFromMetadata(planKey: string, currency: string): 
   return lookup || null;
 }
 
-async function resolvePriceByLookupKey(lookupKey: string) {
+async function resolvePriceByLookupKey(stripe: Stripe, lookupKey: string) {
   const trimmed = String(lookupKey || "").trim();
   if (!trimmed) return null;
   const list = await stripe.prices.list({
@@ -230,6 +276,12 @@ serve(async (req) => {
     } catch {
       // no-op
     }
+    const stripeMode = resolveStripeRuntimeMode(stripeModeHint, req.headers.get("origin"));
+    const stripeSecret = pickStripeSecret(stripeMode);
+    if (!stripeSecret) {
+      return json({ error: `Stripe config invalid: missing ${stripeMode} secret key.` }, 500);
+    }
+    const stripe = createStripeClient(stripeSecret);
     const authHeader = req.headers.get("Authorization") || "";
     const accessToken = authHeader.replace(/^Bearer\s+/i, "").trim();
     if (accessToken && !requestedCurrency) {
@@ -250,26 +302,37 @@ serve(async (req) => {
     const required = ["plus_monthly", "plus_annual", "gold_monthly", "gold_annual"];
     for (const key of required) {
       const lookupKey = await resolveLookupKeyFromMetadata(key, targetCurrency);
-      if (!lookupKey && !PRICE_IDS[key]) {
+      if (!lookupKey && !resolveConfiguredPriceId(key, stripeMode)) {
         return json({ error: `Stripe config invalid: missing ${key} price id for ${stripeMode} mode` }, 500);
       }
     }
 
     const results: Record<string, { amount: number; currency: string; interval?: string }> = {};
-    for (const [key, priceId] of Object.entries(PRICE_IDS)) {
+    for (const key of Object.keys(PRICE_ENV_NAMES)) {
       if (key === "family_member" || key === "Family_Member") continue;
+      const priceId = resolveConfiguredPriceId(key, stripeMode);
       let price = null;
       if (CORE_PREMIUM_KEYS.has(key)) {
-        if (priceId) {
-          price = await stripe.prices.retrieve(priceId, { expand: ["currency_options"] });
-        }
-      } else {
         const lookupKey = await resolveLookupKeyFromMetadata(key, targetCurrency);
         if (lookupKey) {
-          price = await resolvePriceByLookupKey(lookupKey);
+          price = await resolvePriceByLookupKey(stripe, lookupKey);
         }
         if (!price && priceId) {
           price = await stripe.prices.retrieve(priceId, { expand: ["currency_options"] });
+        }
+      } else {
+        try {
+          const lookupKey = await resolveLookupKeyFromMetadata(key, targetCurrency);
+          if (lookupKey) {
+            price = await resolvePriceByLookupKey(stripe, lookupKey);
+          }
+          if (!price && priceId) {
+            price = await stripe.prices.retrieve(priceId, { expand: ["currency_options"] });
+          }
+        } catch {
+          // Optional add-ons may not exist in every Stripe mode/account. Keep
+          // core membership pricing available and use the canonical fallback.
+          price = null;
         }
       }
       if (!price) {

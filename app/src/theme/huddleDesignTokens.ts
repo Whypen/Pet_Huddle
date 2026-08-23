@@ -2,8 +2,14 @@ export const huddleColors = {
   blue: "#2145CF",
   blueLight: "#3A5FE8",
   blueSoft: "#EBF5FF",
-  coral: "#FF7F50",
+  // Onboarding hero photo scrim — brand-blue (#2145CF) wash over the welcome
+  // image, mirroring the brand-web About hero treatment so white/coral display
+  // text stays legible over a real photo.
+  heroOverlayStrong: "rgba(33, 69, 207, 0.94)",
+  heroOverlaySoft: "rgba(33, 69, 207, 0.62)",
+  coral: "#FF751F",
   lime: "#BFFF00",
+  subscriptionAddonLime: "#7CFF6B",
   premiumGold: "#CFAB21",
   premiumGoldSoft: "#FFF9E6",
   tierBadgeGold: "#CFAB21",
@@ -41,7 +47,7 @@ export const huddleColors = {
   chatEditScrim: "rgba(255, 255, 255, 0.30)",
   iconMuted: "rgba(66, 73, 101, 0.82)",
   iconSubtle: "rgba(66, 73, 101, 0.45)",
-  caption: "rgba(66, 73, 101, 0.58)",
+  caption: "rgba(66, 73, 101, 0.72)",
   tabActive: "rgba(66, 73, 101, 0.22)",
   fieldBorder: "rgba(66, 73, 101, 0.16)",
   fieldBorderStrong: "rgba(66, 73, 101, 0.28)",
@@ -55,6 +61,7 @@ export const huddleColors = {
   cardBorderSoft: "rgba(66, 73, 101, 0.04)",
   sectionDividerStrong: "rgba(66, 73, 101, 0.10)",
   primarySoftFill: "rgba(33, 69, 207, 0.09)",
+  coralSoftFill: "rgba(255, 117, 31, 0.12)",
   toggleOff: "rgba(255, 255, 255, 0.72)",
   onPrimary: "#FFFFFF",
   profileHeroScrimStart: "rgba(20, 24, 38, 0.78)",
@@ -105,9 +112,9 @@ export const huddleFormFields = {
   background: huddleColors.canvas,
   labelSize: 11,
   labelLine: 15,
-  valueSize: 15,
-  valueLine: 20,
-  errorSize: 12,
+  valueSize: 16,
+  valueLine: 22,
+  errorSize: 14,
   errorLine: 20,
   compactLabelSize: 10,
   compactLabelLine: 13,
@@ -116,6 +123,9 @@ export const huddleFormFields = {
   shadowRadius: 5,
   shadowOffset: 2,
   shadowOpacity: 0.8,
+  // All app-owned multiline editors stop growing at this shared three-line-plus
+  // surface and scroll internally so text never displaces adjacent controls.
+  multilineHeight: 156,
 } as const;
 
 export const huddleRadii = {
@@ -148,6 +158,13 @@ export const huddleLayout = {
   fieldHeight: 52,
   minTouch: 44,
 };
+
+export const huddleLayers = {
+  modalBackdrop: 20,
+  nestedBackdrop: 10,
+  nestedModal: 30,
+  coachMark: 1800,
+} as const;
 
 export const huddleType = {
   nativeHeaderTitle: 22,
@@ -238,6 +255,28 @@ export const huddleShadows = {
   },
 };
 
+// Shared neutral surface for secondary controls and inactive toggles. It keeps
+// controls visually light without introducing solid grey or light-blue fills.
+export const huddleGlassControls = {
+  toggleSurface: {
+    borderWidth: 0.5,
+    borderColor: huddleColors.fieldBorder,
+    backgroundColor: huddleColors.glassControl,
+    ...huddleShadows.glassElevation1,
+  },
+  surface: {
+    borderWidth: 1,
+    borderColor: huddleColors.glassBorder,
+    backgroundColor: huddleColors.glassControl,
+    ...huddleShadows.glassElevation1,
+  },
+  borderlessSurface: {
+    borderWidth: 0,
+    backgroundColor: huddleColors.glassControl,
+    ...huddleShadows.glassElevation1,
+  },
+} as const;
+
 export const huddleButtons = {
   base: {
     minHeight: 48,
@@ -299,6 +338,13 @@ export const huddleButtons = {
 } as const;
 
 export const huddlePolaroid = {
+  selectionWidth: 170,
+  selectionBorderWidth: 2,
+  selectionPlaceholderIconSize: 30,
+  selectionCheckIconSize: 14,
+  addIconSize: 22,
+  addBorderWidth: 1,
+  addLabelMaxWidth: "82%",
   frame: {
     aspectRatio: 4 / 5,
     radius: 4,
@@ -310,6 +356,8 @@ export const huddlePolaroid = {
     elevation: 3,
   },
   photo: {
+    // 90% card width over 64% of a 4:5 card height.
+    aspectRatio: 9 / 8,
     top: "5%",
     left: "5%",
     right: "5%",
@@ -349,6 +397,91 @@ export const huddlePolaroid = {
   },
 } as const;
 
+// The full Family indicator cannot fit inside the fixed icon puck. This shared
+// text badge keeps the established polaroid badge height/type/shadow treatment.
+export const huddleFamilyPet = {
+  badgeHeight: huddlePolaroid.badge.size,
+  badgeMaxWidth: 144,
+  badgeFontFamily: "Urbanist-600",
+  badgeFontSize: huddleType.meta,
+  badgeLineHeight: huddleType.metaLine,
+} as const;
+
+// Shared feedback glass. NativeToast established this exact light-blur and
+// system-blue wash; coach marks reuse it so feedback surfaces do not drift into
+// a second glass recipe.
+export const huddleFeedbackGlass = {
+  blurAmount: 24,
+  reducedTransparencyFallbackColor: huddleColors.glassOverlay,
+  systemWash: ["rgba(33,69,207,0.26)", "rgba(33,69,207,0.07)"] as const,
+} as const;
+
+// Coach-mark spotlight. Editorial copy sits directly on the shared feedback
+// veil; no page-local card or panel is introduced.
+export const huddleCoachMark = {
+  blockLeft: huddleSpacing.x5,
+  blockRight: huddleSpacing.x7,
+  ruleWidth: 26,
+  ruleHeight: 2,
+  kickerLetterSpacing: 1.6,
+  dashWidth: 14,
+  dashHeight: 2,
+  // Type is dark, because the veil is light glass.
+  dashIdle: huddleColors.fieldBorderStrong,
+  dashActive: huddleColors.text,
+  kickerColor: huddleColors.mutedText,
+  bodyColor: huddleColors.subtext,
+  hintColor: huddleColors.mutedText,
+  // Real clearance either side of the target — a bare fit check let the block
+  // land 8pt from the footer, which is what pushed Discover's text into it.
+  placementMargin: huddleSpacing.x6,
+  // Swipe guide motion. Arrow geometry comes from the approved reference asset;
+  // the guide begins lower and nearer the card centre, then turns outward toward
+  // the existing Pass/Wave controls like the real card gesture.
+  swipeGuideOpacity: 0.8,
+  swipeGestureTravelX: huddleSpacing.x8,
+  swipeGestureTravelY: huddleSpacing.x7,
+  swipeGestureMidTravelX: huddleSpacing.x4,
+  swipeGestureMidTravelY: huddleSpacing.x1,
+  swipeGestureEndLift: huddleSpacing.x1,
+  swipeGestureMidProgress: 0.58,
+  swipeGestureReducedMotionProgress: 0.7,
+  swipeGestureStartRotation: 45,
+  swipeGestureMidRotation: 8,
+  swipeGestureEndRotation: 4,
+  swipeIconSize: 60,
+  swipeGlyphSize: 22,
+  // These exactly mirror Discover's pass and primary action treatments.
+  passSurface: "rgba(17,24,39,0.18)",
+  passBorder: "rgba(255,255,255,0.40)",
+  waveSurface: huddleColors.blue,
+  waveBorder: huddleColors.blue,
+} as const;
+
+export const huddleFamilyAccount = {
+  searchResultsMaxHeight: 220,
+  featureCheckSize: huddleType.h4,
+  featureCheckIconSize: huddleType.meta,
+  headerIconSize: huddleType.h4,
+  rowActionIconSize: 17,
+  inviteIconSize: 15,
+} as const;
+
+export const huddleCareUpdate = {
+  polaroidWidth: 188,
+  polaroidCaptionPadding: huddleSpacing.x2,
+  polaroidMinWidth: 136,
+  subjectLabelMinWidth: 148,
+  subjectScrollMaxHeight: 172,
+  subjectOptionMinHeight: 34,
+  subjectRadioSize: 18,
+  subjectRadioDotSize: huddleSpacing.x2,
+  actionCircleSize: huddleSpacing.x8,
+  retakeButtonSize: 32,
+  stampLogoWidth: 116,
+  stampLogoHeight: 38,
+} as const;
+
 export const huddleToggle = {
   trackWidth: 42,
   visibilityTrackWidth: 58,
@@ -372,10 +505,20 @@ export const huddleProfilePhotoCropper = {
   frameMaxViewportRatio: 0.58,
   zoomButtonSize: 44,
   zoomStep: 0.12,
+  accessibilityPanStep: 18,
+  accessibilityRotationStep: 5,
   minZoom: 1,
   maxZoom: 3,
   cropGridLineWidth: 1,
   imageFade: 120,
+} as const;
+
+/** Pet portrait and Home-card presentation are deliberately separate crops.
+ * The Home crop is the one longer treatment used only for pet cards. */
+export const huddlePetPhoto = {
+  bannerAspect: 5 / 4,
+  bannerHorizontalMargin: huddleSpacing.x5,
+  bannerMinWidth: 280,
 } as const;
 
 export const huddleNativeChrome = {
@@ -422,6 +565,7 @@ export const huddleMotion = {
     base: 200,
     slow: 300,
     enter: 350,
+    coachMarkSwipe: 1200,
   },
   easings: {
     out: [0.22, 1.0, 0.36, 1.0],
@@ -484,7 +628,7 @@ export const huddleSocial = {
   mapIconSize: 14,
   mapLinkFontSize: 13,
   composeFabSize: 56,
-  feedTopInset: 64,
+  feedTopInset: 0,
   mediaHeight: 260,
   mediaWidth: 292,
   mediaFrameAspectRatio: 1,
@@ -511,6 +655,14 @@ export const huddleSocial = {
   emptyTextLineHeight: 22,
   topicTabRowHeight: 32,
   contentCollapsedLines: 5,
+  // Total height of NativeSocialFilterBar's rendered block (filterBlock in
+  // NativeSocialFeedPrimitives.tsx): topicTabRowHeight (32) + filterBlock's gap
+  // (huddleSpacing.x2 = 8) + the search/sort row (huddleLayout.minTouch = 44) +
+  // filterBlock's paddingBottom (huddleSpacing.x2 = 8) = 92. Used by RootNavigator
+  // to keep the left-edge notification-swipe catcher below Social's own filter
+  // bar instead of overlapping it. If NativeSocialFilterBar's layout changes,
+  // update this alongside it.
+  filterBarHeight: 92,
 } as const;
 
 export const huddleMapBroadcastFooter = {
@@ -529,7 +681,8 @@ export const huddleMap = {
   marker: {
     alertStray: "#EAB308",
     alertLost: huddleColors.validationRed,
-    alertCaution: huddleColors.blue,
+    // Caution is intentionally neutral so it does not read as friend presence.
+    alertCaution: huddleColors.alertOther,
     alertOthers: "#A1A4A9",
     ownPin: "#A6D539",
     ownPinRetained: "rgba(33,69,207,0.72)",
@@ -544,7 +697,8 @@ export const huddleMap = {
     alertActive: 40,
     alertExpired: 12,
     userPin: 44,
-    userPinCompressed: 24,
+    userPinCompressed: 32,
+    userPinOverview: 24,
     userPinInnerInset: 4,
     userPinCompressedInnerInset: 2,
     alertTipWidth: 8,

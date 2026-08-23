@@ -1,10 +1,13 @@
 import { StyleSheet, Text, View } from "react-native";
 import { huddleColors, huddleSpacing, huddleType } from "../../theme/huddleDesignTokens";
+import { NativeEngagementSparkleInline } from "../NativeProfileAvatar";
+import type { NativeEngagementSummary } from "../../lib/nativeEngagement";
 
 type NativeProfileColophonProps = {
   lastActiveAt?: string | null;
   memberNumber?: number | null;
   memberSince?: string | null;
+  engagement?: NativeEngagementSummary | null;
 };
 
 const formatMemberSince = (value?: string | null) => {
@@ -31,18 +34,40 @@ const formatActivityBucket = (value?: string | null) => {
   return "";
 };
 
-export function NativeProfileColophon({ lastActiveAt, memberNumber, memberSince }: NativeProfileColophonProps) {
+export function NativeProfileColophon({ lastActiveAt, memberNumber, memberSince, engagement }: NativeProfileColophonProps) {
   const since = formatMemberSince(memberSince);
   const activity = formatActivityBucket(lastActiveAt);
-  const parts = [
-    typeof memberNumber === "number" && memberNumber > 0 ? `#${memberNumber}` : null,
-    activity || null,
-    since ? `With huddle since ${since}` : "With huddle",
-  ].filter(Boolean);
+  const percentileRank = engagement?.percentileRank;
+  const topPercent = typeof percentileRank === "number" && Number.isFinite(percentileRank)
+    ? Math.max(1, Math.round(100 - percentileRank))
+    : null;
+  // Below the median isn't a flattering stat to broadcast, so we only ever
+  // show the percentile line when the user is in the top half.
+  const showPercentile = topPercent !== null && topPercent <= 50;
+
+  const memberNumberText = typeof memberNumber === "number" && memberNumber > 0 ? `#${memberNumber}` : null;
+  const sinceText = since ? `With huddle since ${since}` : "With huddle";
+
+  const firstLineParts = [memberNumberText, sinceText].filter(Boolean);
+  const secondLineParts = showPercentile
+    ? [`Top ${topPercent}% members`, activity || null].filter(Boolean)
+    : [];
+
+  const singleLineParts = [memberNumberText, sinceText, activity || null].filter(Boolean);
 
   return (
     <View style={styles.footer}>
-      <Text style={styles.text}>{parts.join(" · ")}</Text>
+      {showPercentile ? (
+        <>
+          <Text style={styles.text}>{firstLineParts.join(" · ")}</Text>
+          <View style={styles.secondLineRow}>
+            <NativeEngagementSparkleInline engagement={engagement} size={11} style={styles.secondLineSparkle} />
+            <Text style={styles.text}>{secondLineParts.join(" · ")}</Text>
+          </View>
+        </>
+      ) : (
+        <Text style={styles.text}>{singleLineParts.join(" · ")}</Text>
+      )}
     </View>
   );
 }
@@ -52,6 +77,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: huddleSpacing.x5,
     paddingVertical: huddleSpacing.x8,
     alignItems: "center",
+    gap: 4,
+  },
+  secondLineRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  secondLineSparkle: {
+    marginTop: -1,
   },
   text: {
     textAlign: "center",

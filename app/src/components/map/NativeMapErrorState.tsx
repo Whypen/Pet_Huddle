@@ -10,7 +10,7 @@ import {
 } from "../../theme/huddleDesignTokens";
 
 type NativeMapErrorStateProps = {
-  body: string;
+  body?: string;
   onRetry?: () => void;
   title: string;
 };
@@ -23,7 +23,7 @@ export function NativeMapErrorState({ body, onRetry, title }: NativeMapErrorStat
           <Feather color={huddleColors.blue} name="map-pin" size={22} />
         </View>
         <Text style={styles.title}>{title}</Text>
-        <Text style={styles.body}>{body}</Text>
+        {body ? <Text style={styles.body}>{body}</Text> : null}
         {onRetry ? (
           <Pressable accessibilityRole="button" onPress={onRetry} style={({ pressed }) => [
             styles.retryButton,

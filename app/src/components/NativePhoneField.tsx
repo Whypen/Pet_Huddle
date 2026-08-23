@@ -9,6 +9,7 @@ import {
   huddleLayout,
   huddleRadii,
   huddleSpacing,
+  huddleType,
 } from "../theme/huddleDesignTokens";
 
 export type NativePhoneCountry = {
@@ -41,14 +42,21 @@ export const resolveNativePhoneCountry = (phone: string) => {
     .find((country) => normalized.startsWith(country.dialCode)) || null;
 };
 
+const normalizeNativePhoneLocalDigits = (value: string, country?: NativePhoneCountry | null) => {
+  const countryDigits = country?.dialCode.replace(/\D/g, "").length ?? 0;
+  return value.replace(/\D/g, "").slice(0, Math.max(1, 15 - countryDigits));
+};
+
 export const localNativePhoneValue = (phone: string, country?: NativePhoneCountry | null) => {
   const normalized = phone.trim();
   if (!normalized) return "";
   if (country && normalized.startsWith(country.dialCode)) {
-    return normalized.slice(country.dialCode.length).replace(/^\s+/, "");
+    return normalizeNativePhoneLocalDigits(normalized.slice(country.dialCode.length), country);
   }
   const savedCountry = resolveNativePhoneCountry(normalized);
-  return savedCountry ? normalized.slice(savedCountry.dialCode.length).replace(/^\s+/, "") : normalized.replace(/^\+/, "");
+  return savedCountry
+    ? normalizeNativePhoneLocalDigits(normalized.slice(savedCountry.dialCode.length), savedCountry)
+    : normalizeNativePhoneLocalDigits(normalized.replace(/^\+/, ""));
 };
 
 export const composeNativePhoneValue = (localValue: string, country?: NativePhoneCountry | null) => {
@@ -65,7 +73,9 @@ export const isNativePhoneValueValid = (phone: string, country?: NativePhoneCoun
 
 type NativePhoneFieldProps = {
   defaultCountryCode?: string | null;
+  editable?: boolean;
   error?: boolean;
+  onBlur?: () => void;
   onChangeText: (value: string) => void;
   onFocus?: () => void;
   onOpenCountryPicker?: () => void;
@@ -79,7 +89,9 @@ type NativePhoneFieldProps = {
 
 export function NativePhoneField({
   defaultCountryCode,
+  editable = true,
   error = false,
+  onBlur,
   onChangeText,
   onFocus,
   onOpenCountryPicker,
@@ -113,6 +125,7 @@ export function NativePhoneField({
   const composedValue = composeNativePhoneValue(localValue, selectedCountry);
   const valid = Boolean(localValue.trim() && selectedCountry && isValidPhoneNumber(composedValue, selectedCountry.code));
   const formatWarning = showFormatWarning && localValue.trim() && selectedCountry && !valid;
+  const countrySelectLabel = selectedCountry ? "Change phone country code" : "Choose phone country code";
   const filteredCountries = useMemo(() => {
     const query = search.trim().toLowerCase().replace(/^\+/, "");
     if (!query) return nativePhoneCountries;
@@ -127,17 +140,20 @@ export function NativePhoneField({
   }, [onValidityChange, valid]);
 
   const commitLocalValue = (nextLocal: string, country: NativePhoneCountry | null = selectedCountry) => {
-    setLocalValue(nextLocal);
-    const nextValue = composeNativePhoneValue(nextLocal, country);
+    const normalizedLocal = normalizeNativePhoneLocalDigits(nextLocal, country);
+    setLocalValue(normalizedLocal);
+    const nextValue = composeNativePhoneValue(normalizedLocal, country);
     lastComposedValue.current = nextValue;
     onChangeText(nextValue);
   };
 
   const selectCountry = (country: NativePhoneCountry) => {
+    const normalizedLocal = normalizeNativePhoneLocalDigits(localValue, country);
     setSelectedCountry(country);
+    setLocalValue(normalizedLocal);
     setSearch("");
     setPickerOpen(false);
-    const nextValue = composeNativePhoneValue(localValue, country);
+    const nextValue = composeNativePhoneValue(normalizedLocal, country);
     lastComposedValue.current = nextValue;
     onChangeText(nextValue);
   };
@@ -146,11 +162,19 @@ export function NativePhoneField({
     <View style={styles.wrap}>
       <View style={styles.inputWrap}>
         <TextInput
+                multiline={false}
+                scrollEnabled
+                numberOfLines={1} lineBreakModeIOS="tail" lineBreakStrategyIOS="none"
+                textBreakStrategy="simple"
           autoComplete="tel"
           autoCorrect={false}
+          editable={editable}
           keyboardType="phone-pad"
           onChangeText={commitLocalValue}
-          onBlur={() => setFocused(false)}
+          onBlur={() => {
+            setFocused(false);
+            onBlur?.();
+          }}
           onFocus={() => {
             setFocused(true);
             setPickerOpen(false);
@@ -170,6 +194,8 @@ export function NativePhoneField({
         />
         <Pressable
           accessibilityRole="button"
+          accessibilityLabel={countrySelectLabel}
+          disabled={!editable}
           onPress={() => {
             Keyboard.dismiss();
             onOpenCountryPicker?.();
@@ -178,9 +204,11 @@ export function NativePhoneField({
           }}
           style={({ pressed }) => [styles.countrySelect, pressed ? styles.pressed : null]}
         >
-          <Text style={styles.countryFlag}>{selectedCountry?.flag ?? ""}</Text>
-          <Text style={styles.phoneDialCode}>{selectedCountry?.dialCode ?? ""}</Text>
-          <Feather color={huddleColors.iconSubtle} name="chevron-down" size={12} />
+          {selectedCountry ? <Text style={styles.countryFlag}>{selectedCountry.flag}</Text> : null}
+          <Text style={[styles.phoneDialCode, !selectedCountry ? styles.phoneDialCodePlaceholder : null]}>
+            {selectedCountry?.dialCode ?? "Code"}
+          </Text>
+          {editable ? <Feather color={huddleColors.iconSubtle} name="chevron-down" size={12} /> : null}
         </Pressable>
         {rightAccessory ? <View style={styles.rightAccessory}>{rightAccessory}</View> : null}
       </View>
@@ -190,6 +218,10 @@ export function NativePhoneField({
           <View style={styles.countrySearchField}>
             <Feather color={huddleColors.mutedText} name="search" size={15} />
             <TextInput
+                multiline={false}
+                scrollEnabled
+                numberOfLines={1} lineBreakModeIOS="tail" lineBreakStrategyIOS="none"
+                textBreakStrategy="simple"
               autoCapitalize="characters"
               autoCorrect={false}
               onChangeText={setSearch}
@@ -220,24 +252,32 @@ export function NativePhoneField({
 
 const styles = StyleSheet.create({
   wrap: {
-    gap: huddleSpacing.x2,
+    gap: huddleSpacing.x1,
   },
   inputWrap: {
     position: "relative",
   },
   input: {
+    flexShrink: 1,
+    minWidth: 0,
     minHeight: huddleLayout.fieldHeight,
     borderRadius: huddleRadii.field,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderWidth: 1,
     borderColor: huddleColors.fieldBorder,
     backgroundColor: huddleFormFields.background,
     paddingHorizontal: huddleSpacing.x4,
     color: huddleColors.text,
     fontFamily: "Urbanist-500",
-    fontSize: 15,
-    lineHeight: 20,
+    fontSize: huddleType.body,
+    lineHeight: huddleType.body + 6,
     includeFontPadding: false,
     textAlignVertical: "center",
+    shadowColor: huddleColors.neutralShadow,
+    shadowOpacity: huddleFormFields.shadowOpacity,
+    shadowRadius: 6,
+    shadowOffset: { width: huddleFormFields.shadowOffset, height: huddleFormFields.shadowOffset },
+    elevation: 1,
+    overflow: "hidden",
   },
   inputFocused: {
     ...huddleFieldStates.focused,
@@ -248,8 +288,11 @@ const styles = StyleSheet.create({
   },
   phoneInput: {
     width: "100%",
+    flexShrink: 1,
+    minWidth: 0,
     paddingLeft: 92,
     textAlignVertical: "center",
+    overflow: "hidden",
   },
   countrySelect: {
     position: "absolute",
@@ -257,6 +300,7 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
     zIndex: 1,
+    minWidth: 58,
     minHeight: huddleLayout.fieldHeight,
     borderRadius: 17,
     flexDirection: "row",
@@ -281,9 +325,12 @@ const styles = StyleSheet.create({
   phoneDialCode: {
     color: huddleColors.text,
     fontFamily: "Urbanist-600",
-    fontSize: 15,
-    lineHeight: 20,
+    fontSize: huddleType.body,
+    lineHeight: huddleType.body + 6,
     includeFontPadding: false,
+  },
+  phoneDialCodePlaceholder: {
+    color: huddleColors.mutedText,
   },
   countryPicker: {
     borderRadius: huddleRadii.card,
@@ -303,6 +350,7 @@ const styles = StyleSheet.create({
   },
   countrySearchInput: {
     flex: 1,
+    minWidth: 0,
     minHeight: 44,
     padding: 0,
     margin: 0,
@@ -311,6 +359,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 18,
     includeFontPadding: false,
+    overflow: "hidden",
   },
   countryPickerList: {
     maxHeight: 180,
@@ -342,9 +391,8 @@ const styles = StyleSheet.create({
   errorText: {
     color: huddleColors.validationRed,
     fontFamily: "Urbanist-600",
-    fontSize: 12,
-    lineHeight: 16,
-    marginTop: 2,
+    fontSize: huddleType.label,
+    lineHeight: huddleType.labelLine,
   },
   pressed: {
     opacity: 0.78,

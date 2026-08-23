@@ -2,6 +2,9 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { nativeExactTokenRpc } from "./nativeExactTokenRequest";
 import { cleanupNativeBroadcastImages } from "./nativeBroadcast";
 import { invalidateNativeMapAlertCaches } from "./nativeMapData";
+import { getFreshNativeAccessToken } from "./nativeFunctionClient";
+import { requireCurrentNativeSession } from "./nativeSessionGuard";
+import { readNativeDisplayCacheItem } from "./nativeDisplayCacheStorage";
 
 const supportedCache = new Map<string, boolean>();
 const supportCountCache = new Map<string, number>();
@@ -11,16 +14,23 @@ const supportCountInFlight = new Map<string, Promise<number>>();
 const supportedKey = (alertId: string, userId: string) => `${alertId}:${userId}`;
 const supportedStorageKey = (alertId: string, userId: string) => `native-alert-support:v1:${alertId}:${userId}`;
 const supportCountStorageKey = (alertId: string) => `native-alert-support-count:v1:${alertId}`;
-type NativeMapActionOptions = { accessToken?: string | null; force?: boolean };
+type NativeMapActionOptions = { accessToken?: string | null; force?: boolean; sessionKey?: string | null; userId?: string | null };
+type NativeAlertSupportResult = { support_count?: number | null; supported?: boolean | null };
 
-const requireAccessToken = (accessToken?: string | null) => {
-  const token = String(accessToken || "").trim();
+const requireAccessToken = async (accessToken?: string | null) => {
+  const token = await getFreshNativeAccessToken(accessToken);
   if (!token) throw new Error("missing_access_token");
   return token;
 };
 
+const requireMapActionSession = (userId: string | null | undefined, options: NativeMapActionOptions = {}) => requireCurrentNativeSession({
+  accessToken: options.accessToken,
+  expectedUserId: userId,
+  sessionKey: options.sessionKey,
+});
+
 const mapActionRpc = async <T = unknown>(fn: string, params: Record<string, unknown> = {}, accessToken?: string | null) => {
-  const token = requireAccessToken(accessToken);
+  const token = await requireAccessToken(accessToken);
   const { data, error } = await nativeExactTokenRpc<T>(fn, params, token);
   if (error) {
     if (__DEV__) console.warn("NATIVE_MAP_SUPPORT_RPC_ERROR", {
@@ -35,7 +45,7 @@ const mapActionRpc = async <T = unknown>(fn: string, params: Record<string, unkn
 
 const readPersistentBoolean = async (key: string): Promise<boolean | null> => {
   try {
-    const raw = await AsyncStorage.getItem(key);
+    const raw = await readNativeDisplayCacheItem(key);
     if (raw === "true") return true;
     if (raw === "false") return false;
     return null;
@@ -54,7 +64,7 @@ const writePersistentBoolean = async (key: string, value: boolean) => {
 
 const readPersistentNumber = async (key: string): Promise<number | null> => {
   try {
-    const raw = await AsyncStorage.getItem(key);
+    const raw = await readNativeDisplayCacheItem(key);
     if (raw === null) return null;
     const value = Number(raw);
     return Number.isFinite(value) ? value : null;
@@ -109,19 +119,15 @@ export async function areNativeUsersBlocked(viewerId: string, targetId: string, 
   return Boolean(data);
 }
 
-export async function enqueueNativeAlertSupportNotification({
-  accessToken,
-  actorName,
-  alertId,
-  creatorId,
-  userId,
-}: {
+export async function enqueueNativeAlertSupportNotification(args: {
   actorName: string;
   alertId: string;
   creatorId: string | null;
   userId: string;
 } & NativeMapActionOptions) {
-  if (!creatorId || creatorId === userId) return;
+  const { actorName, alertId, creatorId, userId } = args;
+  const session = requireMapActionSession(userId, args);
+  if (!creatorId || creatorId === session.userId) return;
   await mapActionRpc("upsert_notification_window", {
     p_owner_user_id: creatorId,
     p_subject_id: alertId,
@@ -129,13 +135,13 @@ export async function enqueueNativeAlertSupportNotification({
     p_kind: "alert_like",
     p_category: "map",
     p_href: `/map?alert=${encodeURIComponent(alertId)}`,
-    p_actor_id: userId,
+    p_actor_id: session.userId,
     p_actor_name: actorName || "Someone",
-  }, accessToken);
+  }, session.accessToken);
 }
 
 export async function loadNativeAlertSupported(alertId: string, userId: string, options: NativeMapActionOptions = {}) {
-  requireAccessToken(options.accessToken);
+  await requireAccessToken(options.accessToken);
   const key = supportedKey(alertId, userId);
 
   if (!options.force && supportedCache.has(key)) return supportedCache.get(key) === true;
@@ -165,7 +171,7 @@ export async function loadNativeAlertSupported(alertId: string, userId: string, 
 }
 
 export async function countNativeAlertSupports(alertId: string, options: NativeMapActionOptions = {}) {
-  requireAccessToken(options.accessToken);
+  await requireAccessToken(options.accessToken);
   if (!options.force && supportCountCache.has(alertId)) return supportCountCache.get(alertId) ?? 0;
 
   const persistent = options.force ? null : await readPersistentNumber(supportCountStorageKey(alertId));
@@ -193,33 +199,36 @@ export async function countNativeAlertSupports(alertId: string, options: NativeM
 }
 
 export async function supportNativeAlert(alertId: string, userId: string, options: NativeMapActionOptions = {}) {
+  const session = requireMapActionSession(userId, options);
   if (__DEV__) console.log("NATIVE_MAP_SUPPORT_RPC_START", {
     alertId,
     hasAccessToken: Boolean(options.accessToken),
     nextSupported: true,
   });
-  const data = await mapActionRpc("native_map_upsert_alert_interaction", {
+  const data = await mapActionRpc<NativeAlertSupportResult | NativeAlertSupportResult[]>("native_map_upsert_alert_interaction", {
     p_alert_id: alertId,
     p_interaction_type: "support",
-  }, options.accessToken);
+  }, session.accessToken);
+  const row = Array.isArray(data) ? data[0] : data;
+  const nextCount = Number(row?.support_count ?? 0);
+  const nextSupported = row?.supported === true;
   if (__DEV__) console.log("NATIVE_MAP_SUPPORT_RPC_RESULT", {
     alertId,
     isArray: Array.isArray(data),
     rawDataShape: data === null ? "null" : Array.isArray(data) ? "array" : typeof data,
+    supportCount: nextCount,
+    supported: nextSupported,
   });
 
-  supportedCache.set(supportedKey(alertId, userId), true);
-  void writePersistentBoolean(supportedStorageKey(alertId, userId), true);
-
-  const cachedCount = supportCountCache.get(alertId);
-  if (typeof cachedCount === "number") {
-    const nextCount = cachedCount + 1;
-    supportCountCache.set(alertId, nextCount);
-    void writePersistentNumber(supportCountStorageKey(alertId), nextCount);
-  }
+  supportedCache.set(supportedKey(alertId, session.userId), nextSupported);
+  void writePersistentBoolean(supportedStorageKey(alertId, session.userId), nextSupported);
+  supportCountCache.set(alertId, nextCount);
+  void writePersistentNumber(supportCountStorageKey(alertId), nextCount);
+  return { supportCount: nextCount, supported: nextSupported };
 }
 
 export async function removeNativeAlertSupport(alertId: string, userId: string, options: NativeMapActionOptions = {}) {
+  const session = requireMapActionSession(userId, options);
   if (__DEV__) console.log("NATIVE_MAP_SUPPORT_RPC_START", {
     alertId,
     hasAccessToken: Boolean(options.accessToken),
@@ -228,15 +237,15 @@ export async function removeNativeAlertSupport(alertId: string, userId: string, 
   const data = await mapActionRpc("native_map_remove_alert_interaction", {
     p_alert_id: alertId,
     p_interaction_type: "support",
-  }, options.accessToken);
+  }, session.accessToken);
   if (__DEV__) console.log("NATIVE_MAP_SUPPORT_RPC_RESULT", {
     alertId,
     isArray: Array.isArray(data),
     rawDataShape: data === null ? "null" : Array.isArray(data) ? "array" : typeof data,
   });
 
-  supportedCache.set(supportedKey(alertId, userId), false);
-  void writePersistentBoolean(supportedStorageKey(alertId, userId), false);
+  supportedCache.set(supportedKey(alertId, session.userId), false);
+  void writePersistentBoolean(supportedStorageKey(alertId, session.userId), false);
 
   const cachedCount = supportCountCache.get(alertId);
   if (typeof cachedCount === "number") {
@@ -247,65 +256,114 @@ export async function removeNativeAlertSupport(alertId: string, userId: string, 
 }
 
 export async function reportNativeAlert(alertId: string, userId: string, options: NativeMapActionOptions = {}) {
+  const session = requireMapActionSession(userId, options);
   await mapActionRpc("native_map_upsert_alert_interaction", {
     p_alert_id: alertId,
     p_interaction_type: "report",
-  }, options.accessToken);
+  }, session.accessToken);
+}
+
+export async function recordNativeMapAlertShare(alertId: string, userId: string, options: NativeMapActionOptions = {}) {
+  const session = requireMapActionSession(userId, options);
+  const data = await mapActionRpc("native_map_record_alert_share", {
+    p_alert_id: alertId,
+  }, session.accessToken);
+  return typeof data === "number" ? data : null;
 }
 
 export async function deleteNativeBroadcastAlert(alertId: string, imageUrls: string[] = [], ownerUserId?: string | null, options: NativeMapActionOptions = {}) {
+  const session = requireMapActionSession(ownerUserId || options.userId, options);
   await mapActionRpc("delete_broadcast_alert", {
     p_alert_id: alertId,
-  }, options.accessToken);
+  }, session.accessToken);
   void invalidateNativeMapAlertCaches(alertId);
   if (imageUrls.length > 0) {
-    await cleanupNativeBroadcastImages(imageUrls, ownerUserId, options.accessToken).catch((cleanupError) => {
+    void cleanupNativeBroadcastImages(imageUrls, ownerUserId, session.accessToken, session.sessionKey).catch((cleanupError) => {
       if (__DEV__) {
         console.warn("[map.delete_alert_image_cleanup.failed]", {
           alertId,
           error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
         });
       }
-      throw cleanupError;
+    });
+  }
+}
+
+// Marks a Lost alert as found: the pin is removed from the map exactly like a delete, but
+// the cross-posted Social thread survives and is stamped so it can show a Found badge.
+export async function markNativeBroadcastAlertFound(alertId: string, imageUrls: string[] = [], ownerUserId?: string | null, options: NativeMapActionOptions = {}) {
+  const session = requireMapActionSession(ownerUserId || options.userId, options);
+  await mapActionRpc("mark_broadcast_alert_found", {
+    p_alert_id: alertId,
+  }, session.accessToken);
+  void invalidateNativeMapAlertCaches(alertId);
+  if (imageUrls.length > 0) {
+    void cleanupNativeBroadcastImages(imageUrls, ownerUserId, session.accessToken, session.sessionKey).catch((cleanupError) => {
+      if (__DEV__) {
+        console.warn("[map.found_alert_image_cleanup.failed]", {
+          alertId,
+          error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+        });
+      }
     });
   }
 }
 
 export async function blockNativeAlertCreator(creatorId: string, options: NativeMapActionOptions = {}) {
+  const session = requireMapActionSession(options.userId, options);
   await mapActionRpc("block_user", {
     p_blocked_id: creatorId,
-  }, options.accessToken);
+  }, session.accessToken);
 }
 
 export async function updateNativeBroadcastAlert(alertId: string, patch: {
   description: string | null;
   images: string[];
   is_sensitive?: boolean;
+  verified_only?: boolean;
   photo_url: string | null;
   previousImages?: string[];
   ownerUserId?: string | null;
   title: string;
 }, options: NativeMapActionOptions = {}) {
+  const session = requireMapActionSession(patch.ownerUserId || options.userId, options);
   const previousImages = Array.isArray(patch.previousImages) ? patch.previousImages : [];
   const nextImages = Array.isArray(patch.images) ? patch.images : [];
   const data = await mapActionRpc("update_broadcast_alert", {
     p_alert_id: alertId,
     p_patch: patch,
-  }, options.accessToken);
+  }, session.accessToken);
   if (!data) throw new Error("Failed to update alert");
   void invalidateNativeMapAlertCaches(alertId);
   const removedImages = previousImages.filter((url) => !nextImages.includes(url));
   if (removedImages.length > 0) {
-    await cleanupNativeBroadcastImages(removedImages, patch.ownerUserId, options.accessToken).catch((cleanupError) => {
+    void cleanupNativeBroadcastImages(removedImages, patch.ownerUserId, session.accessToken, session.sessionKey).catch((cleanupError) => {
       if (__DEV__) {
         console.warn("[map.update_alert_image_cleanup.failed]", {
           alertId,
           error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
         });
       }
-      throw cleanupError;
     });
   }
+}
+
+export async function loadNativeBroadcastVerifiedOnly(alertId: string, options: NativeMapActionOptions = {}) {
+  const session = requireMapActionSession(options.userId, options);
+  const data = await mapActionRpc<boolean>("get_broadcast_alert_verified_only", {
+    p_alert_id: alertId,
+  }, session.accessToken);
+  return data === true;
+}
+
+export async function createNativeBroadcastAlertShareToken(alertId: string, options: NativeMapActionOptions = {}) {
+  const session = requireMapActionSession(options.userId, options);
+  const data = await mapActionRpc<string>("create_broadcast_alert_share_link", {
+    p_alert_id: alertId,
+  }, session.accessToken);
+  const token = typeof data === "string" ? data.trim() : "";
+  if (!token) throw new Error("Unable to create a private alert link.");
+  return token;
 }
 
 export async function loadNativeMapActorName(userId: string, options: NativeMapActionOptions = {}) {

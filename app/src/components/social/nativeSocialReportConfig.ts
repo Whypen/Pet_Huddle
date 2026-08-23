@@ -47,6 +47,8 @@ export const nativeSocialReportTokens = {
   attachmentGridGap: huddleSpacing.x2,
   attachmentPreviewSize: 96,
   attachmentRadius: huddleRadii.card,
+  attachmentRemoveButtonOffset: huddleSpacing.x1,
+  attachmentRemoveButtonSize: 24,
   checkboxBorderRadius: huddleSpacing.x1,
   checkboxSize: 18,
   categoryGap: huddleSpacing.x1,

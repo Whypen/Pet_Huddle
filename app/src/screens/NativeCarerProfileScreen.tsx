@@ -1,12 +1,13 @@
 import { Feather } from "@expo/vector-icons";
+import { fetchNativeResponseWithTimeout as fetch } from "../lib/nativeTimeout";
 import type { Session } from "@supabase/supabase-js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator,
   Alert,
   Animated,
   Modal,
   Keyboard,
+  LayoutAnimation,
   findNodeHandle,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
@@ -20,17 +21,27 @@ import {
   UIManager,
   View,
 } from "react-native";
-import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { NativeFormChoiceField } from "../components/NativeFormField";
+import { NativeGlassSurface } from "../components/NativeGlassSurface";
 import { NativeCarerProfileContent } from "../components/service/NativeCarerProfileContent";
+import { NativeLoadingState } from "../components/NativeLoadingState";
+import { NativePhoneField } from "../components/NativePhoneField";
+import { NativeLegalText } from "../components/NativeLegalText";
+import { NativeSpinner } from "../components/NativeSpinner";
+import { NativeCollapsibleSection } from "../components/profile/NativeCollapsibleSection";
+import { NativeProfileProgressTrack } from "../components/profile/NativeProfileProgressTrack";
+import { useGuidedSections } from "../components/profile/useGuidedSections";
 import { NativeStripeConnectOnboarding } from "../components/wallet/NativeStripeConnectOnboarding";
 import {
   SlideToConfirm,
+  AppKeyboardAvoidingView as KeyboardAvoidingView,
 } from "../components/nativeModalPrimitives";
 import { nativeModalStyles } from "../components/nativeModalPrimitives.styles";
 import { nativeCountryOptions } from "../components/profile/NativeProfileForm";
 import { getNativeLegalPage } from "../content/nativeLegalPages";
-import { createNativeFunctionHeaders } from "../lib/nativeFunctionClient";
+import { createFreshNativeFunctionHeaders, createNativeAuthenticatedHeaders, getFreshNativeAccessToken } from "../lib/nativeFunctionClient";
+import { isReduceMotionActive } from "../lib/nativeReduceMotion";
 import { createSingleRealtimeChannel } from "../lib/realtimeChannelManager";
 import {
   ALL_SKILLS,
@@ -40,9 +51,11 @@ import {
   DOG_SIZES,
   EMPTY_PROFESSIONAL_CREDENTIAL,
   EMPTY_CARER_PROFILE,
+  formatNativeCareCurrencySymbol,
   hasSubmittedProfessionalCredential,
-  isAge18PlusFromDob,
+  isAge16PlusFromDob,
   isProfessionalCredentialComplete,
+  isVerifiedPublicCredentialLabel,
   LOCATION_STYLES,
   makeCarerViewData,
   mapCarerRowToForm,
@@ -51,36 +64,52 @@ import {
   PET_TYPES_REQUIRING_SIZE,
   PROFESSIONAL_TYPES,
   RATE_OPTIONS,
+  reconcileNativeCarerCurrency,
+  nativeCarerServiceCurrencies,
   resolveSocialAlbumUrlList,
   SERVICES_OFFERED,
   toggleStringItem,
   buildCarerUpsertPayload,
   computeCarerCompleted,
   fetchPublicProviderCredentialBadges,
+  type NativeCareLocationArea,
   type NativeCarerProfileData,
   type NativeProfessionalCredential,
   type NativePublicCredentialBadge,
   type NativeRateRow,
 } from "../lib/nativeCarerProfile";
+import { nativeCarerProfileSelectColumns } from "../lib/nativeCarerProfilePrivacy";
+import { NativeShareCardModal } from "../components/share/NativeShareCardModal";
+import { buildCareShareCard } from "../lib/shareCardData";
 import {
   fetchNativeProfileSummary,
   readCachedNativeProfileSummary,
   subscribeNativeProfileSummary,
   type NativeProfileSummary,
 } from "../lib/nativeProfileSummary";
-import { isNativeVerifiedProfile } from "../lib/nativeVerificationGate";
+import { fetchNativeProviderRatingSummaries, invalidateNativeServiceProviderCaches } from "../lib/nativeService";
 import { haptic } from "../lib/nativeHaptics";
-import { useShakeAnimation } from "../lib/nativeAnimations";
+import { nativeSafeErrorCopy } from "../lib/nativeSafeErrorCopy";
+import { useNativeLoadingDeadline } from "../lib/useNativeLoadingDeadline";
+import { allowValidatedWrite } from "../lib/nativeAsyncRace";
+import { nativePetEmojiForLabel } from "../lib/nativePetTaxonomy";
+import { useErrorShake } from "../components/motion/useErrorShake";
 import { supabaseAnonKey, supabaseUrl } from "../lib/supabase";
 import {
-  fetchNativeLocationSuggestions,
+  fetchNativePrioritizedLocationSuggestions,
+  getNativeCurrentCoordinates,
+  reverseGeocodeNativeLocationComponents,
   type NativeLocationSuggestion,
+  type NativeResolvedLocation,
 } from "../lib/nativeLocation";
+import { NativeLocationPinButton } from "../components/NativeLocationPinButton";
 import {
   huddleButtons,
   huddleColors,
   huddleFieldStates,
+  huddleGlassControls,
   huddleFormControls,
+  huddleFormFields,
   huddleLayout,
   huddleRadii,
   huddleShadows,
@@ -91,8 +120,11 @@ import {
 type NativeCarerProfileScreenProps = {
   accessToken?: string | null;
   initialSession?: Session | null;
+  profileUserId?: string | null;
   session?: Session | null;
+  sessionKey?: string | null;
   userId: string | null;
+  openProfessionalOnLoad?: boolean;
   onNavigate: (path: string) => void;
   onGoBack?: () => void;
 };
@@ -119,13 +151,16 @@ type FocusField =
   | "price"
   | "petTypesOther"
   | "minNotice"
-  | "areaName"
+  | "preferredMeetupArea"
   | "professional"
   | "professionalCredentials"
   | "wallet"
-  | "agreement";
+  | "agreement"
+  | "careContactNumber";
 
 type FieldErrors = Partial<Record<FocusField | "time" | "rate" | "careScope" | "petSize" | "listing", string>>;
+
+const carerAccordionSectionTitles = ["Care Scope", "Strengths & Credentials", "Availability"] as const;
 
 type NativeSubmittedCredential = {
   id: string;
@@ -147,23 +182,27 @@ const CARER_PROFILE_CACHE_TTL_MS = 30_000;
 const carerProfileCache = new Map<string, NativeCarerProfileCacheEntry>();
 const carerProfileInFlight = new Map<string, Promise<Record<string, unknown> | null>>();
 
-const readNativeCarerProfileCache = (userId: string): Record<string, unknown> | null | undefined => {
-  const cached = carerProfileCache.get(userId);
+const nativeCarerProfileCacheKey = (userId: string, includeOwnerPrivateFields: boolean) =>
+  `${includeOwnerPrivateFields ? "owner" : "public"}:${userId}`;
+
+const readNativeCarerProfileCache = (userId: string, includeOwnerPrivateFields: boolean): Record<string, unknown> | null | undefined => {
+  const cacheKey = nativeCarerProfileCacheKey(userId, includeOwnerPrivateFields);
+  const cached = carerProfileCache.get(cacheKey);
   if (!cached) return undefined;
   if (Date.now() - cached.cachedAt > CARER_PROFILE_CACHE_TTL_MS) {
-    carerProfileCache.delete(userId);
+    carerProfileCache.delete(cacheKey);
     return undefined;
   }
   return cached.row;
 };
 
-const writeNativeCarerProfileCache = (userId: string, row: Record<string, unknown> | null) => {
-  carerProfileCache.set(userId, { row, cachedAt: Date.now() });
+const writeNativeCarerProfileCache = (userId: string, row: Record<string, unknown> | null, includeOwnerPrivateFields: boolean) => {
+  carerProfileCache.set(nativeCarerProfileCacheKey(userId, includeOwnerPrivateFields), { row, cachedAt: Date.now() });
   return row;
 };
 
-const cleanAccessToken = (value: string | null | undefined) => {
-  const token = String(value || "").trim();
+const cleanAccessToken = async (value: string | null | undefined) => {
+  const token = await getFreshNativeAccessToken(value);
   if (!token) throw new Error("missing_access_token");
   return token;
 };
@@ -197,47 +236,95 @@ const credentialDisplayBadge = (credential: NativeSubmittedCredential | null | u
       : "Self-declared";
 };
 
-async function fetchNativeCarerProfileRow(userId: string, accessToken: string | null | undefined, options: { force?: boolean } = {}): Promise<Record<string, unknown> | null> {
-  const token = cleanAccessToken(accessToken);
-  const cached = readNativeCarerProfileCache(userId);
+async function fetchNativeCarerProfileRow(userId: string, accessToken: string | null | undefined, options: { force?: boolean; includeOwnerPrivateFields?: boolean } = {}): Promise<Record<string, unknown> | null> {
+  const includeOwnerPrivateFields = options.includeOwnerPrivateFields === true;
+  const cacheKey = nativeCarerProfileCacheKey(userId, includeOwnerPrivateFields);
+  const cached = readNativeCarerProfileCache(userId, includeOwnerPrivateFields);
   if (!options.force && cached !== undefined) return cached;
 
-  const existing = carerProfileInFlight.get(userId);
+  const existing = carerProfileInFlight.get(cacheKey);
   if (!options.force && existing) return existing;
 
   const request = (async () => {
-    const response = await fetch(`${supabaseUrl}/rest/v1/pet_care_profiles?select=${encodeURIComponent(providerColumns)}&user_id=eq.${encodeURIComponent(userId)}&limit=1`, {
+    const token = await cleanAccessToken(accessToken);
+    const selectColumns = nativeCarerProfileSelectColumns();
+    const response = await fetch(`${supabaseUrl}/rest/v1/pet_care_profiles?select=${encodeURIComponent(selectColumns)}&user_id=eq.${encodeURIComponent(userId)}&limit=1`, {
       method: "GET",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        apikey: supabaseAnonKey,
+      headers: createNativeAuthenticatedHeaders(token, {
         Accept: "application/json",
-      },
+      }),
     });
     const body = await response.json().catch(() => null) as unknown;
     if (!response.ok) throw new Error(getNativeCarerRestError(body, "Unable to load care profile."));
     const data = Array.isArray(body) ? body[0] : null;
-    return writeNativeCarerProfileCache(userId, data ? (data as unknown as Record<string, unknown>) : null);
+    const publicRow = data ? (data as unknown as Record<string, unknown>) : null;
+    if (!publicRow || !includeOwnerPrivateFields) {
+      return writeNativeCarerProfileCache(userId, publicRow, includeOwnerPrivateFields);
+    }
+
+    const privateResponse = await fetch(`${supabaseUrl}/rest/v1/rpc/get_my_pet_care_stripe_fields`, {
+      method: "POST",
+      headers: createNativeAuthenticatedHeaders(token, {
+        "content-type": "application/json",
+        Accept: "application/json",
+      }),
+      body: "{}",
+    });
+    const privateBody = await privateResponse.json().catch(() => null) as unknown;
+    if (!privateResponse.ok) throw new Error(getNativeCarerRestError(privateBody, "Unable to load wallet status."));
+    const privateRow = Array.isArray(privateBody) && privateBody[0] && typeof privateBody[0] === "object"
+      ? privateBody[0] as Record<string, unknown>
+      : {};
+    return writeNativeCarerProfileCache(userId, { ...publicRow, ...privateRow }, true);
   })();
 
-  carerProfileInFlight.set(userId, request);
+  carerProfileInFlight.set(cacheKey, request);
   try {
     return await request;
   } finally {
-    carerProfileInFlight.delete(userId);
+    carerProfileInFlight.delete(cacheKey);
+  }
+}
+
+// Lives on `profiles` (not `pet_care_profiles`) since generate-care-agreement-pdf/index.ts
+// reads it straight off the carer's profile row for the owner-facing PDF's "Carer contact"
+// field -- keeping one source of truth for both the app and the generated agreement.
+async function fetchNativeCareContactNumber(userId: string, accessToken: string | null | undefined): Promise<string> {
+  const token = await cleanAccessToken(accessToken);
+  const response = await fetch(`${supabaseUrl}/rest/v1/profiles?select=care_contact_number&id=eq.${encodeURIComponent(userId)}&limit=1`, {
+    method: "GET",
+    headers: createNativeAuthenticatedHeaders(token, { Accept: "application/json" }),
+  });
+  const body = await response.json().catch(() => null) as unknown;
+  if (!response.ok) return "";
+  const row = Array.isArray(body) ? body[0] as Record<string, unknown> : null;
+  return String(row?.care_contact_number ?? "").trim();
+}
+
+async function saveNativeCareContactNumber(userId: string, accessToken: string | null | undefined, value: string): Promise<void> {
+  const token = await cleanAccessToken(accessToken);
+  const response = await fetch(`${supabaseUrl}/rest/v1/profiles?id=eq.${encodeURIComponent(userId)}`, {
+    method: "PATCH",
+    headers: createNativeAuthenticatedHeaders(token, {
+      "content-type": "application/json",
+      Prefer: "return=minimal",
+    }),
+    body: JSON.stringify({ care_contact_number: value.trim() || null }),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null) as unknown;
+    throw new Error(getNativeCarerRestError(body, "Unable to save contact number."));
   }
 }
 
 async function nativeCredentialRpc<T>(fn: string, params: Record<string, unknown>, accessToken: string | null | undefined): Promise<T> {
-  const token = cleanAccessToken(accessToken);
+  const token = await cleanAccessToken(accessToken);
   const response = await fetch(`${supabaseUrl}/rest/v1/rpc/${fn}`, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      apikey: supabaseAnonKey,
+    headers: createNativeAuthenticatedHeaders(token, {
       "content-type": "application/json",
       Accept: "application/json",
-    },
+    }),
     body: JSON.stringify(params),
   });
   const body = await response.json().catch(() => null) as unknown;
@@ -274,40 +361,6 @@ const submitCredentialRecord = async (credential: NativeProfessionalCredential, 
     p_document_storage_path: null,
   }, accessToken);
 
-const providerColumns = [
-  "id",
-  "user_id",
-  "story",
-  "skills",
-  "proof_metadata",
-  "vet_license_found",
-  "days",
-  "time_blocks",
-  "other_time_from",
-  "other_time_to",
-  "emergency_readiness",
-  "min_notice_value",
-  "min_notice_unit",
-  "location_styles",
-  "area_name",
-  "services_offered",
-  "services_other",
-  "pet_types",
-  "pet_types_other",
-  "dog_sizes",
-  "currency",
-  "starting_price",
-  "rates",
-  "agreement_accepted",
-  "agreement_accepted_at",
-  "listed",
-  "stripe_account_id",
-  "stripe_details_submitted",
-  "stripe_payouts_enabled",
-  "stripe_payout_status",
-  "stripe_requirements_currently_due",
-].join(",");
-
 const TIME_OPTIONS = Array.from({ length: 48 }, (_, index) => {
   const hours = Math.floor(index / 2);
   const minutes = index % 2 === 0 ? "00" : "30";
@@ -316,7 +369,7 @@ const TIME_OPTIONS = Array.from({ length: 48 }, (_, index) => {
 
 const LICENSED_MEDICAL_CARE_ERROR = "Add a professional credential before offering Licensed Medical Care.";
 const UNSUPPORTED_CREDENTIAL_COPY = "Self-declared · Not verified by huddle.";
-const UNABLE_TO_VERIFY_COPY = "Unable to verify online. Please check credentials before booking.";
+const UNABLE_TO_VERIFY_COPY = "We couldn't verify this credential online. It will remain Self-declared.";
 
 const isIsoDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value.trim());
 const pad2 = (value: number) => String(value).padStart(2, "0");
@@ -334,6 +387,10 @@ const datePartsFromIso = (value: string) => {
 const daysInMonth = (year: number, month: number) => new Date(year, month, 0).getDate();
 const isoFromParts = (year: number, month: number, day: number) => `${year}-${pad2(month)}-${pad2(Math.min(day, daysInMonth(year, month)))}`;
 const isPastDate = (value: string) => isIsoDate(value) && new Date(`${value}T00:00:00`) < todayAtMidnight();
+const formatCredentialExpiryDate = (value: string) => {
+  if (!isIsoDate(value)) return value;
+  return new Date(`${value}T00:00:00`).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+};
 
 const cloneEmpty = (): NativeCarerProfileData => ({
   ...EMPTY_CARER_PROFILE,
@@ -347,12 +404,41 @@ const cloneEmpty = (): NativeCarerProfileData => ({
   days: [],
   timeBlocks: ["Specify"],
   locationStyles: [],
+  areaCountry: "",
+  areaLat: null,
+  areaLng: null,
+  preferredMeetupAreas: [],
   servicesOffered: [],
   petTypes: [],
   dogSizes: [],
   stripeRequirementsCurrentlyDue: [],
   rateRows: [{ price: "", rate: "", services: [], voluntary: false }],
 });
+
+// Older profiles stored a separate Carer's Place area. Fold a valid saved area
+// into the single preferred-area list before the form is rendered or saved.
+const normalizeLegacyCareArea = (data: NativeCarerProfileData): NativeCarerProfileData => {
+  const label = data.areaName.trim();
+  const country = data.areaCountry.trim();
+  const legacyArea = label && country
+    ? { label, country, lat: data.areaLat, lng: data.areaLng }
+    : null;
+  const alreadyPreferred = legacyArea && data.preferredMeetupAreas.some((area) => (
+    area.label.trim().toLowerCase() === legacyArea.label.toLowerCase()
+    && area.country.trim().toLowerCase() === legacyArea.country.toLowerCase()
+  ));
+
+  return {
+    ...data,
+    areaName: "",
+    areaCountry: "",
+    areaLat: null,
+    areaLng: null,
+    preferredMeetupAreas: legacyArea && !alreadyPreferred
+      ? [...data.preferredMeetupAreas, legacyArea].slice(0, 5)
+      : data.preferredMeetupAreas,
+  };
+};
 
 const noticeExceedsEmergencyLimit = (value: string, unit: NativeCarerProfileData["minNoticeUnit"]) => {
   const parsed = Number.parseInt(value, 10);
@@ -372,7 +458,7 @@ const getQualificationError = (credential: NativeProfessionalCredential) => {
   ) {
     return "Complete the required professional qualification fields.";
   }
-  if (!isIsoDate(credential.expiry_date) || isPastDate(credential.expiry_date)) return "Expiry date cannot be in the past.";
+  if (!isIsoDate(credential.expiry_date)) return "Enter a valid expiry date.";
   return "";
 };
 
@@ -391,6 +477,7 @@ function SelectList({
   disabledOptions,
   closeOnSelect = false,
   embedded = false,
+  optionIcon,
 }: {
   options: readonly string[];
   selected: string[];
@@ -398,6 +485,7 @@ function SelectList({
   disabledOptions?: Set<string>;
   closeOnSelect?: boolean;
   embedded?: boolean;
+  optionIcon?: (option: string) => string | null;
 }) {
   return (
     <ScrollView
@@ -425,7 +513,10 @@ function SelectList({
               disabled ? styles.disabled : null,
             ]}
           >
-            <Text style={styles.dropdownText}>{option}</Text>
+            <View style={styles.dropdownLabelRow}>
+              {optionIcon?.(option) ? <Text style={styles.dropdownOptionEmoji}>{optionIcon(option)}</Text> : null}
+              <Text ellipsizeMode="tail" numberOfLines={1} style={styles.dropdownText}>{option}</Text>
+            </View>
             {active ? <Feather color={huddleColors.blue} name="check" size={huddleFormControls.select.checkSlot} /> : <View style={styles.checkSlot} />}
           </Pressable>
         );
@@ -463,6 +554,10 @@ function ExpiryDateField({
   return (
     <View style={[styles.dateField, error ? styles.fieldError : null, focused ? styles.fieldFocused : null]}>
       <TextInput
+                multiline={false}
+                scrollEnabled
+                numberOfLines={1} lineBreakModeIOS="tail" lineBreakStrategyIOS="none"
+                textBreakStrategy="simple"
         autoCapitalize="none"
         autoCorrect={false}
         onChangeText={onChangeText}
@@ -538,15 +633,21 @@ function FutureDatePicker({
   );
 }
 
-export function NativeCarerProfileScreen({ accessToken, initialSession, session, userId, onNavigate, onGoBack }: NativeCarerProfileScreenProps) {
+export function NativeCarerProfileScreen({ accessToken, initialSession, openProfessionalOnLoad = false, profileUserId, session, sessionKey, userId, onNavigate, onGoBack }: NativeCarerProfileScreenProps) {
   const insets = useSafeAreaInsets();
   const [profile, setProfile] = useState<NativeProfileSummary | null>(null);
   const [formData, setFormData] = useState<NativeCarerProfileData>(cloneEmpty);
   const [mode, setMode] = useState<"edit" | "view">("view");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [saveShakeAnim, triggerSaveShake] = useShakeAnimation();
+  const { shake: triggerSaveShake, shakeStyle: saveShakeStyle } = useErrorShake();
   const [loadError, setLoadError] = useState("");
+  useNativeLoadingDeadline(loading, {
+    onTrip: () => {
+      setLoading(false);
+      setLoadError("Care profile is taking too long to load. Please try again.");
+    },
+  });
   const [openDrop, setOpenDrop] = useState<DropdownKey | null>(null);
   const [rateEditIndex, setRateEditIndex] = useState<number | null>(null);
   const [rateDraft, setRateDraft] = useState<NativeRateRow>({ price: "", rate: "", services: [] });
@@ -561,15 +662,65 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
   const [credentialDateIndex, setCredentialDateIndex] = useState<number | null>(null);
   const [submittedCredentials, setSubmittedCredentials] = useState<NativeSubmittedCredential[]>([]);
   const [credentialBusyKey, setCredentialBusyKey] = useState<string | null>(null);
+  const professionalDeepLinkHandledRef = useRef(false);
   const [publicCredentialBadges, setPublicCredentialBadges] = useState<NativePublicCredentialBadge[]>([]);
   const [countrySearch, setCountrySearch] = useState("");
+  // Separate from the account's verified `profiles.phone` -- this is the number shared with
+  // an owner only after a booking is confirmed, so it needs no SMS re-verification to edit.
+  const [careContactNumber, setCareContactNumber] = useState("");
+  const [careContactNumberSaving, setCareContactNumberSaving] = useState(false);
   const [focusedField, setFocusedField] = useState<FocusField | null>(null);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
-  const [locationSuggestions, setLocationSuggestions] = useState<NativeLocationSuggestion[]>([]);
-  const [locationSuggestionsOpen, setLocationSuggestionsOpen] = useState(false);
-  const [locationLoading, setLocationLoading] = useState(false);
+  const [preferredMeetupQuery, setPreferredMeetupQuery] = useState("");
+  const [preferredMeetupSuggestions, setPreferredMeetupSuggestions] = useState<NativeLocationSuggestion[]>([]);
+  const [preferredMeetupSuggestionsOpen, setPreferredMeetupSuggestionsOpen] = useState(false);
+  const [preferredMeetupLoading, setPreferredMeetupLoading] = useState(false);
+  // Collapsible cards with guided flow (all modes): opens the first incomplete
+  // card and auto-follows forward as cards complete; stops once the user opens
+  // one themselves. Publish Checklist stays outside the accordion.
+  const isCarerSectionComplete = (title: string): boolean => {
+    switch (title) {
+      case "About Me":
+        return Boolean(formData.story.trim());
+      case "Care Scope":
+        return formData.rateRows.some((row) => row.services.length > 0);
+      case "Strengths & Credentials":
+        return formData.skills.length > 0;
+      case "Availability":
+        return formData.days.length > 0;
+      default:
+        return false;
+    }
+  };
+  const [autoExpandedCarerSections, setAutoExpandedCarerSections] = useState<Set<string>>(() => new Set());
+  const { openSection: openCarerSection, toggleSection: toggleCarerSection, openSectionManually: openCarerSectionManually, progress: carerProgress } = useGuidedSections(
+    ["About Me", ...carerAccordionSectionTitles],
+    isCarerSectionComplete,
+  );
+  const isCarerSectionOpen = (title: string) => openCarerSection === title || autoExpandedCarerSections.has(title);
+  const toggleCarerProfileSection = (title: string) => {
+    if (!autoExpandedCarerSections.has(title)) {
+      toggleCarerSection(title);
+      return;
+    }
+    setAutoExpandedCarerSections((current) => {
+      const next = new Set(current);
+      next.delete(title);
+      return next;
+    });
+    if (openCarerSection === title) toggleCarerSection(title);
+  };
+  const carerSectionForField = (field: FocusField | null): string | null => {
+    if (!field) return null;
+    if (field === "story") return "About Me";
+    if (["servicesOther", "currency", "price", "rate", "petTypes", "petTypesOther", "dogSizes"].includes(field)) return "Care Scope";
+    if (["skills", "professional", "professionalCredentials"].includes(field)) return "Strengths & Credentials";
+    if (["days", "timeFrom", "timeTo", "minNotice", "minNoticeUnit", "preferredMeetupArea"].includes(field)) return "Availability";
+    return null; // wallet/agreement/listing live in the always-visible Publish Checklist
+  };
   const editScrollRef = useRef<ScrollView | null>(null);
   const scrollYRef = useRef(0);
+  const nextAutoExpandScrollYRef = useRef(huddleSpacing.x8);
   const scrollViewportHeightRef = useRef(0);
   const fieldRefs = useRef<Record<string, View | null>>({});
   const focusedFieldRef = useRef<FocusField | null>(null);
@@ -577,13 +728,35 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
     () => String(accessToken || initialSession?.access_token || session?.access_token || "").trim() || null,
     [accessToken, initialSession?.access_token, session?.access_token],
   );
+  const viewedUserId = useMemo(() => {
+    const candidate = String(profileUserId || "").trim();
+    return candidate || userId || null;
+  }, [profileUserId, userId]);
+  const viewerSessionKey = sessionKey || (userId ? `${userId}:0` : null);
+  const isOwnCarerProfile = Boolean(userId && viewedUserId && userId === viewedUserId);
 
-  const isAge18Plus = isAge18PlusFromDob(profile?.dob);
-  const isVerified = isNativeVerifiedProfile(profile);
-  const providerEligible = isAge18Plus && isVerified;
+  const isAge16Plus = isAge16PlusFromDob(profile?.dob);
+  const providerEligible = isAge16Plus;
   const walletState = deriveWalletState(formData);
-  const shouldShowAreaSearch = formData.locationStyles.includes("Carer's Place") || formData.locationStyles.includes("Outdoor");
-  const areaPlaceholder = formData.locationStyles.includes("Outdoor") ? "District / Area (optional)" : "District / Area";
+  const needsPayoutWallet = true;
+  const hasServiceListingLocation = (data: NativeCarerProfileData) => {
+    return data.preferredMeetupAreas.some((area) => area.label.trim().length > 0 && area.country.trim().length > 0);
+  };
+  // Rate-currency pick-list: the carer's service-location currencies (multi-country
+  // support), falling back to all currencies before any area is set.
+  const availableCurrencies = useMemo(() => {
+    const scoped = nativeCarerServiceCurrencies("", formData.preferredMeetupAreas.map((area) => area.country));
+    return scoped.length > 0 ? scoped : [...CURRENCIES];
+  }, [formData.preferredMeetupAreas]);
+  const reconcileFormCurrency = useCallback((data: NativeCarerProfileData): NativeCarerProfileData => ({
+    ...data,
+    currency: reconcileNativeCarerCurrency({
+      areaCountry: "",
+      preferredCountries: data.preferredMeetupAreas.map((area) => area.country),
+      current: data.currency,
+      fallbackCountries: [profile?.location_country],
+    }),
+  }), [profile?.location_country]);
   const serviceAgreementPage = useMemo(() => getNativeLegalPage("/service-provider-agreement"), []);
   const agreementSheetPanResponder = useMemo(
     () => PanResponder.create({
@@ -602,66 +775,134 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
   }, [countrySearch]);
 
   const loadData = useCallback(async () => {
-    if (!userId) {
+    if (!viewedUserId) {
       setLoadError("Profile is unavailable.");
       setLoading(false);
       return;
     }
     setLoading(true);
     setLoadError("");
+    let showedCachedProfile = false;
     try {
-      const cached = await readCachedNativeProfileSummary(userId);
-      if (cached?.profile) setProfile(cached.profile);
-
+      const [cachedProfileSnapshot, cachedCarerRow] = await Promise.all([
+        readCachedNativeProfileSummary(viewedUserId, { sessionKey: viewerSessionKey }).catch(() => null),
+        Promise.resolve(readNativeCarerProfileCache(viewedUserId, isOwnCarerProfile)),
+      ]);
+      if (cachedProfileSnapshot?.profile && cachedCarerRow !== undefined) {
+        showedCachedProfile = true;
+        const cachedProfile = cachedProfileSnapshot.profile;
+        const cachedForm = normalizeLegacyCareArea(cachedCarerRow ? mapCarerRowToForm(cachedCarerRow) : cloneEmpty());
+        cachedForm.currency = reconcileNativeCarerCurrency({
+          areaCountry: "",
+          preferredCountries: cachedForm.preferredMeetupAreas.map((area) => area.country),
+          current: cachedForm.currency,
+          fallbackCountries: [cachedProfile.location_country],
+        });
+        setProfile(cachedProfile);
+        setFormData(cachedForm);
+        setMode(isOwnCarerProfile && (openProfessionalOnLoad || !cachedCarerRow) ? "edit" : "view");
+        setLoading(false);
+        const cachedAlbumRaw = Array.isArray(cachedProfile.social_album) ? cachedProfile.social_album as string[] : [];
+        void resolveSocialAlbumUrlList(cachedAlbumRaw).then(setSocialAlbumUrls);
+      }
       const [profileSnapshot, carerRow] = await Promise.all([
-        fetchNativeProfileSummary(userId, { force: false, accessToken: effectiveAccessToken }),
-        fetchNativeCarerProfileRow(userId, effectiveAccessToken, { force: true }),
+        fetchNativeProfileSummary(viewedUserId, { force: true, accessToken: effectiveAccessToken, sessionKey: viewerSessionKey }),
+        fetchNativeCarerProfileRow(viewedUserId, effectiveAccessToken, { force: true, includeOwnerPrivateFields: isOwnCarerProfile }),
       ]);
       const nextProfile = profileSnapshot.profile;
       setProfile(nextProfile);
 
-      const nextForm = carerRow ? mapCarerRowToForm(carerRow) : cloneEmpty();
+      const nextForm = normalizeLegacyCareArea(carerRow ? mapCarerRowToForm(carerRow) : cloneEmpty());
+      // Reconcile the rate currency against the care locations every load: keep it if it
+      // still matches a service area (multi-country carers keep their pick), otherwise
+      // reset to the care-location currency — this self-heals a stale currency left over
+      // from a removed area (e.g. GBP after switching a UK area to HK). GPS is only needed
+      // as a fallback when there is no service area at all yet.
+      const hasServiceArea = nextForm.preferredMeetupAreas.some((area) => area.country.trim());
+      let gpsCountry: string | null = null;
+      if (!hasServiceArea) {
+        const gpsCoordinates = await getNativeCurrentCoordinates().catch(() => null);
+        gpsCountry = gpsCoordinates
+          ? await reverseGeocodeNativeLocationComponents(gpsCoordinates.lat, gpsCoordinates.lng).then((components) => components?.countryCode || components?.countryName || null).catch(() => null)
+          : null;
+      }
+      nextForm.currency = reconcileNativeCarerCurrency({
+        areaCountry: "",
+        preferredCountries: nextForm.preferredMeetupAreas.map((area) => area.country),
+        current: nextForm.currency,
+        fallbackCountries: [gpsCountry, nextProfile?.location_country],
+      });
       setFormData(nextForm);
-      setMode(carerRow ? "view" : "edit");
+      setMode(isOwnCarerProfile && (openProfessionalOnLoad || !carerRow) ? "edit" : "view");
+      if (isOwnCarerProfile && openProfessionalOnLoad) {
+        setAutoExpandedCarerSections((current) => new Set(current).add("Strengths & Credentials"));
+        const expiredIndex = nextForm.professional.credentials.findIndex((credential) => isPastDate(credential.expiry_date));
+        if (expiredIndex >= 0) setCredentialEditIndex(expiredIndex);
+      }
       const albumRaw = Array.isArray(nextProfile?.social_album) ? (nextProfile?.social_album as string[]) : [];
       const albumUrls = await resolveSocialAlbumUrlList(albumRaw);
       setSocialAlbumUrls(albumUrls);
+      if (isOwnCarerProfile) {
+        void fetchNativeCareContactNumber(viewedUserId, effectiveAccessToken).then((value) => {
+          setCareContactNumber(value || nextProfile?.phone || "");
+          careContactNumberLoadedRef.current = true;
+        });
+      } else {
+        setCareContactNumber("");
+        careContactNumberLoadedRef.current = false;
+      }
       const [ownerCredentials, badges] = await Promise.all([
-        nativeCredentialRpc<unknown>("get_my_professional_credentials", {}, effectiveAccessToken).catch(() => []),
-        fetchPublicProviderCredentialBadges(userId, { force: true }).catch(() => []),
+        isOwnCarerProfile ? nativeCredentialRpc<unknown>("get_my_professional_credentials", {}, effectiveAccessToken).catch(() => []) : Promise.resolve([]),
+        fetchPublicProviderCredentialBadges(viewedUserId, { force: true }).catch(() => []),
       ]);
       setSubmittedCredentials(normalizeSubmittedCredentials(ownerCredentials));
       setPublicCredentialBadges(badges);
     } catch (error) {
-      setLoadError(error instanceof Error ? error.message : "Unable to load care profile.");
+      if (!showedCachedProfile) setLoadError(nativeSafeErrorCopy(error, "Unable to load care profile."));
     } finally {
       setLoading(false);
     }
-  }, [effectiveAccessToken, userId]);
+  }, [effectiveAccessToken, isOwnCarerProfile, openProfessionalOnLoad, viewedUserId, viewerSessionKey]);
+
+  // Guards the debounced auto-save below from firing the moment the fetched value is first
+  // applied to state (which would otherwise PATCH the exact value straight back on load).
+  const careContactNumberLoadedRef = useRef(false);
+  useEffect(() => {
+    if (!careContactNumberLoadedRef.current) return;
+    if (!isOwnCarerProfile || !viewedUserId) return;
+    const timer = setTimeout(() => {
+      setCareContactNumberSaving(true);
+      saveNativeCareContactNumber(viewedUserId, effectiveAccessToken, careContactNumber)
+        .catch((error) => setLoadError(nativeSafeErrorCopy(error, "Unable to save contact number.")))
+        .finally(() => setCareContactNumberSaving(false));
+    }, 800);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [careContactNumber]);
 
   useEffect(() => {
     void loadData();
   }, [loadData]);
 
   useEffect(() => {
-    if (!userId) return;
-    return subscribeNativeProfileSummary(userId, ({ profile: nextProfile }) => {
+    if (!viewedUserId || !viewerSessionKey) return;
+    return subscribeNativeProfileSummary(viewedUserId, ({ profile: nextProfile }) => {
       setProfile(nextProfile);
       const albumRaw = Array.isArray(nextProfile?.social_album) ? (nextProfile?.social_album as string[]) : [];
       void resolveSocialAlbumUrlList(albumRaw).then(setSocialAlbumUrls);
-    });
-  }, [userId]);
+    }, { sessionKey: viewerSessionKey });
+  }, [viewedUserId, viewerSessionKey]);
 
   useEffect(() => {
-    if (!userId) return;
-    const channelName = `native_pet_care_profiles_wallet:${userId}`;
+    if (!isOwnCarerProfile || !viewedUserId) return;
+    const channelName = `native_pet_care_profiles_wallet:${viewedUserId}`;
     const handle = createSingleRealtimeChannel(channelName, (channel) =>
       channel.on(
         "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "pet_care_profiles", filter: `user_id=eq.${userId}` },
+        { event: "UPDATE", schema: "public", table: "pet_care_profiles", filter: `user_id=eq.${viewedUserId}` },
         (payload) => {
           const row = payload.new as Record<string, unknown>;
-          writeNativeCarerProfileCache(userId, row);
+          writeNativeCarerProfileCache(viewedUserId, row, true);
           setFormData((prev) => ({
             ...prev,
             stripePayoutStatus: row.stripe_payout_status === "pending" || row.stripe_payout_status === "needs_action" || row.stripe_payout_status === "complete" ? row.stripe_payout_status : prev.stripePayoutStatus,
@@ -679,18 +920,76 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
       if (__DEV__) console.log("SUPABASE_REALTIME_UNSUBSCRIBE", { channel: channelName, screen: "NativeCarerProfileScreen" });
       void handle.dispose();
     };
-  }, [userId]);
+  }, [isOwnCarerProfile, viewedUserId]);
 
   const viewData = useMemo(
     () => ({
-      ...makeCarerViewData(userId || "", formData, profile as Record<string, unknown> | null, socialAlbumUrls),
+      ...makeCarerViewData(viewedUserId || "", formData, profile as Record<string, unknown> | null, socialAlbumUrls),
       publicCredentialBadges,
     }),
-    [formData, profile, publicCredentialBadges, socialAlbumUrls, userId],
+    [formData, profile, publicCredentialBadges, socialAlbumUrls, viewedUserId],
   );
+
+  const [shareCardOpen, setShareCardOpen] = useState(false);
+  // Real rating from service_reviews (via summary RPC) — pet_care_profiles
+  // carries a stale rating_avg cache that must not feed the share card.
+  const [careRatingSummary, setCareRatingSummary] = useState<{ avgRating: number; reviewCount: number } | null>(null);
+  useEffect(() => {
+    if (!isOwnCarerProfile || !viewedUserId) return;
+    let alive = true;
+    void fetchNativeProviderRatingSummaries([viewedUserId], effectiveAccessToken)
+      .then((summaries) => { if (alive) setCareRatingSummary(summaries.get(viewedUserId) ?? null); })
+      .catch(() => undefined);
+    return () => { alive = false; };
+  }, [effectiveAccessToken, isOwnCarerProfile, viewedUserId]);
+  const careShareData = useMemo(() => {
+    if (!isOwnCarerProfile) return null;
+    const profileRow = profile as Record<string, unknown> | null;
+    const days = formData.days.join(" · ");
+    const timeLabel = formData.timeBlocks.includes("Anytime") ? "anytime" : "";
+    const availability = days ? `${days}${timeLabel ? ` — ${timeLabel}` : ""}` : null;
+    const petTypes = [...formData.petTypes];
+    const voluntary = formData.rateRows.some((r) => r.voluntary === true);
+    // Credentials from professional_credentials via the public badge RPC —
+    // registry/certificate/organization-matched entries are VERIFIED and
+    // outrank self-declared ones from the care-profile form.
+    const badgeCreds = publicCredentialBadges
+      .filter((badge) => badge.credentialType.trim())
+      .map((badge) => ({
+        type: badge.credentialType,
+        issuingBody: badge.sourceName,
+        verified: isVerifiedPublicCredentialLabel(badge.publicLabel),
+      }));
+    const selfDeclared = formData.professional.credentials
+      .filter((c) => c.professional_type?.trim())
+      .filter((c) => !badgeCreds.some((b) => b.type.toLowerCase() === c.professional_type.trim().toLowerCase()))
+      .map((c) => ({ type: c.professional_type.trim(), issuingBody: c.issuing_body || null, verified: false }));
+    return buildCareShareCard({
+      id: viewedUserId || "",
+      displayName: String(profileRow?.display_name || viewData.displayName || "Pet Carer"),
+      socialId: typeof profileRow?.social_id === "string" ? profileRow.social_id : null,
+      avatarUrl: typeof profileRow?.avatar_url === "string" ? profileRow.avatar_url : null,
+      tier: (typeof profileRow?.effective_tier === "string" ? profileRow.effective_tier : null) ?? (typeof profileRow?.tier === "string" ? profileRow.tier : null),
+      createdAt: null,
+      availableNow: formData.listed === true,
+      emergencyReady: formData.emergencyReadiness === true,
+      voluntaryRate: voluntary,
+      petTypes,
+      allPets: petTypes.length >= 4,
+      services: formData.servicesOffered,
+      skills: formData.skills,
+      availability,
+      credentials: [...badgeCreds, ...selfDeclared],
+      experienceYears: typeof profileRow?.experience_years === "number" || typeof profileRow?.experience_years === "string" ? profileRow.experience_years : null,
+      petExperience: Array.isArray(profileRow?.pet_experience) ? (profileRow.pet_experience as string[]) : null,
+      ratingAvg: careRatingSummary?.avgRating ?? null,
+      reviewCount: careRatingSummary?.reviewCount ?? 0,
+    });
+  }, [careRatingSummary, formData, isOwnCarerProfile, profile, publicCredentialBadges, viewData.displayName, viewedUserId]);
 
   const updateEmergencyReadiness = (emergencyReadiness: boolean) => {
     haptic.toggleControl(); // F4: tactile feedback on carer toggle
+    if (!isReduceMotionActive()) LayoutAnimation.configureNext(LayoutAnimation.create(180, LayoutAnimation.Types.easeInEaseOut, LayoutAnimation.Properties.opacity));
     setFormData((prev) => {
       if (emergencyReadiness) {
         return { ...prev, emergencyReadiness, minNoticeUnit: "hours", minNoticeValue: "2" };
@@ -702,6 +1001,7 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
 
   const updateAnytime = (anytime: boolean) => {
     haptic.toggleControl(); // F4: tactile feedback on carer toggle
+    if (!isReduceMotionActive()) LayoutAnimation.configureNext(LayoutAnimation.create(180, LayoutAnimation.Types.easeInEaseOut, LayoutAnimation.Properties.opacity));
     setFormData((prev) => ({
       ...prev,
       timeBlocks: [anytime ? "Anytime" : "Specify"],
@@ -741,57 +1041,99 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
     };
 
     if (data.rateRows.length === 0 || data.rateRows.some((row) => row.services.length === 0)) {
-      mark("rateServices", "Care Scope is required.", "careScope");
+      mark("rateServices", "Don't skip this one!", "careScope");
     }
     const licensedMedicalSelected = data.rateRows.some((row) => row.services.includes("Licensed Medical Care"));
     if (licensedMedicalSelected && !hasSubmittedProfessionalCredential(data.professional)) {
       mark("rateServices", LICENSED_MEDICAL_CARE_ERROR, "careScope");
       mark("professional", LICENSED_MEDICAL_CARE_ERROR);
     }
-    if (data.rateRows.some((row) => !row.voluntary && (!data.currency || !row.price.trim() || !row.rate))) {
-      mark("price", "Rate and unit are required for paid care scope.", "rate");
+    if (data.rateRows.some((row) => {
+      const hasPrice = row.price.trim().length > 0;
+      const hasRate = row.rate.trim().length > 0;
+      if (row.voluntary && !hasPrice && !hasRate) return false;
+      const price = Number.parseFloat(row.price);
+      return !hasPrice || Number.isNaN(price) || price <= 0 || !data.currency || !hasRate;
+    })) {
+      mark("price", "We'll need this part.", "rate");
     }
-    if (data.petTypes.length === 0) mark("petTypes", "Pet Types are required.");
+    if (data.petTypes.length === 0) mark("petTypes", "Gotta have this!");
     const needsPetSize = data.petTypes.some((petType) => (PET_TYPES_REQUIRING_SIZE as readonly string[]).includes(petType));
-    if (needsPetSize && data.dogSizes.length === 0) mark("dogSizes", "Pet Size is required.", "petSize");
-    if (data.skills.length === 0) mark("skills", "Strengths are required.");
-    if (data.days.length === 0) mark("days", "Availability is required.");
+    if (needsPetSize && data.dogSizes.length === 0) mark("dogSizes", "Don't forget this bit.", "petSize");
+    if (data.skills.length === 0) mark("skills", "Oops! Don't leave this blank.");
+    if (data.days.length === 0) mark("days", "Don't skip this one!");
     if (!data.timeBlocks.includes("Anytime") && (!data.otherTimeFrom || !data.otherTimeTo)) {
-      mark("timeFrom", "Availability From and To are required.", "time");
+      mark("timeFrom", "We'll need this part.", "time");
     }
     const notice = Number.parseInt(data.minNoticeValue, 10);
     if (data.emergencyReadiness !== true) {
-      if (data.minNoticeValue.trim() === "" || Number.isNaN(notice) || notice < 0) mark("minNotice", "Notice Time is required.");
+      if (data.minNoticeValue.trim() === "" || Number.isNaN(notice) || notice < 0) mark("minNotice", "Gotta have this!");
       else if (data.minNoticeUnit === "hours" && notice > 24) mark("minNotice", "Hours cannot exceed 24.");
       else if (data.minNoticeUnit === "days" && notice > 99) mark("minNotice", "Days cannot exceed 99.");
     }
-    if (data.locationStyles.length === 0) mark("locationStyles", "Care Location is required.");
+    if (data.locationStyles.length === 0) mark("locationStyles", "Don't forget this bit.");
+    const preferredMeetupQueryValue = preferredMeetupQuery.trim();
+    if (preferredMeetupQueryValue) {
+      mark("preferredMeetupArea", "Choose a valid area from search.");
+    }
+    if (!hasServiceListingLocation(data)) mark("preferredMeetupArea", "Add at least one preferred area.");
     if (data.professional.has_credentials) {
       if (!data.professional.credentials.some(isProfessionalCredentialComplete)) {
         mark("professionalCredentials", "Add at least one complete professional qualification.");
       }
-      if (data.professional.credentials.some((credential) => credential.expiry_date.trim() && (!isIsoDate(credential.expiry_date) || isPastDate(credential.expiry_date)))) {
-        mark("professionalCredentials", "Expiry date cannot be in the past.");
+      if (data.professional.credentials.some((credential) => credential.expiry_date.trim() && !isIsoDate(credential.expiry_date))) {
+        mark("professionalCredentials", "Enter a valid expiry date.");
       }
     }
     if (data.listed || requireListing) {
-      if (!isVerified) nextErrors.listing = "Complete identity verification first.";
       if (!data.stripePayoutsEnabled) mark("wallet", "Set up wallet before providing care.");
       if (!data.agreementAccepted) mark("agreement", "Accept the Care Service Carer Agreement.");
     }
     return { errors: nextErrors, firstInvalid: firstInvalid[0] ?? null };
-  }, [isVerified]);
+  }, [preferredMeetupQuery]);
+
+  // Declared before its first use (applyValidationErrors below) — this is a
+  // useCallback const, so referencing it earlier would hit the temporal dead
+  // zone. Depends only on `mode` + refs defined at the top of the component.
+  const scrollFieldIntoView = useCallback((fieldName: string, options?: { targetRatio?: number }) => {
+      const node = fieldRefs.current[fieldName];
+      const scrollView = editScrollRef.current;
+      if (!node || !scrollView || mode !== "edit") return;
+
+      const target = findNodeHandle(node);
+      const viewportTarget = findNodeHandle(scrollView);
+      if (!target || !viewportTarget) return;
+
+      requestAnimationFrame(() => {
+        UIManager.measureInWindow(viewportTarget, (_sx, scrollViewY, _sw, viewportHeight) => {
+          if (!viewportHeight) return;
+
+          UIManager.measureInWindow(target, (_x, y, _width, height) => {
+            const targetRatio = options?.targetRatio ?? 0.5;
+            const fieldCenterInViewport = y - scrollViewY + height / 2;
+            const desiredCenterInViewport = viewportHeight * targetRatio;
+            const nextY = Math.max(
+              0,
+              scrollYRef.current + fieldCenterInViewport - desiredCenterInViewport,
+            );
+
+            scrollView.scrollTo({ y: nextY, animated: true });
+          });
+        });
+      });
+  }, [mode]);
 
   const applyValidationErrors = useCallback((errors: FieldErrors, firstInvalid: FocusField | null) => {
     setFieldErrors(errors);
     if (firstInvalid) {
-      haptic.error();
       triggerSaveShake();
+      const section = carerSectionForField(firstInvalid);
+      if (section) openCarerSectionManually(section);
       scrollFieldIntoView(firstInvalid, { targetRatio: 0.34 });
       return true;
     }
     return false;
-  }, [scrollFieldIntoView, triggerSaveShake]);
+  }, [scrollFieldIntoView, triggerSaveShake, openCarerSectionManually]);
 
   const refreshCredentialEvidence = useCallback(async () => {
     if (!userId) return [];
@@ -805,41 +1147,49 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
     return normalized;
   }, [effectiveAccessToken, userId]);
 
-  const saveProfile = useCallback(async (silent = false, validateBeforeSave = false) => {
+  const saveProfile = useCallback(async (silent = false, requireListing = false) => {
     if (!userId) return false;
-    if (validateBeforeSave) {
-      const { errors, firstInvalid } = getValidationErrors(formData);
-      if (applyValidationErrors(errors, firstInvalid)) return false;
-    }
+    const nextFormData = reconcileFormCurrency(formData);
+    const { errors, firstInvalid } = getValidationErrors(nextFormData, requireListing);
+    if (!allowValidatedWrite(
+      { valid: firstInvalid === null },
+      () => { applyValidationErrors(errors, firstInvalid); },
+    )) return false;
     if (!silent) setFieldErrors({});
 
     setSaving(!silent);
     try {
-      const token = cleanAccessToken(effectiveAccessToken);
-      const payload = buildCarerUpsertPayload(userId, formData, providerEligible);
-      const response = await fetch(`${supabaseUrl}/rest/v1/pet_care_profiles?on_conflict=user_id`, {
+      const token = await cleanAccessToken(effectiveAccessToken);
+      const payload = buildCarerUpsertPayload(userId, nextFormData, providerEligible);
+      const publicSelectColumns = nativeCarerProfileSelectColumns();
+      const response = await fetch(`${supabaseUrl}/rest/v1/pet_care_profiles?on_conflict=user_id&select=${encodeURIComponent(publicSelectColumns)}`, {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          apikey: supabaseAnonKey,
+        headers: createNativeAuthenticatedHeaders(token, {
           "content-type": "application/json",
           Prefer: "resolution=merge-duplicates,return=representation",
-        },
+        }),
         body: JSON.stringify(payload),
       });
       const body = await response.json().catch(() => null) as unknown;
       if (!response.ok) throw new Error(getNativeCarerRestError(body, "Couldn't save profile. Please retry."));
-      const savedRow = Array.isArray(body) && body[0] && typeof body[0] === "object"
+      const savedPublicRow = Array.isArray(body) && body[0] && typeof body[0] === "object"
         ? body[0] as Record<string, unknown>
         : payload as Record<string, unknown>;
-      writeNativeCarerProfileCache(userId, savedRow);
+      const savedOwnerRow = await fetchNativeCarerProfileRow(userId, effectiveAccessToken, {
+        force: true,
+        includeOwnerPrivateFields: true,
+      });
+      const savedRow = savedOwnerRow || savedPublicRow;
+      writeNativeCarerProfileCache(userId, savedRow, true);
+      void invalidateNativeServiceProviderCaches(userId);
       setFormData(mapCarerRowToForm(savedRow));
+      setPreferredMeetupQuery("");
       const submittedKeys = new Set(submittedCredentials.map((credential) => [
         normalizeCredentialLookup(credential.credential_type),
         normalizeCredentialLookup(credential.country_region),
         credential.license_number_masked || "",
       ].join("|")));
-      const completeCredentials = formData.professional.credentials.filter(isProfessionalCredentialComplete);
+      const completeCredentials = nextFormData.professional.credentials.filter(isProfessionalCredentialComplete);
       for (const credential of completeCredentials) {
         const key = [
           normalizeCredentialLookup(credential.professional_type),
@@ -855,16 +1205,11 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
         setMode("view");
         haptic.success();
         Alert.alert("Saved", "Pet Carer Profile saved.");
-        void fetch(`${supabaseUrl}/functions/v1/brevo-sync`, {
-          method: "POST",
-          headers: createNativeFunctionHeaders(token),
-          body: JSON.stringify({ event: "service_profile_completed", user_id: userId }),
-        }).catch(() => {});
       }
       return true;
-    } catch (error) {
+    } catch {
       if (silent) {
-        console.warn("[NativeCarerProfile.silentSave]", error);
+        console.warn("[NativeCarerProfile.silentSave] failed");
       } else {
         haptic.error();
         Alert.alert("Save failed", "Couldn't save profile. Please retry.");
@@ -873,7 +1218,7 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
     } finally {
       setSaving(false);
     }
-  }, [applyValidationErrors, effectiveAccessToken, formData, getValidationErrors, providerEligible, refreshCredentialEvidence, submittedCredentials, userId]);
+  }, [applyValidationErrors, effectiveAccessToken, formData, getValidationErrors, providerEligible, reconcileFormCurrency, refreshCredentialEvidence, submittedCredentials, userId]);
 
   const findSubmittedCredential = useCallback((credential: NativeProfessionalCredential) => {
     const masked = maskCredentialIdentifier(credential.license_number);
@@ -908,7 +1253,7 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
       ) ?? true;
     } catch (error) {
       await refreshCredentialEvidence();
-      Alert.alert("Credential", error instanceof Error ? error.message : "Unable to save credential evidence.");
+      Alert.alert("Credential", nativeSafeErrorCopy(error, "We couldn't save your certification document right now. Try uploading later."));
       return false;
     } finally {
       setCredentialBusyKey((current) => current === busyKey ? null : current);
@@ -932,10 +1277,10 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
     const busyKey = `check:${index}`;
     setCredentialBusyKey(busyKey);
     try {
-      const token = cleanAccessToken(effectiveAccessToken);
+      const token = await cleanAccessToken(effectiveAccessToken);
       const response = await fetch(`${supabaseUrl}/functions/v1/credential-registry-check`, {
         method: "POST",
-        headers: createNativeFunctionHeaders(token),
+        headers: await createFreshNativeFunctionHeaders(token),
         body: JSON.stringify({ credential_id: submitted.id }),
       });
       const body = await response.json().catch(() => null) as unknown;
@@ -945,17 +1290,44 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
       if (result === "unable_to_verify") Alert.alert("Credential", UNABLE_TO_VERIFY_COPY);
     } catch (error) {
       await refreshCredentialEvidence();
-      Alert.alert("Credential", error instanceof Error ? error.message : "Unable to check credential online.");
+      Alert.alert("Credential", nativeSafeErrorCopy(error, "This document image isn't clear enough for our checks. Let's try again later."));
     } finally {
       setCredentialBusyKey((current) => current === busyKey ? null : current);
     }
-  }, [effectiveAccessToken, findSubmittedCredential, refreshCredentialEvidence, submitCredentialEvidence, submittedCredentials]);
+  }, [effectiveAccessToken, findSubmittedCredential, refreshCredentialEvidence, submitCredentialEvidence]);
 
   const textFieldStyle = (field: FocusField) => [
     styles.field,
     focusedField === field ? styles.fieldFocused : null,
     fieldErrors[field] ? styles.fieldError : null,
   ];
+
+  const applyCurrentPreferredMeetupArea = (loc: NativeResolvedLocation) => {
+    addPreferredMeetupArea({
+      country: loc.countryName || loc.country,
+      label: loc.district || loc.label,
+      lat: Number.isFinite(loc.lat) ? loc.lat : null,
+      lng: Number.isFinite(loc.lng) ? loc.lng : null,
+    });
+  };
+
+  const updatePreferredMeetupQuery = (value: string) => {
+    const parts = value.split(",");
+    const nextQuery = parts.length > 1 ? parts.at(-1)?.trimStart() ?? "" : value;
+    setPreferredMeetupQuery(nextQuery);
+    setPreferredMeetupSuggestionsOpen(true);
+    setFieldErrors((prev) => ({ ...prev, preferredMeetupArea: undefined }));
+  };
+
+  const fetchCareLocationSuggestions = useCallback(async (query: string) => {
+    const profileCountry = typeof profile?.location_country === "string" ? profile.location_country : null;
+    return fetchNativePrioritizedLocationSuggestions(query, {
+      selectedCountry: profileCountry,
+      biasPoint: Number.isFinite(profile?.latitude) && Number.isFinite(profile?.longitude)
+        ? { lat: Number(profile?.latitude), lng: Number(profile?.longitude) }
+        : null,
+    });
+  }, [profile?.latitude, profile?.location_country, profile?.longitude]);
 
   const setFieldRef = useCallback(
     (fieldName: string) => (node: View | null) => {
@@ -965,42 +1337,27 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
   );
 
   const handleEditScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    scrollYRef.current = event.nativeEvent.contentOffset.y;
-  }, []);
+    const scrollY = event.nativeEvent.contentOffset.y;
+    scrollYRef.current = scrollY;
+    if (scrollY < nextAutoExpandScrollYRef.current) return;
+    nextAutoExpandScrollYRef.current = scrollY + huddleSpacing.x9;
+    setAutoExpandedCarerSections((current) => {
+      const next = carerAccordionSectionTitles.find((title) => title !== openCarerSection && !current.has(title));
+      return next ? new Set([...current, next]) : current;
+    });
+  }, [openCarerSection]);
 
-  function scrollFieldIntoView(fieldName: string, options?: { targetRatio?: number }) {
-      const node = fieldRefs.current[fieldName];
-      const scrollView = editScrollRef.current;
-      if (!node || !scrollView || mode !== "edit") return;
-
-      const target = findNodeHandle(node);
-      const viewportTarget = findNodeHandle(scrollView);
-      if (!target || !viewportTarget) return;
-
-      requestAnimationFrame(() => {
-        UIManager.measureInWindow(viewportTarget, (_sx, scrollViewY, _sw, viewportHeight) => {
-          if (!viewportHeight) return;
-
-          UIManager.measureInWindow(target, (_x, y, _width, height) => {
-            const targetRatio = options?.targetRatio ?? 0.5;
-            const fieldCenterInViewport = y - scrollViewY + height / 2;
-            const desiredCenterInViewport = viewportHeight * targetRatio;
-            const nextY = Math.max(
-              0,
-              scrollYRef.current + fieldCenterInViewport - desiredCenterInViewport,
-            );
-
-            scrollView.scrollTo({ y: nextY, animated: true });
-          });
-        });
-      });
-  }
+  useEffect(() => {
+    if (professionalDeepLinkHandledRef.current || loading || !isOwnCarerProfile || !openProfessionalOnLoad || mode !== "edit") return;
+    professionalDeepLinkHandledRef.current = true;
+    requestAnimationFrame(() => scrollFieldIntoView("professionalCredentials", { targetRatio: 0.34 }));
+  }, [isOwnCarerProfile, loading, mode, openProfessionalOnLoad, scrollFieldIntoView]);
 
   const focusField = useCallback(
     (fieldName: FocusField) => {
       focusedFieldRef.current = fieldName;
       setFocusedField(fieldName);
-      scrollFieldIntoView(fieldName, fieldName === "areaName" ? { targetRatio: 0.42 } : undefined);
+      scrollFieldIntoView(fieldName);
     },
     [scrollFieldIntoView],
   );
@@ -1010,7 +1367,7 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
       const fieldName = focusedFieldRef.current;
       if (!fieldName) return;
       requestAnimationFrame(() => {
-        scrollFieldIntoView(fieldName, fieldName === "areaName" ? { targetRatio: 0.42 } : undefined);
+        scrollFieldIntoView(fieldName);
       });
     };
 
@@ -1033,23 +1390,27 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
   );
 
   useEffect(() => {
-    const query = formData.areaName.trim();
-    if (query.length < 2 || !locationSuggestionsOpen) {
-      setLocationSuggestions([]);
-      setLocationLoading(false);
+    const query = preferredMeetupQuery.trim();
+    if (query.length < 2 || !preferredMeetupSuggestionsOpen) {
+      setPreferredMeetupSuggestions([]);
+      setPreferredMeetupLoading(false);
       return;
     }
 
     let cancelled = false;
     const timer = setTimeout(async () => {
-      setLocationLoading(true);
+      setPreferredMeetupLoading(true);
       try {
-        const suggestions = await fetchNativeLocationSuggestions(query, typeof profile?.location_country === "string" ? profile.location_country : null);
-        if (!cancelled) setLocationSuggestions(suggestions);
+        const suggestions = await fetchCareLocationSuggestions(query);
+        if (!cancelled) {
+          setPreferredMeetupSuggestions(suggestions);
+        }
       } catch {
-        if (!cancelled) setLocationSuggestions([]);
+        if (!cancelled) {
+          setPreferredMeetupSuggestions([]);
+        }
       } finally {
-        if (!cancelled) setLocationLoading(false);
+        if (!cancelled) setPreferredMeetupLoading(false);
       }
     }, 300);
 
@@ -1057,7 +1418,44 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [formData.areaName, locationSuggestionsOpen, profile?.location_country]);
+  }, [fetchCareLocationSuggestions, preferredMeetupQuery, preferredMeetupSuggestionsOpen]);
+
+  const addPreferredMeetupArea = (area: NativeCareLocationArea) => {
+    setFormData((prev) => {
+      const key = `${area.label.toLowerCase()}|${area.country.toLowerCase()}`;
+      const exists = prev.preferredMeetupAreas.some((item) => `${item.label.toLowerCase()}|${item.country.toLowerCase()}` === key);
+      if (exists) return prev;
+      const nextAreas = [...prev.preferredMeetupAreas, area].slice(0, 5);
+      return {
+        ...prev,
+        preferredMeetupAreas: nextAreas,
+        currency: reconcileNativeCarerCurrency({
+          areaCountry: "",
+          preferredCountries: nextAreas.map((item) => item.country),
+          current: prev.currency,
+        }),
+      };
+    });
+    setPreferredMeetupQuery("");
+    setPreferredMeetupSuggestions([]);
+    setPreferredMeetupSuggestionsOpen(false);
+    setFieldErrors((prev) => ({ ...prev, preferredMeetupArea: undefined }));
+  };
+
+  const removePreferredMeetupArea = (label: string, country: string) => {
+    setFormData((prev) => {
+      const nextAreas = prev.preferredMeetupAreas.filter((item) => item.label !== label || item.country !== country);
+      return {
+        ...prev,
+        preferredMeetupAreas: nextAreas,
+        currency: reconcileNativeCarerCurrency({
+          areaCountry: "",
+          preferredCountries: nextAreas.map((item) => item.country),
+          current: prev.currency,
+        }),
+      };
+    });
+  };
 
   const toggleSkill = (skill: string) => {
     const alreadySelected = formData.skills.includes(skill);
@@ -1170,8 +1568,8 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
       const rows = [...prev.rateRows];
       rows[rateEditIndex] = {
         ...rateDraft,
-        price: rateDraft.voluntary ? "" : rateDraft.price,
-        rate: rateDraft.voluntary ? "" : rateDraft.rate,
+        price: rateDraft.price,
+        rate: rateDraft.rate,
         services: [...rateDraft.services],
       };
       return {
@@ -1186,7 +1584,7 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
 
   const startWallet = useCallback(async () => {
     if (!userId) return;
-    const draftSaved = await saveProfile(true, false);
+    const draftSaved = await saveProfile(true);
     if (!draftSaved) {
       haptic.error();
       setFieldErrors((prev) => ({ ...prev, wallet: "Save your draft before setting up wallet." }));
@@ -1197,16 +1595,16 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
 
   const refreshWallet = useCallback(async () => {
     try {
-      const token = cleanAccessToken(effectiveAccessToken);
+      const token = await cleanAccessToken(effectiveAccessToken);
       const response = await fetch(`${supabaseUrl}/functions/v1/refresh-stripe-account-status`, {
         method: "POST",
-        headers: createNativeFunctionHeaders(token),
+        headers: await createFreshNativeFunctionHeaders(token),
         body: JSON.stringify({}),
       });
       await parseFunctionResponse(response);
       await loadData();
     } catch (error) {
-      Alert.alert("Wallet", error instanceof Error ? error.message : "Unable to refresh wallet status.");
+      Alert.alert("Wallet", nativeSafeErrorCopy(error, "Your payout profile isn't fully set up yet. Tap to connect Stripe!"));
     }
   }, [effectiveAccessToken, loadData]);
 
@@ -1225,7 +1623,7 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
       setSliderResetKey((current) => current + 1);
       return;
     }
-    void saveProfile(false, false);
+    void saveProfile(false, true);
   };
   const goBack = () => {
     if (onGoBack) onGoBack();
@@ -1235,23 +1633,21 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
   if (loading) {
     return (
       <SafeAreaView style={styles.safe}>
-        <View style={styles.centered}>
-          <ActivityIndicator color={huddleColors.blue} />
-        </View>
+        <NativeLoadingState variant="centered" />
       </SafeAreaView>
     );
   }
 
-  if (!isAge18Plus) {
+  if (isOwnCarerProfile && !isAge16Plus) {
     return (
       <SafeAreaView edges={["left", "right"]} style={styles.safe}>
-        <View style={[styles.header, { marginTop: 0, paddingTop: huddleLayout.headerHeight + huddleSpacing.x3 }]}>
+        <View style={styles.header}>
           <Pressable accessibilityLabel="Back" onPress={goBack} style={styles.headerIcon}>
             <Feather color={huddleColors.text} name="arrow-left" size={24} />
           </Pressable>
           <View style={styles.headerTitleWrap}>
             <Text style={styles.headerTitle}>Pet Carer Profile</Text>
-            <Text style={styles.headerSubtitle}>Care Service Providers must be at least 18.</Text>
+            <Text style={styles.headerSubtitle}>Care Service Providers must be at least 16.</Text>
           </View>
           <View style={styles.headerIcon} />
         </View>
@@ -1261,19 +1657,19 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
 
   return (
     <SafeAreaView edges={["left", "right"]} style={styles.safe}>
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.flex}>
-        <View style={[styles.header, { marginTop: 0, paddingTop: huddleLayout.headerHeight + huddleSpacing.x3 }]}>
+      <KeyboardAvoidingView behavior="padding" style={styles.flex}>
+        <View style={styles.header}>
           <Pressable accessibilityLabel="Back" onPress={goBack} style={({ pressed }) => [styles.headerIcon, pressed ? styles.pressed : null]}>
             <Feather color={huddleColors.text} name="arrow-left" size={24} />
           </Pressable>
           <View style={styles.headerTitleWrap}>
             <Text style={styles.headerTitle}>Pet Carer Profile</Text>
-            <Text style={styles.headerSubtitle}>Customize how you offer trusted support</Text>
+            <Text style={styles.headerSubtitle}>{isOwnCarerProfile ? "Customize how you offer trusted support" : "Trusted pet care profile"}</Text>
           </View>
           {mode === "edit" ? (
-            <Animated.View style={{ transform: [{ translateX: saveShakeAnim }] }}>
+            <Animated.View style={saveShakeStyle}>
               <Pressable accessibilityLabel="Save" disabled={saving} onPress={() => void saveProfile(false)} style={({ pressed }) => [styles.headerIcon, pressed && !saving ? styles.pressed : null, saving ? styles.disabled : null]}>
-                {saving ? <ActivityIndicator color={huddleColors.text} /> : <Feather color={huddleColors.text} name="save" size={22} />}
+                {saving ? <NativeSpinner tone="secondary" /> : <Feather color={huddleColors.text} name="save" size={22} />}
               </Pressable>
             </Animated.View>
           ) : (
@@ -1281,17 +1677,19 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
           )}
         </View>
 
-        <View style={styles.tabs}>
-          <Pressable onPress={() => setMode("edit")} style={[styles.tab, mode === "edit" ? styles.tabActive : null]}>
-            <Text style={[styles.tabText, mode === "edit" ? styles.tabTextActive : null]}>Edit</Text>
-          </Pressable>
-          <Pressable
-            onPress={() => setMode("view")}
-            style={[styles.tab, mode === "view" ? styles.tabActive : null]}
-          >
-            <Text style={[styles.tabText, mode === "view" ? styles.tabTextActive : null]}>View</Text>
-          </Pressable>
-        </View>
+        {isOwnCarerProfile ? (
+          <View style={styles.tabs}>
+            <Pressable onPress={() => setMode("edit")} style={[styles.tab, mode === "edit" ? styles.tabActive : null]}>
+              <Text style={[styles.tabText, mode === "edit" ? styles.tabTextActive : null]}>Edit</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setMode("view")}
+              style={[styles.tab, mode === "view" ? styles.tabActive : null]}
+            >
+              <Text style={[styles.tabText, mode === "view" ? styles.tabTextActive : null]}>View</Text>
+            </Pressable>
+          </View>
+        ) : null}
 
         {loadError ? (
           <View style={styles.centered}>
@@ -1314,11 +1712,23 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
             style={styles.contentScroller}
           >
             {mode === "view" ? (
-              <NativeCarerProfileContent provider={viewData} />
+              <NativeCarerProfileContent
+                provider={viewData}
+                accessToken={accessToken}
+                topRightOverlay={careShareData ? (
+                  <Pressable accessibilityLabel="Share your care card" accessibilityRole="button" onPress={() => setShareCardOpen(true)}>
+                    <NativeGlassSurface style={styles.shareCardGlass}>
+                      <Feather color={huddleColors.text} name="share" size={18} />
+                    </NativeGlassSurface>
+                  </Pressable>
+                ) : null}
+              />
             ) : (
               <View style={styles.form}>
-                <View ref={setFieldRef("story")} style={styles.section}>
-                  <Text style={styles.sectionTitle}>About Me</Text>
+                <NativeProfileProgressTrack progress={carerProgress} />
+                <NativeCollapsibleSection title="About Me" collapsible open onToggle={() => undefined}>
+                <View style={styles.groupStack}>
+                <View ref={setFieldRef("story")} style={styles.fieldGroup}>
                   <TextInput
                     multiline
                     onBlur={() => setFocusedField(null)}
@@ -1326,15 +1736,33 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
                     onFocus={() => focusField("story")}
                     placeholder="Introduce yourself and how you care for pets"
                     placeholderTextColor={huddleColors.mutedText}
+                    scrollEnabled
                     style={[...textFieldStyle("story"), styles.textArea]}
                     textAlignVertical="top"
                     value={formData.story}
                   />
                 </View>
+                <View style={styles.contactFieldGroup}>
+                  <Text style={styles.sectionTitle}>Contact Number for Care Service</Text>
+                  <View style={styles.helperFieldStack}>
+                    <NativePhoneField
+                      onChangeText={setCareContactNumber}
+                      onFocus={() => focusField("careContactNumber")}
+                      placeholder="Phone number"
+                      value={careContactNumber}
+                    />
+                    <Text style={styles.helperText}>Your contact number will only be shared after a booking is confirmed.</Text>
+                  </View>
+                  {careContactNumberSaving ? <NativeSpinner tone="secondary" /> : null}
+                </View>
+                </View>
+                </NativeCollapsibleSection>
 
-                <View ref={setFieldRef("rateServices")} style={styles.section}>
+                <NativeCollapsibleSection title="Care Scope" collapsible open={isCarerSectionOpen("Care Scope")} onToggle={() => toggleCarerProfileSection("Care Scope")}>
+                <View style={styles.groupStack}>
+                <View ref={setFieldRef("rateServices")} style={styles.fieldGroup}>
                   <View style={styles.sectionHeaderRow}>
-                    <Text style={styles.sectionTitle}>Care Scope</Text>
+                    <Text style={styles.sectionTitle}>Rates & services</Text>
                     {rateEditIndex === null ? (
                       <Pressable onPress={addRateRow} style={styles.iconCircle}>
                         <Feather color={huddleColors.blue} name="plus" size={18} />
@@ -1344,7 +1772,11 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
                   {formData.rateRows.map((row, index) => {
                     const isEditing = rateEditIndex === index;
                     if (!isEditing) {
-                      const needsDetails = row.services.length === 0 && (row.voluntary !== true && (!row.price || !row.rate));
+                      const rowHasPrice = Boolean(row.price && row.rate);
+                      const needsDetails = row.services.length === 0 && (!row.voluntary || rowHasPrice);
+                      const rateMeta = row.voluntary
+                        ? rowHasPrice ? `Voluntary · ${formatNativeCareCurrencySymbol(formData.currency)}${row.price} / ${row.rate.toLowerCase()}` : "Voluntary"
+                        : rowHasPrice ? `${formatNativeCareCurrencySymbol(formData.currency)}${row.price} / ${row.rate.toLowerCase()}` : "Add details";
                       return (
                         <View key={index} style={styles.rateSummary}>
                           {needsDetails ? (
@@ -1353,8 +1785,8 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
                             </View>
                           ) : (
                             <View style={styles.flex}>
-                              <Text style={styles.rateTitle}>{row.services.length ? row.services.join(", ") : "Add details"}</Text>
-                              <Text style={styles.rateMeta}>{row.voluntary ? "Voluntary" : row.price && row.rate ? `${formData.currency} ${row.price} / ${row.rate.toLowerCase()}` : "Add details"}</Text>
+                              <Text ellipsizeMode="tail" numberOfLines={1} style={styles.rateTitle}>{row.services.length ? row.services.join(", ") : "Add details"}</Text>
+                              <Text ellipsizeMode="tail" numberOfLines={1} style={styles.rateMeta}>{rateMeta}</Text>
                             </View>
                           )}
                           <Pressable onPress={() => editRate(index)} style={styles.iconCircle}>
@@ -1387,7 +1819,7 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
                           <View style={styles.voluntaryColumn}>
                             <Text style={styles.fieldLabel}>Voluntary</Text>
                             <View style={styles.voluntaryToggleBox}>
-                              <NeuToggle value={rateDraft.voluntary === true} onChange={() => setRateDraft((prev) => ({ ...prev, voluntary: !prev.voluntary, price: !prev.voluntary ? "" : prev.price, rate: !prev.voluntary ? "" : prev.rate }))} />
+                              <NeuToggle value={rateDraft.voluntary === true} onChange={() => setRateDraft((prev) => ({ ...prev, voluntary: !prev.voluntary }))} />
                             </View>
                           </View>
                         </View>
@@ -1403,27 +1835,35 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
                         {rateDraft.services.includes("Others") ? (
                           <View ref={setFieldRef("servicesOther")}>
                             <TextInput
+                multiline={false}
+                scrollEnabled
+                numberOfLines={1} lineBreakModeIOS="tail" lineBreakStrategyIOS="none"
+                textBreakStrategy="simple"
                               onBlur={() => setFocusedField(null)}
                             onChangeText={(servicesOther) => setFormData((prev) => ({ ...prev, servicesOther }))}
                             onFocus={() => focusField("servicesOther")}
                             placeholder="Describe your other care"
                             placeholderTextColor={huddleColors.mutedText}
                             returnKeyType="done"
+                            onSubmitEditing={Keyboard.dismiss}
                             style={textFieldStyle("servicesOther")}
                               value={formData.servicesOther}
                             />
                           </View>
                         ) : null}
                         {fieldErrors.careScope ? <Text style={styles.errorText}>{fieldErrors.careScope}</Text> : null}
-                        {!rateDraft.voluntary ? (
-                          <>
-                            <Text style={styles.fieldLabel}>Rate</Text>
-                            <View style={[styles.rateCompositeField, fieldErrors.rate ? styles.fieldError : null]}>
+                        <>
+                            <Text style={styles.fieldLabel}>{rateDraft.voluntary ? "Optional rate" : "Rate"}</Text>
+                            <View style={[styles.rateCompositeField, focusedField === "currency" || focusedField === "price" || focusedField === "rate" || openDrop === "currency" || openDrop === "rate" ? styles.fieldFocused : null, fieldErrors.rate ? styles.fieldError : null]}>
                               <Pressable ref={setFieldRef("currency")} onPress={() => toggleDrop("currency")} style={styles.rateCompositeCurrency}>
-                                <Text style={styles.rateSelectText}>{formData.currency || "-"}</Text>
+                                <Text style={styles.rateSelectText}>{formatNativeCareCurrencySymbol(formData.currency)}</Text>
                               </Pressable>
                               <View ref={setFieldRef("price")} style={styles.flex}>
                                 <TextInput
+                multiline={false}
+                scrollEnabled
+                numberOfLines={1} lineBreakModeIOS="tail" lineBreakStrategyIOS="none"
+                textBreakStrategy="simple"
                                   keyboardType="decimal-pad"
                                   onBlur={() => setFocusedField(null)}
                                   onChangeText={(price) => setRateDraft((prev) => ({ ...prev, price }))}
@@ -1440,13 +1880,12 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
                             </View>
                             {fieldErrors.rate ? <Text style={styles.errorText}>{fieldErrors.rate}</Text> : null}
                             {openDrop === "currency" ? (
-                              <SelectList closeOnSelect options={CURRENCIES} selected={formData.currency ? [formData.currency] : []} onToggle={(currency) => { setFormData((prev) => ({ ...prev, currency })); setOpenDrop(null); }} />
+                              <SelectList closeOnSelect options={availableCurrencies} selected={formData.currency ? [formData.currency] : []} onToggle={(currency) => { setFormData((prev) => ({ ...prev, currency })); setOpenDrop(null); }} />
                             ) : null}
                             {openDrop === "rate" ? (
                               <SelectList closeOnSelect options={RATE_OPTIONS} selected={rateDraft.rate ? [rateDraft.rate] : []} onToggle={(rate) => { setRateDraft((prev) => ({ ...prev, rate })); setOpenDrop(null); }} />
                             ) : null}
                           </>
-                        ) : null}
                         <View style={styles.actionRow}>
                           <Pressable onPress={saveRate} style={styles.smallPrimaryButton}>
                             <Text style={styles.smallPrimaryText}>Save</Text>
@@ -1460,38 +1899,46 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
                   })}
                 </View>
 
-                <MultiSelectSection
+                <View style={styles.compositeContent}>
+                <PetTypeMultiSelectSection
                   dropKey="petTypes"
                   fieldRef={setFieldRef("petTypes")}
                   focusedDrop={focusedField as DropdownKey | null}
                   onFocusControl={toggleDrop}
                   openDrop={openDrop}
-                  options={PET_TYPES}
                   selected={formData.petTypes}
                   setOpenDrop={setOpenDrop}
-                  title="Pet Types"
                   error={fieldErrors.petTypes}
-                  onToggle={(petType) => setFormData((prev) => ({
-                    ...prev,
-                    petTypes: toggleStringItem(prev.petTypes, petType),
-                    ...((PET_TYPES_REQUIRING_SIZE as readonly string[]).includes(petType) && prev.petTypes.includes(petType) ? { dogSizes: [] } : {}),
-                  }))}
+                  onToggle={(petType) => {
+                    setFormData((prev) => ({
+                      ...prev,
+                      petTypes: toggleStringItem(prev.petTypes, petType),
+                      ...(petType === "Dogs" && prev.petTypes.includes(petType) ? { dogSizes: [] } : {}),
+                    }));
+                    setFieldErrors((prev) => ({ ...prev, petTypes: undefined }));
+                  }}
                 />
                 {formData.petTypes.includes("Others") ? (
-                  <View ref={setFieldRef("petTypesOther")} style={styles.section}>
+                  <View ref={setFieldRef("petTypesOther")}>
                     <TextInput
+                multiline={false}
+                scrollEnabled
+                numberOfLines={1} lineBreakModeIOS="tail" lineBreakStrategyIOS="none"
+                textBreakStrategy="simple"
                       onBlur={() => setFocusedField(null)}
                     onChangeText={(petTypesOther) => setFormData((prev) => ({ ...prev, petTypesOther }))}
                     onFocus={() => focusField("petTypesOther")}
                     placeholder="Describe other pet type"
                     placeholderTextColor={huddleColors.mutedText}
                     returnKeyType="done"
+                    onSubmitEditing={Keyboard.dismiss}
                     style={textFieldStyle("petTypesOther")}
                       value={formData.petTypesOther}
                     />
                   </View>
                 ) : null}
-                {formData.petTypes.some((petType) => (PET_TYPES_REQUIRING_SIZE as readonly string[]).includes(petType)) ? (
+                </View>
+                {formData.petTypes.includes("Dogs") ? (
                   <MultiSelectSection
                     dropKey="dogSizes"
                     fieldRef={setFieldRef("dogSizes")}
@@ -1503,11 +1950,18 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
                     setOpenDrop={setOpenDrop}
                     title="Pet Size"
                     error={fieldErrors.petSize || fieldErrors.dogSizes}
-                    onToggle={(size) => setFormData((prev) => ({ ...prev, dogSizes: toggleStringItem(prev.dogSizes, size) }))}
+                    onToggle={(size) => {
+                      setFormData((prev) => ({ ...prev, dogSizes: toggleStringItem(prev.dogSizes, size) }));
+                      setFieldErrors((prev) => ({ ...prev, dogSizes: undefined, petSize: undefined }));
+                    }}
                   />
                 ) : null}
+                </View>
+                </NativeCollapsibleSection>
 
-                <View ref={setFieldRef("skills")} style={styles.section}>
+                <NativeCollapsibleSection title="Strengths & Credentials" collapsible open={isCarerSectionOpen("Strengths & Credentials")} onToggle={() => toggleCarerProfileSection("Strengths & Credentials")}>
+                <View style={styles.groupStack}>
+                <View ref={setFieldRef("skills")} style={styles.fieldGroup}>
                   <View style={styles.sectionHeaderRow}>
                     <Text style={styles.sectionTitle}>Strengths</Text>
                     <Text style={styles.sectionCount}>{formData.skills.length}/{MAX_SKILLS}</Text>
@@ -1525,7 +1979,7 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
                   {formData.skills.length < MAX_SKILLS ? (
                     <>
                       <Pressable onPress={() => toggleDrop("skills")} style={[styles.selectButton, openDrop === "skills" || focusedField === "skills" ? styles.fieldFocused : null, fieldErrors.skills ? styles.fieldError : null]}>
-                        <Text style={styles.selectButtonText}>{formData.skills.length === 0 ? "Select" : "Select"}</Text>
+                        <Text ellipsizeMode="tail" numberOfLines={1} style={styles.selectButtonText}>{formData.skills.length === 0 ? "Select" : "Select"}</Text>
                         <Feather color={huddleColors.iconMuted} name={openDrop === "skills" ? "chevron-up" : "chevron-down"} size={16} />
                       </Pressable>
                       {openDrop === "skills" ? (
@@ -1540,7 +1994,7 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
                   {fieldErrors.skills ? <Text style={styles.errorText}>{fieldErrors.skills}</Text> : null}
                 </View>
 
-                <View ref={setFieldRef("professional")} style={styles.section}>
+                <View ref={setFieldRef("professional")} style={styles.fieldGroup}>
                   <View style={[styles.switchSettingRow, fieldErrors.professional ? styles.fieldError : null]}>
                     <Text style={styles.fieldLabel}>Do you have professional qualifications?</Text>
                     <NeuToggle value={formData.professional.has_credentials} onChange={setProfessionalQualifications} />
@@ -1580,7 +2034,7 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
                               </View>
                               <View style={styles.qualificationActions}>
                                 <Pressable disabled={submitting || checking} onPress={() => editing ? void saveCredential(index) : setCredentialEditIndex(index)} style={[styles.iconCircle, submitting || checking ? styles.disabled : null]}>
-                                  {submitting ? <ActivityIndicator color={huddleColors.iconMuted} size="small" /> : <Feather color={huddleColors.iconMuted} name={editing ? "save" : "edit-2"} size={15} />}
+                                  {submitting ? <NativeSpinner tone="muted" /> : <Feather color={huddleColors.iconMuted} name={editing ? "save" : "edit-2"} size={15} />}
                                 </Pressable>
                                 <Pressable onPress={() => removeCredential(index)} style={styles.iconCircle}>
                                   <Feather color={huddleColors.iconMuted} name="trash-2" size={15} />
@@ -1590,19 +2044,23 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
                             {editing ? (
                               <>
                                 <Pressable onPress={() => toggleDrop(`professionalType:${index}`)} style={[styles.selectButton, openDrop === `professionalType:${index}` ? styles.fieldFocused : null, credentialHasError && !credential.professional_type.trim() ? styles.fieldError : null]}>
-                                  <Text style={styles.selectButtonText}>{credential.professional_type || "Professional type"}</Text>
+                                  <Text ellipsizeMode="tail" numberOfLines={1} style={styles.selectButtonText}>{credential.professional_type || "Professional type"}</Text>
                                   <Feather color={huddleColors.iconMuted} name={openDrop === `professionalType:${index}` ? "chevron-up" : "chevron-down"} size={16} />
                                 </Pressable>
                                 {openDrop === `professionalType:${index}` ? (
                                   <SelectList closeOnSelect options={PROFESSIONAL_TYPES} selected={credential.professional_type ? [credential.professional_type] : []} onToggle={(professional_type) => { updateCredential(index, { professional_type }); setOpenDrop(null); }} />
                                 ) : null}
                                 <Pressable onPress={() => { setCountrySearch(""); toggleDrop(`credentialCountry:${index}`); }} style={[styles.selectButton, openDrop === `credentialCountry:${index}` ? styles.fieldFocused : null, credentialHasError && !credential.country_region.trim() ? styles.fieldError : null]}>
-                                  <Text style={styles.selectButtonText}>{credential.country_region || "Country/region"}</Text>
+                                  <Text ellipsizeMode="tail" numberOfLines={1} style={styles.selectButtonText}>{credential.country_region || "Country/region"}</Text>
                                   <Feather color={huddleColors.iconMuted} name={openDrop === `credentialCountry:${index}` ? "chevron-up" : "chevron-down"} size={16} />
                                 </Pressable>
                                 {openDrop === `credentialCountry:${index}` ? (
                                   <View style={styles.countryDropdownMenu}>
                                     <TextInput
+                multiline={false}
+                scrollEnabled
+                numberOfLines={1} lineBreakModeIOS="tail" lineBreakStrategyIOS="none"
+                textBreakStrategy="simple"
                                       onChangeText={setCountrySearch}
                                       placeholder="Search country/region"
                                       placeholderTextColor={huddleColors.mutedText}
@@ -1612,11 +2070,23 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
                                     <SelectList embedded closeOnSelect options={filteredCountryOptions} selected={credential.country_region ? [credential.country_region] : []} onToggle={(country_region) => { updateCredential(index, { country_region }); setOpenDrop(null); }} />
                                   </View>
                                 ) : null}
-                                <TextInput onBlur={() => setFocusedField(null)} onChangeText={(name_on_certificate) => updateCredential(index, { name_on_certificate })} onFocus={() => focusField("professionalCredentials")} placeholder="Name on Certificate" placeholderTextColor={huddleColors.mutedText} style={[...textFieldStyle("professionalCredentials"), credentialHasError && !credential.name_on_certificate.trim() ? styles.fieldError : null]} value={credential.name_on_certificate} />
-                                <TextInput onBlur={() => setFocusedField(null)} onChangeText={(license_number) => updateCredential(index, { license_number })} onFocus={() => focusField("professionalCredentials")} placeholder="License/certificate number" placeholderTextColor={huddleColors.mutedText} style={[...textFieldStyle("professionalCredentials"), credentialHasError && !credential.license_number.trim() ? styles.fieldError : null]} value={credential.license_number} />
-                                <TextInput onBlur={() => setFocusedField(null)} onChangeText={(issuing_body) => updateCredential(index, { issuing_body })} onFocus={() => focusField("professionalCredentials")} placeholder="Issuing body" placeholderTextColor={huddleColors.mutedText} style={[...textFieldStyle("professionalCredentials"), credentialHasError && !credential.issuing_body.trim() ? styles.fieldError : null]} value={credential.issuing_body} />
+                                <TextInput
+                multiline={false}
+                scrollEnabled
+                numberOfLines={1} lineBreakModeIOS="tail" lineBreakStrategyIOS="none"
+                textBreakStrategy="simple" onBlur={() => setFocusedField(null)} onChangeText={(name_on_certificate) => updateCredential(index, { name_on_certificate })} onFocus={() => focusField("professionalCredentials")} placeholder="Name on Certificate" placeholderTextColor={huddleColors.mutedText} returnKeyType="done" onSubmitEditing={Keyboard.dismiss} style={[...textFieldStyle("professionalCredentials"), credentialHasError && !credential.name_on_certificate.trim() ? styles.fieldError : null]} value={credential.name_on_certificate} />
+                                <TextInput
+                multiline={false}
+                scrollEnabled
+                numberOfLines={1} lineBreakModeIOS="tail" lineBreakStrategyIOS="none"
+                textBreakStrategy="simple" onBlur={() => setFocusedField(null)} onChangeText={(license_number) => updateCredential(index, { license_number })} onFocus={() => focusField("professionalCredentials")} placeholder="License/certificate number" placeholderTextColor={huddleColors.mutedText} returnKeyType="done" onSubmitEditing={Keyboard.dismiss} style={[...textFieldStyle("professionalCredentials"), credentialHasError && !credential.license_number.trim() ? styles.fieldError : null]} value={credential.license_number} />
+                                <TextInput
+                multiline={false}
+                scrollEnabled
+                numberOfLines={1} lineBreakModeIOS="tail" lineBreakStrategyIOS="none"
+                textBreakStrategy="simple" onBlur={() => setFocusedField(null)} onChangeText={(issuing_body) => updateCredential(index, { issuing_body })} onFocus={() => focusField("professionalCredentials")} placeholder="Issuing body" placeholderTextColor={huddleColors.mutedText} returnKeyType="done" onSubmitEditing={Keyboard.dismiss} style={[...textFieldStyle("professionalCredentials"), credentialHasError && !credential.issuing_body.trim() ? styles.fieldError : null]} value={credential.issuing_body} />
                                 <ExpiryDateField
-                                  error={credentialHasError && (!credential.expiry_date.trim() || isPastDate(credential.expiry_date))}
+                                  error={credentialHasError && (!credential.expiry_date.trim() || !isIsoDate(credential.expiry_date))}
                                   focused={credentialDateIndex === index}
                                   onChangeText={(expiry_date) => updateCredential(index, { expiry_date })}
                                   onToggle={() => {
@@ -1626,6 +2096,11 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
                                   }}
                                   value={credential.expiry_date}
                                 />
+                                {isPastDate(credential.expiry_date) ? (
+                                  <Text style={styles.expiredCredentialHelper}>
+                                    Certificate expired on {formatCredentialExpiryDate(credential.expiry_date)}. Update it to restore your verified credential badge.
+                                  </Text>
+                                ) : null}
                                 <FutureDatePicker
                                   onChange={(expiry_date) => {
                                     updateCredential(index, { expiry_date });
@@ -1647,8 +2122,8 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
                                 )}
                                 {submittedCredential?.check_available ? (
                                   <Pressable disabled={checking || submitting} onPress={() => void checkCredentialEvidence(credential, index)} style={[styles.smallSecondaryButton, checking || submitting ? styles.disabled : null]}>
-                                    {checking ? <ActivityIndicator color={huddleColors.blue} size="small" /> : <Feather color={huddleColors.blue} name="shield" size={14} />}
-                                    <Text style={styles.smallSecondaryText}>{checking ? "Checking..." : "Check credential"}</Text>
+                                    {checking ? <NativeSpinner tone="accent" /> : <Feather color={huddleColors.blue} name="shield" size={14} />}
+                                    {checking ? null : <Text style={styles.smallSecondaryText}>Check credential</Text>}
                                   </Pressable>
                                 ) : null}
                               </View>
@@ -1659,24 +2134,29 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
                     </View>
                   ) : null}
                 </View>
+                </View>
+                </NativeCollapsibleSection>
 
-                <View style={styles.section}>
-                  <Text style={styles.sectionTitle}>Availability</Text>
+                <NativeCollapsibleSection title="Availability" collapsible open={isCarerSectionOpen("Availability")} onToggle={() => toggleCarerProfileSection("Availability")}>
+                <View style={styles.groupStack}>
+                <View style={styles.compactGroup}>
                   <MultiSelectControl
+                    compact
                     dropKey="days"
                     fieldRef={setFieldRef("days")}
                     focusedDrop={focusedField as DropdownKey | null}
                     onFocusControl={toggleDrop}
-                    label="Days"
+                    label={null}
                     openDrop={openDrop}
                     options={DAYS}
+                    placeholder="Days"
                     selected={formData.days}
                     setOpenDrop={setOpenDrop}
                     error={fieldErrors.days}
                     onToggle={(day) => setFormData((prev) => ({ ...prev, days: toggleStringItem(prev.days, day) }))}
                   />
                   <View style={styles.availabilityColumn}>
-                    <View style={styles.switchSettingRow}>
+                    <View style={[styles.switchSettingRow, styles.compactSwitchSettingRow]}>
                       <Text adjustsFontSizeToFit minimumFontScale={0.82} numberOfLines={1} style={styles.fieldLabel}>Anytime</Text>
                       <NeuToggle value={formData.timeBlocks.includes("Anytime")} onChange={updateAnytime} />
                     </View>
@@ -1685,7 +2165,7 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
                         <View style={styles.availabilityTimeRow}>
                           <View style={styles.flex}>
                             <Pressable ref={setFieldRef("timeFrom")} onPress={() => toggleDrop("timeFrom")} style={[styles.selectButton, styles.compactSelectButton, openDrop === "timeFrom" || focusedField === "timeFrom" ? styles.fieldFocused : null, fieldErrors.time ? styles.fieldError : null]}>
-                              <Text style={styles.selectButtonText}>{formData.otherTimeFrom || "From"}</Text>
+                              <Text ellipsizeMode="tail" numberOfLines={1} style={styles.selectButtonText}>{formData.otherTimeFrom || "From"}</Text>
                               <Feather color={huddleColors.iconMuted} name={openDrop === "timeFrom" ? "chevron-up" : "chevron-down"} size={16} />
                             </Pressable>
                             {openDrop === "timeFrom" ? (
@@ -1694,7 +2174,7 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
                           </View>
                           <View style={styles.flex}>
                             <Pressable ref={setFieldRef("timeTo")} onPress={() => toggleDrop("timeTo")} style={[styles.selectButton, styles.compactSelectButton, openDrop === "timeTo" || focusedField === "timeTo" ? styles.fieldFocused : null, fieldErrors.time ? styles.fieldError : null]}>
-                              <Text style={styles.selectButtonText}>{formData.otherTimeTo || "To"}</Text>
+                              <Text ellipsizeMode="tail" numberOfLines={1} style={styles.selectButtonText}>{formData.otherTimeTo || "To"}</Text>
                               <Feather color={huddleColors.iconMuted} name={openDrop === "timeTo" ? "chevron-up" : "chevron-down"} size={16} />
                             </Pressable>
                             {openDrop === "timeTo" ? (
@@ -1708,18 +2188,22 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
                   </View>
                 </View>
 
-                <View style={styles.section}>
+                <View style={styles.fieldGroup}>
                   <Text style={styles.sectionTitle}>Notice Time</Text>
                   <View style={[styles.noticeCompactRow, !formData.emergencyReadiness ? styles.noticeCompactRowSplit : null]}>
-                    <View style={[styles.noticeToggleWrap, formData.emergencyReadiness === true ? styles.noticeToggleWrapFull : null]}>
+                    <View style={[styles.noticeToggleWrap, styles.compactNoticeControl]}>
                       <Text adjustsFontSizeToFit minimumFontScale={0.88} numberOfLines={1} style={styles.noticeToggleLabel}>Available Now</Text>
                       <NeuToggle value={formData.emergencyReadiness === true} onChange={updateEmergencyReadiness} />
                     </View>
                     {!formData.emergencyReadiness ? (
                       <View style={styles.noticeInputColumn}>
-                        <View style={[styles.noticeCompositeField, fieldErrors.minNotice ? styles.fieldError : null]}>
+                        <View style={[styles.noticeCompositeField, styles.compactNoticeControl, fieldErrors.minNotice ? styles.fieldError : null]}>
                           <View ref={setFieldRef("minNotice")} style={styles.noticeValueWrap}>
                             <TextInput
+                multiline={false}
+                scrollEnabled
+                numberOfLines={1} lineBreakModeIOS="tail" lineBreakStrategyIOS="none"
+                textBreakStrategy="simple"
                               keyboardType="number-pad"
                               onBlur={() => setFocusedField(null)}
                               onChangeText={updateMinNoticeValue}
@@ -1754,9 +2238,10 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
                   {fieldErrors.minNotice ? <Text style={styles.errorText}>{fieldErrors.minNotice}</Text> : null}
                 </View>
 
-                <View style={styles.section}>
-                  <Text style={styles.sectionTitle}>Care Location</Text>
+                <View style={styles.fieldGroup}>
+                  <Text style={styles.sectionTitle}>Preferred Location</Text>
                   <MultiSelectControl
+                    compact
                     dropKey="locationStyles"
                     fieldRef={setFieldRef("locationStyles")}
                     focusedDrop={focusedField as DropdownKey | null}
@@ -1767,67 +2252,104 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
                     selected={formData.locationStyles}
                     setOpenDrop={setOpenDrop}
                     error={fieldErrors.locationStyles}
-                    onToggle={(locationStyle) => setFormData((prev) => {
-                      const locationStyles = toggleStringItem(prev.locationStyles, locationStyle);
-                      const showArea = locationStyles.includes("Carer's Place") || locationStyles.includes("Outdoor");
-                      return { ...prev, locationStyles, areaName: showArea ? prev.areaName : "" };
-                    })}
+                    onToggle={(locationStyle) => {
+                      setFormData((prev) => ({
+                        ...prev,
+                        locationStyles: toggleStringItem(prev.locationStyles, locationStyle),
+                      }));
+                      setFieldErrors((prev) => ({ ...prev, locationStyles: undefined }));
+                    }}
                   />
-                  {shouldShowAreaSearch ? (
-                  <View>
-                    <View collapsable={false} ref={setFieldRef("areaName")}>
-                      <TextInput
-                        onBlur={() => {
-                          focusedFieldRef.current = null;
-                          setFocusedField(null);
-                          setTimeout(() => setLocationSuggestionsOpen(false), 140);
-                        }}
-                        onChangeText={(areaName) => {
-                          setLocationSuggestionsOpen(true);
-                          setFormData((prev) => ({ ...prev, areaName }));
-                        }}
-                        onFocus={() => {
-                          focusField("areaName");
-                          setLocationSuggestionsOpen(true);
-                        }}
-                        onPressIn={() => {
-                          focusField("areaName");
-                          setLocationSuggestionsOpen(true);
-                        }}
-                        placeholder={areaPlaceholder}
-                        placeholderTextColor={huddleColors.mutedText}
-                        returnKeyType="search"
-                        style={textFieldStyle("areaName")}
-                        value={formData.areaName}
-                      />
-                    </View>
-                    {locationLoading ? <Text style={styles.locationHelper}>Loading suggestions...</Text> : null}
-                    {locationSuggestionsOpen && locationSuggestions.length > 0 ? (
-                      <View style={styles.suggestionMenu}>
-                        {locationSuggestions.map((item) => (
-                          <Pressable
-                            accessibilityRole="button"
-                            key={`${item.label}:${item.lat}:${item.lng}`}
-                            onPress={() => {
-                              const selectedLocation = item.district || item.label;
-                              setFormData((prev) => ({ ...prev, areaName: selectedLocation }));
-                              setLocationSuggestions([]);
-                              setLocationSuggestionsOpen(false);
+                  <View style={styles.locationFollowupStack}>
+                    <View style={styles.preferredMeetupBlock}>
+                      <View collapsable={false} ref={setFieldRef("preferredMeetupArea")}>
+                        <View style={[styles.locationFieldRow, styles.compactFieldFrame, focusedField === "preferredMeetupArea" ? styles.fieldFocused : null, fieldErrors.preferredMeetupArea ? styles.fieldError : null]}>
+                          <NativeLocationPinButton
+                            onError={(message) => setFieldErrors((prev) => ({ ...prev, preferredMeetupArea: message }))}
+                            onResolved={applyCurrentPreferredMeetupArea}
+                            retainedCoordinates={Number.isFinite(profile?.latitude) && Number.isFinite(profile?.longitude)
+                              ? { lat: Number(profile?.latitude), lng: Number(profile?.longitude) }
+                              : null}
+                            style={styles.locationFieldPin}
+                          />
+                          <TextInput
+                multiline={false}
+                scrollEnabled
+                numberOfLines={1} lineBreakModeIOS="tail" lineBreakStrategyIOS="none"
+                textBreakStrategy="simple"
+                            onBlur={() => {
+                              focusedFieldRef.current = null;
+                              setFocusedField(null);
+                              setTimeout(() => setPreferredMeetupSuggestionsOpen(false), 140);
                             }}
-                            style={({ pressed }) => [styles.suggestionRow, pressed ? styles.pressed : null]}
-                          >
-                            <Text style={styles.suggestionPrimary}>{item.district || item.label}</Text>
-                            {item.label ? <Text numberOfLines={1} style={styles.suggestionText}>{item.label}</Text> : null}
-                          </Pressable>
-                        ))}
+                            onChangeText={(value) => {
+                              updatePreferredMeetupQuery(value);
+                            }}
+                            onFocus={() => {
+                              focusField("preferredMeetupArea");
+                              setPreferredMeetupSuggestionsOpen(true);
+                            }}
+                            onPressIn={() => {
+                              focusField("preferredMeetupArea");
+                              setPreferredMeetupSuggestionsOpen(true);
+                            }}
+                            placeholder="Preferred Area"
+                            placeholderTextColor={huddleColors.mutedText}
+                            returnKeyType="search"
+                            style={styles.locationFieldInput}
+                            value={preferredMeetupQuery}
+                          />
+                        </View>
                       </View>
-                    ) : null}
+                      {formData.preferredMeetupAreas.length > 0 ? (
+                        <View style={styles.chipWrap}>
+                          {formData.preferredMeetupAreas.map((area) => (
+                            <Pressable
+                              accessibilityRole="button"
+                              key={`${area.label}:${area.country}`}
+                              onPress={() => removePreferredMeetupArea(area.label, area.country)}
+                              style={styles.chip}
+                            >
+                              <Text ellipsizeMode="tail" numberOfLines={1} style={styles.chipText}>{area.label}</Text>
+                              <Feather color={huddleColors.iconMuted} name="x" size={14} />
+                            </Pressable>
+                          ))}
+                        </View>
+                      ) : null}
+                      {preferredMeetupLoading ? <NativeSpinner tone="muted" style={styles.locationSpinner} /> : null}
+                      {preferredMeetupSuggestionsOpen && preferredMeetupSuggestions.length > 0 ? (
+                        <View style={styles.suggestionMenu}>
+                          {preferredMeetupSuggestions.map((item) => (
+                            <Pressable
+                              accessibilityRole="button"
+                              key={`${item.label}:${item.lat}:${item.lng}`}
+                              onPress={() => {
+                                const selectedLocation = item.district || item.label;
+                                addPreferredMeetupArea({
+                                  country: item.country,
+                                  label: selectedLocation,
+                                  lat: Number.isFinite(item.lat) && item.lat !== 0 ? item.lat : null,
+                                  lng: Number.isFinite(item.lng) && item.lng !== 0 ? item.lng : null,
+                                });
+                              }}
+                              style={({ pressed }) => [styles.suggestionRow, pressed ? styles.pressed : null]}
+                            >
+                              <Text ellipsizeMode="tail" numberOfLines={1} style={styles.suggestionPrimary}>{item.district || item.label}</Text>
+                              {item.label ? <Text numberOfLines={1} style={styles.suggestionText}>{item.label}</Text> : null}
+                            </Pressable>
+                          ))}
+                        </View>
+                      ) : null}
+                      {fieldErrors.preferredMeetupArea ? <Text style={styles.errorText}>{fieldErrors.preferredMeetupArea}</Text> : null}
+                    </View>
                   </View>
-                  ) : null}
                 </View>
+                </View>
+                </NativeCollapsibleSection>
 
-                <View style={styles.section}>
+                <View style={styles.fieldGroup}>
                   <Text style={styles.sectionTitle}>Publish Checklist</Text>
+                  <View style={styles.groupStack}>
                   <View ref={setFieldRef("agreement")}>
                     <Pressable onPress={openAgreementSheet} style={[styles.agreementRow, fieldErrors.agreement ? styles.fieldError : null]}>
                       <View style={[styles.checkbox, formData.agreementAccepted ? styles.checkboxActive : null]}>
@@ -1839,7 +2361,7 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
                       </Text>
                     </Pressable>
                   </View>
-                  <View style={[styles.listingRow, fieldErrors.listing || (fieldErrors.wallet && walletState !== "connected") ? styles.fieldError : null]}>
+                  <View style={[styles.listingRow, fieldErrors.listing || (needsPayoutWallet && fieldErrors.wallet && walletState !== "connected") ? styles.fieldError : null]}>
                     <View style={styles.listingTopRow}>
                       <Text style={styles.listingText}>List on Care Service</Text>
                       <NeuToggle
@@ -1850,7 +2372,7 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
                             setFormData((prev) => ({ ...prev, listed: false }));
                             return;
                           }
-                          if (!formData.stripePayoutsEnabled) {
+                          if (needsPayoutWallet && !formData.stripePayoutsEnabled) {
                             haptic.warning();
                             setListingAttempted(true);
                             setFormData((prev) => ({ ...prev, listed: false }));
@@ -1864,7 +2386,7 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
                         }}
                       />
                     </View>
-                    {listingAttempted || formData.listed || walletState === "connected" ? (
+                    {needsPayoutWallet && (listingAttempted || formData.listed || walletState === "connected") ? (
                       <View ref={setFieldRef("wallet")} style={[styles.publishCard, fieldErrors.wallet && walletState !== "connected" ? styles.fieldError : null]}>
                         {walletState === "connected" ? (
                           <Pressable disabled style={[styles.walletButton, styles.walletButtonConnected]}>
@@ -1874,7 +2396,7 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
                         ) : walletState === "review" ? (
                           <View style={styles.walletRow}>
                             <View style={styles.walletStatusRow}>
-                              <ActivityIndicator color={huddleColors.iconMuted} />
+                              <NativeSpinner tone="muted" />
                               <Text style={styles.walletText}>Wallet under review</Text>
                             </View>
                             <Pressable onPress={() => void refreshWallet()} style={styles.walletButton}>
@@ -1889,14 +2411,19 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
                       </View>
                     ) : null}
                   </View>
+                  </View>
                 </View>
               </View>
             )}
           </ScrollView>
         )}
 
+        {careShareData ? (
+          <NativeShareCardModal data={careShareData} visible={shareCardOpen} onClose={() => setShareCardOpen(false)} />
+        ) : null}
+
         {mode === "edit" ? (
-          <Animated.View style={[styles.stickyFooter, { paddingBottom: insets.bottom + huddleSpacing.x3, transform: [{ translateX: saveShakeAnim }] }]}>
+          <Animated.View style={[styles.stickyFooter, { paddingBottom: insets.bottom + huddleSpacing.x3 }, saveShakeStyle]}>
             <SlideToConfirm
               busy={saving}
               label="Slide to Complete"
@@ -1943,13 +2470,19 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
                   {serviceAgreementPage ? (
                     <>
                       {serviceAgreementPage.intro.map((paragraph, index) => (
-                        <Text key={`intro-${index}`} style={styles.agreementSheetText}>{paragraph}</Text>
+                        <NativeLegalText key={`intro-${index}`} style={styles.agreementSheetText}>{paragraph}</NativeLegalText>
                       ))}
                       {serviceAgreementPage.sections.map((section) => (
                         <View key={section.title} style={styles.agreementLegalSection}>
                           <Text style={styles.agreementLegalTitle}>{section.title}</Text>
                           {section.body.map((paragraph, index) => (
-                            <Text key={`${section.title}-${index}`} style={styles.agreementSheetText}>{paragraph}</Text>
+                            <NativeLegalText key={`${section.title}-${index}`} style={styles.agreementSheetText}>{paragraph}</NativeLegalText>
+                          ))}
+                          {section.bullets?.map((bullet, index) => (
+                            <View key={`${section.title}-bullet-${index}`} style={styles.agreementBulletRow}>
+                              <Text style={styles.agreementBulletDot}>•</Text>
+                              <NativeLegalText style={styles.agreementBulletText}>{bullet}</NativeLegalText>
+                            </View>
                           ))}
                           {section.bullets?.map((bullet, index) => (
                             <View key={`${section.title}-bullet-${index}`} style={styles.agreementBulletRow}>
@@ -1959,7 +2492,7 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
                           ))}
                         </View>
                       ))}
-                      <Text style={styles.locationHelper}>{serviceAgreementPage.effectiveDate}</Text>
+                      <Text style={styles.locationHelper}>Updated: {serviceAgreementPage.effectiveDate}</Text>
                     </>
                   ) : null}
                 </ScrollView>
@@ -1994,10 +2527,12 @@ export function NativeCarerProfileScreen({ accessToken, initialSession, session,
 }
 
 function MultiSelectControl({
+  compact = false,
   dropKey,
   label,
   openDrop,
   options,
+  placeholder = "Select",
   selected,
   setOpenDrop,
   onToggle,
@@ -2006,10 +2541,12 @@ function MultiSelectControl({
   onFocusControl,
   error,
 }: {
+  compact?: boolean;
   dropKey: DropdownKey;
   label: string | null;
   openDrop: DropdownKey | null;
   options: readonly string[];
+  placeholder?: string;
   selected: string[];
   setOpenDrop: (key: DropdownKey | null) => void;
   onToggle: (value: string) => void;
@@ -2029,9 +2566,9 @@ function MultiSelectControl({
             setOpenDrop(openDrop === dropKey ? null : dropKey);
           }
         }}
-        style={[styles.selectButton, openDrop === dropKey || focusedDrop === dropKey ? styles.fieldFocused : null, error ? styles.fieldError : null]}
+        style={[styles.selectButton, compact ? styles.compactSelectButton : null, openDrop === dropKey || focusedDrop === dropKey ? styles.fieldFocused : null, error ? styles.fieldError : null]}
       >
-        <Text numberOfLines={1} style={styles.selectButtonText}>{selected.length ? selected.join(", ") : "Select"}</Text>
+        <Text numberOfLines={1} style={[styles.selectButtonText, selected.length === 0 ? styles.placeholder : null]}>{selected.length ? selected.join(", ") : placeholder}</Text>
         <Feather color={huddleColors.iconMuted} name={openDrop === dropKey ? "chevron-up" : "chevron-down"} size={16} />
       </Pressable>
       {openDrop === dropKey ? <SelectList options={options} selected={selected} onToggle={onToggle} /> : null}
@@ -2042,9 +2579,50 @@ function MultiSelectControl({
 
 function MultiSelectSection(props: Omit<Parameters<typeof MultiSelectControl>[0], "label"> & { title: string; error?: string }) {
   return (
-    <View style={styles.section}>
+    <View style={styles.fieldGroup}>
       <Text style={styles.sectionTitle}>{props.title}</Text>
       <MultiSelectControl {...props} label={null} />
+    </View>
+  );
+}
+
+function PetTypeMultiSelectSection({
+  dropKey,
+  error,
+  fieldRef,
+  focusedDrop,
+  onFocusControl,
+  onToggle,
+  openDrop,
+  selected,
+  setOpenDrop,
+}: Omit<Parameters<typeof MultiSelectControl>[0], "compact" | "label" | "options" | "placeholder">) {
+  const selectedIcons = selected.map((option) => nativePetEmojiForLabel(option)).filter((icon): icon is string => Boolean(icon));
+  return (
+    <View ref={fieldRef} style={styles.fieldGroup}>
+      <Text style={styles.sectionTitle}>Pet Types</Text>
+      <NativeFormChoiceField error={error} focused={openDrop === dropKey || focusedDrop === dropKey} label="">
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => {
+            if (onFocusControl) onFocusControl(dropKey);
+            else {
+              Keyboard.dismiss();
+              setOpenDrop(openDrop === dropKey ? null : dropKey);
+            }
+          }}
+          style={styles.petTypeSelectTrigger}
+        >
+          <View style={styles.petTypeSelectValueRow}>
+            {selectedIcons.length > 0 ? <Text style={styles.petTypeEmoji}>{selectedIcons.join(" ")}</Text> : null}
+            <Text numberOfLines={1} style={[styles.petTypeSelectValue, selected.length === 0 ? styles.placeholder : null]}>
+              {selected.length > 0 ? selected.join(", ") : "Pet type"}
+            </Text>
+          </View>
+          <Feather color={huddleColors.mutedText} name={openDrop === dropKey ? "chevron-up" : "chevron-down"} size={18} />
+        </Pressable>
+      </NativeFormChoiceField>
+      {openDrop === dropKey ? <SelectList optionIcon={nativePetEmojiForLabel} options={PET_TYPES} selected={selected} onToggle={onToggle} /> : null}
     </View>
   );
 }
@@ -2056,6 +2634,7 @@ const styles = StyleSheet.create({
   },
   flex: {
     flex: 1,
+    minWidth: 0,
   },
   centered: {
     flex: 1,
@@ -2073,8 +2652,7 @@ const styles = StyleSheet.create({
     paddingBottom: huddleSpacing.x3,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: huddleColors.divider,
-    backgroundColor: huddleColors.glassChrome,
-    ...huddleShadows.glassHeader,
+    backgroundColor: huddleColors.canvas,
   },
   headerIcon: {
     width: 40,
@@ -2133,11 +2711,47 @@ const styles = StyleSheet.create({
   contentScroller: {
     backgroundColor: huddleColors.canvas,
   },
+  // Stationed at the top-right corner of the card in view mode; frosted recipe
+  // matches the bottom nav (NativeGlassSurface), not a solid white circle.
+  shareCardButton: {
+    position: "absolute",
+    top: huddleSpacing.x5,
+    right: huddleSpacing.x5,
+    zIndex: 20,
+    ...huddleShadows.glassElevation1,
+  },
+  shareCardGlass: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: huddleColors.glassBorder,
+  },
   form: {
     gap: huddleSpacing.x6,
   },
-  section: {
-    gap: huddleSpacing.x4,
+  contactFieldGroup: {
+    gap: huddleSpacing.x2,
+  },
+  helperFieldStack: {
+    gap: huddleSpacing.x1,
+  },
+  // Every card owns one local stack so the shared collapsible-body gap cannot
+  // accidentally determine the spacing between form groups.
+  groupStack: {
+    gap: huddleSpacing.x5,
+    paddingBottom: huddleSpacing.x2,
+  },
+  fieldGroup: {
+    gap: huddleSpacing.x2,
+  },
+  compactGroup: {
+    gap: huddleSpacing.x2,
+  },
+  compositeContent: {
+    gap: huddleSpacing.x1,
   },
   sectionHeaderRow: {
     flexDirection: "row",
@@ -2165,6 +2779,8 @@ const styles = StyleSheet.create({
     color: huddleColors.text,
   },
   field: {
+    flexShrink: 1,
+    minWidth: 0,
     height: huddleLayout.fieldHeight,
     borderWidth: 1,
     borderColor: huddleColors.fieldBorder,
@@ -2175,6 +2791,7 @@ const styles = StyleSheet.create({
     lineHeight: huddleType.body + 6,
     color: huddleColors.text,
     backgroundColor: huddleColors.canvas,
+    overflow: "hidden",
     ...huddleShadows.glassElevation1,
   },
   fieldFocused: {
@@ -2183,9 +2800,43 @@ const styles = StyleSheet.create({
   fieldError: {
     ...huddleFieldStates.error,
   },
+  locationFieldRow: {
+    height: huddleLayout.fieldHeight,
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: huddleColors.fieldBorder,
+    borderRadius: huddleRadii.field,
+    paddingLeft: huddleSpacing.x1,
+    paddingRight: huddleSpacing.x4,
+    backgroundColor: huddleColors.canvas,
+    ...huddleShadows.glassElevation1,
+  },
+  compactFieldFrame: {
+    height: 48,
+    minHeight: 48,
+    maxHeight: 48,
+  },
+  locationFieldInput: {
+    flex: 1,
+    minWidth: 0,
+    flexShrink: 1,
+    height: huddleLayout.fieldHeight - 2,
+    paddingTop: huddleSpacing.x1,
+    paddingBottom: huddleSpacing.x1,
+    fontFamily: "Urbanist-500",
+    fontSize: huddleType.body,
+    lineHeight: huddleType.body + 8,
+    color: huddleColors.text,
+    textAlignVertical: "center",
+    overflow: "hidden",
+  },
+  locationFieldPin: {
+    marginRight: huddleSpacing.x1,
+  },
   textArea: {
-    height: undefined,
-    minHeight: 108,
+    height: huddleFormFields.multilineHeight,
+    maxHeight: huddleFormFields.multilineHeight,
     paddingTop: huddleSpacing.x3,
     paddingBottom: huddleSpacing.x3,
   },
@@ -2202,8 +2853,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: huddleSpacing.x3,
     borderRadius: huddleRadii.pill,
     borderWidth: 1,
-    borderColor: huddleColors.fieldBorderSoft,
-    backgroundColor: huddleColors.mutedCanvas,
+    borderColor: huddleColors.glassBorder,
+    backgroundColor: huddleColors.glassChrome,
+    ...huddleShadows.glassElevation1,
   },
   chipText: {
     fontFamily: "Urbanist-600",
@@ -2218,24 +2870,33 @@ const styles = StyleSheet.create({
     gap: huddleSpacing.x3,
     paddingHorizontal: huddleSpacing.x4,
     borderWidth: 1,
-    borderColor: huddleColors.fieldBorder,
+    borderColor: huddleColors.glassBorder,
     borderRadius: huddleRadii.field,
-    backgroundColor: huddleColors.canvas,
+    backgroundColor: huddleFormFields.background,
+    shadowColor: huddleColors.neutralShadow,
+    shadowOpacity: huddleFormFields.shadowOpacity,
+    shadowRadius: 6,
+    shadowOffset: { width: huddleFormFields.shadowOffset, height: huddleFormFields.shadowOffset },
+    elevation: 1,
   },
   selectButtonText: {
     flex: 1,
     fontFamily: "Urbanist-500",
-    fontSize: huddleType.body,
-    lineHeight: huddleType.body + 6,
-    color: huddleColors.mutedText,
+    fontSize: huddleFormFields.valueSize,
+    lineHeight: huddleFormFields.valueLine,
+    color: huddleColors.text,
   },
   dropdownMenu: {
     maxHeight: huddleFormControls.select.menuMaxHeight,
+    marginTop: huddleSpacing.x2,
     borderRadius: huddleFormControls.select.menuRadius,
-    borderWidth: 1,
-    borderColor: huddleColors.fieldBorderSoft,
+    borderWidth: 0,
     backgroundColor: huddleColors.canvas,
-    ...huddleShadows.glassElevation1,
+    shadowColor: huddleColors.neutralShadow,
+    shadowOpacity: 0.18,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 6,
   },
   dropdownMenuEmbedded: {
     maxHeight: 180,
@@ -2254,17 +2915,18 @@ const styles = StyleSheet.create({
     padding: huddleFormControls.select.menuPadding,
   },
   dropdownSearchInput: {
+    flexShrink: 1,
+    minWidth: 0,
     height: huddleLayout.fieldHeight,
     margin: huddleFormControls.select.menuPadding,
     marginBottom: 0,
     borderRadius: huddleRadii.field,
-    borderWidth: 1,
-    borderColor: huddleColors.fieldBorder,
     paddingHorizontal: huddleSpacing.x3,
     fontFamily: "Urbanist-500",
     fontSize: huddleType.body,
     color: huddleColors.text,
     backgroundColor: huddleColors.canvas,
+    overflow: "hidden",
   },
   dropdownOption: {
     minHeight: huddleFormControls.select.optionMinHeight,
@@ -2277,17 +2939,54 @@ const styles = StyleSheet.create({
     gap: huddleSpacing.x2,
   },
   dropdownOptionActive: {
-    backgroundColor: huddleColors.primarySoftFill,
+    backgroundColor: "transparent",
   },
   dropdownText: {
     flex: 1,
-    fontFamily: "Urbanist-600",
+    fontFamily: "Urbanist-500",
+    fontSize: 14,
+    color: huddleColors.text,
+  },
+  dropdownLabelRow: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: huddleSpacing.x2,
+  },
+  dropdownOptionEmoji: {
+    fontSize: 17,
+    lineHeight: 20,
+  },
+  checkSlot: {
+    width: huddleFormControls.select.checkSlot,
+  },
+  petTypeSelectTrigger: {
+    minHeight: huddleLayout.fieldHeight - 2,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: huddleSpacing.x2,
+  },
+  petTypeSelectValueRow: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: huddleSpacing.x2,
+  },
+  petTypeEmoji: {
+    fontSize: 17,
+    lineHeight: 20,
+  },
+  petTypeSelectValue: {
+    flex: 1,
+    fontFamily: "Urbanist-500",
     fontSize: huddleType.body,
     lineHeight: huddleType.body + 6,
     color: huddleColors.text,
   },
-  checkSlot: {
-    width: huddleFormControls.select.checkSlot,
+  placeholder: {
+    color: huddleColors.mutedText,
   },
   iconCircle: {
     width: 32,
@@ -2332,8 +3031,9 @@ const styles = StyleSheet.create({
     padding: huddleSpacing.x4,
     borderRadius: huddleRadii.card,
     borderWidth: 1,
-    borderColor: huddleColors.fieldBorderSoft,
-    backgroundColor: huddleColors.mutedCanvas,
+    borderColor: huddleColors.glassBorder,
+    backgroundColor: huddleColors.glassOverlay,
+    ...huddleShadows.glassElevation1,
   },
   careTypeToggleRow: {
     flexDirection: "row",
@@ -2410,11 +3110,14 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   rateCompositeInput: {
+    flexShrink: 1,
+    minWidth: 0,
     height: huddleLayout.fieldHeight,
     paddingHorizontal: huddleSpacing.x2,
     fontFamily: "Urbanist-500",
     fontSize: huddleType.body,
     color: huddleColors.text,
+    overflow: "hidden",
   },
   rateCompositeUnit: {
     minWidth: 98,
@@ -2464,7 +3167,10 @@ const styles = StyleSheet.create({
     gap: huddleSpacing.x2,
     paddingHorizontal: huddleSpacing.x3,
     borderRadius: huddleRadii.field,
-    backgroundColor: huddleColors.mutedCanvas,
+    borderWidth: 1,
+    borderColor: huddleColors.glassBorder,
+    backgroundColor: huddleColors.glassChrome,
+    ...huddleShadows.glassElevation1,
   },
   availabilityColumns: {
     flexDirection: "row",
@@ -2491,7 +3197,12 @@ const styles = StyleSheet.create({
     gap: huddleSpacing.x2,
   },
   compactSelectButton: {
-    height: huddleLayout.fieldHeight,
+    height: 48,
+    minHeight: 48,
+  },
+  compactSwitchSettingRow: {
+    minHeight: 48,
+    height: 48,
   },
   noticeCompactRow: {
     width: "100%",
@@ -2512,11 +3223,14 @@ const styles = StyleSheet.create({
     gap: huddleSpacing.x1,
     paddingHorizontal: huddleSpacing.x3,
     borderRadius: huddleRadii.field,
-    backgroundColor: huddleColors.mutedCanvas,
+    borderWidth: 1,
+    borderColor: huddleColors.glassBorder,
+    backgroundColor: huddleColors.glassChrome,
+    ...huddleShadows.glassElevation1,
   },
-  noticeToggleWrapFull: {
-    flex: 0,
-    width: "100%",
+  compactNoticeControl: {
+    minHeight: 48,
+    height: 48,
   },
   noticeToggleLabel: {
     flex: 1,
@@ -2550,11 +3264,15 @@ const styles = StyleSheet.create({
     width: 34,
   },
   noticeCompositeInput: {
+    flexShrink: 1,
+    minWidth: 0,
     height: huddleLayout.fieldHeight,
-    paddingHorizontal: huddleSpacing.x2,
+    paddingLeft: huddleSpacing.x3,
+    paddingRight: 0,
     fontFamily: "Urbanist-500",
     fontSize: huddleType.body,
     color: huddleColors.text,
+    overflow: "hidden",
   },
   noticeCompositeUnit: {
     flex: 1,
@@ -2651,7 +3369,14 @@ const styles = StyleSheet.create({
     fontSize: huddleType.label,
     lineHeight: huddleType.labelLine,
     color: huddleColors.mutedText,
-    textAlign: "center",
+    textAlign: "left",
+  },
+  expiredCredentialHelper: {
+    fontFamily: "Urbanist-500",
+    fontSize: huddleType.label,
+    lineHeight: huddleType.labelLine,
+    color: huddleColors.blue,
+    textAlign: "left",
   },
   agreementRow: {
     flexDirection: "row",
@@ -2659,7 +3384,10 @@ const styles = StyleSheet.create({
     gap: huddleSpacing.x3,
     padding: huddleSpacing.x3,
     borderRadius: huddleRadii.field,
-    backgroundColor: huddleColors.mutedCanvas,
+    borderWidth: 1,
+    borderColor: huddleColors.glassBorder,
+    backgroundColor: huddleColors.glassChrome,
+    ...huddleShadows.glassElevation1,
   },
   checkbox: {
     width: 20,
@@ -2695,7 +3423,10 @@ const styles = StyleSheet.create({
     borderRadius: huddleRadii.field,
     paddingVertical: huddleSpacing.x3,
     paddingHorizontal: huddleSpacing.x4,
-    backgroundColor: huddleColors.mutedCanvas,
+    borderWidth: 1,
+    borderColor: huddleColors.glassBorder,
+    backgroundColor: huddleColors.glassChrome,
+    ...huddleShadows.glassElevation1,
   },
   listingTopRow: {
     minHeight: 40,
@@ -2711,11 +3442,9 @@ const styles = StyleSheet.create({
   },
   qualificationReadCard: {
     gap: huddleSpacing.x1,
-    padding: huddleSpacing.x3,
-    borderRadius: huddleRadii.field,
-    borderWidth: 1,
-    borderColor: huddleColors.fieldBorderSoft,
-    backgroundColor: huddleColors.canvas,
+    padding: 0,
+    borderWidth: 0,
+    backgroundColor: "transparent",
   },
   qualificationPreviewRow: {
     minHeight: 24,
@@ -2786,7 +3515,7 @@ const styles = StyleSheet.create({
   dateField: {
     height: huddleLayout.fieldHeight,
     borderRadius: huddleRadii.field,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderWidth: 1,
     borderColor: huddleColors.fieldBorder,
     backgroundColor: huddleColors.canvas,
     flexDirection: "row",
@@ -2796,11 +3525,14 @@ const styles = StyleSheet.create({
   },
   dateFieldInput: {
     flex: 1,
+    minWidth: 0,
+    flexShrink: 1,
     height: huddleLayout.fieldHeight,
     paddingHorizontal: huddleSpacing.x4,
     color: huddleColors.text,
     fontFamily: "Urbanist-500",
     fontSize: huddleType.body,
+    overflow: "hidden",
   },
   dateIconButton: {
     width: 40,
@@ -2948,14 +3680,17 @@ const styles = StyleSheet.create({
     gap: huddleSpacing.x3,
     paddingHorizontal: huddleSpacing.x3,
     borderRadius: huddleRadii.field,
-    backgroundColor: huddleColors.mutedCanvas,
+    borderWidth: 1,
+    borderColor: huddleColors.glassBorder,
+    backgroundColor: huddleColors.glassChrome,
+    ...huddleShadows.glassElevation1,
   },
   switchTrack: {
+    ...huddleGlassControls.toggleSurface,
     width: 50,
     height: 28,
     flexShrink: 0,
     borderRadius: huddleRadii.pill,
-    backgroundColor: huddleColors.fieldBorderStrong,
     justifyContent: "center",
     paddingHorizontal: 3,
   },
@@ -2975,6 +3710,7 @@ const styles = StyleSheet.create({
     fontFamily: "Urbanist-600",
     fontSize: huddleType.label,
     lineHeight: huddleType.labelLine,
+    letterSpacing: 0,
     color: huddleColors.validationRed,
   },
   locationHelper: {
@@ -2982,6 +3718,15 @@ const styles = StyleSheet.create({
     fontSize: huddleType.helper,
     lineHeight: huddleType.labelLine,
     color: huddleColors.mutedText,
+  },
+  preferredMeetupBlock: {
+    gap: huddleSpacing.x1,
+  },
+  locationFollowupStack: {
+    gap: huddleSpacing.x2,
+  },
+  locationSpinner: {
+    alignSelf: "flex-start",
   },
   suggestionMenu: {
     marginTop: huddleSpacing.x2,
@@ -3001,12 +3746,14 @@ const styles = StyleSheet.create({
     borderBottomColor: huddleColors.divider,
   },
   suggestionPrimary: {
+    flexShrink: 1,
     fontFamily: "Urbanist-700",
     fontSize: huddleType.label,
     lineHeight: huddleType.labelLine,
     color: huddleColors.text,
   },
   suggestionText: {
+    flexShrink: 1,
     fontFamily: "Urbanist-500",
     fontSize: huddleType.helper,
     lineHeight: huddleType.helperLine,

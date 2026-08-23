@@ -1,9 +1,9 @@
 import * as FileSystem from "expo-file-system/legacy";
 import { manipulateAsync, SaveFormat, type Action } from "expo-image-manipulator";
-import { supabase } from "./supabase";
-import { supabaseAnonKey } from "./supabase";
-import { registerNativeMediaAsset } from "./nativeMediaAssets";
-import { createNativeProtectedActionError, requestNativeStorageCleanupResult } from "./nativeStorageCleanup";
+import { supabase, supabaseUrl } from "./supabase";
+import { createNativeProtectedActionError, requestNativeStorageCleanupResult, type NativeProtectedActionStage } from "./nativeStorageCleanup";
+import { createFreshNativeFunctionHeaders, getFreshNativeAccessToken, refreshNativeSessionOnce } from "./nativeFunctionClient";
+import { fetchNativeResponseWithTimeout, NATIVE_MEDIA_UPLOAD_TIMEOUT_MS } from "./nativeTimeout";
 import {
   parseNativeProfileImageStorageRef,
   resolveNativeProfileImageUrlAsync,
@@ -11,6 +11,7 @@ import {
 
 export type NativeProfilePhotoSlot = "cover" | "establishing" | "pack" | "solo" | "closer";
 export type NativeSoloAspect = "1:1" | "4:5" | "16:9";
+export type NativeProfilePhotoPresentationCrop = { centerX: number; centerY: number; widthPct: number; sourceAspect?: number };
 
 export type NativeProfilePhotos = {
   cover: string | null;
@@ -23,6 +24,7 @@ export type NativeProfilePhotos = {
   solo_caption: string | null;
   closer_caption: string | null;
   solo_aspect: NativeSoloAspect | null;
+  avatar_presentation: NativeProfilePhotoPresentationCrop | null;
 };
 
 export type NativeProfileUploadAsset = {
@@ -56,9 +58,7 @@ export const NATIVE_PROFILE_PHOTO_SLOTS: NativeProfilePhotoSlot[] = [
 export const NATIVE_SOLO_ASPECTS: NativeSoloAspect[] = ["1:1", "4:5", "16:9"];
 
 export const PROFILE_PHOTOS_BUCKET = "profile_photos";
-export const LEGACY_PROFILE_PHOTOS_BUCKET = "Profiles";
-const LEGACY_AVATARS_BUCKET = "avatars";
-const NATIVE_PROFILE_PHOTO_STORAGE_PATH_REGEX = /^(?:profile_photos|Profiles)\/[^/]+\/(?:cover|establishing|pack|solo|closer)-\d+\.(?:webp|jpg)$/;
+const NATIVE_PROFILE_PHOTO_STORAGE_PATH_REGEX = /^profile_photos\/[^/]+\/(?:cover|establishing|pack|solo|closer)(?:-[A-Za-z0-9][A-Za-z0-9_-]*)?\.(?:webp|jpg|jpeg|png)$/;
 export const NATIVE_PROFILE_PHOTO_RAW_MAX_BYTES = 25 * 1024 * 1024;
 export const NATIVE_PROFILE_PHOTO_FINAL_MAX_BYTES = 1.2 * 1024 * 1024;
 export const NATIVE_PROFILE_PHOTO_LONG_EDGE = 1600;
@@ -85,7 +85,24 @@ export const emptyNativeProfilePhotos = (): NativeProfilePhotos => ({
   solo_caption: null,
   closer_caption: null,
   solo_aspect: null,
+  avatar_presentation: null,
 });
+
+export const normalizeNativeProfilePhotoPresentationCrop = (value: unknown): NativeProfilePhotoPresentationCrop | null => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const centerX = Number(record.centerX);
+  const centerY = Number(record.centerY);
+  const widthPct = Number(record.widthPct);
+  if (![centerX, centerY, widthPct].every(Number.isFinite)) return null;
+  const sourceAspect = Number(record.sourceAspect);
+  return {
+    centerX: Math.min(Math.max(centerX, 0), 100),
+    centerY: Math.min(Math.max(centerY, 0), 100),
+    widthPct: Math.min(Math.max(widthPct, 1), 100),
+    ...(Number.isFinite(sourceAspect) && sourceAspect > 0 ? { sourceAspect } : {}),
+  };
+};
 
 export const normalizeNativeSoloAspect = (value: unknown): NativeSoloAspect | null => (
   typeof value === "string" && (NATIVE_SOLO_ASPECTS as string[]).includes(value)
@@ -97,12 +114,14 @@ export const curateLegacyNativeProfilePhotos = (
   avatarUrl: string | null | undefined,
   legacyAlbum: string[] | null | undefined,
 ): NativeProfilePhotos => {
+  const cleanAvatarUrl = cleanString(avatarUrl);
   const album = Array.isArray(legacyAlbum)
     ? legacyAlbum.map(cleanString).filter((item): item is string => Boolean(item))
+      .filter((item) => item !== cleanAvatarUrl)
     : [];
 
   return {
-    cover: cleanString(avatarUrl),
+    cover: cleanAvatarUrl,
     establishing: album[0] ?? null,
     pack: album[1] ?? null,
     solo: album[2] ?? null,
@@ -112,6 +131,7 @@ export const curateLegacyNativeProfilePhotos = (
     solo_caption: null,
     closer_caption: null,
     solo_aspect: album[2] ? "4:5" : null,
+    avatar_presentation: null,
   };
 };
 
@@ -137,6 +157,7 @@ export const normalizeNativeProfilePhotos = (
   normalized.solo_caption = cleanCaption(record.solo_caption);
   normalized.closer_caption = cleanCaption(record.closer_caption);
   normalized.solo_aspect = normalizeNativeSoloAspect(record.solo_aspect) ?? legacy.solo_aspect;
+  normalized.avatar_presentation = normalizeNativeProfilePhotoPresentationCrop(record.avatar_presentation);
 
   return normalized;
 };
@@ -172,6 +193,7 @@ export const sanitizeNativeProfilePhotosForDraft = (photos: NativeProfilePhotos)
   solo_caption: photos.solo_caption,
   closer_caption: photos.closer_caption,
   solo_aspect: photos.solo_aspect,
+  avatar_presentation: normalizeNativeProfilePhotoPresentationCrop(photos.avatar_presentation),
 });
 
 export const hasAnyNativeProfilePhoto = (photos: NativeProfilePhotos) => (
@@ -241,19 +263,19 @@ export const resolveNativeProfilePhotos = async (photos: NativeProfilePhotos) =>
   );
 };
 
-export const getNativeProfilePhotoUploadPath = (
-  userId: string,
-  slot: NativeProfilePhotoSlot,
-  extension = "jpg",
-) => `${PROFILE_PHOTOS_BUCKET}/${userId}/${slot}-${Date.now()}.${extension}`;
-
 export const validateNativeProfilePhotoAsset = (asset: NativeProfileUploadAsset) => {
-  const size = typeof asset.fileSize === "number" ? asset.fileSize : 0;
+  const size = typeof asset.fileSize === "number" && Number.isFinite(asset.fileSize) && asset.fileSize > 0 ? asset.fileSize : null;
+  if (!size) {
+    return "Couldn't verify that photo's size. Try another image.";
+  }
   if (size > NATIVE_PROFILE_PHOTO_RAW_MAX_BYTES) {
     return "That file's too big. Try a photo under 25MB.";
   }
   const mime = String(asset.mimeType || "").toLowerCase();
-  if (mime && !["image/jpeg", "image/jpg", "image/png", "image/webp", "image/heic", "image/heif"].includes(mime)) {
+  const supportedMimes = ["image/jpeg", "image/jpg", "image/png", "image/webp", "image/heic", "image/heif"];
+  const extension = String(asset.fileName || asset.uri || "").split(".").pop()?.split("?")[0]?.toLowerCase() ?? "";
+  const supportedExtensions = ["jpg", "jpeg", "png", "webp", "heic", "heif"];
+  if ((mime && !supportedMimes.includes(mime)) || (!mime && extension && !supportedExtensions.includes(extension))) {
     return "That file type's not supported. Try JPG, PNG, or HEIC.";
   }
   if (!asset.uri) return "That file type's not supported. Try JPG, PNG, or HEIC.";
@@ -286,6 +308,22 @@ const getFileSize = async (uri: string) => {
   return info.exists && typeof info.size === "number" ? info.size : null;
 };
 
+const deleteNativeProfilePhotoTemporaryFile = async (uri: string | null | undefined) => {
+  const cleanUri = cleanString(uri);
+  if (!cleanUri || !cleanUri.startsWith("file://")) return;
+  await FileSystem.deleteAsync(cleanUri, { idempotent: true }).catch(() => undefined);
+};
+
+export const cleanupNativeProfilePhotoTemporaryAsset = async (asset: NativeProfileUploadAsset | null | undefined) => {
+  const fileName = cleanString(asset?.fileName);
+  if (!fileName || !/^(?:profile-photo\.(?:webp|jpe?g)|huddle-photo-edit-\d+\.(?:webp|jpe?g|png|heic|heif))$/i.test(fileName)) return;
+  await deleteNativeProfilePhotoTemporaryFile(asset?.uri);
+};
+
+export const isNativeProfilePhotoFinalSizeAllowed = (size: number | null | undefined) => (
+  typeof size === "number" && Number.isFinite(size) && size > 0 && size <= NATIVE_PROFILE_PHOTO_FINAL_MAX_BYTES
+);
+
 export const normalizeNativeProfilePhotoAsset = async (
   asset: NativeProfileUploadAsset & { height?: number | null; width?: number | null },
   crop: NativeProfilePhotoCropRect,
@@ -307,72 +345,51 @@ export const normalizeNativeProfilePhotoAsset = async (
   const resizeScale = Math.min(1, NATIVE_PROFILE_PHOTO_LONG_EDGE / Math.max(safeCrop.width, safeCrop.height));
   const resizeWidth = Math.max(1, Math.round(safeCrop.width * resizeScale));
   const resizeHeight = Math.max(1, Math.round(safeCrop.height * resizeScale));
-  const actions: Action[] = [
-    ...(Math.abs(rotationDegrees) > 0.1 ? [{ rotate: rotationDegrees } as Action] : []),
-    { crop: safeCrop },
-    { resize: { width: resizeWidth, height: resizeHeight } },
-  ];
-
-  const qualities = [0.82, 0.72, 0.62, 0.52];
-  try {
-    for (const quality of qualities) {
-      const result = await manipulateAsync(asset.uri as string, actions, {
-        compress: quality,
-        format: SaveFormat.WEBP,
-      });
-      const size = await getFileSize(result.uri);
-      if (!size || size <= NATIVE_PROFILE_PHOTO_FINAL_MAX_BYTES || quality === qualities[qualities.length - 1]) {
-        return {
-          uri: result.uri,
-          fileName: "profile-photo.webp",
-          fileSize: size,
-          mimeType: "image/webp",
-        };
+  const qualities = [0.82, 0.68, 0.54, 0.4];
+  const outputScales = [1, 0.8, 0.6];
+  const formats = [
+    { extension: "webp", format: SaveFormat.WEBP, mimeType: "image/webp" },
+    { extension: "jpg", format: SaveFormat.JPEG, mimeType: "image/jpeg" },
+  ] as const;
+  for (const outputScale of outputScales) {
+    const actions: Action[] = [
+      ...(Math.abs(rotationDegrees) > 0.1 ? [{ rotate: rotationDegrees } as Action] : []),
+      { crop: safeCrop },
+      { resize: {
+        width: Math.max(1, Math.round(resizeWidth * outputScale)),
+        height: Math.max(1, Math.round(resizeHeight * outputScale)),
+      } },
+    ];
+    for (const output of formats) {
+      for (const quality of qualities) {
+        try {
+          const result = await manipulateAsync(asset.uri as string, actions, {
+            compress: quality,
+            format: output.format,
+          });
+          const finalSize = await getFileSize(result.uri);
+          if (!isNativeProfilePhotoFinalSizeAllowed(finalSize)) {
+            await deleteNativeProfilePhotoTemporaryFile(result.uri);
+            continue;
+          }
+          return {
+            uri: result.uri,
+            fileName: `profile-photo.${output.extension}`,
+            fileSize: finalSize,
+            mimeType: output.mimeType,
+          };
+        } catch {
+          // Try the next quality/format/size. No candidate is returned without a
+          // verified file size at or below the client upload ceiling.
+        }
       }
     }
-  } catch {
-    const result = await manipulateAsync(asset.uri as string, actions, {
-      compress: 0.85,
-      format: SaveFormat.JPEG,
-    });
-    return {
-      uri: result.uri,
-      fileName: "profile-photo.jpg",
-      fileSize: await getFileSize(result.uri),
-      mimeType: "image/jpeg",
-    };
   }
 
-  throw new Error("profile_photo_normalize_failed");
+  throw new Error("Couldn't make that photo small enough to upload. Try a different image.");
 };
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-const base64ToArrayBuffer = (base64: string) => {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-  const cleanBase64 = base64.replace(/[^A-Za-z0-9+/=]/g, "");
-  const padding = cleanBase64.endsWith("==") ? 2 : cleanBase64.endsWith("=") ? 1 : 0;
-  const byteLength = Math.max(0, Math.floor((cleanBase64.length * 3) / 4) - padding);
-  const bytes = new Uint8Array(byteLength);
-  let buffer = 0;
-  let bits = 0;
-  let index = 0;
-
-  for (const char of cleanBase64) {
-    if (char === "=") break;
-    const value = chars.indexOf(char);
-    if (value < 0) continue;
-    buffer = (buffer << 6) | value;
-    bits += 6;
-    if (bits >= 8 && index < byteLength) {
-      bits -= 8;
-      bytes[index] = (buffer >> bits) & 0xff;
-      index += 1;
-    }
-  }
-
-  return bytes.buffer;
-};
 
 const shouldRetryStorageUpload = (error: unknown): boolean => {
   if (!error || typeof error !== "object") return true;
@@ -386,85 +403,75 @@ export const uploadNativeProfilePhotoAsset = async (
   asset: NativeProfileUploadAsset,
   accessToken?: string | null,
 ) => {
-  const cleanAccessToken = cleanString(accessToken);
+  const cleanAccessToken = await getFreshNativeAccessToken(accessToken);
   if (!cleanAccessToken) throw new Error("Please sign in again to upload photos.");
   const validation = validateNativeProfilePhotoAsset(asset);
   if (validation) throw new Error(validation);
   const uri = asset.uri as string;
-  const extension = extensionForAsset(asset);
-  const path = getNativeProfilePhotoUploadPath(userId, slot, extension);
-  const objectPath = path.replace(/^profile_photos\/+/i, "");
-  const base64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
-  const body = base64ToArrayBuffer(base64);
-  const contentType = asset.mimeType || (extension === "png" ? "image/png" : extension === "webp" ? "image/webp" : "image/jpeg");
-  let lastError: unknown = null;
-  const retryDelays = [250, 1000];
-  for (let attempt = 0; attempt <= retryDelays.length; attempt += 1) {
-    const { error } = await supabase.storage.from(PROFILE_PHOTOS_BUCKET).upload(objectPath, body, {
-      contentType,
-      headers: { Authorization: `Bearer ${cleanAccessToken}`, apikey: supabaseAnonKey },
-      upsert: false,
-    });
-    if (!error) {
-      try {
-        await registerNativeMediaAsset({
-          accessToken: cleanAccessToken,
-          bucket: PROFILE_PHOTOS_BUCKET,
-          contentType: "profile_photo",
-          objectPath,
-        });
-      } catch (registrationError) {
-        const cleanupResult = await requestNativeStorageCleanupResult(PROFILE_PHOTOS_BUCKET, objectPath, "profile_photo_registration_failed", cleanAccessToken);
-        throw createNativeProtectedActionError({
-          ok: false,
-          stage: "register",
-          originalError: registrationError instanceof Error ? registrationError : new Error("profile_photo_registration_failed"),
-          cleanupAttempted: true,
-          cleanupResult,
-        });
+  try {
+    const extension = extensionForAsset(asset);
+    const base64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
+    const contentType = asset.mimeType || (extension === "png" ? "image/png" : extension === "webp" ? "image/webp" : "image/jpeg");
+    let activeAccessToken = cleanAccessToken;
+    let lastError: unknown = null;
+    const retryDelays = [250, 1000];
+    for (let attempt = 0; attempt <= retryDelays.length; attempt += 1) {
+      const response = await fetchNativeResponseWithTimeout(`${supabaseUrl}/functions/v1/native-profile-photo-upload`, {
+      method: "POST",
+      headers: await createFreshNativeFunctionHeaders(activeAccessToken, { functionName: "native-profile-photo-upload", routeToken: cleanAccessToken }),
+      body: JSON.stringify({
+        extension,
+        file_base64: base64,
+        mime_type: contentType,
+        slot,
+      }),
+    }, NATIVE_MEDIA_UPLOAD_TIMEOUT_MS);
+      if (response.ok) {
+        const payload = await response.json().catch(() => null) as { data?: { path?: string } } | null;
+        const uploadedPath = String(payload?.data?.path || "").trim();
+        if (uploadedPath) return uploadedPath;
+        throw new Error("profile_photo_upload_missing_path");
       }
-      return path;
+      const parsed = await response.json().catch(() => null) as { error?: string; stage?: NativeProtectedActionStage } | null;
+      const raw = parsed?.error || `profile_photo_upload_failed_${response.status}`;
+      lastError = new Error(raw);
+      (lastError as Error & { status?: number }).status = response.status;
+      if (response.status === 401 && attempt === 0) {
+        const refreshed = await refreshNativeSessionOnce().then((session) => session?.access_token || "").catch(() => "");
+        if (refreshed) {
+          activeAccessToken = refreshed;
+          continue;
+        }
+      }
+      if (!shouldRetryStorageUpload(lastError)) break;
+      const retryDelay = retryDelays[attempt];
+      if (retryDelay) await delay(retryDelay);
     }
-    lastError = error;
-    if (!shouldRetryStorageUpload(error)) break;
-    const retryDelay = retryDelays[attempt];
-    if (retryDelay) await delay(retryDelay);
+    throw createNativeProtectedActionError({
+      ok: false,
+      stage: "upload",
+      userMessage: "We couldn't upload your profile photo. Please check the photo and try again.",
+      originalError: lastError instanceof Error ? lastError : new Error("profile_photo_upload_failed"),
+      cleanupAttempted: false,
+      cleanupResult: "not_needed",
+    });
+  } catch (error) {
+    await cleanupNativeProfilePhotoTemporaryAsset(asset);
+    throw error;
   }
-  throw createNativeProtectedActionError({
-    ok: false,
-    stage: "upload",
-    originalError: lastError instanceof Error ? lastError : new Error("profile_photo_upload_failed"),
-    cleanupAttempted: false,
-    cleanupResult: "not_needed",
-  });
 };
 
-export const deleteNativeProfilePhotoPath = async (path: string | null | undefined) => {
+export const deleteNativeProfilePhotoPath = async (path: string | null | undefined, accessToken?: string | null) => {
   const cleanPath = cleanString(path);
   if (!cleanPath) return;
   if (cleanPath.startsWith(`${PROFILE_PHOTOS_BUCKET}/`)) {
-    const cleanupResult = await requestNativeStorageCleanupResult(PROFILE_PHOTOS_BUCKET, cleanPath.replace(/^profile_photos\//, ""), "delete_profile_photo");
+    const cleanupResult = await requestNativeStorageCleanupResult(PROFILE_PHOTOS_BUCKET, cleanPath.replace(/^profile_photos\//, ""), "delete_profile_photo", accessToken);
     if (cleanupResult === "failed") {
-      throw createNativeProtectedActionError({
-        ok: false,
-        stage: "delete",
-        originalError: new Error("profile_photo_delete_cleanup_failed"),
-        cleanupAttempted: true,
+      console.warn("[native.profilePhotos] profile_photo_delete_cleanup_failed", {
         cleanupResult,
+        path: cleanPath,
       });
     }
     return;
-  }
-  if (cleanPath.startsWith(`${LEGACY_PROFILE_PHOTOS_BUCKET}/`)) {
-    const cleanupResult = await requestNativeStorageCleanupResult(PROFILE_PHOTOS_BUCKET, cleanPath.replace(/^Profiles\//, ""), "delete_profile_photo");
-    if (cleanupResult === "failed") {
-      throw createNativeProtectedActionError({
-        ok: false,
-        stage: "delete",
-        originalError: new Error("legacy_profile_photo_delete_cleanup_failed"),
-        cleanupAttempted: true,
-        cleanupResult,
-      });
-    }
   }
 };

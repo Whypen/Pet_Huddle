@@ -4,8 +4,6 @@ export type NativeBootRoute =
   | "/"
   | "/signup"
   | "/verify-identity"
-  | "/set-profile"
-  | "/set-pet"
   | "/social"
   | "/chats"
   | "/service"
@@ -24,9 +22,14 @@ export type NativeBootRoute =
 
 export type NativeOnboardingSnapshot = {
   profileExists: boolean;
+  registeredIdentity: boolean;
   onboardingCompleted: boolean;
   ownsPets: boolean;
   activePetCount: number;
+  signupResumeState?: string | null;
+  signupNotificationPromptHandled?: boolean;
+  signupWelcomePending?: boolean;
+  careInterestPending?: boolean;
 };
 
 export type NativeSessionIdentity = {
@@ -57,9 +60,14 @@ export const parseNativeOnboardingSnapshot = (value: unknown): NativeOnboardingS
 
   return {
     profileExists: data.profile_exists,
+    registeredIdentity: data.registered_identity === true,
     onboardingCompleted: data.onboarding_completed === true,
     ownsPets: data.owns_pets === true,
     activePetCount: typeof data.active_pet_count === "number" ? data.active_pet_count : 0,
+    signupResumeState: typeof data.signup_resume_state === "string" ? data.signup_resume_state : null,
+    signupNotificationPromptHandled: data.signup_notification_prompt_handled === true,
+    signupWelcomePending: data.signup_welcome_pending === true,
+    careInterestPending: false,
   };
 };
 
@@ -70,11 +78,17 @@ export const resolveNativeBootRoute = (
 ): NativeResolvedBootRoute => {
   if (!getNativeSessionIdentity(nextSession)) return { route: "auth", needsOnboardingSnapshot: false };
   if (!snapshot) return { route: requestedRoute, needsOnboardingSnapshot: true };
-  if (!snapshot.profileExists) {
+  if (!snapshot.registeredIdentity) {
+    return { route: "/signup", needsOnboardingSnapshot: false };
+  }
+  if (!snapshot.onboardingCompleted) {
     return {
-      route: requestedRoute === "/set-profile" ? "/set-profile" : "/verify-identity",
+      route: "/signup",
       needsOnboardingSnapshot: false,
     };
+  }
+  if (requestedRoute === "/signup") {
+    return { route: "/", needsOnboardingSnapshot: false };
   }
   return { route: requestedRoute, needsOnboardingSnapshot: false };
 };

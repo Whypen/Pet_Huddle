@@ -2,6 +2,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { deriveCareConversationState } from "./careConversationState";
 
 // Executable proof for CARE_BOOKING_SCOPE_CONTRACT.md (§13 verification gates).
 // These are static-source invariants over the exact files applied to the app and
@@ -13,9 +14,12 @@ const appRoot = resolve(here, "../..");          // .../app
 const repoRoot = resolve(appRoot, "..");          // repo root
 const screen = readFileSync(join(appRoot, "src/screens/NativeServiceChatScreen.tsx"), "utf8");
 const chats = readFileSync(join(appRoot, "src/screens/NativeChatsScreen.tsx"), "utf8");
+const nativeSocial = readFileSync(join(appRoot, "src/lib/nativeSocial.ts"), "utf8");
 const pdfBuilder = readFileSync(join(repoRoot, "supabase/functions/generate-care-agreement-pdf/pdf.ts"), "utf8");
 const pdfFunction = readFileSync(join(repoRoot, "supabase/functions/generate-care-agreement-pdf/index.ts"), "utf8");
 const adminSafety = readFileSync(join(repoRoot, "src/pages/admin/AdminSafety.tsx"), "utf8");
+const careBookingContract = readFileSync(join(appRoot, "docs/Contracts/CARE_BOOKING_SCOPE_CONTRACT.md"), "utf8");
+const careScopePingPongContract = readFileSync(join(repoRoot, "docs/Contracts/care_scope_ping_pong_contract.md"), "utf8");
 
 const migrationsDir = resolve(repoRoot, "supabase/migrations");
 const migrationFiles = readdirSync(migrationsDir).filter((f) => f.endsWith(".sql")).sort();
@@ -37,6 +41,10 @@ const callbackBlock = (name: string) => {
   if (start < 0) return "";
   if (name === "loadCareHistoryRows") {
     const end = screen.indexOf("const closeProviderProfile", start);
+    return screen.slice(start, end < 0 ? undefined : end);
+  }
+  if (name === "submitReview") {
+    const end = screen.indexOf("const openRequiredCareUpdateSheet", start);
     return screen.slice(start, end < 0 ? undefined : end);
   }
   const rest = screen.slice(start + 1);
@@ -61,9 +69,79 @@ describe("§9 Care list return — no empty-state flash", () => {
   it("suppresses empty flash when activating a tab with no cached rows", () => {
     expect(chats).toMatch(/current === "fresh" \|\| current === "error" \? "refreshing" : current/);
   });
-  it("loads Care conversations with the service inbox scope, not all-inbox plus client filtering", () => {
+  it("keeps the Care tab scoped to service rooms plus the intentional Team huddle room", () => {
     expect(chats).toMatch(/if \(tab === "service"\) return "service"/);
-    expect(chats).not.toMatch(/if \(tab === "service"\) return "all"/);
+    expect(chats).toMatch(/const isCareInboxRow = \(row: NativeChatInboxRow\) => row\.roomType === "service"/);
+  });
+});
+
+describe("Active Care conversation state machine", () => {
+  const active = (overrides: Partial<Parameters<typeof deriveCareConversationState>[0] extends infer Row ? Exclude<Row, null> : never> = {}) => ({
+    id: "service-active",
+    status: "pending",
+    careStatus: null,
+    mutualSigned: false,
+    ...overrides,
+  });
+
+  it.each([
+    [null, false, "clean_slate", "pending"],
+    [active(), false, "scope_pending", "pending"],
+    [active({ mutualSigned: true }), false, "agreement_signed", "pending"],
+    [active({ status: "booked", careStatus: "awaiting_handoff" }), false, "handoff_waiting", "booked"],
+    [active({ status: "booked", careStatus: "pin_shared" }), false, "pin_shared", "booked"],
+    [active({ status: "in_progress", careStatus: "in_progress" }), false, "care_in_progress", "in_progress"],
+    [active({ status: "pending", careStatus: "under_dispute" }), false, "under_review", "disputed"],
+    [active({ status: "completed", careStatus: "completed" }), false, "completed", "completed"],
+  ] as const)("derives %s as %s", (row, underReview, expectedKind, expectedStatus) => {
+    const state = deriveCareConversationState(row, underReview);
+    expect(state.kind).toBe(expectedKind);
+    expect(state.status).toBe(expectedStatus);
+    expect(state.activeServiceChatId).toBe(row?.id || null);
+  });
+
+  it("under-review status wins over every other active-stage signal", () => {
+    expect(deriveCareConversationState(active({ status: "booked", careStatus: "pin_shared" }), true).kind).toBe("under_review");
+  });
+});
+
+describe("Care block protection", () => {
+  it("keeps Block User muted but explainable until Care is clean or completed", () => {
+    expect(screen).toMatch(/const blockUnavailableForCare = Boolean\([\s\S]{0,220}!\["clean_slate", "completed"\]\.includes\(careConversationState\.kind\)/);
+    expect(screen).toMatch(/muted: blockUnavailableForCare/);
+    expect(screen).toMatch(/if \(blockUnavailableForCare\) setBlockUnavailableNoticeOpen\(true\)/);
+    expect(screen).toMatch(/title="Blocking unavailable"/);
+    expect(screen).toMatch(/once the booking and any open case are closed/);
+  });
+});
+
+describe("Completed booking review identity", () => {
+  it("keeps the latest completed history row reviewable when there is no new active request", () => {
+    expect(screen).toMatch(/const reviewTargetServiceChat = serviceChat \|\| latestTerminalServiceChat/);
+    expect(screen).toMatch(/const reviewTargetIsCompleted = Boolean\([\s\S]{0,260}reviewTargetServiceChat\.status === "completed"/);
+    expect(screen).toMatch(/const canLeaveReview = Boolean\(!underReview && reviewTargetIsCompleted/);
+    expect(screen).toMatch(/\.from\("service_reviews"\)[\s\S]{0,220}\.in\("service_chat_id", terminalIds\)[\s\S]{0,120}\.eq\("reviewer_id", userId\)/);
+    expect(screen).toMatch(/isNoChargeServiceChat\(reviewTargetServiceChat\)/);
+  });
+
+  it("hydrates terminal rows before clean-slate enrichment and prioritizes review over a new quote", () => {
+    const noActiveStart = screen.indexOf("if (!row) {", screen.indexOf("const row = selectServiceChatRowForRoute"));
+    const noActiveBranch = screen.slice(noActiveStart, screen.indexOf("// The message body can paint", noActiveStart));
+    expect(noActiveBranch).toMatch(/const terminalRows = serviceRows\.filter\(isServiceChatHistoryMenuEligible\);[\s\S]{0,700}setCareHistoryRows\(terminalRows\.map\(\(item\) => frozenHistoryServiceChatRow\(item\)\)\);[\s\S]{0,220}hasAuthoritativeCareState = true;[\s\S]{0,120}setLoading\(false\);[\s\S]{0,500}const cleanSlateProviderId/);
+    const actionPrimaryStart = screen.indexOf("const actionPrimary = useMemo");
+    const actionPrimary = screen.slice(actionPrimaryStart, screen.indexOf("const completionPrimaryActionIsSlider", actionPrimaryStart));
+    expect(actionPrimary.indexOf("if (canLeaveReview) return")).toBeGreaterThanOrEqual(0);
+    expect(actionPrimary.indexOf("if (canLeaveReview) return")).toBeLessThan(actionPrimary.indexOf('if (careConversationState.kind === "clean_slate")'));
+  });
+
+  it("submits reviews against the exact completed service row, not the conversation room", () => {
+    const submitReview = callbackBlock("submitReview");
+    const reviewMigration = readMigration("submit_service_review_exact_service_chat");
+    expect(submitReview).toMatch(/p_service_chat_id: completedServiceChatId/);
+    expect(submitReview).not.toMatch(/p_chat_id: roomId/);
+    expect(reviewMigration).toMatch(/p_service_chat_id uuid/);
+    expect(reviewMigration).toMatch(/from public\.service_chats\s+where id = p_service_chat_id\s+for update/);
+    expect(reviewMigration).not.toMatch(/where chat_id = p_chat_id/);
   });
 });
 
@@ -108,19 +186,27 @@ describe("§8 Expired pending request", () => {
   });
 });
 
-describe("§10/§11 Daily summary — warn, never hard block", () => {
-  it("surfaces a persistent missed-summary banner above the composer", () => {
-    expect(screen).toMatch(/summaryUpdateMissed/);
-    expect(screen).toMatch(/You missed a daily summary\./);
-    expect(screen).toMatch(/Complete anyway/);
-    expect(screen).toMatch(/Send summary/);
-    expect(screen).toMatch(/summaryUpdateMissed \? \(\s*<ServiceActionCard/);
-    expect(screen).not.toMatch(/summaryUpdateMissed \? \(\s*<View style=\{styles\.paymentInfoBox\}>/);
+describe("§10/§11 Required updates — prompt, never block completion", () => {
+  it("keeps the update action visible and explains that completion remains available", () => {
+    expect(screen).toMatch(/showRequiredCareUpdateAction/);
+    expect(screen).toMatch(/Care update not sent/);
+    expect(screen).toMatch(/You haven’t sent the requested \{missingCareUpdateLabel\}\. You can still confirm completion\./);
+    expect(screen).not.toMatch(/summaryUpdateMissed/);
   });
   it("backend never hard-blocks completion for a missing daily summary", () => {
-    // submit_provider_completion only raises care_update_required when the required
-    // update kind is NOT optional/summary — summary completes and is logged.
-    expect(allSql).toMatch(/v_update_kind not in \('optional', 'summary'\)[\s\S]{0,80}raise exception 'care_update_required'/);
+    const strictCompletion = readMigration("care_completion_exact_identity_prompt_only_updates");
+    expect(strictCompletion).toMatch(/'care_update_met', v_update_met/);
+    expect(strictCompletion).toMatch(/perform public\.complete_service_if_both_confirmed_by_service_id\(v_sc\.id\)/);
+    expect(strictCompletion).not.toMatch(/raise exception 'care_update_required'/);
+    expect(strictCompletion).not.toMatch(/service_chat_care_update_hard_completion_met/);
+  });
+  it("keeps both native contracts aligned with prompt-only update handling", () => {
+    expect(careBookingContract).toContain("Care update not sent");
+    expect(careBookingContract).toContain("You haven’t sent the requested photo and summary. You can still confirm completion.");
+    expect(careBookingContract).not.toContain("Care update required before completion");
+    expect(careBookingContract).not.toContain("Complete anyway");
+    expect(careScopePingPongContract).toContain("never blocks either party's completion confirmation, 48-hour forced completion, or payout");
+    expect(careScopePingPongContract).not.toContain("completion/payout gates");
   });
 });
 
@@ -173,7 +259,9 @@ describe("Service chat sheet hitboxes", () => {
       // never covers the chat header, since it isn't mounted until the user opens it. Strip any
       // such nested Modal blocks before checking that the SHEET ITSELF never adds a full-screen
       // close Pressable directly over the header.
-      const bodyWithoutNestedModals = body.replace(/<Modal[\s\S]*?<\/Modal>/g, "");
+      const termsSheetStart = body.indexOf("{termsSheetVisible ? (");
+      const bodyWithoutNestedModals = (termsSheetStart >= 0 ? body.slice(0, termsSheetStart) : body)
+        .replace(/<Modal[\s\S]*?<\/Modal>/g, "");
       expect(bodyWithoutNestedModals, `${name} should not add a full-screen close Pressable over the header`).not.toMatch(/<Pressable[\s\S]{0,180}StyleSheet\.absoluteFill/);
     }
   });
@@ -189,13 +277,12 @@ describe("Service chat restart row selection", () => {
     expect(screen).toMatch(/activeScopeServiceChatIds\.has\(row\.id\) && isActiveServiceChatRow\(row\)\) return 60/);
     expect(screen).toMatch(/\.from\("service_chats"\)[\s\S]{0,220}\.eq\("chat_id", requestRoomId\)[\s\S]{0,220}\.limit\(20\)/);
     expect(screen).toMatch(/\.from\("care_scope_versions"\)[\s\S]{0,220}\.select\("service_chat_id"\)[\s\S]{0,220}\.eq\("is_active", true\)/);
-    expect(screen).toMatch(/selectActiveServiceChatRow\(serviceRows, activeScopeServiceChatIds\)/);
+    expect(screen).toMatch(/selectServiceChatRowForRoute\(serviceRows, activeScopeServiceChatIds, requestServiceId\)/);
     expect(screen).not.toMatch(/\.from\("service_chats"\)[\s\S]{0,220}\.eq\("chat_id", requestRoomId\)[\s\S]{0,220}\.maybeSingle\(\)/);
   });
 
-  it("keeps the legacy status refresh best-effort so an ambiguous old row cannot block active row loading", () => {
-    expect(screen).toMatch(/refresh_status_failed/);
-    expect(screen).toMatch(/try \{\s*const \{ error \} = await supabase\.rpc\("refresh_service_chat_status", \{ p_chat_id: requestRoomId \}\)/);
+  it("does not refresh status through a room id before the strict active row is selected", () => {
+    expect(screen).not.toMatch(/refresh_service_chat_status", \{ p_chat_id: requestRoomId \}/);
   });
 
   it("follows friends-chat canonical pair behavior for one Care conversation per owner/carer pair", () => {
@@ -208,6 +295,59 @@ describe("Service chat restart row selection", () => {
     expect(pairMigration).toMatch(/if v_active_service_chat_id is null then[\s\S]{0,220}insert into public\.service_chats/);
     expect(pairMigration).toMatch(/moved_messages as \(\s*update public\.chat_messages cm[\s\S]{0,180}set chat_id = d\.canonical_chat_id/);
     expect(pairMigration).toMatch(/moved_service_rows as \(\s*update public\.service_chats sc[\s\S]{0,180}set chat_id = d\.canonical_chat_id/);
+  });
+
+  it("returns a cancelled conversation to the owner clean-slate quote state and anchors the action menu to its trigger", () => {
+    expect(screen).toMatch(/const roleAnchor = serviceChat \|\| careHistoryRows\.find/);
+    expect(screen).toMatch(/if \(careConversationState\.kind === "clean_slate"\) \{[\s\S]{0,180}label: "Start a quote"[\s\S]{0,120}openNewRequestSheet/);
+    expect(screen).toMatch(/\(!serviceChat \|\| status === "completed" \? openNewRequestSheet : openCurrentRequestSheet\)/);
+    expect(screen).toMatch(/menuAnchorRef\.current\?\.measureInWindow/);
+    expect(screen).toMatch(/top: y \+ height \+ huddleSpacing\.x1/);
+    expect(screen).toMatch(/headerActionMenuAnchor/);
+    expect(screen).not.toMatch(/appModalMenuSafeArea\]} onPress=\{\(\) => setMenuOpen\(false\)\}/);
+  });
+
+  it("derives all live Care UI from one active-service conversation state", () => {
+    expect(screen).toMatch(/import \{ deriveCareConversationState \} from "\.\.\/lib\/careConversationState"/);
+    expect(screen).toMatch(/const deriveActiveCareConversationState = \([\s\S]{0,640}deriveCareConversationState\(/);
+    expect(screen).toMatch(/const careConversationState = useMemo\([\s\S]{0,180}deriveActiveCareConversationState\(serviceChat, underReview\)/);
+    expect(screen).toMatch(/if \(careConversationState\.kind === "clean_slate"\)[\s\S]{0,180}label: "Start a quote"/);
+    expect(screen).toMatch(/const canShowComposer = Boolean\(hasRequest && !showReviewComposerCta && careConversationState\.kind !== "completed"\)/);
+    expect(screen).toMatch(/const canBookCareFromMenu = Boolean\(isRequester && \(careConversationState\.kind === "clean_slate"/);
+    expect(screen).toMatch(/careConversationState\.kind === "handoff_waiting" \|\| careConversationState\.kind === "pin_shared"/);
+    expect(screen).toMatch(/careConversationState\.kind === "care_in_progress"/);
+    expect(screen).toMatch(/careConversationState\.kind !== "scope_pending" && careConversationState\.kind !== "agreement_signed"/);
+    expect(screen).toMatch(/get_service_care_update_status_by_service_id", \{ p_service_chat_id: row\.id \}/);
+    expect(screen).not.toMatch(/get_service_care_update_status_by_service_id", \{ p_service_chat_id: requestRoomId \}/);
+    // A room ID is only valid before the first service row exists. Every live
+    // action thereafter carries the selected active service row to its RPC.
+    expect(screen.match(/p_chat_id: roomId/g)?.length || 0).toBe(1);
+    expect(screen).toMatch(/send_service_request", \{ p_chat_id: roomId, p_request_card: card \}/);
+    expect(screen).toMatch(/submit_service_checkin_by_service_id", \{[\s\S]{0,520}p_service_chat_id: activeServiceChatId/);
+    expect(screen).toMatch(/submit_service_issue_report_by_service_id", \{[\s\S]{0,220}p_service_chat_id: activeServiceChatId/);
+  });
+
+  it("creates a new active booking from the hydrated pair context after clean slate", () => {
+    const sendFreshStart = screen.indexOf("const sendRequestFromSheet = useCallback");
+    const sendFreshRequest = screen.slice(sendFreshStart, screen.indexOf("const sendQuote = useCallback", sendFreshStart));
+    const pairMigration = readMigration("service_chat_pair_canonical_conversation");
+    const strictRoomMigration = readMigration("service_room_id_calls_resolve_strict_active");
+    expect(sendFreshRequest).toMatch(/const newBookingProviderId = clean\(serviceChat\?\.provider_id\) \|\| clean\(counterpart\?\.id\)/);
+    expect(sendFreshRequest).not.toMatch(/if \(!serviceChat\?\.provider_id \|\| !accessToken \|\| !userId\)/);
+    expect(sendFreshRequest).toMatch(/createNativeServiceChat\(newBookingProviderId/);
+    expect(sendFreshRequest).toMatch(/if \(nextChatId !== roomId\) \{[\s\S]{0,180}onNavigate\(/);
+    expect(sendFreshRequest).toMatch(/await load\(true\)/);
+    expect(pairMigration).toMatch(/if v_active_service_chat_id is null then[\s\S]{0,320}insert into public\.service_chats/);
+    expect(strictRoomMigration).toMatch(/current_active_service_chat_id_from_any_id\(p_chat_id\)/);
+  });
+
+  it("does not remount the current Care room during service-chat recovery", () => {
+    const loadStart = screen.indexOf("const load = useCallback");
+    const loadEnd = screen.indexOf("const loadOlderServiceMessages", loadStart);
+    const loadBody = screen.slice(loadStart, loadEnd);
+    expect(loadBody).toMatch(/if \(nextChatId !== requestRoomId\) \{[\s\S]{0,180}onNavigate\(/);
+    expect(loadBody).toMatch(/await loadRef\.current\(false\)/);
+    expect(screen).toMatch(/loadRef\.current = load/);
   });
 
   it("Care inbox summarizes exactly one active/current service row per conversation", () => {
@@ -230,10 +370,28 @@ describe("Service chat restart row selection", () => {
     const historyLoader = callbackBlock("loadCareHistoryRows");
     const historySheet = sourceBlock("CareHistorySheet");
     expect(historyLoader).toMatch(/\.from\("service_chats"\)[\s\S]{0,160}\.select\(SERVICE_CHAT_SELECT_FIELDS\)/);
+    expect(historyLoader).toMatch(/status\.eq\.cancelled/);
+    expect(historyLoader).toMatch(/care_status\.eq\.cancelled/);
     expect(historyLoader).toMatch(/\.from\("service_care_agreements"\)/);
     expect(historyLoader).not.toMatch(/care_scope_versions/);
+    expect(historyLoader).toMatch(/const historyAnchor = serviceChat \|\| careHistoryRows\.find/);
+    expect(historyLoader).not.toMatch(/if \(!serviceChat \|\| !userId\)/);
+    expect(screen).toMatch(/const careHistoryLoadSequenceRef = useRef\(0\)/);
+    expect(historyLoader).toMatch(/care_history_load_timeout/);
+    expect(historyLoader).toMatch(/care_history_details_timeout/);
+    expect(screen).toMatch(/const closeCareHistory = useCallback/);
+    expect(screen).toMatch(/const terminalRows = serviceRows\.filter\(isServiceChatHistoryMenuEligible\)/);
+    expect(screen).toMatch(/care_history_agreements_timeout/);
+    expect(screen).toMatch(/care_agreement: terminalAgreementByServiceId\.get\(item\.id\) \|\| null/);
     expect(screen).toMatch(/const frozenHistoryServiceChatRow = \(row: ServiceChatRow\): ServiceChatRow =>/);
-    expect(screen).toMatch(/const serviceRequestCardFromBookingSnapshot = \(snapshot\?: CareBookingSnapshot \| null\): ServiceRequestCard \| null =>/);
+    expect(screen).toMatch(/const serviceRequestCardFromBookingSnapshot = \(snapshot\?: CareHistorySnapshot \| null\): ServiceRequestCard \| null =>/);
+    expect(historyLoader).toMatch(/booking_snapshot,requester_signed_at,provider_signed_at,pdf_path/);
+    expect(screen).toMatch(/const frozenSnapshot = \(row\.care_agreement\?\.bookingSnapshot \|\| row\.booking_snapshot\)/);
+    expect(screen).toMatch(/const mergeCareScopePets = \(requestPets\?: ServiceRequestPet\[\], quotePets\?: ServiceRequestPet\[\]\)/);
+    expect(screen).toMatch(/petPhotoUrl: clean\(requestPet\?\.petPhotoUrl\) \|\| clean\(quotePet\.petPhotoUrl\)/);
+    expect(screen).toMatch(/const formatCareScopeSetting = \(locationStyles\?: string\[\] \| null, locationArea\?: string \| null\)/);
+    expect(screen).toMatch(/careDetails: frozenCareDetails/);
+    expect(screen).toMatch(/const agreedAt = clean\(chat\.booking_snapshot\?\.agreedAt\)[\s\S]{0,140}latestIso\(chat\.care_agreement\?\.requesterSignedAt/);
     expect(screen).toMatch(/for \(const row of careHistoryRows\) byId\.set\(row\.id, frozenHistoryServiceChatRow\(row\)\)/);
     expect(screen).not.toMatch(/if \(effectiveServiceChat\) byId\.set\(effectiveServiceChat\.id, effectiveServiceChat\)/);
     expect(historySheet).toMatch(/allowAgreementPdfFromAgreement/);
@@ -241,6 +399,37 @@ describe("Service chat restart row selection", () => {
     expect(screen).toMatch(/const visibleScopeCard = visibleCareScopeCardForChat\(chat\)/);
     expect(screen).toMatch(/const careTaskDetail = \[[\s\S]{0,160}scopeTasks\.join\(", "\)[\s\S]{0,220}visibleScopeCard\?\.otherTasks/);
     expect(screen).toMatch(/label: "Agreement signed", dateLabel: formatTimelineStepDate\(agreementSignedAt\)/);
+    expect(screen).toMatch(/const cancelled = isCancelledServiceChatRow\(chat\)/);
+    expect(screen).toMatch(/\{ label: "Booking Cancellation", dateLabel: formatTimelineStepDate\(cancellationDate\), done: false, cancelled: true \}/);
+    expect(screen).toMatch(/const cancelledHistoryRow = isCancelledServiceChatRow\(chat\)/);
+    expect(screen).toMatch(/<Text style=\{styles\.careAgreementBadgeText\}>Cancelled<\/Text>/);
+  });
+
+  it("stores a complete immutable Care Scope in the agreement before history or PDF reads it", () => {
+    const migration = readMigration("care_history_frozen_scope_snapshot");
+    expect(migration).toMatch(/create or replace function public\.enrich_service_care_agreement_frozen_snapshot/);
+    expect(migration).toMatch(/'requestCard', v_scope\.request_card/);
+    expect(migration).toMatch(/'quoteCard', v_scope\.quote_card/);
+    expect(migration).toMatch(/'careDetails', v_scope\.care_details/);
+    expect(migration).toMatch(/before insert or update of booking_snapshot, scope_version_id, scope_hash, requester_signed_at, provider_signed_at/);
+    expect(migration).toMatch(/update public\.service_care_agreements agreement/);
+    expect(migration).not.toMatch(/from public\.service_chats/);
+  });
+
+  it("terminal bookings are never selected as the active/current Care Scope row", () => {
+    const strictActiveMigration = readMigration("strict_active_service_chat_selector");
+    const exactActiveMigration = readMigration("service_room_id_calls_resolve_strict_active");
+    expect(screen).toMatch(/const isCancelledServiceChatRow = \(row: ServiceChatRow\) =>/);
+    expect(screen).toMatch(/const validRows = rows\.filter\(\(row\) => row\.id && row\.chat_id && isActiveServiceChatRow\(row\)\)/);
+    expect(screen).toMatch(/if \(exact && isActiveServiceChatRow\(exact\)\) return exact/);
+    expect(screen).toMatch(/if \(isActiveServiceChatRow\(cachedRow\)\) \{[\s\S]{0,120}setServiceChat\(cachedRow\)/);
+    expect(screen).toMatch(/clearCachedServiceChatRow\(userId, requestSessionKey, requestRoomId\)/);
+    expect(screen).toMatch(/setServiceChat\(null\)/);
+    expect(screen).toMatch(/clearCachedServiceChatRow\(userId, requestSessionKey, requestRoomId\)/);
+    expect(strictActiveMigration).toMatch(/sc\.status in \('pending', 'booked', 'in_progress'\)/);
+    expect(strictActiveMigration).toMatch(/coalesce\(sc\.care_status, ''\) not in \('completed', 'cancelled', 'under_dispute', 'handoff_issue_review'\)/);
+    expect(exactActiveMigration).toMatch(/sc\.status in \('pending', 'booked', 'in_progress'\)/);
+    expect(exactActiveMigration).toMatch(/coalesce\(sc\.care_status, ''\) not in \('completed', 'cancelled', 'under_dispute', 'handoff_issue_review'\)/);
   });
 });
 
@@ -254,7 +443,8 @@ describe("Care Scope ping-pong turn ownership", () => {
   it("returns the active scope proposer as actorRole instead of inferring turn from signatures only", () => {
     expect(turnMigration).toMatch(/'actorRole', v_version\.actor_role/);
     expect(screen).toMatch(/actorRole\?: "owner" \| "carer" \| null/);
-    expect(screen).toMatch(/const canSignCareScope = !currentMutualSignatures && !ownerAlreadySigned && \(carerAlreadySigned \|\| careScope\?\.actorRole === "carer"\)/);
+    expect(screen).toMatch(/const legacyCanSignCareScope = !currentMutualSignatures && !ownerAlreadySigned && \(carerAlreadySigned \|\| careScope\?\.actorRole === "carer"\) && !paymentInProgress/);
+    expect(screen).toMatch(/careScopeAllows\(careScope, "sign_scope", legacyCanSignCareScope\)/);
   });
 
   it("sends owner into review after a carer edit without faking carerSigned", () => {
@@ -280,27 +470,28 @@ describe("Care Scope ping-pong turn ownership", () => {
     expect(tier1Migration).toMatch(/p_acknowledged_terms boolean/);
     expect(tier1Migration).toMatch(/care_scope_acknowledgement_required/);
     expect(screen.match(/p_acknowledged_terms: true/g)?.length).toBeGreaterThanOrEqual(2);
-    expect(screen).toMatch(/Cancellation policy acknowledgement is required before sign off\./);
+    expect(screen).toMatch(/Accept the cancellation policy to sign off\./);
   });
 
   it("supports owner-approved early start without bypassing server authority", () => {
     expect(tier1Migration).toMatch(/add column if not exists early_start_allowed_at/);
     expect(tier1Migration).toMatch(/create or replace function public\.allow_service_early_start/);
     expect(tier1Migration).toMatch(/care_start_too_early/);
-    expect(screen).toMatch(/Allow Early Start/);
-    expect(screen).toMatch(/allow_service_early_start/);
+    expect(screen).toMatch(/onConfirm=\{\(\) => \{\s*setConfirmOwnerStartCareOpen\(false\);\s*void performShareStartPin\(\);/s);
+    expect(screen).toMatch(/share_service_start_pin_by_service_id", \{ p_service_chat_id: activeServiceChatId, p_requester_confirmed: true \}/);
     expect(screen).toMatch(/canServiceStartNow\(serviceChatRef\.current\)/);
   });
 
-  it("splits Care Instruction edits from Care Scope edits so save-then-pay is not blocked", () => {
-    expect(screen).toMatch(/const canSaveInstructionThenPay = paymentReadyBase && hasEditedCareInstruction/);
-    expect(screen).toMatch(/if \(!canSignCareScope && !canPay && !canSaveInstructionThenPay\)/);
-    expect(screen).not.toMatch(/Save the Care Instruction before paying\./);
+  it("treats every Care Instruction edit as a counterproposal and never combines it with payment", () => {
+    expect(screen).toMatch(/const canSubmitCareScopeUpdate = canSubmitCareDetailsUpdate/);
+    expect(screen).toMatch(/if \(!canSignCareScope && !canPay\)/);
+    expect(screen).not.toMatch(/canSaveInstructionThenPay/);
+    expect(screen).not.toMatch(/Slide to Update & Payment/);
   });
 
   it("locks an open payment sheet if the active Care Scope version changes", () => {
     expect(screen).toMatch(/const paymentLockedByScopeChange = !canSignCareScope/);
-    expect(screen).toMatch(/This payment is paused because the Care Scope changed/);
+    expect(screen).toMatch(/The Care Scope changed\. Review and sign the latest version to pay/);
     expect(screen).toMatch(/paymentLockedByScopeChange \? \(\s*<AppModalButton/);
     expect(screen).toMatch(/onEdit=\{canSignCareScope \? onEditCareScope : undefined\}/);
   });
@@ -317,7 +508,7 @@ describe("Care Scope ping-pong turn ownership", () => {
     expect(screen).toMatch(/const requesterTotal = requestOffer \* \(1 \+ CARE_REQUESTER_FEE_RATE\)/);
     expect(screen).toMatch(/const providerPayout = requestOffer \* \(1 - CARE_PROVIDER_FEE_RATE\)/);
     expect(screen).toMatch(/<Text style=\{styles\.paymentInfoTitle\}>Free Care Session<\/Text>/);
-    expect(screen).toMatch(/No payment will be collected for voluntary booking unless a paid total is proposed\./);
+    expect(screen).toMatch(/Nothing is charged unless a price is agreed\./);
     expect(screen).not.toMatch(/Free Booking/);
   });
 
@@ -354,7 +545,7 @@ describe("Care Scope ping-pong turn ownership", () => {
 
   it("treats a voluntary quote with a positive proposed rate as paid, not free", () => {
     expect(screen).toMatch(/const hasPaidQuote = hasActiveQuote && Number\.isFinite\(quoteAmount\) && quoteAmount > 0/);
-    expect(screen).toMatch(/const isNoChargeVoluntaryQuote = \(quote: ServiceQuoteCard \| null \| undefined\) =>\s*Boolean\(quote\) && !quoteHasPositivePrice\(quote\)/);
+    expect(screen).toMatch(/const isNoChargeVoluntaryQuote = \(quote: ServiceQuoteCard \| null \| undefined\) =>\s*hasMeaningfulServiceQuoteCard\(quote\) && !quoteHasPositivePrice\(quote\)/);
     expect(screen).toMatch(/const normalizeCareScopePaymentInput = /);
     expect(screen).toMatch(/if \(numeric === 0\) return \{ adjustedToMinimum: false, currency: "", finalPrice: "", invalid: false, minimum: 0, paid: false, rate: "", voluntary: true \}/);
     expect(screen).toMatch(/const proposedNoChargeVoluntary = isNoChargeVoluntaryQuote\(proposedQuoteCard\)/);
@@ -399,8 +590,10 @@ describe("Care Scope ping-pong turn ownership", () => {
     expect(screen).toMatch(/petName: visiblePetName/);
   });
 
-  it("uses stable Stripe idempotency for carer full-refund cancellation", () => {
-    expect(cancelServiceBookingFunction).toMatch(/service_cancel_provider:\$\{row\.id\}:full/);
+  it("claims one persisted Stripe idempotency key before every paid cancellation", () => {
+    expect(cancelServiceBookingFunction).toMatch(/claim_paid_service_cancellation/);
+    expect(cancelServiceBookingFunction).toMatch(/const refundIdempotencyKey = clean\(claim\.stripe_idempotency_key\)/);
+    expect(cancelServiceBookingFunction).toMatch(/idempotencyKey: refundIdempotencyKey/);
     expect(cancelServiceBookingFunction).not.toMatch(/service_cancel:\$\{serviceChatId\}:\$\{actorRole\}:\$\{refundCents\}/);
   });
 
@@ -418,6 +611,8 @@ describe("Care Scope ping-pong turn ownership", () => {
     expect(screen).toMatch(/p_checkin_note: evidence\?\.note\?\.trim\(\) \|\| null/);
     expect(screen).toMatch(/<Text style=\{styles\.fieldLabel\}>Check-in note<\/Text>/);
     expect(screen).toMatch(/placeholder="Optional handoff note"/);
+    expect(screen).toMatch(/checkinWarningText: \{ alignSelf: "stretch", textAlign: "left"/);
+    expect(screen).not.toMatch(/checkinWarningText: \{ marginLeft:/);
   });
 
   it("removes fake far-from-handoff admin signal until real distance logic exists", () => {
@@ -468,8 +663,8 @@ describe("Runtime bug fixes (2026-06-26 batch)", () => {
     expect(screen).not.toMatch(/\(Optional\)/);
   });
   it("#5 turn-ownership waiting states explain status without fake actions", () => {
-    expect(screen).toMatch(/Waiting for the owner to review & sign/);
-    expect(screen).toMatch(/Care Scope is still under \$\{clean\(peerName\) \|\| "the carer"\}'s review/);
+    expect(screen).toMatch(/Waiting for the owner to sign/);
+    expect(screen).toMatch(/\$\{clean\(peerName\) \|\| "The carer"\} is still reviewing the Care Scope/);
     expect(screen).not.toMatch(/Waiting for the carer to confirm the scope", onPress: \(\) => undefined, disabled: true/);
   });
   it("#6 times are constrained to 24h HH:MM and validated", () => {
@@ -484,31 +679,24 @@ describe("Runtime bug fixes (2026-06-26 batch)", () => {
     expect(screen).toMatch(/const missingTerms = missingTermsAcknowledgement \|\| missingPolicyAcknowledgement/);
     expect(screen).toMatch(/careScopeTermsAcknowledgementCopy\("requester"\)/);
     expect(screen).toMatch(/careScopeTermsAcknowledgementCopy\("provider"\)/);
-    expect(screen).toMatch(/Booking terms acknowledgement is required before sign off\./);
-    expect(screen).toMatch(/Cancellation policy acknowledgement is required before sign off\./);
+    expect(screen).toMatch(/careScopeTermsAcknowledgementCopy\("requester"\)/);
+    expect(screen).toMatch(/Accept the cancellation policy to sign off\./);
   });
 
-  it("Care Instruction updates never create a new Care Scope version or reset signatures", () => {
-    const instructionMigration = readMigration("care_instruction_in_place_update");
-    const instructionSnapshotMigration = readMigration("care_instruction_agreement_snapshot_sync");
+  it("Care Instruction updates create a new immutable Care Scope version and require both signatures again", () => {
+    const roverContract = readMigration("rover_grade_care_contract");
     expect(screen).toMatch(/update_service_care_instruction/);
-    expect(screen).not.toMatch(/p_care_details: careDetails \}[\s\S]{0,120}create_care_scope_counterproposal/);
-    expect(instructionMigration).toMatch(/create or replace function public\.update_service_care_instruction/);
-    expect(instructionMigration).toMatch(/update public\.care_scope_versions\s+set care_details =/);
-    expect(instructionMigration).not.toMatch(/insert_care_scope_version_for_service_chat/);
-    expect(instructionSnapshotMigration).toMatch(/update public\.care_scope_versions\s+set care_details =/);
-    expect(instructionSnapshotMigration).toMatch(/update public\.service_care_agreements/);
-    expect(instructionSnapshotMigration).toMatch(/jsonb_build_object\('careDetails', v_version\.care_details\)/);
-    expect(instructionSnapshotMigration).toMatch(/pdf_path = null/);
-    expect(instructionSnapshotMigration).not.toMatch(/insert_care_scope_version_for_service_chat/);
-    expect(instructionMigration).toMatch(/service_care_instruction_shared/);
-    expect(instructionMigration).toMatch(/service_care_instruction_updated/);
-    expect(screen).toMatch(/service_care_instruction_shared: `\$\{actorName\} shared the Care Instruction\.`/);
-    expect(screen).toMatch(/service_care_instruction_updated: `\$\{actorName\} updated the Care Instruction\.`/);
+    expect(roverContract).toMatch(/create or replace function public\.update_service_care_instruction/);
+    expect(roverContract).toMatch(/return public\.create_care_scope_counterproposal\([\s\S]{0,140}p_care_details/);
+    expect(roverContract).not.toMatch(/update public\.care_scope_versions\s+set care_details =/);
     expect(screen).toMatch(/const hasEditedCareInstruction = comparableCurrentCareDetails !== comparableInitialCareDetails/);
-    expect(screen).not.toMatch(/hasEditedCareScope[\s\S]{0,160}onUpdateCareDetails/);
-    expect(screen).toMatch(/Slide to Update & Payment/);
-    expect(screen).toMatch(/await onUpdateCareDetails\(currentCareDetails\)[\s\S]{0,220}currentMutualSignatures/);
+    expect(screen).not.toMatch(/Slide to Update & Payment/);
+    const updateStart = screen.indexOf("if (hasEditedCareInstruction) {");
+    const updateBlock = screen.slice(updateStart, screen.indexOf("if (!canSignCareScope && !canPay)", updateStart));
+    expect(updateBlock).toMatch(/await onUpdateCareDetails\(currentCareDetails\)/);
+    expect(updateBlock).toMatch(/onClose\(\)/);
+    expect(updateBlock).toMatch(/return;/);
+    expect(screen).toMatch(/Saving changes will require a new signature from both sides\./);
   });
 
   it("Payment/Confirm Care Instruction fields are complete, field-local, and persisted separately", () => {
@@ -519,11 +707,11 @@ describe("Runtime bug fixes (2026-06-26 batch)", () => {
     expect(screen).toMatch(/Owner's Contact<\/Text>/);
     expect(screen).toMatch(/onValidityChange=\{setContactValid\}/);
     expect(screen).toMatch(/onFocus=\{\(\) => focusPaymentField\("contact"\)\}/);
-    expect(screen).toMatch(/Add a valid owner's contact before confirming\./);
+    expect(screen).toMatch(/Add a contact number to continue\./);
     expect(screen).toMatch(/Emergency contact<\/Text>/);
     expect(screen).toMatch(/onFocus=\{\(\) => focusPaymentField\("emergency"\)\}/);
     expect(screen).toMatch(/Hand-off location<\/Text>/);
-    expect(screen).toMatch(/Carer need the exact hand-off location to begin Care session\./);
+    expect(screen).toMatch(/Your carer needs the exact hand-off spot to start care\./);
     expect(screen).toMatch(/const getFirstInvalidPaymentField = useCallback/);
     expect(screen).toMatch(/if \(firstInvalidField\) focusPaymentField\(firstInvalidField\)/);
     expect(snapshotMigration).toMatch(/booking_snapshot_contact_required/);
@@ -551,37 +739,31 @@ describe("Runtime bug fixes (2026-06-26 batch)", () => {
   it("payment and no-charge confirm target the active service row, not the reused conversation id", () => {
     const paymentFunction = readFileSync(join(repoRoot, "supabase/functions/create-service-payment/index.ts"), "utf8");
     const confirmFunction = readFileSync(join(repoRoot, "supabase/functions/confirm-voluntary-service-booking/index.ts"), "utf8");
-    const strictVoluntaryMigration = readMigration("confirm_voluntary_uses_strict_active_row");
+    const strictPaymentMigration = readMigration("care_booking_payment_exact_rpc_boundaries");
     const payFn = screen.slice(screen.indexOf("const pay = useCallback"), screen.indexOf("const confirmVolunteerBooking"));
     const confirmFn = screen.slice(screen.indexOf("const confirmVolunteerBooking = useCallback"), screen.indexOf("const proceedPaymentDirect"));
     expect(payFn).toMatch(/const activeServiceChat = serviceChatRef\.current/);
     expect(payFn).toMatch(/const activeServiceChatId = clean\(activeServiceChat\?\.id\)/);
     expect(payFn).toMatch(/service_chat_id: activeServiceChatId/);
-    expect(payFn).toMatch(/chat_id: roomId/);
+    expect(payFn).not.toMatch(/chat_id: roomId/);
     expect(confirmFn).toMatch(/const activeServiceChat = serviceChatRef\.current/);
     expect(confirmFn).toMatch(/const activeServiceChatId = clean\(activeServiceChat\?\.id\)/);
     expect(confirmFn).toMatch(/service_chat_id: activeServiceChatId/);
-    expect(confirmFn).toMatch(/chat_id: roomId/);
+    expect(confirmFn).not.toMatch(/chat_id: roomId/);
     expect(paymentFunction).toMatch(/\.eq\("id", serviceChatId\)[\s\S]{0,180}\.maybeSingle\(\)/);
-    expect(paymentFunction).toMatch(/current_active_service_chat_id_for_room/);
+    expect(paymentFunction).not.toMatch(/current_active_service_chat_id_for_room/);
     expect(paymentFunction).not.toMatch(/\.eq\("chat_id", serviceChatId\)[\s\S]{0,160}\.eq\("status", "pending"\)[\s\S]{0,160}\.order\("updated_at"/);
     expect(paymentFunction).toMatch(/booking_snapshot_pending: snapshot[\s\S]{0,90}\.eq\("id", serviceChat\.id\)/);
     expect(paymentFunction).toMatch(/service_chat_id: serviceChat\.id/);
-    expect(paymentFunction).toMatch(/idempotencyKey: `svc_pay_\$\{serviceChat\.id\}_/);
+    expect(paymentFunction).toMatch(/carePaymentStripeIdempotencyKey\(serviceChat\.id, claim\.attemptId\)/);
     expect(confirmFunction).toMatch(/\.eq\("id", serviceChatId\)[\s\S]{0,180}\.maybeSingle\(\)/);
-    expect(confirmFunction).toMatch(/current_active_service_chat_id_for_room/);
+    expect(confirmFunction).not.toMatch(/current_active_service_chat_id_for_room/);
     expect(confirmFunction).not.toMatch(/\.eq\("chat_id", serviceChatId\)[\s\S]{0,160}\.eq\("status", "pending"\)[\s\S]{0,160}\.order\("updated_at"/);
-    expect(strictVoluntaryMigration).toMatch(/where id = public\.current_active_service_chat_id_for_room\(p_chat_id\)/);
-    expect(strictVoluntaryMigration).not.toMatch(/where chat_id = p_chat_id and status = 'pending'[\s\S]{0,120}order by updated_at desc/);
-    expect(confirmFunction).toMatch(/p_chat_id: serviceChat\.id/);
-    expect(confirmFunction).not.toMatch(/p_chat_id: serviceChat\.chat_id/);
+    expect(strictPaymentMigration).toMatch(/confirm_voluntary_service_booking_by_service_id/);
+    expect(strictPaymentMigration).not.toMatch(/current_active_service_chat_id_for_room|current_active_service_chat_id_from_any_id/);
+    expect(confirmFunction).toMatch(/p_service_chat_id: serviceChat\.id/);
+    expect(confirmFunction).not.toMatch(/p_chat_id:/);
     expect(confirmFunction).toMatch(/body: \{ service_chat_id: serviceChat\.id, source: "voluntary_booking_confirmed" \}/);
-    const voluntaryActiveRowMigration = readMigration("confirm_voluntary_active_service_row");
-    expect(voluntaryActiveRowMigration).toMatch(/from public\.service_chats[\s\S]{0,80}where id = p_chat_id[\s\S]{0,80}for update/);
-    expect(voluntaryActiveRowMigration).toMatch(/where chat_id = p_chat_id and status = 'pending'[\s\S]{0,120}order by updated_at desc[\s\S]{0,80}limit 1/);
-    expect(voluntaryActiveRowMigration).toMatch(/values \(v_sc\.chat_id, v_uid/);
-    expect(voluntaryActiveRowMigration).toMatch(/update public\.chats set last_message_at = now\(\) where id = v_sc\.chat_id/);
-    expect(voluntaryActiveRowMigration).toMatch(/'\/service-chat\?room=' \|\| v_sc\.chat_id::text/);
   });
 
   it("post-payment confirm and cancellation also target the active service row", () => {
@@ -591,21 +773,41 @@ describe("Runtime bug fixes (2026-06-26 batch)", () => {
     const cancelPaidBookingFn = screen.slice(screen.indexOf("const cancelPaidBooking = useCallback"), screen.indexOf("const submitCompletion"));
     expect(confirmServicePaymentFn).toMatch(/const activeServiceChatId = clean\(serviceChatRef\.current\?\.id\)/);
     expect(confirmServicePaymentFn).toMatch(/service_chat_id: activeServiceChatId/);
-    expect(confirmServicePaymentFn).toMatch(/chat_id: roomId/);
+    expect(confirmServicePaymentFn).not.toMatch(/chat_id: roomId/);
     expect(confirmPaymentFunction).toMatch(/\.eq\("id", serviceChatId\)[\s\S]{0,180}\.maybeSingle\(\)/);
-    expect(confirmPaymentFunction).toMatch(/current_active_service_chat_id_for_room/);
+    expect(confirmPaymentFunction).not.toMatch(/current_active_service_chat_id_for_room/);
     expect(confirmPaymentFunction).toMatch(/const chatRoomId = serviceChat\.chat_id/);
-    expect(confirmPaymentFunction).toMatch(/validateSessionForServiceChat\(session, serviceChat as Record<string, unknown>, \[serviceChat\.id, chatRoomId\], user\.id\)/);
-    expect(confirmPaymentFunction).toMatch(/p_chat_id: chatRoomId/);
+    expect(confirmPaymentFunction).toMatch(/validateSessionForServiceChat\(session, serviceChat as Record<string, unknown>, serviceChat\.id, user\.id\)/);
+    expect(confirmPaymentFunction).toMatch(/finalize_service_care_agreement_for_payment_by_service_id", \{\s*p_service_chat_id: serviceChat\.id/);
+    expect(confirmPaymentFunction).toMatch(/notify_service_booking_confirmed_by_service_id/);
+    expect(confirmPaymentFunction).not.toMatch(/p_chat_id:/);
     expect(confirmPaymentFunction).toMatch(/insertServiceBookedMessage\(supabase, chatRoomId, user\.id\)/);
     expect(cancelPaidBookingFn).toMatch(/const activeServiceChatId = clean\(serviceChat\?\.id\)/);
     expect(cancelPaidBookingFn).toMatch(/service_chat_id: activeServiceChatId/);
-    expect(cancelPaidBookingFn).toMatch(/chat_id: roomId/);
+    expect(cancelPaidBookingFn).not.toMatch(/chat_id: roomId/);
     expect(cancelFunction).toMatch(/\.eq\("id", serviceChatId\)[\s\S]{0,180}\.maybeSingle\(\)/);
-    expect(cancelFunction).toMatch(/Old app builds sent the conversation chat_id/);
-    expect(cancelFunction).toMatch(/p_chat_id: row\.chat_id/);
+    expect(cancelFunction).toMatch(/p_service_chat_id: row\.id/);
+    expect(cancelFunction).not.toMatch(/p_chat_id: row\.chat_id/);
     expect(cancelFunction).toMatch(/service_chat_id: row\.id/);
-    expect(cancelFunction).toMatch(/idempotencyKey: actorRole === "carer" \? `service_cancel_provider:\$\{row\.id\}:full`/);
+    expect(cancelFunction).toMatch(/claim_paid_service_cancellation/);
+    expect(cancelFunction).toMatch(/idempotencyKey: refundIdempotencyKey/);
+    const exactCancellationMigration = readMigration("cancellation_requires_service_chat_id");
+    expect(exactCancellationMigration).toMatch(/p_service_chat_id uuid/);
+    expect(exactCancellationMigration).toMatch(/where id = p_service_chat_id for update/g);
+    expect(exactCancellationMigration).not.toMatch(/where chat_id = p_chat_id/);
+    expect(exactCancellationMigration).toMatch(/values \(v_sc\.chat_id, p_actor_id/);
+  });
+
+  it("live care actions resolve through the strict active service row, not a room-ambiguous lookup", () => {
+    const activeCareActions = readMigration("care_updates_strict_service_identity_and_reminders");
+    expect(activeCareActions).toMatch(/create or replace function public\.get_service_care_update_status_by_service_id/);
+    expect(activeCareActions).toMatch(/create or replace function public\.submit_service_care_update_by_service_id/);
+    expect(activeCareActions).toMatch(/create or replace function public\.submit_service_checkin_by_service_id/);
+    expect(activeCareActions).toMatch(/create or replace function public\.verify_service_start_pin_by_service_id/);
+    expect(activeCareActions).toMatch(/create or replace function public\.submit_service_issue_report_by_service_id/);
+    expect(activeCareActions).toMatch(/create or replace function public\.submit_requester_handoff_response_by_service_id/);
+    expect(activeCareActions).toMatch(/where id = p_service_chat_id/);
+    expect(activeCareActions).not.toMatch(/_by_service_id[\s\S]{0,900}current_active_service_chat_id_from_any_id/);
   });
 
   it("Agreement PDF is gated by mandatory Care Instruction and active mutual Care Scope signature", () => {
@@ -619,10 +821,9 @@ describe("Runtime bug fixes (2026-06-26 batch)", () => {
     expect(pdfFunction).toMatch(/Care Instruction is required before generating the agreement PDF/);
   });
 
-  it("live agreement PDF room fallback resolves only the active service row, never an arbitrary history row", () => {
+  it("agreement PDF requires the exact service row and never resolves from a room", () => {
     expect(pdfFunction).toMatch(/\.eq\("id", serviceChatId\)[\s\S]{0,120}\.maybeSingle\(\)/);
-    expect(pdfFunction).toMatch(/current_active_service_chat_id_for_room/);
-    expect(pdfFunction).toMatch(/snapshotModeInput === "live" && canonicalId/);
+    expect(pdfFunction).not.toMatch(/current_active_service_chat_id_for_room/);
     expect(pdfFunction).not.toMatch(/\.or\(`id\.eq\.\$\{serviceChatId\},chat_id\.eq\.\$\{serviceChatId\}`\)/);
   });
 
@@ -638,6 +839,14 @@ describe("Runtime bug fixes (2026-06-26 batch)", () => {
     expect(screen).toMatch(/<ScopeDetailRow label="Hand-off Location">/);
     expect(screen).not.toMatch(/<ScopeDetailRow label="Handoff method">/);
     expect(screen).toMatch(/<PaymentCareScopeSummary[\s\S]{0,160}careDetails=\{careScope\?\.careDetails \|\| null\}/);
+  });
+
+  it("keeps persisted single-line Care Scope values on one line while instructions remain multiline", () => {
+    expect(screen).toMatch(/function ScopeDetailRow\(\{ children, label, multiline = false \}/);
+    expect(screen).toMatch(/nestedScrollEnabled showsVerticalScrollIndicator style=\{styles\.scopeDetailValueMultiline\}/);
+    expect(screen).toMatch(/<ScopeDetailRow label="Care Instructions" multiline>/);
+    expect(screen).toMatch(/<ScopeDetailRow label="Care tasks">\{\[scopeTasks\.join\(", "\), otherTasks\]/);
+    expect(screen).toMatch(/<ScopeDetailRow label="Walks per day">\{scopeFrequency\}<\/ScopeDetailRow>/);
   });
 
   it("opens role-specific agreement PDFs so counterpart payment rows are not shown", () => {
@@ -695,8 +904,21 @@ describe("Runtime bug fixes (2026-06-26 batch)", () => {
     expect(cardBlock).toMatch(/<View style=\{styles\.scopeHeaderActions\}>/);
     expect(cardBlock).toMatch(/showUpdateDateAction \?/);
     expect(cardBlock).toMatch(/showWithdrawAction \?/);
+    expect(screen).toMatch(/scopeHeaderActions: \{ flexShrink: 0, flexDirection: "row", alignItems: "center"/);
     // the old bordered action row inside the expanded body is gone
     expect(cardBlock).not.toMatch(/styles\.scopeActionRow/);
+  });
+
+  it("uses the same compact two-row Care Scope header in collapsed and expanded states", () => {
+    const cardBlock = screen.slice(screen.indexOf("function BookingCards"), screen.indexOf("function ScopeLine"));
+    const reviewSummaryBlock = screen.slice(screen.indexOf("function PaymentCareScopeSummary"), screen.indexOf("function CareScopeAgreementPaymentDetails"));
+    expect(cardBlock).toMatch(/<View style=\{styles\.scopeHeaderTopRow\}>[\s\S]{0,1800}<View style=\{styles\.scopeHeaderActions\}>[\s\S]{0,1800}name=\{expanded \? "chevron-up" : "chevron-down"\}/);
+    expect(cardBlock).toMatch(/<View style=\{styles\.scopeHeaderBottomRow\}>[\s\S]{0,500}\{collapsedWhereLine \? <Text[\s\S]{0,1800}careAgreementReady \? \(/);
+    expect(cardBlock).not.toMatch(/Updates ·|scopeUpdateStatus|updateStatusLine/);
+    expect(reviewSummaryBlock).not.toMatch(/Updates ·|scopeUpdateStatus/);
+    expect(screen).toMatch(/scopeHeadlineBlock: \{ gap: 4 \}/);
+    expect(screen).toMatch(/scopeUtilityActions: \{ flexDirection: "row", alignItems: "center", justifyContent: "flex-end"/);
+    expect(cardBlock.indexOf('accessibilityLabel="Hide care scope from chat"')).toBeLessThan(cardBlock.indexOf("careAgreementReady ? ("));
   });
 
   it("mutual signatures materialize the agreement row while visible PDF readiness waits for Care Instruction", () => {
@@ -710,16 +932,17 @@ describe("Runtime bug fixes (2026-06-26 batch)", () => {
     expect(screen).not.toMatch(/if \(!clean\(details\?\.careInstructions\)\) return false/);
     expect(pdfFunction).not.toMatch(/if \(!clean\(careDetails\.careInstructions \|\| snapshot\.careInstructions\)\) return false/);
     expect(screen).toMatch(/See Agreement/);
-    expect(screen).toMatch(/The agreement is being prepared\. Please check again shortly\./);
+    expect(screen).toMatch(/Your agreement is still being prepared\. Check back shortly\./);
   });
 
   it("paid checkout pending state is a five-minute retry lock with a countdown, then Proceed Payment returns", () => {
     const paymentFunction = readFileSync(join(repoRoot, "supabase/functions/create-service-payment/index.ts"), "utf8");
     expect(paymentFunction).toMatch(/CARE_PAYMENT_RETRY_LOCK_MS = 5 \* 60 \* 1000/);
     expect(paymentFunction).toMatch(/Math\.min\(stripeExpiresAtMs, retryLockExpiresAtMs\)/);
-    expect(paymentFunction).toMatch(/const paymentAttemptId = crypto\.randomUUID\(\)/);
-    expect(paymentFunction).toMatch(/payment_attempt_id: paymentAttemptId/);
-    expect(paymentFunction).toMatch(/idempotencyKey: `svc_pay_\$\{serviceChat\.id\}_\$\{mode\}_\$\{customerId\}_\$\{currency\}_\$\{customerTotal\}_\$\{scopeVersionId\}_\$\{scopeHash\}_\$\{paymentAttemptId\}`/);
+    expect(paymentFunction).toMatch(/claim_service_care_payment_attempt/);
+    expect(paymentFunction).toMatch(/payment_attempt_id: claim\.attemptId/);
+    expect(paymentFunction).toMatch(/carePaymentStripeIdempotencyKey\(serviceChat\.id, claim\.attemptId\)/);
+    expect(paymentFunction).not.toMatch(/payload\.idempotency/);
     expect(screen).toMatch(/const \[paymentNowMs, setPaymentNowMs\] = useState/);
     expect(screen).toMatch(/setInterval\(\(\) => setPaymentNowMs\(Date\.now\(\)\), 1000\)/);
     expect(screen).toMatch(/isCarePaymentPendingActive\(scope, paymentNowMs\)/);
@@ -740,8 +963,8 @@ describe("Runtime bug fixes (2026-06-26 batch)", () => {
   });
 
   it("waiting states explain status without rendering useless disabled CTA buttons", () => {
-    expect(screen).toMatch(/Care Scope is still under \$\{clean\(peerName\) \|\| "the carer"\}'s review/);
-    expect(screen).toMatch(/\$\{clean\(peerName\) \|\| "The owner"\} already agreed to this Care Scope/);
+    expect(screen).toMatch(/\$\{clean\(peerName\) \|\| "The carer"\} is still reviewing the Care Scope/);
+    expect(screen).toMatch(/\$\{clean\(peerName\) \|\| "The owner"\} has already signed the Care Scope/);
     expect(screen).not.toMatch(/clean\(ownerName\)/);
     expect(screen).toMatch(/\{actionPrimary && !actionPrimary\.disabled \? \(/);
     expect(screen).toMatch(/scope\.actorRole === "carer" && !scope\.ownerSigned[\s\S]{0,120}Review & Sign Care Scope/);
@@ -750,8 +973,9 @@ describe("Runtime bug fixes (2026-06-26 batch)", () => {
     expect(screen).not.toMatch(/Carer is finishing payout setup", onPress: \(\) => setActiveSheet\("payment"\), disabled: true/);
   });
 
-  it("owner-signed-first path pays/confirms after late carer signature without stale update mode", () => {
+  it("owner-signed-first path pays/confirms after late carer signature without a payout dead end", () => {
     expect(screen).toMatch(/const mutuallyAgreed = hasCurrentCareScopeAgreement\(serviceChat\)/);
+    expect(screen).toMatch(/if \(mutuallyAgreed\) \{\s*if \(hasPaymentAmount && !providerStripeReady\) return \{ label: "Finish payout setup", onPress: openPayoutAccount/);
     expect(screen).toMatch(/if \(mutuallyAgreed\) \{\s*if \(hasPaymentAmount && !providerStripeReady\) return null;\s*return \{ label: hasPaymentAmount \? "Proceed Payment" : "Proceed Confirm", onPress: hasPaymentAmount \? proceedPaymentDirect : \(\) => setActiveSheet\("payment"\)/);
     expect(screen.indexOf("if (mutuallyAgreed)")).toBeLessThan(screen.indexOf("if (hasPaymentAmount && !providerStripeReady)"));
     expect(screen).toMatch(/\{actionPrimary && !actionPrimary\.disabled \? \(/);
@@ -777,7 +1001,7 @@ describe("Runtime bug fixes (2026-06-26 batch)", () => {
   it("booked handoff uses one bottom action card for owner and carer, not pinned top banners", () => {
     expect(screen).toMatch(/Your Care Session PIN/);
     expect(screen).toMatch(/Share the 4-digit PIN after handing over your pet or giving access to the care location\./);
-    expect(screen).toMatch(/Share Care Session PIN/);
+    expect(screen).toMatch(/Your Care Session PIN/);
     expect(screen).toMatch(/Enter PIN and 📸/);
     expect(screen).toMatch(/Collect 4-digit PIN, then take a timestamped photo of the pet to start care\./);
     expect(screen).toMatch(/function ServiceActionCard/);
@@ -787,12 +1011,11 @@ describe("Runtime bug fixes (2026-06-26 batch)", () => {
     expect(screen).toMatch(/const isCollapsed = staticCard \? false : \(locked \|\| collapsed\)/);
     expect(screen).toMatch(/accessibilityLabel=\{isCollapsed \? "Expand action card" : "Collapse action card"\}/);
     expect(screen).toMatch(/name=\{isCollapsed \? "chevron-up" : "chevron-down"\}/);
-    expect(screen).toMatch(/headerRight=\{isRequester && activeStartPin \? <StartPinDetailCard digits=\{sanitizeStartPin\(activeStartPin\)\.split\(""\)\} \/> : null\}/);
-    // Once the owner shares the PIN, their card locks (no toggle affordance, forced
-    // collapsed) and the header title itself becomes the "Share Care Session PIN"
-    // confirmation label -- the CTA/cancel-booking actions are only visible pre-share.
-    expect(screen).toMatch(/locked=\{isRequester && careStatus === "pin_shared"\}/);
-    expect(screen).toMatch(/title=\{isRequester \? \(careStatus === "pin_shared" \? "Share Care Session PIN" : "Your Care Session PIN"\) : "Enter PIN and 📸"\}/);
+    expect(screen).toMatch(/headerRight=\{!systemNoStartCancellationPending && isRequester \? \([\s\S]{0,180}activeStartPin[\s\S]{0,180}<StartPinDetailCard digits=\{sanitizeStartPin\(activeStartPin\)\.split\(""\)\} \/>/);
+    // The owner always sees the PIN in the handoff card. Tapping Start Care grants
+    // the early-start authority; the carer still completes check-in with PIN + photo.
+    expect(screen).toMatch(/locked=\{isRequester && ownerAuthorizedStart && !handoffReady\}/);
+    expect(screen).toMatch(/title=\{systemNoStartCancellationPending \? "Cancelling…" : isRequester \? "Your Care Session PIN" : "Enter PIN and 📸"\}/);
     expect(screen).toMatch(/\{locked \|\| staticCard \? null : \(/);
     expect(screen).not.toMatch(/<Text style=\{styles\.handoffBannerTitle\}>Share PIN Required<\/Text>/);
     expect(screen).not.toMatch(/<Text style=\{styles\.handoffBannerTitle\}>Start PIN required<\/Text>/);
@@ -802,6 +1025,40 @@ describe("Runtime bug fixes (2026-06-26 batch)", () => {
     expect(screen).not.toMatch(/initialPin/);
     expect(screen).toMatch(/\/\/ Never pre-fill the PIN/);
     expect(screen).toMatch(/setPin\(""\)/);
+  });
+
+  it("keeps the owner's booking PIN visible across cache races and retries preparation until it is available", () => {
+    expect(screen).toMatch(/if \(!cancelled && pin\) setSharedStartPin\(\(current\) => current \|\| pin\)/);
+    expect(screen).not.toMatch(/\["awaiting_handoff", "pin_shared"\][^\n]+\|\| activeStartPin/);
+    expect(screen).toMatch(/supabase\.rpc\("prepare_service_start_pin_by_service_id", \{ p_service_chat_id: activeServiceChatId \}\)/);
+    expect(screen).toMatch(/if \(!pin\) throw new Error\("start_pin_not_prepared"\)/);
+    expect(screen).toMatch(/retryTimer = setTimeout\(\(\) => void preparePin\(\), 3000\)/);
+    expect(screen).toMatch(/headerRight=\{!systemNoStartCancellationPending && isRequester \? \(/);
+    expect(screen).toMatch(/<StartPinDetailCard digits=\{sanitizeStartPin\(activeStartPin\)\.split\(""\)\} \/>/);
+    expect(screen).toMatch(/Preparing PIN…/);
+    const invariantMigration = readMigration("start_pin_display_and_verification_invariant");
+    expect(invariantMigration).toMatch(/extensions\.crypt\(v_pin, start_pin_hash\) <> start_pin_hash/);
+    expect(invariantMigration).toMatch(/return jsonb_build_object\('pin', v_pin, 'service_chat_id', v_sc\.id\)/);
+    const bookingInvariantMigration = readMigration("booked_service_requires_start_pin");
+    expect(bookingInvariantMigration).toMatch(/before update of status on public\.service_chats/);
+    expect(bookingInvariantMigration).toMatch(/new\.status = 'booked' and old\.status is distinct from 'booked'/);
+    expect(bookingInvariantMigration).toMatch(/insert into public\.service_start_pins/);
+    expect(bookingInvariantMigration).toMatch(/new\.start_pin_hash := extensions\.crypt\(v_pin, extensions\.gen_salt\('bf'\)\)/);
+    expect(bookingInvariantMigration).toMatch(/raise exception 'start_pin_creation_failed'/);
+  });
+
+  it("accepts up to 10 compressed evidence images for no-start and issue reports", () => {
+    const reportSheet = screen.slice(screen.indexOf("function HandoffProblemSheet"), screen.indexOf("function ReviewSheet"));
+    expect(screen).toMatch(/const MAX_CARE_REPORT_EVIDENCE = 10/);
+    expect(reportSheet).toMatch(/allowsMultipleSelection: true/);
+    expect(reportSheet).toMatch(/selectionLimit: MAX_CARE_REPORT_EVIDENCE - media\.length/);
+    expect(reportSheet).toMatch(/Math\.min\(2, media\.length\)/);
+    expect(reportSheet).toMatch(/uploadNativeServiceCareEvidenceImage/);
+    expect(reportSheet).toMatch(/Add Photos \(\$\{media\.length\}\/10\)/);
+    expect(nativeSocial).toMatch(/resize: \{ width: 1600 \}[\s\S]{0,80}compress: 0\.86/);
+    const evidenceLimitMigration = readMigration("care_report_evidence_limit_ten");
+    expect(evidenceLimitMigration).toMatch(/> 10 then raise exception ''no_start_evidence_limit_exceeded''/);
+    expect(evidenceLimitMigration).toMatch(/> 10 then raise exception ''issue_evidence_limit_exceeded''/);
   });
 
   it("keeps the status banner and composer together in one sticky in-flow footer surface", () => {
@@ -820,9 +1077,9 @@ describe("Runtime bug fixes (2026-06-26 batch)", () => {
   it("Start Care is date-gated before opening and remains camera-only", () => {
     expect(screen).toMatch(/const openStartCareFromHandoff = useCallback/);
     expect(screen).toMatch(/Too early to start/);
-    expect(screen).toMatch(/Care can only begin on the scheduled service date\./);
-    expect(screen).toMatch(/ImagePicker\.requestCameraPermissionsAsync\(\)/);
-    expect(screen).toMatch(/ImagePicker\.launchCameraAsync/);
+    expect(screen).toMatch(/Care can only start on the day it is booked for\./);
+    expect(screen).toMatch(/requestNativeCameraPermissionDetail\(\)/);
+    expect(screen).toMatch(/launchNativeCameraAsync\(/);
     const startCareBlock = screen.slice(screen.indexOf("function StartCareSheet"), screen.indexOf("function HandoffProblemSheet"));
     expect(startCareBlock).not.toMatch(/launchImageLibraryAsync/);
   });
@@ -841,7 +1098,7 @@ describe("Runtime bug fixes (2026-06-26 batch)", () => {
     // one static message -- see the dedicated describe block below for full tier coverage.
     expect(screen).toMatch(/Cancelling now marks your Care record and may reduce how often your profile is shown/);
     expect(screen).toMatch(/No payment or refund is involved/);
-    const cancelModalBlock = screen.slice(screen.indexOf("confirmCancelBookingOpen ? ("), screen.indexOf("<AppSlideConfirm", screen.indexOf("confirmCancelBookingOpen ? (")));
+    const cancelModalBlock = screen.slice(screen.indexOf("confirmCancelBookingOpen ? ("), screen.indexOf("<SlideToConfirm", screen.indexOf("confirmCancelBookingOpen ? (")));
     expect(cancelModalBlock).not.toMatch(/placeholder=\{?"?Optional"?\}?/);
     expect(cancelModalBlock).toMatch(/AppBottomSheetScroll/);
     expect(cancelModalBlock).toMatch(/KeyboardAvoidingView/);
@@ -849,7 +1106,7 @@ describe("Runtime bug fixes (2026-06-26 batch)", () => {
     const cancelFunction = readFileSync(join(repoRoot, "supabase/functions/cancel-service-booking/index.ts"), "utf8");
     expect(cancelFunction).toMatch(/const actorRole = row\.requester_id === user\.id \? "owner" : row\.provider_id === user\.id \? "carer" : ""/);
     expect(cancelFunction).toMatch(/cancel_service_booking_without_payment/);
-    expect(cancelFunction).toMatch(/cancel_paid_booking_by_provider_after_refund/);
+    expect(cancelFunction).toMatch(/complete_paid_service_cancellation/);
     expect(cancelFunction).toMatch(/service_cancel_\$\{actorRole\}_no_payment/);
     const cancelMigration = readMigration("care_handoff_cancel_contract");
     expect(cancelMigration).toMatch(/create table if not exists public\.care_provider_trust_events/);
@@ -926,7 +1183,7 @@ describe("Runtime bug fixes (2026-06-26 batch)", () => {
     expect(screen).toMatch(/p_checkin_location_lng: evidence\?\.locationLng \?\? null/);
     expect(screen).toMatch(/p_checkin_location_accuracy_m: evidence\?\.locationAccuracyM \?\? null/);
     expect(screen).toMatch(/p_checkin_location_permission_denied: evidence\?\.locationPermissionDenied === true/);
-    expect(screen).toMatch(/Location\.requestForegroundPermissionsAsync\(\)/);
+    expect(screen).toMatch(/requestNativeForegroundLocationPermissionDetail\(\)/);
     expect(screen).toMatch(/Location\.getCurrentPositionAsync/);
     const evidenceMigration = readMigration("care_admin_evidence_signals");
     const evidenceValidatorMigration = readMigration("service_care_evidence_chat_id_validator");
@@ -945,19 +1202,16 @@ describe("Runtime bug fixes (2026-06-26 batch)", () => {
     expect(adminSafety).not.toMatch(/create table .*service.*evidence/i);
   });
 
-  it("Report Issue has visible evidence upload; Cancel Booking evidence upload is carer-only", () => {
+  it("Report Issue and Cancel Booking expose supporting-evidence upload", () => {
     expect(screen).toMatch(/Report Issue/);
-    expect(screen).toMatch(/Add Supporting Information/);
+    expect(screen).toMatch(/Add Photos/);
     expect(screen).toMatch(/Slide to Report/);
     const cancelBookingBlock = screen.slice(
       screen.indexOf("confirmCancelBookingOpen ? ("),
       screen.indexOf("Slide to Cancel Booking"),
     );
-    // Carer cancellations can attach supporting evidence for the trust/dispute review;
-    // the field is gated behind isProvider so owner cancellations never see it.
-    expect(cancelBookingBlock).toMatch(/isProvider \? \(/);
     expect(cancelBookingBlock).toMatch(/pickCancelEvidence/);
-    expect(cancelBookingBlock).toMatch(/Add Supporting Information/);
+    expect(cancelBookingBlock).toMatch(/Add Photos/);
     expect(screen).toMatch(/scope: "cancellation"/);
   });
 
@@ -995,9 +1249,7 @@ describe("Runtime bug fixes (2026-06-26 batch)", () => {
 describe("#12 deeplink — service-chat notifications must be tappable", () => {
   const notif = readFileSync(join(appRoot, "src/lib/nativeNotifications.ts"), "utf8");
   it("allowedNotificationPath covers every real notification destination (no silent null)", () => {
-    const m = notif.match(/allowedNotificationPath = \(path: string\) =>\s*\/\^([\s\S]*?)\/\.test/);
-    expect(m).toBeTruthy();
-    const allow = m![1];
+    const allow = notif.slice(notif.indexOf("const allowedNotificationPath"), notif.indexOf("const normalizePathCandidate"));
     // Every routable screen a notification can deeplink to must be present, or its
     // row renders disabled and the tap does nothing (the care-chat deeplink bug).
     for (const route of [
@@ -1006,6 +1258,7 @@ describe("#12 deeplink — service-chat notifications must be tappable", () => {
     ]) {
       expect(allow.includes(route)).toBe(true);
     }
+    expect(notif).toMatch(/path === "\/"/);
   });
 });
 
@@ -1014,6 +1267,15 @@ describe("Book Care sheet — manual pet + draft + currency (2026-06-27 batch)",
     const m = readMigration("service_request_allow_manual_pet");
     expect(m).toMatch(/v_has_pet :=[\s\S]{0,160}petId[\s\S]{0,40}or[\s\S]{0,60}petName/);
     expect(m).toMatch(/create or replace function public\.validate_service_request_payload/);
+  });
+  it("latest request-time validator parses ISO and wall-clock values without operator-precedence failure", () => {
+    const m = readMigration("fix_service_request_time_validation");
+    expect(m).toMatch(/v_has_pet :=[\s\S]{0,180}petId[\s\S]{0,80}or[\s\S]{0,100}petName/);
+    expect(m).toMatch(/service_wall_clock_to_timestamptz\(v_first_date, p_request_card->>'startTime', p_request_card\)/);
+    expect(m).toMatch(/service_wall_clock_to_timestamptz\(v_last_date, p_request_card->>'endTime', p_request_card\)/);
+    expect(m).not.toMatch(/v_first_date \|\| ' ' \|\| p_request_card->>'startTime'/);
+    expect(m).toMatch(/v_end_at - v_start_at < interval '1 hour'/);
+    expect(m).toMatch(/v_end_at <= now\(\)[\s\S]{0,40}care_request_expired/);
   });
   it("booking snapshot validator also accepts a manual pet (no petId haunting at payment)", () => {
     const m = readMigration("booking_snapshot_manual_pet_empty_pet_id");
@@ -1052,12 +1314,28 @@ describe("Book Care sheet — manual pet + draft + currency (2026-06-27 batch)",
     expect(requestSheet).not.toMatch(/accessibilityLabel="Add or change pet"/);
     expect(requestSheet).toMatch(/!petChoicesOpen && selectedPets\.length > 0/);
     expect(requestSheet).toMatch(/NativePolaroidCard[\s\S]{0,700}setPetChoicesOpen\(true\)/);
-    expect(requestSheet).toMatch(/petChoicesOpen \? \([\s\S]{0,240}<RequestPetCarousel/);
+    expect(requestSheet).toMatch(/petChoicesOpen \|\| \(selectedPets\.length === 0 && manualPetDrafts\.length === 0\) \? \([\s\S]{0,240}<RequestPetCarousel/);
   });
   it("mixed profile + manual pets stay compact in the Care Scope summary", () => {
     const summary = sourceBlock("SelectedPetPolaroid");
     expect(summary).toMatch(/\[\.\.\.profilePets, \.\.\.manualPets\]\.map/);
     expect(summary).toMatch(/profilePets\.length === 0 \? manualPets\.map/);
+  });
+  it("keeps dog size in the active Care Scope for both profile and manual pets", () => {
+    const requestSheet = sourceBlock("RequestSheet");
+    expect(screen).toMatch(/select\("id,owner_id,name,species,breed,pet_size,/);
+    expect(requestSheet).toMatch(/dogSize: nextPetType === "Dog" \? clean\(item\.pet_size\) : ""/);
+    expect(requestSheet).toMatch(/dogSize: speciesValue === "dog" \? clean\(draft\.dogSize\) : ""/);
+    expect(requestSheet).toMatch(/speciesValue === "dog" \? \(/);
+    expect(requestSheet).toMatch(/\{DOG_SIZES\.map/);
+    expect(screen).toMatch(/const speciesWithSize = species === "Dog" && dogSize \? `Dog \(\$\{dogSize\}\)` : species/);
+    expect(pdfBuilder).toMatch(/const petSpecies = petSpeciesWithSize\(/);
+  });
+  it("normalizes profile and manual Cats/Dogs to the same singular Care Scope caption", () => {
+    expect(screen).toMatch(/if \(normalized === "cats" \|\| normalized === "cat"\) return "Cat";/);
+    expect(screen).toMatch(/if \(normalized === "dogs" \|\| normalized === "dog"\) return "Dog";/);
+    expect(pdfBuilder).toMatch(/lower === "cats" \|\| lower === "cat"/);
+    expect(pdfBuilder).toMatch(/lower === "dogs" \|\| lower === "dog"/);
   });
   it("request + quote sheets use in-screen layers so open sheets do not block the chat header", () => {
     expect(sourceBlock("RequestSheet")).toMatch(/pointerEvents="box-none" style=\{styles\.inlineSheetLayer\}/);
@@ -1102,12 +1380,53 @@ describe("Currency — single source of truth across rate / quote / summary", ()
     expect(screen).toMatch(/currencySelectedByRequester: requestCurrencyTouched/);
     expect(screen).toContain("initialCard?.currencySelectedByRequester === true ? initialCard?.suggestedCurrency : \"\"");
   });
-  it("care type derives from the carer's offered services (full palette only as not-loaded fallback)", () => {
-    expect(screen).toMatch(/const scoped = Array\.from\(new Set\(\(providerServices \|\| \[\]\)\.map\(clean\)\.filter\(Boolean\)\)\);\s*return scoped\.length > 0 \? scoped : \[\.\.\.SERVICES_OFFERED\]/);
-    expect(screen).toMatch(/if \(providerServices\.length === 0 && accessToken\)/);
+  it("care type derives only from the carer's offered services", () => {
+    const requestSheet = sourceBlock("RequestSheet");
+    expect(requestSheet).toMatch(/return Array\.from\(new Set\(\(providerServices \|\| \[\]\)\.map\(clean\)\.filter\(Boolean\)\)\);/);
+    expect(requestSheet).not.toMatch(/providerServiceOptions[\s\S]{0,220}SERVICES_OFFERED/);
+    expect(screen).toMatch(/cleanSlateProviderDetail/);
     expect(screen).toMatch(/fetchNativeServiceProviderDetail\(\{/);
-    // no leftover loading-gate that would blank the dropdown
-    expect(screen).not.toMatch(/providerServicesLoading/);
+  });
+
+  it("hydrates clean-slate Book Care from current pets and the carer profile before returning", () => {
+    const noActiveStart = screen.indexOf("if (!row) {");
+    const noActiveEnd = screen.indexOf("const [{ data: disputeRows }", noActiveStart);
+    const noActiveBranch = screen.slice(noActiveStart, noActiveEnd);
+    expect(noActiveBranch).toMatch(/const cleanSlateProviderId = clean\(latestTerminalRow\?\.provider_id\)/);
+    // Care can include a family-shared pet. The access-controlled RPC is the
+    // canonical source; a direct `pets.owner_id` read would incorrectly omit
+    // those pets and bypass the shared-pet contract.
+    expect(noActiveBranch).toMatch(/fetchNativeAccessiblePets\(accessToken\)/);
+    // The Care screen must use the protected provider-detail RPC, never a direct
+    // client read of the private provider profile table.
+    expect(noActiveBranch).not.toMatch(/\.from\("pet_care_profiles"\)/);
+    expect(noActiveBranch).toMatch(/setPets\(\(\(cleanSlatePetRows \|\| \[\]\) as PetOption\[\]\)\.filter\(\(pet\) => Boolean\(pet\) && pet\.is_active !== false\)\)/);
+    expect(noActiveBranch).toMatch(/providerServices: cleanSlateProviderServices/);
+    expect(noActiveBranch).toMatch(/fetchNativeServiceProviderDetail\(\{/);
+  });
+
+  it("creates the next active booking in the existing conversation before sending a clean-slate request", () => {
+    expect(screen).toMatch(/const sendRequestFromSheet = useCallback[\s\S]{0,1600}createNativeServiceChat\(newBookingProviderId/);
+    expect(screen).toMatch(/const sendRequestFromSheet = useCallback[\s\S]{0,1900}send_service_request[\s\S]{0,160}p_chat_id: nextChatId/);
+  });
+
+  it("keeps the manual-pet entry path reachable after the last draft is removed", () => {
+    const requestSheet = sourceBlock("RequestSheet");
+    expect(requestSheet).toMatch(/if \(next\.length === 0\) \{[\s\S]{0,180}setPetChoicesOpen\(true\)/);
+    expect(requestSheet).toMatch(/petChoicesOpen \|\| \(selectedPets\.length === 0 && manualPetDrafts\.length === 0\) \? \(/);
+    expect(sourceBlock("RequestPetCarousel")).toMatch(/Input pet details/);
+  });
+
+  it("renders Input pet details as a neutral glass card, not a blue callout", () => {
+    const stylesStart = screen.indexOf("const styles = StyleSheet.create");
+    const stylesSource = screen.slice(stylesStart);
+    const tile = stylesSource.match(/petAddTile: \{[^\n]+\}/)?.[0] || "";
+    const tileText = stylesSource.match(/petAddTileText: \{[^\n]+\}/)?.[0] || "";
+    expect(tile).toContain("backgroundColor: huddleColors.glassChrome");
+    expect(tile).toContain("borderColor: huddleColors.glassBorder");
+    expect(tile).not.toContain("huddleColors.blue");
+    expect(tileText).toContain("color: huddleColors.text");
+    expect(screen).toMatch(/accessibilityLabel="Input pet details"[\s\S]{0,220}<Feather color=\{huddleColors\.text\} name="plus" size=\{huddlePolaroid\.addIconSize\}/);
   });
 });
 
@@ -1126,7 +1445,7 @@ describe("Out-of-area location advisory", () => {
     expect(isNativeCareLocationOutOfArea({ country: "", lat: null, lng: null }, hk)).toBe(false);
     // carer has no known areas → never warn
     expect(isNativeCareLocationOutOfArea({ country: "United Kingdom", lat: 51.5, lng: -0.12 }, [])).toBe(false);
-  });
+  }, 15_000);
   it("is advisory only — wired into the request sheet without blocking send", () => {
     expect(screen).toMatch(/const locationOutOfArea = !locationAreaLockedToProvider && isNativeCareLocationOutOfArea\(selectedLocationMeta, serviceAreas\)/);
     expect(screen).toMatch(/\{locationOutOfArea \? <Text style=\{styles\.locationOutOfAreaText\}/);
@@ -1156,6 +1475,19 @@ describe("Start Care sheet — PIN error must not swallow unrelated failures", (
     expect(submitCheckinBlock).toMatch(/return \{ ok: false, error: "unexpected_error" \}/);
     // The sentinel must never collide with the real PIN-mismatch string.
     expect(submitCheckinBlock).not.toMatch(/error: "invalid_start_pin"/);
+  });
+  it("keeps a server-confirmed check-in successful while its Care refresh reconciles in the background", () => {
+    const submitCheckinBlock = screen.slice(screen.indexOf("const submitCheckin = useCallback"), screen.indexOf("const verifyStartPin = useCallback"));
+    expect(submitCheckinBlock).toMatch(/void load\(true\);\s*return \{ ok: true \}/);
+    expect(submitCheckinBlock).not.toMatch(/await load\(true\);\s*return \{ ok: true \}/);
+  });
+  it("does not let optional chat snapshots or direct private-profile reads turn an active Care row into a failure", () => {
+    const loader = screen.slice(screen.indexOf("const load = useCallback"), screen.indexOf("loadRef.current = load"));
+    expect(loader).toMatch(/fetchNativeChatDialogueSnapshot[\s\S]{0,240}\.catch\(\(error\) => \{[\s\S]{0,180}return null;/);
+    expect(loader).toMatch(/fetchNativeAccessiblePets\(accessToken\)\.catch\(\(\) => \[\]\)/);
+    expect(loader).not.toMatch(/\.from\("pet_care_profiles"\)/);
+    expect(loader).toMatch(/if \(hasAuthoritativeCareState \|\| \(currentServiceChat && isActiveServiceChatRow\(currentServiceChat\)\)\) return;/);
+    expect(loader).toMatch(/SERVICE_CHAT_LOAD_ERROR_COPY/);
   });
   it("a missing serviceChatId/currentUserId never fails silently -- it must surface a visible error", () => {
     const startCareBlock = screen.slice(screen.indexOf("function StartCareSheet("), screen.indexOf("function HandoffProblemSheet("));
@@ -1261,15 +1593,58 @@ describe("Check-in failures surface their real cause instead of a generic swallo
   });
 });
 
-describe("Completion CTA is a tap that opens the real slider (2026-07-02 fix)", () => {
-  it("composer entry point is honestly labeled 'Complete Care Session', not 'Slide to Complete'", () => {
-    expect(screen).toMatch(/const completionComposerCtaLabel = "Complete Care Session"/);
-    expect(screen).toMatch(/label: completionComposerCtaLabel, onPress: handleStartCompletion/);
-  });
-  it("the REAL slide-to-confirm inside CompletionSheet is untouched", () => {
+describe("Completion entry and submission are real sliders", () => {
+  it("keeps the care-in-progress entry point as a real Slide to Complete gesture", () => {
     expect(screen).toMatch(/const completionCtaLabel = "Slide to Complete"/);
+    expect(screen).toMatch(/label: completionCtaLabel, onPress: handleCompletionEntrySlide/);
+    expect(screen).toMatch(/completionPrimaryActionIsSlider[\s\S]{0,260}<SlideToConfirm busy=\{sending\} label=\{completionCtaLabel\} onCommit=\{actionPrimary\.onPress\}/);
+    expect(screen).not.toMatch(/completionComposerCtaLabel/);
+  });
+  it("keeps the final slide-to-confirm inside CompletionSheet", () => {
     expect(screen).toMatch(/ctaLabel=\{completionCtaLabel\}/);
     expect(screen).toMatch(/label={ctaLabel \|\| "Complete Care Session"}/);
+  });
+  it("prompts for a missing care update without blocking completion", () => {
+    expect(screen).toMatch(/const \[completionCareUpdateAttempted, setCompletionCareUpdateAttempted\] = useState\(false\)/);
+    expect(screen).toMatch(/const handleStartCompletion = useCallback\(async \(\) => \{[\s\S]{0,120}setCompletionCareUpdateAttempted\(false\)/);
+    expect(screen).toMatch(/if \(!fetchedRequirementMet\) \{[\s\S]{0,180}setCompletionCareUpdateAttempted\(true\)/);
+    expect(screen).toMatch(/missingCareUpdateKind=\{isProvider && completionCareUpdateAttempted \? careUpdateKind : null\}/);
+    expect(screen).toMatch(/<Text style=\{styles\.completionCareUpdateNoticeTitle\}>Care update not sent<\/Text>/);
+    expect(screen).toMatch(/<Text style=\{styles\.completionCareUpdateNoticeBody\}>You haven’t sent the requested \{missingCareUpdateLabel\}\. You can still confirm completion\.<\/Text>/);
+    expect(screen).toMatch(/<Text style=\{styles\.completionSendUpdateFirstText\}>Send update first<\/Text>/);
+    expect(screen).toMatch(/<SlideToConfirm busy=\{sending\} label=\{ctaLabel \|\| "Complete Care Session"\}/);
+    expect(screen).toMatch(/setActiveSheet\("completion"\)/);
+    expect(screen).toMatch(/catch \{[\s\S]{0,180}Fail open:[\s\S]{0,180}\}/);
+  });
+  it("never silently loses completion when the live service ref or legacy room id has not hydrated yet", () => {
+    expect(screen).toMatch(/const activeServiceChatId = clean\(serviceChatRef\.current\?\.id\) \|\| clean\(serviceChat\?\.id\)/);
+    expect(screen).toMatch(/if \(!serviceChat \|\| !activeServiceChatId\) \{[\s\S]{0,220}Unable to find this booking/);
+    expect(screen).not.toMatch(/if \(!roomId \|\| !serviceChat \|\| !activeServiceChatId\)/);
+  });
+  it("resolves completion from the exact service row and keeps errors above an open sheet", () => {
+    const completionIdentityMigration = readMigration("completion_accepts_exact_service_chat_id");
+    expect(completionIdentityMigration).toMatch(/submit_provider_completion/);
+    expect(completionIdentityMigration).toMatch(/submit_requester_completion/);
+    expect(completionIdentityMigration).toMatch(/current_active_service_chat_id_from_any_id\(p_chat_id\)/);
+    const popup = screen.slice(screen.indexOf("body={carePopup?.body"), screen.indexOf("body={carePopup?.body") + 500);
+    expect(popup).toMatch(/presentation="modal"/);
+    expect(popup).not.toMatch(/presentation="inline"/);
+  });
+
+  it("keeps care in progress while one side waits for the other to confirm completion", () => {
+    expect(screen).toMatch(/careConversationState\.kind !== "care_in_progress"/);
+    expect(screen).toMatch(/Waiting for \$\{clean\(peerName\) \|\| \(isProvider \? "the owner" : "the carer"\)\} to confirm completion/);
+    expect(screen).toMatch(/\$\{clean\(peerName\) \|\| \(isProvider \? "The owner" : "The carer"\)\} marked the session complete/);
+    expect(screen).toMatch(/isRequester\s*\? "Confirm when your pet is safely home\."\s*:\s*"Confirm your side to release your payout\."/);
+    expect(screen).toMatch(/completionStageBanner && !showReviewComposerCta/);
+    expect(screen).toMatch(/!completionStageBanner\.awaitingPeer && actionPrimary/);
+    // Title and subtext are one tight block on EVERY action card, not an opt-in per card:
+    // the wrapper is applied whenever a body exists, and the gap is zero.
+    expect(screen).toMatch(/style=\{body && !isCollapsed \? styles\.serviceActionCardTitleBodyTight : null\}/);
+    expect(screen).toMatch(/serviceActionCardTitleBodyTight: \{ gap: 0 \}/);
+    expect(screen).not.toMatch(/compactBody/);
+    // Subtext is grey, never the primary text colour.
+    expect(screen).toMatch(/serviceActionCardSubtext: \{ fontFamily: "Urbanist-500", fontSize: huddleType\.helper, lineHeight: huddleType\.helperLine, color: huddleColors\.mutedText \}/);
   });
 });
 
@@ -1292,6 +1667,39 @@ describe("Care flow conversation clutter (2026-07-03)", () => {
 });
 
 describe("Care flow design-system pass (2026-07-03)", () => {
+  it("keeps the review date and location directly below the Care Scope title with a 4px gap", () => {
+    const summary = sourceBlock("PaymentCareScopeSummary");
+    expect(summary).toMatch(/const scopeDateLocation = \[formatShortDateRange\(sourceDates, sourceDate\), locationArea\]/);
+    expect(summary).toMatch(/<View style=\{styles\.paymentScopeHeadlineMain\}>[\s\S]{0,500}>\{scopeDateLocation\}<\/Text>/);
+    expect(screen).toMatch(/paymentScopeHeadlineMain: \{ flex: 1, minWidth: 0, gap: 4 \}/);
+  });
+
+  it("uses icon-only Edit and Reject actions in the review sheet", () => {
+    const summary = sourceBlock("PaymentCareScopeSummary");
+    expect(summary).toMatch(/accessibilityLabel="Edit care scope"[\s\S]{0,500}name="edit-2" size=\{18\}/);
+    expect(summary).toMatch(/accessibilityLabel="Reject care scope"[\s\S]{0,500}name="x" size=\{18\}/);
+    expect(summary).not.toMatch(/>Edit<\/Text>/);
+    expect(summary).not.toMatch(/>Decline<\/Text>/);
+  });
+
+  it("opens every profile-backed Care Scope polaroid through the shared Pet Details modal", () => {
+    const summary = sourceBlock("PaymentCareScopeSummary");
+    const quoteSheet = sourceBlock("QuoteSheet");
+    expect(summary).toMatch(/<SelectedPetPolaroid onOpenPet=\{onOpenPet\} requestCard=\{visibleScopeCard\}/);
+    expect(quoteSheet).toMatch(/<PaymentCareScopeSummary[\s\S]{0,500}onOpenPet=\{onOpenPet\}/);
+    expect(screen).toMatch(/<PaymentCareScopeSummary bookingSnapshot=[^\n]+onOpenPet=\{\(petId\) => void openPetProfile\(petId\)\}/);
+    expect(screen).toMatch(/<PaymentCareScopeSummary careDetails=[^\n]+onOpenPet=\{onOpenPet\}/);
+    expect(screen).toMatch(/<PaymentSheet[\s\S]{0,1000}onOpenPet=\{\(petId\) => void openPetProfile\(petId\)\}/);
+  });
+
+  it("keeps payment validation hidden on open and resets it between sign and confirm stages", () => {
+    const paymentSheet = sourceBlock("PaymentSheet");
+    expect(paymentSheet).toMatch(/validationStageRef = useRef<"sign" \| "confirm" \| null>\(null\)/);
+    expect(paymentSheet).toMatch(/const nextStage = canSignCareScope \? "sign" : "confirm";[\s\S]{0,240}setAttempted\(false\)/);
+    expect(paymentSheet).toMatch(/setAttempted\(true\)[\s\S]{0,1000}getFirstInvalidPaymentField\(\)/);
+    expect(paymentSheet).toMatch(/if \(firstInvalidField\) focusPaymentField\(firstInvalidField\)/);
+    expect(paymentSheet).toMatch(/scrollRef\.current\?\.scrollTo\(\{ animated: true, y: Math\.max\(0, y - huddleSpacing\.x4\) \}\)/);
+  });
   it("info/status box is Option B — white card + soft shadow + left blue accent bar, not the old hard blue outline", () => {
     const box = screen.slice(screen.indexOf("paymentInfoBox: {"), screen.indexOf("paymentInfoBox: {") + 480);
     expect(box).toMatch(/backgroundColor: huddleColors\.canvas/);
@@ -1351,19 +1759,199 @@ describe("QuoteSheet 'Review & Sign' no longer flips to 'Update Care Scope' from
   });
 });
 
+describe("Carer decline returns the active request to a clean slate", () => {
+  it("only allows the carer to decline the explicit current active service row before carer sign-off", () => {
+    const migration = readMigration("carer_declines_active_care_scope");
+    expect(migration).toMatch(/function public\.decline_service_care_request\(p_service_chat_id uuid\)/);
+    expect(migration).toMatch(/id = p_service_chat_id\s+and id = public\.current_active_service_chat_id_for_room\(chat_id\)/);
+    expect(migration).toMatch(/if v_sc\.provider_id <> v_uid then/);
+    expect(migration).toMatch(/care_scope_already_signed/);
+    expect(migration).toMatch(/request_card = null,[\s\S]{0,160}quote_card = null/);
+    expect(migration).toMatch(/set is_active = false/);
+  });
+  it("keeps the decline action out of edit and post-sign-off states, then refreshes the same chat", () => {
+    const quoteSheet = sourceBlock("QuoteSheet");
+    expect(quoteSheet).toMatch(/canSignCareScope && !editingQuoteScope && !carerAlreadySigned && !currentMutualSignatures && onDecline/);
+    expect(screen).toMatch(/rpcVoid\("decline_service_care_request", \{ p_service_chat_id: activeServiceChatId \}/);
+    expect(screen).toMatch(/service_request_declined: `\$\{actorName\} declined the care request\.`/);
+  });
+});
+
 describe("Auto-complete countdown banner above composer (2026-07-02)", () => {
   it("shows a live countdown to the same 48h window the backend cron uses, gated to in-progress + eligible completer", () => {
+    expect(screen).toMatch(/const serviceScheduledEndIso = \(requestCard: ServiceRequestCard \| null \| undefined, bookingSnapshot\?: CareBookingSnapshot \| null\) => \{/);
+    expect(screen.indexOf("const requestEnd = clean(requestCard?.endAtIso)")).toBeLessThan(screen.indexOf("const bookingEnd = clean(bookingSnapshot?.endAt)"));
+    expect(screen).toMatch(/const scheduledEndAtMain = useMemo\(\(\) => serviceScheduledEndIso\(serviceChat\?\.request_card, serviceChat\?\.booking_snapshot\)/);
+    expect(screen).toMatch(/const scheduledEndAt = serviceScheduledEndIso\(chat\.request_card, chat\.booking_snapshot\)/);
     expect(screen).toMatch(/const autoCompleteAtMain = useMemo\(\(\) => addHoursIso\(scheduledEndAtMain, PAYOUT_AUTO_RELEASE_HOURS\)/);
     expect(screen).toMatch(/const showCompletionCountdown = Boolean\(/);
     expect(screen).toMatch(/&& canConfirmCompletion/);
   });
   it("title has no 'unless you report an issue' wording (avoids inviting bad-faith reports); Report issue is a separate plain link", () => {
-    const banner = screen.slice(screen.indexOf("showCompletionCountdown && actionPrimary && !showReviewComposerCta"), screen.indexOf("showCompletionCountdown && actionPrimary && !showReviewComposerCta") + 900);
+    const banner = screen.slice(screen.indexOf("showCompletionCountdown && actionPrimary && !showReviewComposerCta"), screen.indexOf("showCompletionCountdown && actionPrimary && !showReviewComposerCta") + 2800);
     const rendered = banner.split("\n").filter((line) => !line.trim().startsWith("//")).join("\n");
-    expect(banner).toMatch(/title=\{`Auto-completes in \$\{completionCountdownLabel\}`\}/);
+    expect(banner).toMatch(/title=\{`Completes automatically in \$\{completionCountdownLabel\}`\}/);
     expect(rendered).not.toMatch(/unless/i);
     expect(banner).toMatch(/Report issue/);
     expect(banner).toMatch(/onPress=\{openIssueReportSheet\}/);
+  });
+});
+
+describe("Care update send path hardening (2026-07-09)", () => {
+  it("uses exact-token RPCs plus success payload validation so a stalled or half-complete update cannot look successful", () => {
+    const careUpdates = readFileSync(join(appRoot, "src/lib/nativeCareUpdates.ts"), "utf8");
+    expect(careUpdates).toMatch(/nativeExactTokenRpc/);
+    expect(careUpdates).toMatch(/nativeExactTokenRpc<NativeCareUpdateStatus>\("get_service_care_update_status_by_service_id"/);
+    expect(careUpdates).toMatch(/"submit_service_care_update_by_service_id"/);
+    expect(careUpdates).toMatch(/message\?: Partial<SubmitCareUpdateMessage> \| null/);
+    expect(careUpdates).toMatch(/if \(data\?\.ok !== true\)/);
+    expect(careUpdates).toMatch(/return \{ ok: true, message: message\?\.id && message\.sender_id && message\.content \? message : null \}/);
+  });
+  it("puts an explicit timeout on the raw care-evidence storage upload so slide-to-send cannot hang forever after haptic feedback", () => {
+    const social = readFileSync(join(appRoot, "src/lib/nativeSocial.ts"), "utf8");
+    expect(social).toMatch(/NATIVE_SERVICE_CARE_EVIDENCE_UPLOAD_TIMEOUT_MS = 15000/);
+    expect(social).toMatch(/NATIVE_SERVICE_CARE_EVIDENCE_PREP_TIMEOUT_MS = 12000/);
+    expect(social).toMatch(/care_update_image_info_timeout/);
+    expect(social).toMatch(/care_update_image_prepare_timeout/);
+    expect(social).toMatch(/care_update_image_read_timeout/);
+    expect(social).toMatch(/fetchNativeResponseWithTimeout/);
+    expect(social).toMatch(/\}, NATIVE_SERVICE_CARE_EVIDENCE_UPLOAD_TIMEOUT_MS\)/);
+    expect(social).toMatch(/care_update_upload_timeout/);
+  });
+});
+
+describe("Care update polaroid consistency (2026-07-09)", () => {
+  it("uses one shared sheet/chat care-update polaroid renderer, including the explicit >2 pets family caption", () => {
+    const sheet = readFileSync(join(appRoot, "src/components/service/NativeCareUpdateSheet.tsx"), "utf8");
+    const card = readFileSync(join(appRoot, "src/components/service/ServiceCareUpdateCard.tsx"), "utf8");
+    const polaroid = readFileSync(join(appRoot, "src/components/service/CareUpdatePolaroid.tsx"), "utf8");
+    expect(sheet).toMatch(/import \{ CareUpdatePolaroid \} from "\.\/CareUpdatePolaroid"/);
+    expect(card).toMatch(/import \{ CareUpdateDetailPolaroid, CareUpdatePolaroid, CareUpdatePolaroidViewer \} from "\.\/CareUpdatePolaroid"/);
+    expect(card).toMatch(/<CareUpdatePolaroid capturedAt=\{capturedAt\} imageUri=\{signedUri\} ownerName=\{ownerName\} petName=\{petName\} width="100%" \/>/);
+    expect(card).toMatch(/<View style=\{styles\.mediaStack\}>[\s\S]{0,1200}<CareUpdatePolaroid[\s\S]{0,800}\{trimmedNote \?/);
+    expect(card).toMatch(/mediaStack:[\s\S]{0,120}width: huddleCareUpdate\.polaroidWidth/);
+    expect(card).toMatch(/noteBubble:[\s\S]{0,80}alignSelf: "flex-start"/);
+    expect(card).toMatch(/noteBubble:[\s\S]{0,120}maxWidth: "100%"/);
+    expect(card).toMatch(/noteBubbleMine:[\s\S]{0,80}alignSelf: "flex-end"/);
+    expect(card).toMatch(/if \(!hasPhoto\)[\s\S]{0,500}<View style=\{\[styles\.noteBubble, mine \? styles\.noteBubbleMine : styles\.noteBubbleTheirs\]\}>/);
+    expect(polaroid).toMatch(/Product rule: three or more selected pets/);
+    expect(polaroid).toMatch(/if \(labels\.length > 2\)/);
+    expect(polaroid).toMatch(/return \[`\$\{owner\}’s`, "pet family"\]/);
+  });
+
+  it("uses the existing carer-profile detail polaroid for enlarged and saved care-update images", () => {
+    const card = readFileSync(join(appRoot, "src/components/service/ServiceCareUpdateCard.tsx"), "utf8");
+    const polaroid = readFileSync(join(appRoot, "src/components/service/CareUpdatePolaroid.tsx"), "utf8");
+    const nativePolaroidCard = readFileSync(join(appRoot, "src/components/NativePolaroidCard.tsx"), "utf8");
+    expect(polaroid).toMatch(/import \{ NativePolaroidCard, nativePolaroidStyles \} from "\.\.\/NativePolaroidCard"/);
+    expect(polaroid).toMatch(/export function CareUpdateDetailPolaroid/);
+    expect(polaroid).toMatch(/const captionPrimary = captionLabels\.join\(" "\) \|\| "Care update"/);
+    expect(polaroid).toMatch(/<NativePolaroidCard[\s\S]{0,1400}variant="detail"/);
+    expect(polaroid).toMatch(/captionPrimaryLines=\{captionLabels\}/);
+    expect(polaroid).toMatch(/nativePolaroidStyles\.captionSecondaryWrapDetail/);
+    expect(polaroid).toMatch(/nativePolaroidStyles\.captionSecondaryTokenDetail/);
+    expect(polaroid).toMatch(/captionPrimary=\{captionPrimary\}/);
+    expect(polaroid).toMatch(/<Text numberOfLines=\{1\} style=\{nativePolaroidStyles\.captionSecondaryTokenDetail\}>\{stamp\}<\/Text>/);
+    expect(polaroid).not.toMatch(/captionLabels\.slice\(1\)/);
+    expect(polaroid).not.toMatch(/secondaryLabels/);
+    expect(polaroid).toMatch(/<CareUpdateDetailPolaroid capturedAt=\{capturedAt\} imageUri=\{imageUri\} includeLogo ownerName=\{ownerName\} petName=\{petName\} \/>/);
+    expect(card).toMatch(/<CareUpdateDetailPolaroid capturedAt=\{capturedAt\} imageUri=\{signedUri\} includeLogo ownerName=\{ownerName\} petName=\{petName\} \/>/);
+    expect(polaroid).toMatch(/includeLogo/);
+    expect(polaroid).toMatch(/source=\{huddleStampLogo\}/);
+    expect(polaroid).toMatch(/width: huddleCareUpdate\.stampLogoWidth/);
+    expect(polaroid).not.toMatch(/logoBadge:[\s\S]{0,220}borderRadius/);
+    expect(nativePolaroidCard).toMatch(/captionNameDetail:[\s\S]{0,120}fontSize: huddlePolaroid\.detail\.nameSize/);
+    expect(nativePolaroidCard).toMatch(/captionNameDetail:[\s\S]{0,160}lineHeight: huddlePolaroid\.detail\.nameLine/);
+    expect(nativePolaroidCard).toMatch(/captionPrimaryLines\?\.length/);
+    expect(nativePolaroidCard).toMatch(/captionPrimaryLines\.map/);
+    expect(nativePolaroidCard).toMatch(/captionSecondaryTokenDetail:[\s\S]{0,140}fontSize: huddlePolaroid\.detail\.serviceSize/);
+    expect(nativePolaroidCard).toMatch(/captionSecondaryTokenDetail:[\s\S]{0,180}lineHeight: huddlePolaroid\.detail\.serviceLine/);
+    expect(polaroid).not.toMatch(/styles\.viewerTitle/);
+    expect(polaroid).not.toMatch(/styles\.viewerSubtitle/);
+    expect(polaroid).not.toMatch(/viewerTitle:/);
+    expect(polaroid).not.toMatch(/viewerSubtitle:/);
+  });
+
+  it("lets carers share another care update after the first one and saves focused polaroids with a bounded capture", () => {
+    const card = readFileSync(join(appRoot, "src/components/service/ServiceCareUpdateCard.tsx"), "utf8");
+    expect(screen).toMatch(/showShareMoreUpdateAction/);
+    expect(screen).toMatch(/const \[careUpdateSheetOptional, setCareUpdateSheetOptional\] = useState\(false\)/);
+    expect(screen).toMatch(/const openRequiredCareUpdateSheet = useCallback/);
+    expect(screen).toMatch(/const openOptionalCareUpdateSheet = useCallback/);
+    expect(screen).toMatch(/Share more update/);
+    expect(screen).toMatch(/shareMoreUpdateBanner/);
+    expect(screen).toMatch(/onPress=\{openOptionalCareUpdateSheet\}/);
+    expect(screen).toMatch(/updateKind=\{careUpdateSheetOptional \? "optional" : careUpdateKind\}/);
+    expect(screen).toMatch(/shareMoreUpdateBanner:[\s\S]{0,120}\.\.\.huddleButtons\.base/);
+    expect(screen).toMatch(/shareMoreUpdateBannerText:[\s\S]{0,80}\.\.\.huddleButtons\.label/);
+    expect(card).toMatch(/onLongPress=\{\(\) => \{/);
+    expect(card).toMatch(/Save image/);
+    expect(card).toMatch(/raceWithTimeoutFallback\(\s*captureRef\(actionExportRef/);
+  });
+});
+
+describe("Care update required count (2026-07-09)", () => {
+  it("keeps required care updates mandatory until the requested care-day count is met, then shows Share more update", () => {
+    const m = readMigration("care_updates_strict_service_identity_and_reminders");
+    expect(m).toMatch(/create or replace function public\.service_care_update_due_count/);
+    expect(m).toMatch(/jsonb_array_elements_text\(coalesce\(v_sc\.request_card->'requestedDates'/);
+    expect(m).toMatch(/service_care_update_qualifying_count\(v_sc\.id\) >= public\.service_care_update_due_count/);
+    expect(m).toMatch(/'required_count', v_due/);
+    expect(m).toMatch(/'submitted_count', v_submitted/);
+    expect(screen).toMatch(/const requestedCareUpdateCount = Math\.max\(1, getRequestedCareDayCount\(serviceChat\?\.request_card\)\)/);
+    expect(screen).toMatch(/const requiredCareUpdateCount = careUpdateIsRequested\(careUpdateKind\)[\s\S]{0,240}careUpdateStatus\?\.total_required_count[\s\S]{0,100}careUpdateStatus\?\.required_count/);
+    expect(screen).toMatch(/clean\(careUpdateStatus\?\.service_chat_id\) === activeCareUpdateServiceChatId/);
+    expect(screen).toMatch(/showCareUpdateStatusLoading/);
+    expect(screen).toMatch(/Checking requested updates…/);
+    expect(screen).toMatch(/showRequiredCareUpdateAction/);
+    expect(screen).toMatch(/showShareMoreUpdateAction/);
+    expect(screen).toMatch(/requiredCareUpdateActionLabel\(careUpdateKind, statusSubmittedCareUpdateCount, requiredCareUpdateCount\)/);
+    expect(screen).toMatch(/requiredCareUpdateButton:[\s\S]{0,220}backgroundColor: huddleColors\.success/);
+    expect(screen).toMatch(/requiredCareUpdateButtonText:[\s\S]{0,120}color: huddleColors\.onPrimary/);
+    expect(screen).toMatch(/<Text style=\{styles\.requiredCareUpdateButtonText\}>\{requiredCareUpdateActionText\}<\/Text>/);
+  });
+
+  it("keeps in-progress update progress independent from reminder timing", () => {
+    const m = readMigration("care_update_progress_independent_of_reminders");
+    expect(m).toMatch(/'required_count', v_total/);
+    expect(m).toMatch(/'due_count', v_due/);
+    expect(m).toMatch(/'met', v_kind = 'optional' or v_submitted >= v_total/);
+    expect(m).toMatch(/service_care_update_qualifying_count\(v_sc\.id\) >= v_required/);
+  });
+
+  it("keeps extra updates scoped to the active service session and relaxes required fields only after requirements are already met", () => {
+    const m = readMigration("service_care_update_optional_extra");
+    expect(m).toMatch(/where id = public\.current_active_service_chat_id_from_any_id\(p_chat_id\)/);
+    expect(m).toMatch(/for update/);
+    expect(m).toMatch(/v_required_met_before := public\.service_chat_care_update_requirement_met\(v_sc\.id\)/);
+    expect(m).toMatch(/v_effective_kind := case when v_required_met_before then 'optional' else v_kind end/);
+    expect(m).toMatch(/if v_effective_kind in \('photo', 'photo_note'\) and v_photo is null then/);
+    expect(m).toMatch(/if v_effective_kind in \('photo_note', 'summary'\) and v_note is null then/);
+    expect(m).toMatch(/if v_effective_kind = 'optional' and v_photo is null and v_note is null then/);
+    expect(m).toMatch(/jsonb_build_object\('update_kind', v_effective_kind, 'requested_update_kind', v_kind, 'pet_name', v_pet_name\)/);
+    expect(m).toMatch(/values \(\s*v_sc\.chat_id,\s*v_uid,/);
+    expect(m).toMatch(/return jsonb_build_object\('ok', true, 'update_kind', v_effective_kind, 'requested_update_kind', v_kind, 'service_chat_id', v_sc\.id, 'chat_id', v_sc\.chat_id\)/);
+  });
+
+  it("refreshes after slide-to-send before closing and reloads the newest messages, so second updates render in long service chats", () => {
+    const sheet = readFileSync(join(appRoot, "src/components/service/NativeCareUpdateSheet.tsx"), "utf8");
+    const dialogue = readFileSync(join(appRoot, "src/screens/NativeChatDialogueScreen.tsx"), "utf8");
+    const nativeChat = readFileSync(join(appRoot, "src/lib/nativeChat.ts"), "utf8");
+    expect(sheet).toMatch(/onSent: \(result: Extract<SubmitCareUpdateResult, \{ ok: true \}>\) => void \| Promise<void>/);
+    expect(sheet).toMatch(/await Promise\.resolve\(onSent\(result\)\)/);
+    expect(screen).toMatch(/onSent=\{\(result\) => \{/);
+    expect(screen).toMatch(/hydrateServiceMessages\(\[confirmed\],/);
+    expect(screen).toMatch(/scrollServiceMessagesToLatest\(true\)/);
+    expect(screen).toMatch(/return load\(true\)/);
+    expect(screen).toMatch(/const SERVICE_MESSAGE_PAGE_SIZE = 50/);
+    expect(screen).toMatch(/fetchNativeChatDialogueSnapshot\(\{ roomId: requestRoomId, limit: SERVICE_MESSAGE_PAGE_SIZE \+ 1, accessToken \}\)/);
+    expect(screen).toMatch(/const nextMessages = newestRows\.slice\(Math\.max\(0, newestRows\.length - SERVICE_MESSAGE_PAGE_SIZE\)\)/);
+    expect(screen).toMatch(/const loadOlderServiceMessages = useCallback/);
+    expect(screen).toMatch(/beforeCreatedAt: oldestMessage\.created_at/);
+    expect(screen).toMatch(/if \(contentOffset\.y < 56\) void loadOlderServiceMessages\(\)/);
+    expect(dialogue).toMatch(/const loadOlder = useCallback/);
+    expect(dialogue).toMatch(/if \(contentOffset\.y < 56\) void loadOlder\(\)/);
+    expect(nativeChat).toMatch(/p_limit: options\.limit \?\? 50/);
   });
 });
 
@@ -1396,11 +1984,18 @@ describe("Location address input no longer clips descenders g/y/j (2026-07-03)",
 });
 
 describe("Free Care Session note doesn't repeat at the Confirm & Pay step (2026-07-03)", () => {
-  it("CareScopeAgreementPaymentDetails accepts hideWhenFree and skips the free-session note when set", () => {
+  it("CareScopeAgreementPaymentDetails accepts hideWhenFree and treats the persisted empty quote object as no quote", () => {
     const block = sourceBlock("CareScopeAgreementPaymentDetails");
-    expect(block).toMatch(/const hasActiveQuote = Boolean\(quoteCard\)/);
+    expect(screen).toMatch(/const hasMeaningfulServiceQuoteCard = \(quote: ServiceQuoteCard \| null \| undefined\): quote is ServiceQuoteCard => \{/);
+    expect(block).toMatch(/const hasActiveQuote = hasMeaningfulServiceQuoteCard\(quoteCard\)/);
     expect(block).toMatch(/const hasRequestOffer = !hasActiveQuote && Number\.isFinite\(requestOffer\) && requestOffer > 0/);
     expect(block).toMatch(/if \(!hasPaidQuote && !hasRequestOffer && hideWhenFree\) return null;/);
+  });
+  it("does not render an invisible rate-unit space after a Total amount, so the visible money glyphs stay right-aligned", () => {
+    const block = sourceBlock("CareScopeAgreementPaymentDetails");
+    expect(block).toMatch(/const requestRateUnit = formatRateUnit\(requestCard\?\.suggestedRate\);/);
+    expect(block).toMatch(/\{requestRateUnit \? ` \$\{requestRateUnit\}` : ""\}/);
+    expect(block).not.toMatch(/requestCard\?\.suggestedRate \? ` \$\{formatRateUnit\(requestCard\.suggestedRate\)\}` : ""/);
   });
   it("the requester's Confirm/Payment sheet passes hideWhenFree at Step 2 (Confirm & Pay) only — Step 1 (Agree) still shows it once", () => {
     expect(screen).toMatch(/<CareScopeAgreementPaymentDetails hideWhenFree=\{!canSignCareScope\} providerCurrency=\{curr\} quoteCard=\{quoteCard\} requestCard=\{requestCard\} viewerRole="requester" \/>/);
@@ -1411,9 +2006,9 @@ describe("Free Care Session note doesn't repeat at the Confirm & Pay step (2026-
 });
 
 describe("Care Scope sign-off source of truth and cancellation acknowledgement (2026-07-03)", () => {
-  it("uses the active quote as payment source of truth so a $0 quote cannot fall back to stale request payment", () => {
+  it("uses a meaningful active quote as payment source of truth so an empty persistence placeholder cannot hide a paid request", () => {
     expect(screen).toMatch(/const careScopePaymentAmount = \(quote: ServiceQuoteCard \| null \| undefined, request: ServiceRequestCard \| null \| undefined\) => \{/);
-    expect(screen).toMatch(/if \(quote\) return Number\.isFinite\(quoteAmount\) && quoteAmount > 0 \? quoteAmount : 0/);
+    expect(screen).toMatch(/if \(hasMeaningfulServiceQuoteCard\(quote\)\) return Number\.isFinite\(quoteAmount\) && quoteAmount > 0 \? quoteAmount : 0/);
     expect(screen).toMatch(/const serviceChatHasPositivePayment = \(chat: ServiceChatRow \| null \| undefined\) =>\s*!isNoChargeServiceChat\(chat\) && careScopePaymentAmount\(chat\?\.quote_card, visibleCareScopeCardForChat\(chat\)\) > 0/);
     expect(screen.match(/const paymentBasePrice = careScopePaymentAmount\(quoteCard, requestCard\)/g)?.length).toBeGreaterThanOrEqual(2);
   });
@@ -1432,9 +2027,9 @@ describe("Care Scope sign-off source of truth and cancellation acknowledgement (
     expect(screen).toMatch(/<CareSignoffCancellationPolicy isNoChargeVoluntary=\{isNoChargeVoluntary\} viewerRole="requester" \/>/);
     expect(screen).toMatch(/careScopeAcknowledgementCopy\("provider", proposedNoChargeVoluntary\)/);
     expect(screen).toMatch(/careScopeAcknowledgementCopy\("requester", isNoChargeVoluntary\)/);
-    expect(screen).toMatch(/I understand the cancellation policy for this Care booking\./);
-    expect(screen).toMatch(/I understand that confirmed Care bookings are a commitment, even when no payment is involved\./);
-    expect(screen).toMatch(/I understand that last-minute cancellations, confirmed no-shows, or serious trust violations may restrict my ability to provide Care on huddle\./);
+    expect(screen).toMatch(/I have read and agree to the cancellation and no-start policy/);
+    expect(screen).toMatch(/I have read and agree to the cancellation and no-start policy \(including automatic cancellation at the scheduled end time\)\./);
+    expect(screen).toMatch(/I understand that last-minute cancellations, confirmed no-shows, or serious trust violations may restrict my ability to provide Care on huddle\./i);
     expect(screen).not.toMatch(/<Text style=\{styles\.paymentInfoTitle\}>Waiting for the carer<\/Text>/);
     expect(screen).not.toMatch(/<Text style=\{styles\.paymentInfoTitle\}>Step 1 · Agree to Care Scope<\/Text>/);
   });
@@ -1442,6 +2037,145 @@ describe("Care Scope sign-off source of truth and cancellation acknowledgement (
   it("uses the simplified return button copy from edit mode", () => {
     expect(screen).toMatch(/>Return without Change<\/AppModalButton>/);
     expect(screen).not.toMatch(/Return to Payment without change/);
+  });
+});
+
+describe("Paid request accepted as-is materializes an authoritative quote (2026-08-16)", () => {
+  it("treats the persisted empty quote object exactly like no quote when the carer signs", () => {
+    const migration = readMigration("materialize_empty_care_quote_on_provider_agreement");
+    expect(migration).toMatch(/record_service_care_scope_signature\(uuid,jsonb,boolean,boolean\)/);
+    expect(migration).toMatch(/v_sc\.quote_card is null or v_sc\.quote_card = ''\{\}''::jsonb/);
+    expect(migration).toMatch(/care_quote_placeholder_materialization_patch_failed/);
+  });
+
+  it("repairs only pending, positively priced requests already signed by the carer", () => {
+    const migration = readMigration("materialize_empty_care_quote_on_provider_agreement");
+    expect(migration).toMatch(/sc\.status = 'pending'/);
+    expect(migration).toMatch(/\(sc\.request_card->>'suggestedPrice'\)::numeric > 0/);
+    expect(migration).toMatch(/sig\.role = 'carer'/);
+    expect(migration).toMatch(/'finalPrice', sc\.request_card->>'suggestedPrice'/);
+  });
+});
+
+describe("Rover-grade Care agreement integrity (2026-08-21)", () => {
+  const roverContract = readMigration("rover_grade_care_contract");
+  const confirmPayment = readFileSync(join(repoRoot, "supabase/functions/confirm-service-payment/index.ts"), "utf8");
+  const stripeWebhook = readFileSync(join(repoRoot, "supabase/functions/stripe-webhook/index.ts"), "utf8");
+
+  it("makes signatures immutable and server-timestamped while preserving exact retries", () => {
+    expect(roverContract).toMatch(/p_signature - 'signedAt'/);
+    expect(roverContract).toMatch(/'signedAt', now\(\)/);
+    expect(roverContract).toMatch(/signed_at\s*\n\s*\)[\s\S]{0,520}\n\s*now\(\)\s*\n\s*\)/);
+    expect(roverContract).toMatch(/on conflict \(scope_version_id, role, signer_user_id\) do nothing/);
+    expect(roverContract).toMatch(/if v_record\.image_path <> v_path then raise exception 'care_scope_already_signed'/);
+    expect(roverContract).not.toMatch(/on conflict \(scope_version_id, role, signer_user_id\) do update/);
+    expect(roverContract).toMatch(/legacy_signature_rpc_disabled/);
+  });
+
+  it("requires exact consent, signatures, checkout, payment lock, and server-validated snapshot before paid finalization", () => {
+    expect(roverContract).toMatch(/owner_payment_consent_hash is null or v_version\.owner_payment_consent is null/);
+    expect(roverContract).toMatch(/owner_payment_consent_hash_invalid/);
+    expect(roverContract).toMatch(/'paymentMethodConsent'/);
+    expect(roverContract).toMatch(/'checkoutSessionId', v_checkout_session_id/);
+    expect(roverContract).toMatch(/'paymentIntentId', v_payment_intent_id/);
+    expect(roverContract).toMatch(/payment_status not in \('creating', 'pending'\)/);
+    expect(roverContract).toMatch(/payment_pending_started_at <= now\(\) - interval '5 minutes'/);
+    expect(roverContract).toMatch(/payment_pending_expires_at < now\(\)/);
+    expect(roverContract).toMatch(/v_version\.checkout_session_id is distinct from v_checkout_session_id/);
+    expect(roverContract).toMatch(/v_sc\.stripe_checkout_session_id is distinct from v_checkout_session_id/);
+    expect(roverContract).toMatch(/v_version\.payment_intent_id <> v_payment_intent_id/);
+    expect(roverContract).toMatch(/perform public\.validate_service_booking_snapshot\(p_booking_snapshot\)/);
+    expect(roverContract).toMatch(/noStartPolicyAcknowledged/);
+    expect(roverContract).toMatch(/payment_scope_conflict:booking_snapshot_actor_mismatch/);
+    expect(roverContract).toMatch(/payment_scope_conflict:booking_snapshot_payment_mismatch/);
+    expect(roverContract).toMatch(/payment_scope_conflict:owner_scope_signature_required/);
+    expect(roverContract).toMatch(/payment_scope_conflict:carer_scope_signature_required/);
+    expect(roverContract).toMatch(/payment_scope_conflict:payment_lock_expired/);
+  });
+
+  it("records refund-required before either Stripe conflict-refund attempt", () => {
+    for (const source of [confirmPayment, stripeWebhook]) {
+      const refundRequired = source.indexOf('payment_status: "refund_required"');
+      const stripeRefund = source.indexOf("stripe.refunds.create", refundRequired);
+      expect(refundRequired).toBeGreaterThanOrEqual(0);
+      expect(stripeRefund).toBeGreaterThan(refundRequired);
+    }
+  });
+
+  it("refunds an identity-matched captured payment when amount or currency no longer matches", () => {
+    expect(confirmPayment).toMatch(/identityMatches[\s\S]{0,500}capturedPaymentMismatch/);
+    expect(confirmPayment).toMatch(/captured_payment_amount_or_currency_mismatch/);
+    expect(stripeWebhook).toMatch(/amount\/currency mismatch[\s\S]{0,500}refundServiceScopeConflict/);
+    expect(stripeWebhook).toMatch(/service_booking refunded after payment mismatch/);
+  });
+
+  it("returns one authoritative state revision and action envelope and consumes it in both sign-off sheets", () => {
+    expect(roverContract).toMatch(/'lifecycleState', v_lifecycle_state/);
+    expect(roverContract).toMatch(/'agreementStatus', v_agreement_status/);
+    expect(roverContract).toMatch(/'reviewEligible', v_review_eligible/);
+    expect(roverContract).toMatch(/'allowedActions', v_allowed_actions/);
+    expect(roverContract).toMatch(/'stateRevision', v_state_revision/);
+    expect(screen).toMatch(/allowedActions: Array\.isArray\(record\.allowedActions\)/);
+    expect(screen).toMatch(/careScopeAllows\(careScope, "sign_scope"/);
+    expect(screen).toMatch(/careScopeAllows\(careScope, "edit_scope"/);
+    expect(screen).toMatch(/careScopeAllows\(careScope, "start_payment"/);
+  });
+});
+
+describe("Care finalization no-dead-end contract (2026-08-21)", () => {
+  it("blocks a paid Care Scope at the carer's quote boundary until payout setup is ready", () => {
+    const quoteSheet = sourceBlock("QuoteSheet");
+    expect(quoteSheet).toMatch(/providerPaymentReady\?: boolean/);
+    expect(quoteSheet).toMatch(/normalizedQuotePayment\.paid && providerPaymentReady !== true/);
+    expect(quoteSheet).toMatch(/Finish payout setup before sending a paid Care Scope\./);
+    expect(quoteSheet).toMatch(/onOpenPayoutAccount\?\.\(\)/);
+    expect(screen).toMatch(/providerPaymentReady=\{providerStripeReady\}/);
+    expect(screen).toMatch(/onOpenPayoutAccount=\{openPayoutAccount\}/);
+  });
+
+  it("keeps historical payout-readiness races visible and recoverable for both sides", () => {
+    const readinessMigration = readMigration("align_care_payment_readiness_with_checkout");
+    expect(readinessMigration).toMatch(/pc\.stripe_payout_status = 'complete'/);
+    expect(readinessMigration).toMatch(/pc\.stripe_payouts_enabled is true/);
+    expect(readinessMigration).toMatch(/revoke all on function public\.get_service_provider_payment_readiness\(uuid\) from public, anon/);
+    expect(screen).toMatch(/title: "Finish payout setup"/);
+    expect(screen).toMatch(/Payment will be available once setup is complete\./);
+    expect(screen).toMatch(/label: "Finish payout setup", onPress: openPayoutAccount/);
+  });
+
+  it("retries Start PIN preparation silently and only alerts after the final failure", () => {
+    const pinEffectStart = screen.indexOf('supabase.rpc("prepare_service_start_pin_by_service_id"');
+    const pinEffect = screen.slice(pinEffectStart - 700, pinEffectStart + 1500);
+    expect(pinEffect).not.toMatch(/Retrying once/);
+    expect(pinEffect).not.toMatch(/showedError/);
+    expect(pinEffect).toMatch(/if \(prepareAttempts < 2\)[\s\S]{0,180}else if \(!activeStartPin\)/);
+  });
+
+  it("keeps pet-profile refill failures inside the modal with a retryable error", () => {
+    const paymentSheet = sourceBlock("PaymentSheet");
+    expect(paymentSheet).toMatch(/const \[petRefillError, setPetRefillError\] = useState/);
+    expect(paymentSheet).toMatch(/catch \(error\)[\s\S]{0,180}setPetRefillError\(nativeSafeErrorCopy/);
+    expect(paymentSheet).toMatch(/message=\{petRefillError\}/);
+    expect(paymentSheet).toMatch(/loading=\{petRefillSaving\}/);
+  });
+
+  it("keeps the conversation available through one-sided completion", () => {
+    expect(screen).toMatch(/careConversationState\.kind !== "completed"/);
+    expect(screen).toMatch(/Keep the Care conversation available until the server confirms that both/);
+  });
+
+  it("documents Care Instruction edits as a new version that needs both signatures again", () => {
+    expect(careScopePingPongContract).toContain("Care Instruction updates create a new active Care Scope version");
+    expect(careScopePingPongContract).not.toContain("They update `care_details` in place");
+  });
+});
+
+describe("Care review completion feedback", () => {
+  it("closes a successful positive review into the window toast instead of a timed popup", () => {
+    const reviewSheet = sourceBlock("ReviewSheet");
+    expect(screen).toMatch(/import \{ showNativeWindowToast \} from "\.\.\/lib\/nativeToastBus"/);
+    expect(reviewSheet).toMatch(/if \(result === "positive"\) \{[\s\S]{0,320}showNativeWindowToast\([\s\S]{0,260}headline: "Thanks for your feedback"[\s\S]{0,180}copy: "Your review has been shared\."[\s\S]{0,120}onClose\(\)/);
+    expect(reviewSheet).not.toContain("Thanks for your feedback. People like you make this community better for everyone.");
   });
 });
 
@@ -1469,10 +2203,11 @@ describe("Care session system pills include the date, not just a bare time (2026
 
 describe("Booking timeline: 'Payment released' step follows the actual quote price, not the carer's profile-level volunteer flag", () => {
   it("isNoChargeVoluntaryQuote follows the active quote amount, not stale voluntary flags", () => {
-    expect(screen).toMatch(/const isNoChargeVoluntaryQuote = \(quote: ServiceQuoteCard \| null \| undefined\) =>\s*Boolean\(quote\) && !quoteHasPositivePrice\(quote\)/);
+    expect(screen).toMatch(/const isNoChargeVoluntaryQuote = \(quote: ServiceQuoteCard \| null \| undefined\) =>\s*hasMeaningfulServiceQuoteCard\(quote\) && !quoteHasPositivePrice\(quote\)/);
   });
   it("'Payment released' timeline step is gated on that same per-quote check — a volunteer carer who accepts a price on THIS booking still gets it", () => {
     expect(screen).toMatch(/const noChargeVoluntaryBooking = isNoChargeServiceChat\(chat\)/);
-    expect(screen).toMatch(/if \(isProvider && !noChargeVoluntaryBooking\) \{\s*items\.push\(\{\s*label: "Payment released"/);
+    expect(screen).toMatch(/if \(isProvider && !noChargeVoluntaryBooking\) \{\s*const fallbackPayoutReleased[\s\S]*items\.push\(\{/);
+    expect(screen).toMatch(/label: paymentCopy\?\.label \|\| \(fallbackPayoutReleased \? "Payment released" : "Payment pending"\)/);
   });
 });

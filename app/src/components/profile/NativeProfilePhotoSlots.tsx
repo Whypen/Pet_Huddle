@@ -1,6 +1,7 @@
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 import {
   type NativeProfilePhotos,
+  type NativeProfilePhotoPresentationCrop,
   type NativeProfilePhotoSlot as NativeProfilePhotoSlotName,
   type NativeSoloAspect,
 } from "../../lib/nativeProfilePhotos";
@@ -19,6 +20,7 @@ type NativeProfilePhotoSlotsProps = {
   coverError?: boolean;
   photos: NativeProfilePhotos;
   userId: string | null;
+  version?: string | null;
 };
 
 const CAPTION_KEYS = {
@@ -43,6 +45,7 @@ export function NativeProfilePhotoSlots({
   coverError = false,
   photos,
   userId,
+  version,
 }: NativeProfilePhotoSlotsProps) {
   const completedCount = NATIVE_PROFILE_SLOT_ORDER.filter((slot) => Boolean(photos[slot])).length;
   const completion = completedCount * 20;
@@ -56,14 +59,16 @@ export function NativeProfilePhotoSlots({
     path: string,
     soloAspect: NativeSoloAspect | null,
     previousPath: string | null,
+    presentationCrop?: NativeProfilePhotoPresentationCrop,
   ) => {
-    onPreviousPathQueued?.(previousPath);
+    if (previousPath !== path) onPreviousPathQueued?.(previousPath);
     let committedPhotos: NativeProfilePhotos | null = null;
     onChange((previous) => {
       const nextPhotos = {
         ...previous,
         [slot]: path,
         solo_aspect: slot === "solo" ? soloAspect ?? previous.solo_aspect ?? "4:5" : previous.solo_aspect,
+        avatar_presentation: slot === "cover" ? presentationCrop ?? previous.avatar_presentation : previous.avatar_presentation,
       };
       committedPhotos = nextPhotos;
       return nextPhotos;
@@ -82,6 +87,7 @@ export function NativeProfilePhotoSlots({
         ...previous,
         [slot]: null,
         ...(captionKey ? { [captionKey]: null } : {}),
+        avatar_presentation: slot === "cover" ? null : previous.avatar_presentation,
         solo_aspect: slot === "solo" ? null : previous.solo_aspect,
       };
       committedPhotos = nextPhotos;
@@ -115,6 +121,7 @@ export function NativeProfilePhotoSlots({
           return (
             <NativeProfilePhotoSlot
               accessToken={accessToken}
+              avatarPresentation={slot === "cover" ? photos.avatar_presentation : null}
               captionValue={captionKey ? photos[captionKey] : null}
               error={slot === "cover" && coverError}
               key={slot}
@@ -145,6 +152,7 @@ export function NativeProfilePhotoSlots({
               onUploaded={updateSlot}
               slot={slot}
               soloAspect={photos.solo_aspect}
+              version={version}
               userId={userId}
               value={photos[slot]}
             />

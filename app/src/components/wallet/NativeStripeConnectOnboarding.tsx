@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, AppState, Linking, Modal, Pressable, StyleSheet, Text, View } from "react-native";
-import { createNativeFunctionHeaders } from "../../lib/nativeFunctionClient";
+import { fetchNativeResponseWithTimeout as fetch } from "../../lib/nativeTimeout";
+import { AppState, Linking, Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import { NativeSpinner } from "../NativeSpinner";
+import { createFreshNativeFunctionHeaders, getFreshNativeAccessToken } from "../../lib/nativeFunctionClient";
+import { nativeSafeErrorCopy } from "../../lib/nativeSafeErrorCopy";
 import { supabaseUrl } from "../../lib/supabase";
 import { huddleModalTokens } from "../nativeModalPrimitives.styles";
 import { huddleButtons, huddleColors, huddleRadii, huddleShadows, huddleSpacing, huddleType } from "../../theme/huddleDesignTokens";
@@ -43,7 +46,7 @@ const walletErrorCopy = (error: unknown) => {
   if (raw.includes("stripe") && raw.includes("secret")) return "Stripe wallet is not configured on the server yet.";
   if (raw.includes("account_missing")) return "Preparing payout wallet. Please retry in a moment.";
   if (raw.includes("rate_limited") || raw.includes("too many")) return "Too many wallet attempts. Please wait a moment and retry.";
-  return error instanceof Error && error.message ? error.message : "Wallet setup could not open. Please retry.";
+  return nativeSafeErrorCopy(error, "Wallet setup could not open. Please retry.");
 };
 
 export function NativeStripeConnectOnboarding({
@@ -68,14 +71,25 @@ export function NativeStripeConnectOnboarding({
   }, [onExit]);
 
   const refreshStatus = useCallback(async () => {
-    if (!accessToken) throw new Error("missing_access_token");
+    const freshAccessToken = await getFreshNativeAccessToken(accessToken);
     const response = await fetch(`${supabaseUrl}/functions/v1/refresh-stripe-account-status`, {
       method: "POST",
-      headers: createNativeFunctionHeaders(accessToken),
+      headers: await createFreshNativeFunctionHeaders(freshAccessToken),
       body: JSON.stringify({}),
     });
     await parseJsonResponse<Record<string, unknown>>(response);
   }, [accessToken]);
+
+  const finishAfterStatusRefresh = useCallback(async () => {
+    try {
+      await refreshStatus();
+      finish();
+    } catch (nextError) {
+      const message = walletErrorCopy(nextError);
+      setError(message);
+      onError?.(message);
+    }
+  }, [finish, onError, refreshStatus]);
 
   const launchOnboarding = useCallback(async () => {
     if (launchInFlightRef.current) return;
@@ -84,10 +98,10 @@ export function NativeStripeConnectOnboarding({
     setError("");
     onReadyStateChange?.(true);
     try {
-      if (!accessToken) throw new Error("missing_access_token");
+      const freshAccessToken = await getFreshNativeAccessToken(accessToken);
       const response = await fetch(`${supabaseUrl}/functions/v1/create-stripe-connect-link`, {
         method: "POST",
-        headers: createNativeFunctionHeaders(accessToken),
+        headers: await createFreshNativeFunctionHeaders(freshAccessToken),
         body: JSON.stringify({
           action: "create_link",
           returnUrl: STRIPE_RETURN_URL,
@@ -129,7 +143,7 @@ export function NativeStripeConnectOnboarding({
     const linkSubscription = Linking.addEventListener("url", (event) => {
       const url = String(event.url || "");
       if (!url.includes("/carerprofile/stripe-return") && !url.includes("/carerprofile/stripe-refresh")) return;
-      void refreshStatus().finally(finish);
+      void finishAfterStatusRefresh();
     });
     const appSubscription = AppState.addEventListener("change", (state) => {
       if (state !== "active" || !activeRef.current || !opened) return;
@@ -139,7 +153,7 @@ export function NativeStripeConnectOnboarding({
       linkSubscription.remove();
       appSubscription.remove();
     };
-  }, [finish, opened, refreshStatus, visible]);
+  }, [finishAfterStatusRefresh, opened, refreshStatus, visible]);
 
   if (!visible) return null;
   return (
@@ -149,10 +163,10 @@ export function NativeStripeConnectOnboarding({
           <Text style={styles.title}>Set Up Wallet</Text>
           <Text style={styles.body}>
             {opened
-              ? "Complete Stripe onboarding in the secure browser, then return to Huddle."
+              ? "Complete Stripe onboarding in the secure browser, then return to huddle."
               : "Preparing secure Stripe onboarding."}
           </Text>
-          {busy ? <ActivityIndicator color={huddleColors.blue} style={styles.spinner} /> : null}
+          {busy ? <NativeSpinner tone="accent" style={styles.spinner} /> : null}
           {error ? <Text style={styles.error}>{error}</Text> : null}
           <View style={styles.actions}>
             {error ? (
@@ -161,7 +175,7 @@ export function NativeStripeConnectOnboarding({
               </Pressable>
             ) : null}
             {opened ? (
-              <Pressable accessibilityRole="button" onPress={() => void refreshStatus().finally(finish)} style={({ pressed }) => [styles.primaryButton, pressed ? huddleButtons.pressed : null]}>
+              <Pressable accessibilityRole="button" onPress={() => void finishAfterStatusRefresh()} style={({ pressed }) => [styles.primaryButton, pressed ? huddleButtons.pressed : null]}>
                 <Text style={styles.primaryText}>I've finished</Text>
               </Pressable>
             ) : null}

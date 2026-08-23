@@ -1,6 +1,5 @@
 import { Feather } from "@expo/vector-icons";
-import { useEffect, useState } from "react";
-import { Image, Pressable, StyleSheet, Text, View } from "react-native";
+import { Image, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   huddleColors,
@@ -10,6 +9,7 @@ import {
   huddleSpacing,
 } from "../theme/huddleDesignTokens";
 import huddleNameLogo from "../../assets/huddle-full-logo-header.png";
+import { NativePressable } from "./motion/NativeMotion";
 
 const HEADER_LOGO_WIDTH = 116;
 const HEADER_LOGO_HEIGHT = 28;
@@ -21,6 +21,8 @@ type NativeGlobalHeaderProps = {
   onSettingsPress: () => void;
   onLogoPress: () => void;
   showSettings?: boolean;
+  /** Reports the header's actual rendered height so screens can reserve exactly that much space, not a guess. */
+  onHeightChange?: (height: number) => void;
 };
 
 export function NativeGlobalHeader({
@@ -29,52 +31,41 @@ export function NativeGlobalHeader({
   onSettingsPress,
   onLogoPress,
   showSettings = true,
+  onHeightChange,
 }: NativeGlobalHeaderProps) {
   const hasUnread = notificationCount > 0;
   const insets = useSafeAreaInsets();
-  const [headerLogoUri, setHeaderLogoUri] = useState<string | null>(headerLogoAsset?.uri ?? null);
-
-  useEffect(() => {
-    let active = true;
-    const uri = headerLogoAsset?.uri;
-    if (!uri) return () => {
-      active = false;
-    };
-
-    void Image.prefetch(uri).then((ok) => {
-      if (active && ok) setHeaderLogoUri(uri);
-    }).catch(() => {
-      if (active) setHeaderLogoUri(uri);
-    });
-    return () => {
-      active = false;
-    };
-  }, []);
+  const headerLogoUri = headerLogoAsset?.uri ?? null;
 
   return (
     <View pointerEvents="box-none" style={styles.wrapper}>
-      <View style={[styles.header, { paddingTop: insets.top + huddleSpacing.x2 }]}>
-        <Pressable accessibilityLabel="Notifications" onPress={onNotificationsPress} style={styles.iconButton}>
-          <Feather color={huddleColors.iconMuted} name="bell" size={21} />
-          {hasUnread ? (
-            <View accessibilityLabel={`${notificationCount} unread notifications`} style={styles.badge}>
-              <Text maxFontSizeMultiplier={1.1} numberOfLines={1} style={styles.badgeText}>
-                {notificationCount > 9 ? "9+" : notificationCount}
-              </Text>
-            </View>
-          ) : null}
-        </Pressable>
+      <View
+        style={[styles.header, { paddingTop: insets.top + huddleSpacing.x2 }]}
+        onLayout={(event) => onHeightChange?.(event.nativeEvent.layout.height)}
+      >
+        <NativePressable accessibilityLabel="Notifications" hapticIntent="selectTab" onPress={onNotificationsPress} style={styles.iconButton}>
+          <View style={styles.notificationIconWrap}>
+            <Feather color={huddleColors.iconMuted} name="bell" size={21} />
+            {hasUnread ? (
+              <View accessibilityLabel={`${notificationCount} unread notifications`} style={styles.badge}>
+                <Text maxFontSizeMultiplier={1.1} numberOfLines={1} style={styles.badgeText}>
+                  {notificationCount > 9 ? "9+" : notificationCount}
+                </Text>
+              </View>
+            ) : null}
+          </View>
+        </NativePressable>
 
         <View pointerEvents="box-none" style={[styles.logoLayer, { paddingTop: insets.top + huddleSpacing.x2, paddingBottom: huddleSpacing.x2 }]}>
-          <Pressable accessibilityLabel="huddle Home" onPress={onLogoPress} style={styles.logoButton}>
+          <NativePressable accessibilityLabel="huddle Home" hapticIntent="selectTab" onPress={onLogoPress} pressScale={0.98} style={styles.logoButton}>
             <Image resizeMode="contain" source={headerLogoUri ? { uri: headerLogoUri } : huddleNameLogo} style={styles.logo} />
-          </Pressable>
+          </NativePressable>
         </View>
 
         {showSettings ? (
-          <Pressable accessibilityLabel="Settings" onPress={onSettingsPress} style={styles.iconButton}>
+          <NativePressable accessibilityLabel="Settings" hapticIntent="selectTab" onPress={onSettingsPress} style={styles.iconButton}>
             <Feather color={huddleColors.iconMuted} name="settings" size={21} />
-          </Pressable>
+          </NativePressable>
         ) : (
           <View style={styles.iconButtonPlaceholder} />
         )}
@@ -137,10 +128,16 @@ const styles = StyleSheet.create({
     width: HEADER_LOGO_WIDTH,
     height: HEADER_LOGO_HEIGHT,
   },
+  notificationIconWrap: {
+    width: 21,
+    height: 21,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   badge: {
     position: "absolute",
-    top: 5,
-    right: 5,
+    top: -6,
+    right: -7,
     minWidth: 15,
     height: 15,
     borderRadius: 999,

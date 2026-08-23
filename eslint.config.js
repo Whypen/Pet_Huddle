@@ -38,4 +38,20 @@ export default tseslint.config(
       "react-refresh/only-export-components": "off",
     },
   },
+  // React Native uses require() for statically bundled assets and optional
+  // native modules. Metro resolves these at bundle time.
+  {
+    files: ["app/src/**/*.{ts,tsx}"],
+    rules: {
+      "@typescript-eslint/no-require-imports": "off",
+    },
+  },
+  // Supabase Edge Functions sit at an external SDK boundary where payloads
+  // are validated at runtime before being narrowed.
+  {
+    files: ["supabase/functions/**/*.{ts,tsx}"],
+    rules: {
+      "@typescript-eslint/no-explicit-any": "off",
+    },
+  },
 );

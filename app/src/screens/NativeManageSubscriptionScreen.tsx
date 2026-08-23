@@ -1,47 +1,56 @@
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Feather } from "@expo/vector-icons";
-import { useEffect, useRef, useState } from "react";
-import { Image, Pressable, ScrollView, StyleSheet, Text, View, Linking, useWindowDimensions } from "react-native";
+import { fetchNativeResponseWithTimeout as fetch } from "../lib/nativeTimeout";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Image, Linking, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import premiumBanner from "../../assets/Notifications/premium-banner.png";
 import { haptic } from "../lib/nativeHaptics";
+import { createNativeAuthenticatedHeaders, getFreshNativeAccessToken } from "../lib/nativeFunctionClient";
+import { nativeSafeErrorCopy } from "../lib/nativeSafeErrorCopy";
+import { useNativeLoadingDeadline } from "../lib/useNativeLoadingDeadline";
+import { scheduleNativeMembershipRefreshRetry } from "../lib/nativeMembershipRefreshRetry";
 import { fetchNativeProfileSummary } from "../lib/nativeProfileSummary";
+import {
+  NATIVE_STORE_ALIAS_TO_PRODUCT_ID,
+  formatNativeAddonPrice,
+  formatNativeStoreMonthlyEquivalentPrice,
+  formatNativeStorePrice,
+  loadNativeStoreProducts,
+  listenForNativeStorePurchases,
+  nativeFallbackStruckMonthlyPrices,
+  openNativeStoreSubscriptionManagement,
+  requestNativeStoreProductPurchase,
+  restoreNativeStorePurchases,
+  type NativeStoreProductId,
+  type NativeStoreProductState,
+  type NativeStorePurchaseStatus,
+} from "../lib/nativeStoreSubscriptions";
 import { supabaseAnonKey, supabaseUrl } from "../lib/supabase";
 import {
   huddleButtons,
   huddleColors,
+  huddleLayout,
   huddleRadii,
   huddleShadows,
   huddleSpacing,
   huddleType,
-  huddleLayout,
-  huddleVerifyIdentity,
 } from "../theme/huddleDesignTokens";
-
-type NativePriceMap = {
-  plus_monthly?: number;
-  plus_annual?: number;
-  gold_monthly?: number;
-  gold_annual?: number;
-  superBroadcast?: number;
-  topProfileBooster?: number;
-  sharePerks?: number;
-  sharePerksInterval?: "month" | "year" | null;
-  currencyCode: string;
-};
 
 type NativeManageSubscriptionScreenProps = {
   userId: string | null;
   accessToken?: string | null;
   sessionKey?: string | null;
   initialPlan?: PlanKey;
+  initialBilling?: "monthly" | "annual";
   onBack?: () => void;
+  onNavigate?: (path: string) => void;
 };
 
 type PlanKey = "plus" | "gold" | "addons";
 type OwnedTier = "free" | "plus" | "gold";
 
 type NativeMembershipProfile = {
+  family_share_capacity: number | null;
+  has_active_paid_tier: boolean | null;
   tier: string | null;
   effective_tier: string | null;
   subscription_status: string | null;
@@ -59,18 +68,8 @@ type FeatureRow = {
 
 type AddonRow = FeatureRow & {
   id: "superBroadcast" | "topProfileBooster" | "sharePerks";
-  suffix?: string;
+  productId: NativeStoreProductId;
 };
-
-const NATIVE_FALLBACK_PRICES: NativePriceMap = {
-  sharePerksInterval: null,
-  currencyCode: "USD",
-};
-
-const NATIVE_SUBSCRIPTION_CACHE_VERSION = 1;
-const NATIVE_SUBSCRIPTION_CACHE_MAX_AGE_MS = 6 * 60 * 60 * 1000;
-const nativePricingCacheKey = "huddle_native_subscription_pricing:v1";
-const nativeMembershipCacheKey = (userId: string, sessionKey?: string | null) => `huddle_native_membership_profile:v1:${userId}:${sessionKey || `${userId}:0`}`;
 
 const plans: Record<Exclude<PlanKey, "addons">, {
   label: string;
@@ -80,8 +79,8 @@ const plans: Record<Exclude<PlanKey, "addons">, {
   features: FeatureRow[];
 }> = {
   plus: {
-    label: "Huddle+",
-    shortLabel: "Huddle+",
+    label: "huddle+",
+    shortLabel: "huddle+",
     background: "#5BA4F5",
     textColor: "#FFFFFF",
     features: [
@@ -94,8 +93,8 @@ const plans: Record<Exclude<PlanKey, "addons">, {
     ],
   },
   gold: {
-    label: "Huddle Gold",
-    shortLabel: "Huddle Gold",
+    label: "huddle＊",
+    shortLabel: "huddle＊",
     background: "#FF6452",
     textColor: "#FFFFFF",
     features: [
@@ -104,43 +103,25 @@ const plans: Record<Exclude<PlanKey, "addons">, {
       { icon: "star", title: "10 Stars / month", subtitle: "Your fastest way to connect." },
       { icon: "radio", title: "Broadcasts · 20km · 48h", subtitle: "Your widest reach, for even longer." },
       { icon: "sliders", title: "All Filters", subtitle: "Every filter unlocked. Less noise, better matches." },
-      { icon: "video", title: "Video Uploads", subtitle: "Gold exclusive." },
+      { icon: "video", title: "Video Uploads", subtitle: "huddle＊ exclusive." },
       { icon: "users", title: "Family Sharing", subtitle: "Extend your plan benefits to one other account (except Stars)." },
     ],
   },
 };
 
 const addonRows: AddonRow[] = [
-  { id: "superBroadcast", icon: "radio", title: "Super Broadcast · 50km · 72h", subtitle: "Ultra-wide reach. Stay visible the longest." },
-  { id: "topProfileBooster", icon: "zap", title: "Profile Booster", subtitle: "Maximum visibility for 24h." },
-  { id: "sharePerks", icon: "users", title: "Family Sharing", subtitle: "Extend your plan benefits to one other account (except Stars)." },
+  { id: "superBroadcast", productId: "huddle_super_broadcast", icon: "radio", title: "Super Broadcast · 50km · 72h", subtitle: "Ultra-wide reach. Stay visible the longest." },
+  { id: "topProfileBooster", productId: "profile_boost", icon: "zap", title: "Profile Booster", subtitle: "Maximum visibility for 24h." },
+  { id: "sharePerks", productId: "huddle_family_extra_monthly", icon: "users", title: "Family Sharing", subtitle: "Extend your plan benefits to one other account (except Stars)." },
 ];
 
-const formatMoney = (amount: number, currencyCode: string) => {
-  try {
-    return new Intl.NumberFormat(undefined, {
-      style: "currency",
-      currency: currencyCode,
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(amount);
-  } catch {
-    return `${currencyCode.toUpperCase()}$${amount.toFixed(2)}`;
-  }
-};
-
-const isLivePrice = (value: unknown): value is number => (
-  typeof value === "number" && Number.isFinite(value) && value > 0
-);
-
-const discountPct = (monthlyAmount?: number, annualTotal?: number) => {
-  if (!isLivePrice(monthlyAmount) || !isLivePrice(annualTotal)) return null;
-  return Math.round((1 - annualTotal / 12 / monthlyAmount) * 100);
-};
+const storeUnavailableCopy = "Purchases unavailable right now";
+const NATIVE_TERMS_URL = "https://huddle.pet/legal/terms";
+const NATIVE_PRIVACY_URL = "https://huddle.pet/legal/privacy";
 
 const normalizeOwnedTier = (value?: string | null): OwnedTier => {
   const tier = String(value || "free").toLowerCase();
-  if (tier === "gold" || tier === "huddle gold" || tier.startsWith("gold_")) return "gold";
+  if (tier === "gold" || tier === "huddle＊" || tier.startsWith("gold_")) return "gold";
   if (
     tier === "plus" ||
     tier === "premium" ||
@@ -154,105 +135,26 @@ const normalizeOwnedTier = (value?: string | null): OwnedTier => {
   return "free";
 };
 
-const parseNativePrices = (payload: unknown): NativePriceMap | null => {
-  if (!payload || typeof payload !== "object") return null;
-  const root = payload as { prices?: Record<string, { amount?: unknown; currency?: unknown; interval?: unknown }>; display_currency?: unknown };
-  const prices = root.prices;
-  if (!prices) return null;
-  const currencyCode = String(root.display_currency || prices.plus_monthly?.currency || "USD").toUpperCase();
-  const nextPrices = {
-    plus_monthly: Number(prices.plus_monthly?.amount),
-    plus_annual: Number(prices.plus_annual?.amount),
-    gold_monthly: Number(prices.gold_monthly?.amount),
-    gold_annual: Number(prices.gold_annual?.amount),
-    superBroadcast: typeof prices.superBroadcast?.amount === "number" && prices.superBroadcast.amount > 0 ? prices.superBroadcast.amount : undefined,
-    topProfileBooster: typeof prices.topProfileBooster?.amount === "number" && prices.topProfileBooster.amount > 0 ? prices.topProfileBooster.amount : undefined,
-    sharePerks: typeof prices.sharePerks?.amount === "number" && prices.sharePerks.amount > 0 ? prices.sharePerks.amount : undefined,
-    sharePerksInterval:
-      typeof prices.sharePerks?.interval === "string" && ["month", "year"].includes(prices.sharePerks.interval.toLowerCase())
-        ? prices.sharePerks.interval.toLowerCase() as "month" | "year"
-        : null,
-    currencyCode,
-  };
-  if (
-    !isLivePrice(nextPrices.plus_monthly) ||
-    !isLivePrice(nextPrices.plus_annual) ||
-    !isLivePrice(nextPrices.gold_monthly) ||
-    !isLivePrice(nextPrices.gold_annual)
-  ) {
-    return null;
-  }
-  return nextPrices;
-};
-
-const parseCachedPayload = <T,>(raw: string | null, validate: (value: unknown) => value is T): T | null => {
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw) as { cachedAt?: unknown; value?: unknown; version?: unknown };
-    if (
-      parsed.version !== NATIVE_SUBSCRIPTION_CACHE_VERSION ||
-      typeof parsed.cachedAt !== "number" ||
-      Date.now() - parsed.cachedAt > NATIVE_SUBSCRIPTION_CACHE_MAX_AGE_MS ||
-      !validate(parsed.value)
-    ) {
-      return null;
-    }
-    return parsed.value;
-  } catch {
-    return null;
-  }
-};
-
-const writeCachedPayload = async (key: string, value: unknown) => {
-  try {
-    await AsyncStorage.setItem(key, JSON.stringify({
-      cachedAt: Date.now(),
-      value,
-      version: NATIVE_SUBSCRIPTION_CACHE_VERSION,
-    }));
-  } catch {
-    // AsyncStorage can be unavailable in constrained dev/runtime contexts.
-  }
-};
-
-const isNativePriceMap = (value: unknown): value is NativePriceMap => Boolean(value && typeof value === "object" && typeof (value as NativePriceMap).currencyCode === "string");
-const isNativeMembershipProfile = (value: unknown): value is NativeMembershipProfile | null => value === null || Boolean(value && typeof value === "object");
-
-const fetchNativeSubscriptionPricing = async (accessToken?: string | null) => {
-  const token = String(accessToken || "").trim();
-  if (!token) throw new Error("missing_access_token");
-  const response = await fetch(`${supabaseUrl}/functions/v1/stripe-pricing`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      apikey: supabaseAnonKey,
-      "content-type": "application/json",
-    },
-    body: "{}",
-  });
-  const raw = await response.text();
-  const parsed = raw ? JSON.parse(raw) as unknown : null;
-  if (!response.ok) {
-    throw new Error(typeof parsed === "object" && parsed && "message" in parsed ? String((parsed as { message?: unknown }).message) : String(raw || response.statusText));
-  }
-  const prices = parseNativePrices(parsed);
-  if (!prices) throw new Error("pricing_unavailable");
-  return prices;
-};
 
 const fetchNativeMembershipProfile = async (userId: string, accessToken?: string | null, sessionKey?: string | null): Promise<NativeMembershipProfile | null> => {
-  const token = String(accessToken || "").trim();
+  const token = await getFreshNativeAccessToken(accessToken);
   if (!token) throw new Error("missing_access_token");
-  const [summary, profileResponse] = await Promise.all([
-    fetchNativeProfileSummary(userId, { force: true, accessToken: token, sessionKey }),
+  const [summary, profileResponse, entitlementResponse] = await Promise.all([
+    // The canonical profile and entitlement requests below already refresh
+    // membership truth. This summary is fallback data, so reuse the boot cache.
+    fetchNativeProfileSummary(userId, { accessToken: token, sessionKey }),
     fetch(`${supabaseUrl}/rest/v1/profiles?${new URLSearchParams({
       select: "tier,effective_tier,subscription_status,subscription_current_period_end,subscription_cancel_at_period_end,share_perks_subscription_status,share_perks_subscription_current_period_end",
       id: `eq.${userId}`,
     }).toString()}`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        apikey: supabaseAnonKey,
-      },
+      headers: createNativeAuthenticatedHeaders(token),
+    }),
+    fetch(`${supabaseUrl}/rest/v1/rpc/get_store_entitlement_summary`, {
+      body: JSON.stringify({ p_user_id: userId }),
+      headers: createNativeAuthenticatedHeaders(token, {
+        "Content-Type": "application/json",
+      }),
+      method: "POST",
     }),
   ]);
   const raw = await profileResponse.text();
@@ -260,9 +162,22 @@ const fetchNativeMembershipProfile = async (userId: string, accessToken?: string
   if (!profileResponse.ok) {
     throw new Error(typeof parsed === "object" && parsed && "message" in parsed ? String((parsed as { message?: unknown }).message) : String(raw || profileResponse.statusText));
   }
+  const entitlementRaw = await entitlementResponse.text();
+  const entitlementParsed = entitlementRaw ? JSON.parse(entitlementRaw) as unknown : [];
+  if (!entitlementResponse.ok) {
+    throw new Error(typeof entitlementParsed === "object" && entitlementParsed && "message" in entitlementParsed ? String((entitlementParsed as { message?: unknown }).message) : String(entitlementRaw || entitlementResponse.statusText));
+  }
   const row = Array.isArray(parsed) ? parsed[0] as Partial<NativeMembershipProfile> | undefined : null;
+  const entitlementRow = Array.isArray(entitlementParsed) ? entitlementParsed[0] as Partial<NativeMembershipProfile> | undefined : entitlementParsed as Partial<NativeMembershipProfile> | null;
+  const entitlementTier = typeof entitlementRow?.tier === "string"
+    ? entitlementRow.tier
+    : typeof (entitlementRow as { own_tier?: unknown } | null)?.own_tier === "string"
+    ? String((entitlementRow as { own_tier?: unknown }).own_tier)
+    : null;
   return {
-    tier: String(row?.tier ?? summary.profile?.tier ?? summary.quota?.tier ?? "free"),
+    family_share_capacity: typeof entitlementRow?.family_share_capacity === "number" ? entitlementRow.family_share_capacity : null,
+    has_active_paid_tier: typeof entitlementRow?.has_active_paid_tier === "boolean" ? entitlementRow.has_active_paid_tier : null,
+    tier: String(entitlementTier ?? row?.tier ?? summary.profile?.tier ?? summary.quota?.tier ?? "free"),
     effective_tier: String(row?.effective_tier ?? summary.profile?.effective_tier ?? summary.quota?.effective_tier ?? row?.tier ?? "free"),
     subscription_status: typeof row?.subscription_status === "string" ? row.subscription_status : null,
     subscription_current_period_end: typeof row?.subscription_current_period_end === "string" ? row.subscription_current_period_end : null,
@@ -272,76 +187,135 @@ const fetchNativeMembershipProfile = async (userId: string, accessToken?: string
   };
 };
 
-export function NativeManageSubscriptionScreen({ userId, accessToken, sessionKey, onBack, initialPlan = "gold" }: NativeManageSubscriptionScreenProps) {
-  const insets = useSafeAreaInsets();
+export function NativeManageSubscriptionScreen({ userId, accessToken, sessionKey, onBack, onNavigate, initialPlan = "gold", initialBilling = "monthly" }: NativeManageSubscriptionScreenProps) {
   const { width: windowWidth } = useWindowDimensions();
-  const contentWidth = Math.max(0, windowWidth - huddleSpacing.x5 * 2);
-  const handleBackToAccountSettings = () => {
-    if (onBack) {
-      onBack();
-      return;
-    }
-    void Linking.openURL("huddle:/settings").catch(() => {});
-  };
-
-
+  // Banner fills the row beside the back arrow, up to the same right edge as
+  // the plan card below (content's own horizontal padding on both sides).
+  const bannerWidth = Math.max(0, windowWidth - huddleSpacing.x5 * 2 - 40 - huddleSpacing.x2);
+  const bannerHeight = bannerWidth / (1024 / 248);
   const [activePlan, setActivePlan] = useState<PlanKey>(initialPlan);
-  const [billing, setBilling] = useState<"monthly" | "annual">("monthly");
-  const [prices, setPrices] = useState<NativePriceMap>(NATIVE_FALLBACK_PRICES);
+  const [billing, setBilling] = useState<"monthly" | "annual">(initialBilling);
   const [profile, setProfile] = useState<NativeMembershipProfile | null>(null);
+  const [profileLoading, setProfileLoading] = useState(true);
+  const [profileLoadFailed, setProfileLoadFailed] = useState(false);
+  useNativeLoadingDeadline(profileLoading, {
+    onTrip: () => {
+      setProfileLoading(false);
+      setProfileLoadFailed(true);
+    },
+  });
+  const [storeProducts, setStoreProducts] = useState<Record<NativeStoreProductId, NativeStoreProductState> | null>(null);
+  const [purchaseStatus, setPurchaseStatus] = useState<NativeStorePurchaseStatus>("idle");
+  const [purchaseMessage, setPurchaseMessage] = useState<string | null>(null);
+  const [activePurchaseProductId, setActivePurchaseProductId] = useState<NativeStoreProductId | null>(null);
+  const [membershipRefreshNeedsRetry, setMembershipRefreshNeedsRetry] = useState(false);
+  const [membershipAutoRetryProductId, setMembershipAutoRetryProductId] = useState<NativeStoreProductId | null>(null);
+  const membershipAutoRetryAttemptedRef = useRef(false);
   const subscriptionSessionKeyRef = useRef(sessionKey || (userId ? `${userId}:0` : "anon:0"));
   const currentSubscriptionSessionKey = sessionKey || (userId ? `${userId}:0` : "anon:0");
   subscriptionSessionKeyRef.current = currentSubscriptionSessionKey;
-  const [selectedAddons, setSelectedAddons] = useState<Record<AddonRow["id"], boolean>>({
-    superBroadcast: false,
-    topProfileBooster: false,
-    sharePerks: false,
-  });
+
+  const refetchBackendMembership = useCallback(async (requestSessionKey = currentSubscriptionSessionKey) => {
+    if (!userId) return;
+    const nextProfile = await fetchNativeMembershipProfile(userId, accessToken, requestSessionKey);
+    if (subscriptionSessionKeyRef.current !== requestSessionKey) return;
+    setProfile(nextProfile);
+    setProfileLoadFailed(false);
+  }, [accessToken, currentSubscriptionSessionKey, userId]);
+
+  const refreshConfirmedPurchaseMembership = useCallback(async (productId: NativeStoreProductId) => {
+    const requestSessionKey = subscriptionSessionKeyRef.current;
+    setActivePurchaseProductId(productId);
+    setMembershipRefreshNeedsRetry(false);
+    setPurchaseStatus("verified_refetching");
+    setPurchaseMessage("Purchase confirmed. Refreshing membership.");
+    try {
+      await refetchBackendMembership(requestSessionKey);
+      if (subscriptionSessionKeyRef.current !== requestSessionKey) return false;
+      // A confirmed purchase changes the tier every other surface reads from the shared
+      // profile summary cache (Home, Settings drawer). Refresh it here rather than leaving
+      // those surfaces to an indirect realtime listener: this is the contract's
+      // "immediately after a mutation that can change the data" case for force.
+      if (userId) {
+        void fetchNativeProfileSummary(userId, {
+          accessToken,
+          force: true,
+          sessionKey: requestSessionKey,
+          cacheWriteGuard: () => subscriptionSessionKeyRef.current === requestSessionKey,
+        }).catch(() => {});
+      }
+      setMembershipAutoRetryProductId(null);
+      setPurchaseStatus("idle");
+      setPurchaseMessage("Membership updated from backend.");
+      return true;
+    } catch {
+      if (subscriptionSessionKeyRef.current !== requestSessionKey) return false;
+      setPurchaseStatus("verified_refetching");
+      if (!membershipAutoRetryAttemptedRef.current) {
+        membershipAutoRetryAttemptedRef.current = true;
+        setPurchaseMessage("Purchase confirmed. Retrying membership refresh.");
+        setMembershipAutoRetryProductId(productId);
+      } else {
+        setPurchaseMessage("Purchase confirmed, but membership hasn't refreshed yet. Your purchase will not be repeated.");
+        setMembershipRefreshNeedsRetry(true);
+      }
+      return false;
+    }
+  }, [accessToken, refetchBackendMembership, userId]);
+
+  useEffect(() => {
+    membershipAutoRetryAttemptedRef.current = false;
+    setMembershipAutoRetryProductId(null);
+    setMembershipRefreshNeedsRetry(false);
+  }, [currentSubscriptionSessionKey]);
+
+  useEffect(() => {
+    if (!membershipAutoRetryProductId) return;
+    const expectedSessionKey = currentSubscriptionSessionKey;
+    return scheduleNativeMembershipRefreshRetry({
+      delayMs: 1500,
+      isCurrentSession: () => subscriptionSessionKeyRef.current === expectedSessionKey,
+      refresh: async () => {
+        await refreshConfirmedPurchaseMembership(membershipAutoRetryProductId);
+      },
+    });
+  }, [currentSubscriptionSessionKey, membershipAutoRetryProductId, refreshConfirmedPurchaseMembership]);
 
   useEffect(() => {
     setActivePlan(initialPlan);
   }, [initialPlan]);
 
   useEffect(() => {
-    let active = true;
-    void (async () => {
-      const cached = parseCachedPayload(await AsyncStorage.getItem(nativePricingCacheKey), isNativePriceMap);
-      if (active && cached) setPrices(cached);
-      if (!accessToken) return;
-      try {
-        const nextPrices = await fetchNativeSubscriptionPricing(accessToken);
-        if (!active) return;
-        setPrices(nextPrices);
-        await writeCachedPayload(nativePricingCacheKey, nextPrices);
-      } catch {
-        // Keep cached pricing/fallback display when the endpoint is unavailable.
-      }
-    })();
-    return () => {
-      active = false;
-    };
-  }, [accessToken]);
+    setBilling(initialBilling);
+  }, [initialBilling]);
 
   useEffect(() => {
     let active = true;
     const requestSessionKey = currentSubscriptionSessionKey;
-    if (!userId || !accessToken) {
+    if (!userId) {
+      setProfile(null);
+      setProfileLoading(false);
+      setProfileLoadFailed(true);
       return () => {
         active = false;
       };
     }
 
+    setProfileLoading(true);
+    setProfileLoadFailed(false);
     void (async () => {
-      const cacheKey = nativeMembershipCacheKey(userId, requestSessionKey);
-      const cached = parseCachedPayload(await AsyncStorage.getItem(cacheKey), isNativeMembershipProfile);
-      if (active && subscriptionSessionKeyRef.current === requestSessionKey && cached) setProfile(cached);
       try {
         const nextProfile = await fetchNativeMembershipProfile(userId, accessToken, requestSessionKey);
         if (!active || subscriptionSessionKeyRef.current !== requestSessionKey) return;
         setProfile(nextProfile);
-        await writeCachedPayload(cacheKey, nextProfile);
+        setProfileLoadFailed(false);
       } catch {
-        // Failed DB refresh keeps cached membership state.
+        if (active && subscriptionSessionKeyRef.current === requestSessionKey) {
+          setProfile(null);
+          setProfileLoadFailed(true);
+        }
+      } finally {
+        if (active && subscriptionSessionKeyRef.current === requestSessionKey) setProfileLoading(false);
       }
     })();
 
@@ -350,15 +324,152 @@ export function NativeManageSubscriptionScreen({ userId, accessToken, sessionKey
     };
   }, [accessToken, currentSubscriptionSessionKey, userId]);
 
+  const retryMembershipProfile = useCallback(async () => {
+    if (profileLoading) return;
+    setProfileLoading(true);
+    setProfileLoadFailed(false);
+    try {
+      await refetchBackendMembership(currentSubscriptionSessionKey);
+    } catch {
+      if (subscriptionSessionKeyRef.current === currentSubscriptionSessionKey) setProfileLoadFailed(true);
+    } finally {
+      if (subscriptionSessionKeyRef.current === currentSubscriptionSessionKey) setProfileLoading(false);
+    }
+  }, [currentSubscriptionSessionKey, profileLoading, refetchBackendMembership]);
+
+  useEffect(() => {
+    let active = true;
+    setPurchaseStatus("loading_products");
+    setPurchaseMessage(null);
+    void (async () => {
+      try {
+        const products = await loadNativeStoreProducts();
+        if (!active) return;
+        setStoreProducts(products);
+        const unavailableCount = Object.values(products).filter((product) => !product.isAvailable).length;
+        setPurchaseStatus(unavailableCount === Object.keys(products).length ? "unavailable" : "idle");
+        setPurchaseMessage(unavailableCount > 0 ? storeUnavailableCopy : null);
+      } catch {
+        if (!active) return;
+        setStoreProducts(null);
+        setPurchaseStatus("unavailable");
+        setPurchaseMessage(storeUnavailableCopy);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    let unsubscribe: (() => void) | undefined;
+    void (async () => {
+      const freshAccessToken = await getFreshNativeAccessToken(accessToken);
+      if (!active || !freshAccessToken) return;
+      unsubscribe = listenForNativeStorePurchases(freshAccessToken, {
+        onPurchaseError: (message) => {
+          setPurchaseStatus("failed");
+          setPurchaseMessage(message || "Purchase could not be verified.");
+          setActivePurchaseProductId(null);
+        },
+        onPurchasePending: (productId) => {
+          setActivePurchaseProductId(productId);
+          setPurchaseStatus("purchase_pending");
+          setPurchaseMessage("Purchase pending");
+        },
+        onPurchaseVerified: async (productId) => {
+          membershipAutoRetryAttemptedRef.current = false;
+          setMembershipAutoRetryProductId(null);
+          await refreshConfirmedPurchaseMembership(productId);
+        },
+        onVerifying: (productId) => {
+          setActivePurchaseProductId(productId);
+          setPurchaseStatus("backend_verifying");
+          setPurchaseMessage("Confirming purchase with huddle.");
+        },
+      });
+      if (!active) unsubscribe();
+    })();
+    return () => {
+      active = false;
+      unsubscribe?.();
+    };
+  }, [accessToken, refreshConfirmedPurchaseMembership]);
+
+  const planProductId = useMemo<NativeStoreProductId>(() => {
+    if (activePlan === "addons") return "huddle_super_broadcast";
+    const alias = `${activePlan}_${billing === "annual" ? "annual" : "monthly"}` as keyof typeof NATIVE_STORE_ALIAS_TO_PRODUCT_ID;
+    return NATIVE_STORE_ALIAS_TO_PRODUCT_ID[alias];
+  }, [activePlan, billing]);
+
+  const isPurchaseBusy = membershipRefreshNeedsRetry || purchaseStatus === "purchase_pending" || purchaseStatus === "backend_verifying" || purchaseStatus === "verified_refetching" || purchaseStatus === "restoring";
+
+  const requestPurchaseForProduct = async (productId: NativeStoreProductId) => {
+    const product = storeProducts?.[productId];
+    const freshAccessToken = await getFreshNativeAccessToken(accessToken);
+    if (!userId || !freshAccessToken) {
+      setPurchaseStatus("failed");
+      setPurchaseMessage("Sign in again to continue.");
+      return;
+    }
+    if (!product?.isAvailable) {
+      setPurchaseStatus("unavailable");
+      setPurchaseMessage(storeUnavailableCopy);
+      return;
+    }
+    try {
+      haptic.toggleControl();
+      setActivePurchaseProductId(productId);
+      setPurchaseStatus("purchase_pending");
+      setPurchaseMessage("Opening store purchase.");
+      await requestNativeStoreProductPurchase(product, userId);
+    } catch (error) {
+      setPurchaseStatus("failed");
+      setPurchaseMessage(nativeSafeErrorCopy(error, "Your purchase didn't go through. Mind trying again a bit later?"));
+      setActivePurchaseProductId(null);
+    }
+  };
+
+  const restorePurchasesFromStore = async () => {
+    const freshAccessToken = await getFreshNativeAccessToken(accessToken);
+    if (!freshAccessToken) {
+      setPurchaseStatus("failed");
+      setPurchaseMessage("Sign in again to restore purchases.");
+      return;
+    }
+    try {
+      let verifiedProductId: NativeStoreProductId | null = null;
+      setPurchaseStatus("restoring");
+      setPurchaseMessage("Restoring purchases.");
+      const restored = await restoreNativeStorePurchases(freshAccessToken, {
+        onPurchaseVerified: (productId) => {
+          verifiedProductId = productId;
+        },
+        onVerifying: (productId) => {
+          setActivePurchaseProductId(productId);
+          setPurchaseStatus("backend_verifying");
+        },
+      });
+      if (verifiedProductId) {
+        membershipAutoRetryAttemptedRef.current = false;
+        setMembershipAutoRetryProductId(null);
+        await refreshConfirmedPurchaseMembership(verifiedProductId);
+        return;
+      }
+      await refetchBackendMembership();
+      setPurchaseStatus("idle");
+      setPurchaseMessage(restored.length > 0 ? "Purchases restored from backend." : "No active store purchases found.");
+    } catch (error) {
+      setPurchaseStatus("failed");
+      setPurchaseMessage(nativeSafeErrorCopy(error, "We couldn't find any past purchases linked to this account."));
+    }
+  };
+
+  const isMaxFamilyCapacity = typeof profile?.family_share_capacity === "number" && profile.family_share_capacity >= 4;
+
   const renderPlanCard = () => {
     if (activePlan === "addons") {
-      const currencyCode = prices.currencyCode;
-      const selectedAddonRows = addonRows.filter((row) => selectedAddons[row.id] && typeof prices[row.id] === "number");
-      const selectedTotal = selectedAddonRows.reduce((sum, row) => {
-        const addonPrice = prices[row.id];
-        return isLivePrice(addonPrice) ? sum + addonPrice : sum;
-      }, 0);
-      const canShowTotal = Boolean(currencyCode && selectedAddonRows.length > 0 && selectedTotal > 0);
       return (
         <View style={styles.addonCard}>
           <View style={styles.addonHeader}>
@@ -366,44 +477,39 @@ export function NativeManageSubscriptionScreen({ userId, accessToken, sessionKey
             <Text style={styles.addonHeaderSubtitle}>One-time and recurring</Text>
           </View>
           <View style={styles.addonBody}>
-            {addonRows.map((row, index) => (
-              <View key={row.title} style={[styles.addonRow, index > 0 && styles.addonDivider]}>
-                <Feather color={huddleColors.blue} name={row.icon} size={20} />
-                <View style={styles.featureCopy}>
-                  <Text style={styles.addonTitle}>{row.title}</Text>
-                  <Text style={styles.addonSubtitle}>{row.subtitle}</Text>
-                  {isLivePrice(prices[row.id]) ? (
-                    <Text style={styles.addonPrice}>
-                      {formatMoney(prices[row.id] as number, currencyCode)}
-                      {row.id === "sharePerks" && prices.sharePerksInterval ? (prices.sharePerksInterval === "year" ? "/yr" : "/mo") : ""}
-                    </Text>
-                  ) : (
-                    <Text style={styles.addonPricePending}>Checking live price...</Text>
-                  )}
+            {addonRows.map((row, index) => {
+              const isFamilyAddon = row.id === "sharePerks";
+              const product = storeProducts?.[row.productId];
+              const addonDisabled = !product?.isAvailable || isPurchaseBusy || (isFamilyAddon && isMaxFamilyCapacity);
+              return (
+                <View key={row.title} style={[styles.addonRow, index > 0 && styles.addonDivider]}>
+                  <Feather color={huddleColors.blue} name={row.icon} size={20} />
+                  <View style={styles.featureCopy}>
+                    <Text style={styles.addonTitle}>{row.title}</Text>
+                    <Text style={styles.addonSubtitle}>{row.subtitle}</Text>
+                    <Text style={styles.addonPrice}>{isFamilyAddon && isMaxFamilyCapacity ? "Max. capacity reached" : formatNativeAddonPrice(row.productId, product)}</Text>
+                  </View>
+                  <Pressable
+                    accessibilityLabel={`Purchase ${row.title}`}
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: addonDisabled }}
+                    disabled={addonDisabled}
+                    onPress={() => void requestPurchaseForProduct(row.productId)}
+                    style={[styles.addonToggle, activePurchaseProductId === row.productId && styles.addonToggleSelected, addonDisabled && styles.addonToggleDisabled]}
+                  >
+                    <Feather color={activePurchaseProductId === row.productId ? huddleColors.onPrimary : huddleColors.blue} name="shopping-bag" size={15} />
+                  </Pressable>
                 </View>
-                <Pressable
-                  accessibilityLabel={`${selectedAddons[row.id] ? "Remove" : "Add"} ${row.title}`}
-                  accessibilityRole="button"
-                  accessibilityState={{ disabled: !isLivePrice(prices[row.id]) }}
-                  disabled={!isLivePrice(prices[row.id])}
-                  onPress={() => setSelectedAddons((current) => ({ ...current, [row.id]: !current[row.id] }))}
-                  style={[styles.addonToggle, selectedAddons[row.id] && styles.addonToggleSelected, !isLivePrice(prices[row.id]) && styles.addonToggleDisabled]}
-                >
-                  <Feather color={selectedAddons[row.id] ? huddleColors.onPrimary : huddleColors.blue} name={selectedAddons[row.id] ? "minus" : "plus"} size={15} />
-                </Pressable>
-              </View>
-            ))}
+              );
+            })}
             <Pressable
               accessibilityRole="button"
-              accessibilityState={{ disabled: selectedAddonRows.length === 0 }}
-              disabled={selectedAddonRows.length === 0}
-              onPress={() => undefined}
-              style={[styles.addonCta, selectedAddonRows.length === 0 && styles.addonCtaDisabled]}
+              disabled={isPurchaseBusy}
+              onPress={() => void restorePurchasesFromStore()}
+              style={[styles.addonCta, isPurchaseBusy && styles.addonCtaDisabled]}
             >
-              <Feather color={huddleColors.blue} name="shopping-bag" size={18} />
-              <Text style={styles.addonCtaText}>
-                {canShowTotal ? formatMoney(selectedTotal, currencyCode as string) : "Purchase Add-ons"}
-              </Text>
+              <Feather color={huddleColors.blue} name="refresh-cw" size={18} />
+              <Text style={styles.addonCtaText}>Restore Purchases</Text>
             </Pressable>
           </View>
         </View>
@@ -412,83 +518,89 @@ export function NativeManageSubscriptionScreen({ userId, accessToken, sessionKey
 
     const plan = plans[activePlan];
     const isAnnual = billing === "annual";
-    const ownTier = normalizeOwnedTier(profile?.tier);
-    const monthlyAmount = prices[`${activePlan}_monthly` as "plus_monthly" | "gold_monthly"];
-    const annualAmount = prices[`${activePlan}_annual` as "plus_annual" | "gold_annual"];
-    const currencyCode = prices.currencyCode;
-    const price = isAnnual && isLivePrice(annualAmount)
-      ? annualAmount / 12
-      : monthlyAmount;
-    const annualDiscount = discountPct(monthlyAmount, annualAmount);
+    const ownTier = profileLoading || profileLoadFailed ? "free" : normalizeOwnedTier(profile?.tier);
+    const product = storeProducts?.[planProductId] || null;
+    const monthlyProductId = NATIVE_STORE_ALIAS_TO_PRODUCT_ID[`${activePlan}_monthly` as keyof typeof NATIVE_STORE_ALIAS_TO_PRODUCT_ID] as NativeStoreProductId;
+    const monthlyProduct = storeProducts?.[monthlyProductId] || null;
     const isBlockedByTier = ownTier === "gold" || (ownTier === "plus" && activePlan === "plus");
     const isCurrentPlan = ownTier === activePlan;
-    const ctaLabel = isBlockedByTier
-      ? (ownTier === "gold" ? "You're on Huddle Gold" : "You're on Huddle+")
-      : (activePlan === "plus" ? "Get Huddle+" : "Get Huddle Gold");
+    const purchaseUnavailable = !product?.isAvailable;
+    const ctaLabel = profileLoading
+      ? "Checking membership"
+      : profileLoadFailed
+      ? "Refresh membership"
+      : purchaseUnavailable
+      ? storeUnavailableCopy
+      : membershipRefreshNeedsRetry && activePurchaseProductId === product?.id
+      ? "Purchase confirmed"
+      : isPurchaseBusy && activePurchaseProductId === product?.id
+      ? purchaseMessage || "Purchase pending"
+      : isBlockedByTier
+      ? (ownTier === "gold" ? "You're on huddle＊" : "You're on huddle+")
+      : (activePlan === "plus" ? "Get huddle+" : "Get huddle＊");
 
     return (
       <View style={[styles.planCard, { backgroundColor: plan.background }]}>
-          <View style={[styles.billingTabs, { backgroundColor: plan.background }]}>
-            <Pressable onPress={() => setBilling("monthly")} style={[styles.billingTab, !isAnnual ? null : styles.billingTabInactiveRight]}>
-              <Text style={[styles.billingText, isAnnual && { color: plan.background }]}>Monthly</Text>
-            </Pressable>
-            <Pressable onPress={() => setBilling("annual")} style={[styles.billingTab, isAnnual ? null : styles.billingTabInactiveLeft]}>
-              <Text style={[styles.billingText, !isAnnual && { color: plan.background }]}>Annually</Text>
-              {!isAnnual && annualDiscount !== null ? (
-                <View style={[styles.discountPill, { backgroundColor: plan.background }]}>
-                  <Text style={styles.discountText}>-{annualDiscount}%</Text>
-                </View>
-              ) : null}
-            </Pressable>
-          </View>
-          <View style={styles.planBody}>
-            {!isAnnual ? (
+        <View style={[styles.billingTabs, { backgroundColor: plan.background }]}>
+          <Pressable onPress={() => setBilling("monthly")} style={[styles.billingTab, !isAnnual ? null : styles.billingTabInactiveRight]}>
+            <Text style={[styles.billingText, isAnnual && { color: plan.background }]}>Monthly</Text>
+          </Pressable>
+          <Pressable onPress={() => setBilling("annual")} style={[styles.billingTab, isAnnual ? null : styles.billingTabInactiveLeft]}>
+            <Text style={[styles.billingText, !isAnnual && { color: plan.background }]}>Annually</Text>
+          </Pressable>
+        </View>
+        <View style={styles.planBody}>
+          {!isAnnual ? (
+            <Text style={styles.price}>
+              {formatNativeStorePrice(planProductId, product)}<Text style={styles.priceSuffix}>/mo</Text>
+            </Text>
+          ) : (
+            <View>
               <Text style={styles.price}>
-                {isLivePrice(price) ? formatMoney(price, currencyCode) : "--"} <Text style={styles.priceSuffix}>/mo</Text>
+                {formatNativeStorePrice(planProductId, product)}<Text style={styles.priceSuffix}> billed yearly</Text>
               </Text>
-            ) : (
-              <View>
-                <View style={styles.annualPriceRow}>
-                  <Text style={styles.struckPrice}>{isLivePrice(monthlyAmount) ? formatMoney(monthlyAmount, currencyCode) : "--"}</Text>
-                  <Text style={styles.price}>
-                    {isLivePrice(price) ? formatMoney(price, currencyCode) : "--"} <Text style={styles.priceSuffix}>/mo</Text>
-                  </Text>
-                </View>
-                <Text style={styles.annualNote}>{isLivePrice(annualAmount) ? formatMoney(annualAmount, currencyCode) : "--"} billed yearly</Text>
+              <Text style={styles.annualNote}>
+                {formatNativeStoreMonthlyEquivalentPrice(planProductId, product)}<Text style={styles.annualNoteSuffix}>/mo equivalent</Text>
+                {" · "}
+                <Text style={styles.struckPrice}>{formatNativeStorePrice(monthlyProductId, monthlyProduct) || nativeFallbackStruckMonthlyPrices[planProductId] || "--"}</Text>
+              </Text>
+            </View>
+          )}
+          <View style={styles.divider} />
+          {plan.features.map((row) => (
+            <View key={row.title} style={styles.featureRow}>
+              <Feather color={plan.textColor} name={row.icon} size={18} />
+              <View style={styles.featureCopy}>
+                <Text style={styles.featureTitle}>{row.title}</Text>
+                <Text style={styles.featureSubtitle}>{row.subtitle}</Text>
               </View>
-            )}
-            <View style={styles.divider} />
-            {plan.features.map((row) => (
-              <View key={row.title} style={styles.featureRow}>
-                <Feather color={plan.textColor} name={row.icon} size={18} />
-                <View style={styles.featureCopy}>
-                  <Text style={styles.featureTitle}>{row.title}</Text>
-                  <Text style={styles.featureSubtitle}>{row.subtitle}</Text>
-                </View>
-              </View>
-            ))}
+            </View>
+          ))}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ disabled: profileLoading || (!profileLoadFailed && (isBlockedByTier || purchaseUnavailable || isPurchaseBusy)) }}
+            disabled={profileLoading || (!profileLoadFailed && (isBlockedByTier || purchaseUnavailable || isPurchaseBusy))}
+            onPress={() => profileLoadFailed ? void retryMembershipProfile() : void requestPurchaseForProduct(planProductId)}
+            style={[styles.planCta, (profileLoading || (!profileLoadFailed && (isBlockedByTier || purchaseUnavailable || isPurchaseBusy))) && styles.planCtaBlocked]}
+          >
+            <Text style={[styles.planCtaText, { color: (isBlockedByTier || profileLoading || profileLoadFailed || purchaseUnavailable || isPurchaseBusy) ? "#99A0B3" : plan.background }]}>
+              {ctaLabel}
+            </Text>
+          </Pressable>
+          {isCurrentPlan ? (
             <Pressable
+              accessibilityLabel="Manage Subscription"
               accessibilityRole="button"
-              accessibilityState={{ disabled: isBlockedByTier }}
-              disabled={isBlockedByTier}
-              onPress={() => undefined}
-              style={[styles.planCta, isBlockedByTier && styles.planCtaBlocked]}
+              onPress={() => void openNativeStoreSubscriptionManagement(planProductId).catch(() => setPurchaseMessage("Open your app store subscription settings to manage this plan."))}
+              style={styles.cancelSubscriptionLink}
             >
-              <Text style={[styles.planCtaText, { color: isBlockedByTier ? "#99A0B3" : plan.background }]}>
-                {ctaLabel}
-              </Text>
+              <Text style={styles.cancelSubscriptionText}>Manage Subscription</Text>
             </Pressable>
-            {isCurrentPlan ? (
-              <Pressable
-                accessibilityLabel="Cancel Subscription"
-                accessibilityRole="button"
-                onPress={() => undefined}
-                style={styles.cancelSubscriptionLink}
-              >
-                <Text style={styles.cancelSubscriptionText}>Cancel Subscription</Text>
-              </Pressable>
-            ) : null}
-          </View>
+          ) : null}
+          <Pressable accessibilityRole="button" disabled={isPurchaseBusy} onPress={() => void restorePurchasesFromStore()} style={styles.restoreLink}>
+            <Text style={styles.restoreText}>Restore Purchases</Text>
+          </Pressable>
+        </View>
       </View>
     );
   };
@@ -499,23 +611,23 @@ export function NativeManageSubscriptionScreen({ userId, accessToken, sessionKey
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
-        <Pressable accessibilityLabel="Go back" accessibilityRole="button" hitSlop={12} onPress={onBack} style={({ pressed }) => [styles.returnArrow, pressed ? styles.pressed : null]}>
-          <Feather color={huddleColors.iconMuted} name="arrow-left" size={20} />
-        </Pressable>
-
-        <Image
-          accessibilityIgnoresInvertColors
-          accessibilityLabel="Huddle Premium"
-          resizeMode="contain"
-          source={premiumBanner}
-          style={[styles.premiumBanner, { width: contentWidth, height: contentWidth * (175 / 916) }]}
-        />
-
+        <View style={styles.topRow}>
+          <Pressable accessibilityLabel="Go back" accessibilityRole="button" hitSlop={12} onPress={onBack} style={({ pressed }) => [styles.returnArrow, pressed ? styles.pressed : null]}>
+            <Feather color={huddleColors.text} name="arrow-left" size={22} />
+          </Pressable>
+          <Image
+            accessibilityIgnoresInvertColors
+            accessibilityLabel="huddle+"
+            resizeMode="contain"
+            source={premiumBanner}
+            style={[styles.headerBanner, { width: bannerWidth, height: bannerHeight }]}
+          />
+        </View>
         <View style={styles.tabRow}>
           {(["plus", "gold", "addons"] as PlanKey[]).map((planKey) => {
             const selected = activePlan === planKey;
             const isGold = planKey === "gold";
-            const tabColor = planKey === "plus" ? plans.plus.background : planKey === "gold" ? plans.gold.background : "#7CFF6B";
+            const tabColor = planKey === "plus" ? plans.plus.background : planKey === "gold" ? plans.gold.background : huddleColors.subscriptionAddonLime;
             return (
               <View key={planKey} style={styles.tabWrap}>
                 {isGold ? (
@@ -533,7 +645,7 @@ export function NativeManageSubscriptionScreen({ userId, accessToken, sessionKey
                   style={[styles.tab, selected ? { backgroundColor: tabColor } : styles.tabRest]}
                 >
                   <Text style={[styles.tabText, selected ? (planKey === "addons" ? styles.tabTextRest : styles.tabTextSelected) : styles.tabTextRest]}>
-                    {planKey === "plus" ? "Huddle+" : planKey === "gold" ? "Huddle Gold" : "Add-ons"}
+                    {planKey === "plus" ? "huddle+" : planKey === "gold" ? "huddle＊" : "Add-ons"}
                   </Text>
                 </Pressable>
               </View>
@@ -542,6 +654,41 @@ export function NativeManageSubscriptionScreen({ userId, accessToken, sessionKey
         </View>
 
         {renderPlanCard()}
+
+        {membershipRefreshNeedsRetry && activePurchaseProductId ? (
+          <View accessibilityLiveRegion="polite" style={styles.membershipRefreshNotice}>
+            <Text style={styles.membershipRefreshNoticeText}>{purchaseMessage}</Text>
+            <Pressable
+              accessibilityLabel="Retry membership refresh"
+              accessibilityRole="button"
+              onPress={() => void refreshConfirmedPurchaseMembership(activePurchaseProductId)}
+              style={({ pressed }) => [styles.membershipRefreshRetry, pressed ? styles.pressed : null]}
+            >
+              <Feather color={huddleColors.blue} name="refresh-cw" size={16} />
+              <Text style={styles.membershipRefreshRetryText}>Retry membership refresh</Text>
+            </Pressable>
+          </View>
+        ) : null}
+
+        <View style={styles.legalDisclosure}>
+          <Text style={styles.legalDisclosureText}>
+            By purchasing, your subscription renews automatically at the shown price until canceled in your Apple Account settings, and you agree to our{" "}
+            <Text
+              onPress={() => void Linking.openURL(NATIVE_PRIVACY_URL)}
+              style={styles.legalInlineLinkText}
+            >
+              Privacy Policy
+            </Text>
+            {" and "}
+            <Text
+              onPress={() => void Linking.openURL(NATIVE_TERMS_URL)}
+              style={styles.legalInlineLinkText}
+            >
+              Terms
+            </Text>
+            .
+          </Text>
+        </View>
       </ScrollView>
     </View>
   );
@@ -552,27 +699,31 @@ const styles = StyleSheet.create({
     ...huddleButtons.pressed,
   },
   screen: {
-    ...StyleSheet.absoluteFillObject,
-    paddingTop: huddleLayout.headerHeight + huddleSpacing.x5,
+    flex: 1,
     backgroundColor: huddleColors.canvas,
   },
   content: {
     paddingHorizontal: huddleSpacing.x5,
-    paddingTop: huddleSpacing.x5,
+    paddingTop: huddleSpacing.x2,
     paddingBottom: huddleSpacing.x9,
   },
+  topRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: huddleSpacing.x2,
+    marginBottom: huddleSpacing.x4,
+  },
+  headerBanner: {},
   returnArrow: {
-    width: 20,
-    height: 20,
+    width: 40,
+    height: 40,
     alignItems: "center",
     justifyContent: "center",
-  },
-  premiumBanner: {
-    marginTop: 7,
-    alignSelf: "center",
+    borderRadius: huddleRadii.pill,
+    backgroundColor: huddleColors.canvas,
+    ...huddleShadows.glassElevation1,
   },
   tabRow: {
-    marginTop: 14,
     flexDirection: "row",
     gap: huddleSpacing.x2,
   },
@@ -658,17 +809,6 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     color: huddleColors.onPrimary,
   },
-  discountPill: {
-    borderRadius: huddleRadii.pill,
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-  },
-  discountText: {
-    fontFamily: "Urbanist-700",
-    fontSize: 9,
-    lineHeight: 12,
-    color: huddleColors.onPrimary,
-  },
   planBody: {
     paddingHorizontal: huddleSpacing.x5,
     paddingTop: huddleSpacing.x5,
@@ -680,15 +820,10 @@ const styles = StyleSheet.create({
     lineHeight: 36,
     color: huddleColors.onPrimary,
   },
-  annualPriceRow: {
-    flexDirection: "row",
-    alignItems: "baseline",
-    gap: 8,
-  },
   struckPrice: {
     fontFamily: "Urbanist-400",
-    fontSize: 15,
-    lineHeight: 20,
+    fontSize: 12,
+    lineHeight: 16,
     color: "rgba(255, 255, 255, 0.62)",
     textDecorationLine: "line-through",
   },
@@ -701,8 +836,14 @@ const styles = StyleSheet.create({
   annualNote: {
     marginTop: 2,
     fontFamily: "Urbanist-400",
-    fontSize: huddleType.helper,
-    lineHeight: 16,
+    fontSize: 13,
+    lineHeight: 18,
+    color: "rgba(255, 255, 255, 0.78)",
+  },
+  annualNoteSuffix: {
+    fontFamily: "Urbanist-400",
+    fontSize: 13,
+    lineHeight: 18,
     color: "rgba(255, 255, 255, 0.78)",
   },
   divider: {
@@ -760,7 +901,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: huddleSpacing.x3,
     paddingHorizontal: huddleSpacing.x5,
-    backgroundColor: "#7CFF6B",
+    backgroundColor: huddleColors.subscriptionAddonLime,
   },
   addonHeaderTitle: {
     fontFamily: "Urbanist-700",
@@ -808,13 +949,6 @@ const styles = StyleSheet.create({
     lineHeight: 17,
     color: huddleColors.blue,
   },
-  addonPricePending: {
-    marginTop: 4,
-    fontFamily: "Urbanist-600",
-    fontSize: 12,
-    lineHeight: 16,
-    color: "rgba(33, 69, 207, 0.52)",
-  },
   addonToggle: {
     width: 32,
     height: 32,
@@ -846,7 +980,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: huddleSpacing.x2,
     borderRadius: 16,
-    backgroundColor: "#7CFF6B",
+    backgroundColor: huddleColors.subscriptionAddonLime,
   },
   addonCtaDisabled: {
     opacity: 0.38,
@@ -856,6 +990,19 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 20,
     color: huddleColors.blue,
+  },
+  restoreLink: {
+    alignSelf: "center",
+    marginTop: huddleSpacing.x3,
+    paddingHorizontal: huddleSpacing.x2,
+    paddingVertical: huddleSpacing.x1,
+  },
+  restoreText: {
+    fontFamily: "Urbanist-600",
+    fontSize: 11,
+    lineHeight: 15,
+    color: "rgba(255, 255, 255, 0.82)",
+    textDecorationLine: "underline",
   },
   cancelSubscriptionLink: {
     alignSelf: "center",
@@ -868,6 +1015,55 @@ const styles = StyleSheet.create({
     fontSize: 11,
     lineHeight: 15,
     color: "rgba(255, 255, 255, 0.72)",
+    textDecorationLine: "underline",
+  },
+  membershipRefreshNotice: {
+    marginTop: huddleSpacing.x3,
+    padding: huddleSpacing.x4,
+    gap: huddleSpacing.x3,
+    borderRadius: huddleRadii.glass,
+    borderWidth: 1,
+    borderColor: "rgba(33, 69, 207, 0.14)",
+    backgroundColor: huddleColors.canvas,
+  },
+  membershipRefreshNoticeText: {
+    fontFamily: "Urbanist-500",
+    fontSize: 13,
+    lineHeight: 18,
+    color: huddleColors.text,
+  },
+  membershipRefreshRetry: {
+    minHeight: 44,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: huddleSpacing.x2,
+    borderRadius: huddleRadii.pill,
+    backgroundColor: "rgba(33, 69, 207, 0.08)",
+  },
+  membershipRefreshRetryText: {
+    fontFamily: "Urbanist-700",
+    fontSize: 13,
+    lineHeight: 18,
+    color: huddleColors.blue,
+  },
+  legalDisclosure: {
+    marginTop: huddleSpacing.x5,
+    paddingHorizontal: huddleSpacing.x2,
+    alignItems: "center",
+  },
+  legalDisclosureText: {
+    fontFamily: "Urbanist-400",
+    fontSize: 11,
+    lineHeight: 16,
+    color: huddleColors.subtext,
+    textAlign: "center",
+  },
+  legalInlineLinkText: {
+    fontFamily: "Urbanist-400",
+    fontSize: 11,
+    lineHeight: 16,
+    color: huddleColors.subtext,
     textDecorationLine: "underline",
   },
 });

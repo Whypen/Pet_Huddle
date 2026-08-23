@@ -18,7 +18,11 @@ export type NativePolaroidBadge = {
 type NativePolaroidCardProps = {
   accessibilityLabel?: string;
   badges?: NativePolaroidBadge[];
+  leadingBadge?: ReactNode;
+  trailingBadge?: ReactNode;
   captionPrimary: string;
+  captionPrimaryLines?: string[];
+  captionAlign?: "left" | "center";
   captionSecondary?: ReactNode;
   disabled?: boolean;
   onPress?: () => void;
@@ -30,7 +34,11 @@ type NativePolaroidCardProps = {
 export function NativePolaroidCard({
   accessibilityLabel,
   badges = [],
+  leadingBadge,
+  trailingBadge,
   captionPrimary,
+  captionPrimaryLines,
+  captionAlign = "left",
   captionSecondary,
   disabled = false,
   onPress,
@@ -41,37 +49,60 @@ export function NativePolaroidCard({
   const interactive = Boolean(onPress);
   const detail = variant === "detail";
 
+  const centeredCaption = detail || captionAlign === "center";
+
+  const cardBody = (
+    <View style={styles.polaroid}>
+      <View style={[styles.photoSlot, detail ? styles.photoSlotDetail : null]}>
+        {photo}
+        {disabled ? <View pointerEvents="none" style={styles.disabledPhotoOverlay} /> : null}
+        <View pointerEvents="none" style={styles.photoInset} />
+        {photoOverlay}
+      </View>
+
+      {leadingBadge || badges.length > 0 ? (
+        <View pointerEvents="none" style={[styles.badgeStack, detail ? styles.badgeStackDetail : null]}>
+          {leadingBadge}
+          {badges.map((badge) => (
+            <View key={`${badge.name}:${badge.color}`} style={[styles.badgePuck, detail ? styles.badgePuckDetail : null, badge.style]}>
+              <Feather color={badge.color} name={badge.name} size={16} />
+            </View>
+          ))}
+        </View>
+      ) : null}
+
+      {trailingBadge ? (
+        <View pointerEvents="none" style={[styles.trailingBadge, detail ? styles.trailingBadgeDetail : null]}>
+          {trailingBadge}
+        </View>
+      ) : null}
+
+      <View style={[styles.caption, centeredCaption ? styles.captionCentered : null, detail ? styles.captionDetail : null]}>
+        {captionPrimaryLines?.length ? (
+          captionPrimaryLines.map((line) => (
+            <Text key={line} adjustsFontSizeToFit minimumFontScale={0.72} numberOfLines={1} style={[styles.captionName, centeredCaption ? styles.captionNameCentered : null, detail ? styles.captionNameDetail : null]}>{line}</Text>
+          ))
+        ) : (
+          <Text numberOfLines={1} style={[styles.captionName, centeredCaption ? styles.captionNameCentered : null, detail ? styles.captionNameDetail : null]}>{captionPrimary}</Text>
+        )}
+        {captionSecondary}
+      </View>
+    </View>
+  );
+
+  if (!interactive) {
+    return <View style={[styles.outer, disabled ? styles.disabled : null]}>{cardBody}</View>;
+  }
+
   return (
     <Pressable
       accessibilityLabel={accessibilityLabel}
-      accessibilityRole={interactive ? "button" : undefined}
-      disabled={disabled || !interactive}
+      accessibilityRole="button"
+      disabled={disabled}
       onPress={onPress}
-      style={({ pressed }) => [styles.outer, pressed && interactive && !disabled ? styles.pressed : null, disabled ? styles.disabled : null]}
+      style={({ pressed }) => [styles.outer, pressed && !disabled ? styles.pressed : null, disabled ? styles.disabled : null]}
     >
-      <View style={styles.polaroid}>
-        <View style={[styles.photoSlot, detail ? styles.photoSlotDetail : null]}>
-          {photo}
-          {disabled ? <View pointerEvents="none" style={styles.disabledPhotoOverlay} /> : null}
-          <View pointerEvents="none" style={styles.photoInset} />
-          {photoOverlay}
-        </View>
-
-        {badges.length > 0 ? (
-          <View pointerEvents="none" style={[styles.badgeStack, detail ? styles.badgeStackDetail : null]}>
-            {badges.map((badge) => (
-              <View key={`${badge.name}:${badge.color}`} style={[styles.badgePuck, detail ? styles.badgePuckDetail : null, badge.style]}>
-                <Feather color={badge.color} name={badge.name} size={16} />
-              </View>
-            ))}
-          </View>
-        ) : null}
-
-        <View style={[styles.caption, detail ? styles.captionDetail : null]}>
-          <Text numberOfLines={1} style={[styles.captionName, detail ? styles.captionNameDetail : null]}>{captionPrimary}</Text>
-          {captionSecondary}
-        </View>
-      </View>
+      {cardBody}
     </Pressable>
   );
 }
@@ -95,6 +126,10 @@ export const nativePolaroidStyles = StyleSheet.create({
   },
   badgeEmergency: {
     backgroundColor: huddleColors.validationRed,
+  },
+  // Priority/urgent-notice "zap" badge — coral, identical to the Care-page polaroid.
+  badgePlus: {
+    backgroundColor: huddleColors.tierBadgePlus,
   },
   captionSecondaryWrap: {
     width: "100%",
@@ -170,6 +205,15 @@ const styles = StyleSheet.create({
     top: huddlePolaroid.detail.badgeTop,
     left: huddlePolaroid.detail.badgeLeft,
   },
+  trailingBadge: {
+    position: "absolute",
+    top: huddlePolaroid.badge.top,
+    right: huddlePolaroid.badge.left,
+  },
+  trailingBadgeDetail: {
+    top: huddlePolaroid.detail.badgeTop,
+    right: huddlePolaroid.detail.badgeLeft,
+  },
   badgePuck: {
     width: huddlePolaroid.badge.size,
     height: huddlePolaroid.badge.size,
@@ -196,6 +240,12 @@ const styles = StyleSheet.create({
     paddingTop: 10,
     paddingBottom: huddleSpacing.x3,
   },
+  captionCentered: {
+    alignItems: "center",
+    justifyContent: "flex-start",
+    paddingTop: huddleSpacing.x2,
+    paddingBottom: huddleSpacing.x1,
+  },
   captionDetail: {
     top: huddlePolaroid.detail.captionTop,
     alignItems: "center",
@@ -214,6 +264,10 @@ const styles = StyleSheet.create({
     fontSize: huddlePolaroid.caption.nameSize,
     lineHeight: huddlePolaroid.caption.nameLine,
     color: huddleColors.text,
+  },
+  captionNameCentered: {
+    alignSelf: "center",
+    textAlign: "center",
   },
   captionNameDetail: {
     textAlign: "center",

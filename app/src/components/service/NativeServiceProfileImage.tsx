@@ -1,6 +1,7 @@
 import { Image as ExpoImage } from "expo-image";
 import { type ImageStyle, StyleSheet, type StyleProp } from "react-native";
 import { WebView } from "react-native-webview";
+import { nativeFreshImageKey, nativeFreshImageUri } from "../../lib/nativeImageFreshness";
 import { huddleImageDefaults } from "../../theme/huddleDesignTokens";
 
 type NativeServiceProfileImageProps = {
@@ -9,6 +10,7 @@ type NativeServiceProfileImageProps = {
   resizeMode?: "cover" | "contain";
   style: StyleProp<ImageStyle>;
   uri: string;
+  version?: string | number | null;
 };
 
 const isSvgUri = (uri: string) => {
@@ -49,6 +51,7 @@ export function NativeServiceProfileImage({
   resizeMode = "cover",
   style,
   uri,
+  version,
 }: NativeServiceProfileImageProps) {
   if (isSvgUri(uri)) {
     return (
@@ -75,8 +78,9 @@ export function NativeServiceProfileImage({
       onError={onError}
       contentFit={resizeMode}
       cachePolicy={huddleImageDefaults.cachePolicy}
+      key={nativeFreshImageKey(uri, version || uri)}
       transition={huddleImageDefaults.transition}
-      source={{ uri }}
+      source={{ uri: nativeFreshImageUri(uri, version || uri) }}
       style={style}
     />
   );

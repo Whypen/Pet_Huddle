@@ -1,7 +1,6 @@
 import { Feather } from "@expo/vector-icons";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator,
   Modal,
   Pressable,
   StyleSheet,
@@ -9,14 +8,20 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
-import { Gesture, GestureDetector } from "react-native-gesture-handler";
-import Animated, { runOnJS, useAnimatedStyle, useSharedValue } from "react-native-reanimated";
+import { Gesture, GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
+import Animated, { runOnJS, useAnimatedProps, useAnimatedStyle, useSharedValue } from "react-native-reanimated";
+import Svg, { Path } from "react-native-svg";
+import { NativeSpinner } from "../NativeSpinner";
+import { AppConfirmModal } from "../nativeModalPrimitives";
 import {
   normalizeNativeProfilePhotoAsset,
   type NativeProfilePhotoCropRect,
+  type NativeProfilePhotoPresentationCrop,
   type NativeProfileUploadAsset,
   type NativeSoloAspect,
 } from "../../lib/nativeProfilePhotos";
+import { nativeSafeErrorCopy } from "../../lib/nativeSafeErrorCopy";
+import { haptic } from "../../lib/nativeHaptics";
 import {
   huddleButtons,
   huddleColors,
@@ -30,15 +35,18 @@ import {
 import { nativeProfileAspectLabels, type NativeProfileSlotAspect } from "./nativeProfilePhotoSlotBriefs";
 
 export type NativeMediaImageCropperAspect = "1:1" | "3/2" | "4/5" | "4:5" | "16:9";
+export type NativePresentationCrop = NativeProfilePhotoPresentationCrop;
 
 type NativeProfilePhotoCropperProps = {
   asset: (NativeProfileUploadAsset & { height?: number | null; width?: number | null }) | null;
   aspect: NativeProfileSlotAspect;
   onCancel: () => void;
   onError?: (message: string) => void;
-  onSave: (asset: NativeProfileUploadAsset, soloAspect: NativeSoloAspect | null) => Promise<void>;
+  onSave: (asset: NativeProfileUploadAsset, soloAspect: NativeSoloAspect | null, presentationCrop?: NativePresentationCrop) => Promise<void>;
   onSoloAspectChange?: (aspect: NativeSoloAspect) => void;
   soloAspect: NativeSoloAspect;
+  avatarCrop?: boolean;
+  initialPresentationCrop?: NativePresentationCrop | null;
 };
 
 type NativeMediaImageCropperProps = {
@@ -48,8 +56,14 @@ type NativeMediaImageCropperProps = {
   onAspectChange?: (aspect: NativeMediaImageCropperAspect) => void;
   onCancel: () => void;
   onError?: (message: string) => void;
-  onSave: (asset: NativeProfileUploadAsset, aspect: NativeMediaImageCropperAspect | null) => Promise<void>;
+  onSave: (asset: NativeProfileUploadAsset, aspect: NativeMediaImageCropperAspect | null, presentationCrop?: NativePresentationCrop) => Promise<void>;
+  /** When present, a draggable presentation crop is exported alongside the main portrait crop. */
+  presentationCropAspect?: number;
+  initialPresentationCrop?: NativePresentationCrop | null;
+  presentationCropLabel?: string;
   presentation?: "modal" | "inline";
+  previewOverlayAspect?: number;
+  previewOverlayLabel?: string;
   title?: string;
 };
 
@@ -70,6 +84,7 @@ const aspectToNumber = (aspect: NativeMediaImageCropperAspect) => {
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 const initialCropZoom: number = huddleProfilePhotoCropper.minZoom;
+const AnimatedMaskPath = Animated.createAnimatedComponent(Path);
 
 export function NativeMediaImageCropper({
   asset,
@@ -79,14 +94,22 @@ export function NativeMediaImageCropper({
   onCancel,
   onError,
   onSave,
+  presentationCropAspect,
+  initialPresentationCrop,
+  presentationCropLabel = "Home banner",
   presentation = "modal",
+  previewOverlayAspect,
+  previewOverlayLabel = "Banner preview",
   title = "Crop photo",
 }: NativeMediaImageCropperProps) {
   const window = useWindowDimensions();
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState<number>(initialCropZoom);
+  const [cropEdited, setCropEdited] = useState(false);
+  const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [currentAspect, setCurrentAspect] = useState<NativeMediaImageCropperAspect>(aspect);
+  const [presentationSelected, setPresentationSelected] = useState(false);
   const livePanRef = useRef(pan);
   const liveZoomRef = useRef(initialCropZoom);
   const panBoundsRef = useRef({ x: 0, y: 0 });
@@ -95,6 +118,12 @@ export function NativeMediaImageCropper({
   const panY = useSharedValue<number>(0);
   const scale = useSharedValue<number>(initialCropZoom);
   const rotation = useSharedValue<number>(0);
+  const presentationCropX = useSharedValue<number>(0);
+  const presentationCropY = useSharedValue<number>(0);
+  const presentationCropWidth = useSharedValue<number>(0);
+  const presentationStartX = useSharedValue<number>(0);
+  const presentationStartY = useSharedValue<number>(0);
+  const presentationStartWidth = useSharedValue<number>(0);
   const gestureStartPanX = useSharedValue<number>(0);
   const gestureStartPanY = useSharedValue<number>(0);
   const gestureStartScale = useSharedValue<number>(initialCropZoom);
@@ -114,6 +143,51 @@ export function NativeMediaImageCropper({
   );
   const finalFrameWidth = Math.min(frameWidth, frameHeight * numericAspect);
   const finalFrameHeight = finalFrameWidth / numericAspect;
+  const overlayAspect = presentationCropAspect ?? previewOverlayAspect;
+  const previewOverlayFrame = useMemo(() => {
+    if (!overlayAspect || overlayAspect <= 0) return null;
+    const cropAspect = finalFrameWidth / finalFrameHeight;
+    const width = overlayAspect >= cropAspect ? finalFrameWidth : finalFrameHeight * overlayAspect;
+    const height = overlayAspect >= cropAspect ? finalFrameWidth / overlayAspect : finalFrameHeight;
+    const maxLeft = Math.max(0, finalFrameWidth - width);
+    const maxTop = Math.max(0, finalFrameHeight - height);
+    return {
+      height,
+      left: maxLeft / 2,
+      maxLeft,
+      maxTop,
+      top: maxTop / 2,
+      width,
+    };
+  }, [finalFrameHeight, finalFrameWidth, overlayAspect]);
+  const presentationMinWidth = Math.min(finalFrameWidth, Math.max(120, finalFrameWidth * 0.42));
+  const presentationCropHeight = useSharedValue<number>(0);
+  const animatedPresentationFrameStyle = useAnimatedStyle(() => ({
+    height: presentationCropHeight.value,
+    left: presentationCropX.value,
+    top: presentationCropY.value,
+    width: presentationCropWidth.value,
+  }));
+  const animatedMaskTopStyle = useAnimatedStyle(() => ({ height: presentationCropY.value }));
+  const animatedMaskBottomStyle = useAnimatedStyle(() => ({ top: presentationCropY.value + presentationCropHeight.value }));
+  const animatedMaskLeftStyle = useAnimatedStyle(() => ({
+    height: presentationCropHeight.value,
+    top: presentationCropY.value,
+    width: presentationCropX.value,
+  }));
+  const animatedMaskRightStyle = useAnimatedStyle(() => ({
+    height: presentationCropHeight.value,
+    left: presentationCropX.value + presentationCropWidth.value,
+    top: presentationCropY.value,
+  }));
+  const animatedAvatarMaskProps = useAnimatedProps(() => {
+    const radius = presentationCropWidth.value / 2;
+    const centerX = presentationCropX.value + radius;
+    const centerY = presentationCropY.value + radius;
+    return {
+      d: `M0 0 H${finalFrameWidth} V${finalFrameHeight} H0 Z M${centerX - radius} ${centerY} A${radius} ${radius} 0 1 0 ${centerX + radius} ${centerY} A${radius} ${radius} 0 1 0 ${centerX - radius} ${centerY} Z`,
+    };
+  });
 
   const baseScale = imageWidth && imageHeight
     ? Math.max(finalFrameWidth / imageWidth, finalFrameHeight / imageHeight)
@@ -195,6 +269,7 @@ export function NativeMediaImageCropper({
     panBoundsRef.current = bounds;
     setPan(safePan);
     setZoom(safeZoom);
+    setCropEdited(true);
   };
 
   const applyCropTransform = (nextPan: { x: number; y: number }, nextZoom: number, nextRotation = liveRotationRef.current) => {
@@ -210,14 +285,15 @@ export function NativeMediaImageCropper({
 
   useEffect(() => {
     panBoundsRef.current = { x: maxPanX, y: maxPanY };
+    const current = livePanRef.current;
+    const next = {
+      x: clamp(current.x, -maxPanX, maxPanX),
+      y: clamp(current.y, -maxPanY, maxPanY),
+    };
+    livePanRef.current = next;
+    panX.value = next.x;
+    panY.value = next.y;
     setPan((current) => {
-      const next = {
-        x: clamp(current.x, -maxPanX, maxPanX),
-        y: clamp(current.y, -maxPanY, maxPanY),
-      };
-      livePanRef.current = next;
-      panX.value = next.x;
-      panY.value = next.y;
       return next.x === current.x && next.y === current.y ? current : next;
     });
   }, [maxPanX, maxPanY, panX, panY]);
@@ -230,6 +306,67 @@ export function NativeMediaImageCropper({
       { rotate: `${rotation.value}deg` },
     ],
   }));
+
+  const selectPresentationFrame = useCallback(() => {
+    setPresentationSelected(true);
+    setCropEdited(true);
+    haptic.reveal();
+  }, []);
+  const presentationCropGesture = useMemo(() => {
+    const frameTap = Gesture.Tap()
+      .onEnd(() => {
+        runOnJS(selectPresentationFrame)();
+      });
+    const framePan = Gesture.Pan()
+      .onBegin(() => {
+        presentationStartX.value = presentationCropX.value;
+        presentationStartY.value = presentationCropY.value;
+        runOnJS(selectPresentationFrame)();
+      })
+      .onUpdate((event) => {
+        const maxX = finalFrameWidth - presentationCropWidth.value;
+        const maxY = finalFrameHeight - presentationCropHeight.value;
+        presentationCropX.value = Math.min(Math.max(presentationStartX.value + event.translationX, 0), maxX);
+        presentationCropY.value = Math.min(Math.max(presentationStartY.value + event.translationY, 0), maxY);
+      });
+    const framePinch = Gesture.Pinch()
+      .onBegin(() => {
+        presentationStartWidth.value = presentationCropWidth.value;
+        runOnJS(selectPresentationFrame)();
+      })
+      .onUpdate((event) => {
+        if (!overlayAspect) return;
+        const centerX = presentationCropX.value + presentationCropWidth.value / 2;
+        const centerY = presentationCropY.value + presentationCropHeight.value / 2;
+        const maxWidth = Math.min(finalFrameWidth, finalFrameHeight * overlayAspect);
+        const nextWidth = Math.min(Math.max(presentationStartWidth.value * event.scale, presentationMinWidth), maxWidth);
+        const nextHeight = nextWidth / overlayAspect;
+        presentationCropWidth.value = nextWidth;
+        presentationCropHeight.value = nextHeight;
+        presentationCropX.value = Math.min(Math.max(centerX - nextWidth / 2, 0), finalFrameWidth - nextWidth);
+        presentationCropY.value = Math.min(Math.max(centerY - nextHeight / 2, 0), finalFrameHeight - nextHeight);
+      });
+    return Gesture.Simultaneous(frameTap, framePan, framePinch);
+  }, [finalFrameHeight, finalFrameWidth, overlayAspect, presentationCropHeight, presentationCropWidth, presentationCropX, presentationCropY, presentationMinWidth, presentationStartWidth, presentationStartX, presentationStartY, selectPresentationFrame]);
+  const presentationResizeGesture = useMemo(() => Gesture.Pan()
+    .onBegin(() => {
+      presentationStartWidth.value = presentationCropWidth.value;
+      runOnJS(selectPresentationFrame)();
+    })
+    .onUpdate((event) => {
+      if (!overlayAspect) return;
+      const maxWidth = Math.min(
+        finalFrameWidth - presentationCropX.value,
+        (finalFrameHeight - presentationCropY.value) * overlayAspect,
+      );
+      const diagonalDelta = (event.translationX + event.translationY * overlayAspect) / 2;
+      const nextWidth = Math.min(
+        Math.max(presentationStartWidth.value + diagonalDelta, presentationMinWidth),
+        maxWidth,
+      );
+      presentationCropWidth.value = nextWidth;
+      presentationCropHeight.value = nextWidth / overlayAspect;
+    }), [finalFrameHeight, finalFrameWidth, overlayAspect, presentationCropHeight, presentationCropWidth, presentationCropX, presentationCropY, presentationMinWidth, presentationStartWidth, selectPresentationFrame]);
 
   const cropGesture = useMemo(() => {
     const clampWorklet = (value: number, min: number, max: number) => {
@@ -282,6 +419,10 @@ export function NativeMediaImageCropper({
       "worklet";
       runOnJS(syncCropTransform)({ x: panX.value, y: panY.value }, scale.value, rotation.value);
     };
+    const finalizeTransform = (_event: unknown, success: boolean) => {
+      "worklet";
+      if (success) commitTransform();
+    };
 
     const panGesture = Gesture.Pan()
       .onBegin(() => {
@@ -293,9 +434,7 @@ export function NativeMediaImageCropper({
         panX.value = clampWorklet(gestureStartPanX.value + event.translationX, -bounds.x, bounds.x);
         panY.value = clampWorklet(gestureStartPanY.value + event.translationY, -bounds.y, bounds.y);
       })
-      .onEnd(commitTransform)
-      .onFinalize(commitTransform);
-
+      .onFinalize(finalizeTransform);
     const pinchGesture = Gesture.Pinch()
       .onBegin(() => {
         gestureStartScale.value = scale.value;
@@ -311,10 +450,10 @@ export function NativeMediaImageCropper({
         panX.value = clampWorklet(panX.value, -bounds.x, bounds.x);
         panY.value = clampWorklet(panY.value, -bounds.y, bounds.y);
       })
-      .onEnd(commitTransform)
-      .onFinalize(commitTransform);
+      .onFinalize(finalizeTransform);
 
     const rotateGesture = Gesture.Rotation()
+      .enabled(!presentationCropAspect)
       .onBegin(() => {
         gestureStartRotation.value = rotation.value;
       })
@@ -327,8 +466,7 @@ export function NativeMediaImageCropper({
         panX.value = clampWorklet(panX.value, -bounds.x, bounds.x);
         panY.value = clampWorklet(panY.value, -bounds.y, bounds.y);
       })
-      .onEnd(commitTransform)
-      .onFinalize(commitTransform);
+      .onFinalize(finalizeTransform);
 
     const resetGesture = Gesture.Tap()
       .numberOfTaps(2)
@@ -341,7 +479,10 @@ export function NativeMediaImageCropper({
       });
 
     return Gesture.Simultaneous(panGesture, pinchGesture, rotateGesture, resetGesture);
-  }, [baseDisplayHeight, baseDisplayWidth, finalFrameHeight, finalFrameWidth, gestureStartPanX, gestureStartPanY, gestureStartRotation, gestureStartScale, panX, panY, rotation, scale]);
+  // This dependency list intentionally matches the known-good cropper: keeping
+  // the gesture graph stable prevents active native pinch/pan gestures resetting.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [baseDisplayHeight, baseDisplayWidth, finalFrameHeight, finalFrameWidth, gestureStartPanX, gestureStartPanY, gestureStartRotation, gestureStartScale, panX, panY, presentationCropAspect, presentationCropGesture, rotation, scale]);
 
   useEffect(() => {
     setCurrentAspect(aspect);
@@ -358,7 +499,31 @@ export function NativeMediaImageCropper({
     rotation.value = 0;
     setPan(nextPan);
     setZoom(initialCropZoom);
+    setCropEdited(false);
   }, [asset?.uri, effectiveAspect, panX, panY, rotation, scale]);
+
+  useEffect(() => {
+    if (!presentationCropAspect || !previewOverlayFrame) return;
+    const maxWidth = Math.min(finalFrameWidth, finalFrameHeight * presentationCropAspect);
+    const requestedWidth = initialPresentationCrop?.widthPct
+      ? (imageWidth ?? finalFrameWidth) * baseScale * initialPresentationCrop.widthPct / 100
+      : maxWidth;
+    const width = clamp(requestedWidth, presentationMinWidth, maxWidth);
+    const height = width / presentationCropAspect;
+    const overflowX = (baseDisplayWidth - finalFrameWidth) / 2;
+    const overflowY = (baseDisplayHeight - finalFrameHeight) / 2;
+    const centerX = initialPresentationCrop
+      ? (imageWidth ?? finalFrameWidth) * baseScale * initialPresentationCrop.centerX / 100 - overflowX
+      : finalFrameWidth / 2;
+    const centerY = initialPresentationCrop
+      ? (imageHeight ?? finalFrameHeight) * baseScale * initialPresentationCrop.centerY / 100 - overflowY
+      : finalFrameHeight / 2;
+    presentationCropWidth.value = width;
+    presentationCropHeight.value = height;
+    presentationCropX.value = clamp(centerX - width / 2, 0, finalFrameWidth - width);
+    presentationCropY.value = clamp(centerY - height / 2, 0, finalFrameHeight - height);
+    setPresentationSelected(false);
+  }, [asset?.uri, baseDisplayHeight, baseDisplayWidth, baseScale, effectiveAspect, finalFrameHeight, finalFrameWidth, imageHeight, imageWidth, initialPresentationCrop, presentationCropAspect, presentationCropHeight, presentationCropWidth, presentationCropX, presentationCropY, presentationMinWidth, previewOverlayFrame]);
 
   const changeZoom = (delta: number) => {
     const nextZoom = clamp(
@@ -369,7 +534,7 @@ export function NativeMediaImageCropper({
     applyCropTransform(livePanRef.current, nextZoom, liveRotationRef.current);
   };
 
-  const buildCropRect = (): NativeProfilePhotoCropRect | null => {
+  const buildCropRect = (frame = { left: 0, top: 0, width: finalFrameWidth, height: finalFrameHeight }): NativeProfilePhotoCropRect | null => {
     if (!imageWidth || !imageHeight) return null;
     const liveZoom = liveZoomRef.current;
     const livePan = livePanRef.current;
@@ -379,40 +544,78 @@ export function NativeMediaImageCropper({
     const displayHeightForSave = rotatedSize.height * baseScale * liveZoom;
     const cropScale = baseScale * liveZoom;
     return {
-      originX: ((displayWidthForSave - finalFrameWidth) / 2 - livePan.x) / cropScale,
-      originY: ((displayHeightForSave - finalFrameHeight) / 2 - livePan.y) / cropScale,
-      width: finalFrameWidth / cropScale,
-      height: finalFrameHeight / cropScale,
+      originX: ((displayWidthForSave - finalFrameWidth) / 2 - livePan.x + frame.left) / cropScale,
+      originY: ((displayHeightForSave - finalFrameHeight) / 2 - livePan.y + frame.top) / cropScale,
+      width: frame.width / cropScale,
+      height: frame.height / cropScale,
+    };
+  };
+
+  const buildPresentationCrop = (): NativePresentationCrop | undefined => {
+    if (!presentationCropAspect || !previewOverlayFrame) return undefined;
+    const frame = {
+      width: presentationCropWidth.value || previewOverlayFrame.width,
+      height: presentationCropHeight.value || previewOverlayFrame.height,
+      left: presentationCropX.value,
+      top: presentationCropY.value,
+    };
+    const sourceCrop = buildCropRect(frame);
+    if (!sourceCrop || !imageWidth || !imageHeight) return undefined;
+    return {
+      centerX: ((sourceCrop.originX + sourceCrop.width / 2) / imageWidth) * 100,
+      centerY: ((sourceCrop.originY + sourceCrop.height / 2) / imageHeight) * 100,
+      widthPct: sourceCrop.width / imageWidth * 100,
+      sourceAspect: imageWidth / imageHeight,
     };
   };
 
   const handleSave = async () => {
     if (!asset) return;
-    const crop = buildCropRect();
-    if (!crop) return;
+    // Presentation frames are metadata only. Never bake avatar/banner framing
+    // into the canonical image asset.
+    const crop = presentationCropAspect && imageWidth && imageHeight
+      ? { originX: 0, originY: 0, width: imageWidth, height: imageHeight }
+      : buildCropRect();
+    if (!crop) {
+      onError?.("Couldn't read that photo. Try another image.");
+      return;
+    }
     setSaving(true);
     try {
-      const rotationDegrees = liveRotationRef.current;
+      if (presentationCropAspect) {
+        await onSave(asset, aspectOptions && aspectOptions.length > 0 ? currentAspect : null, buildPresentationCrop());
+        return;
+      }
+      const rotationDegrees = presentationCropAspect ? 0 : liveRotationRef.current;
       const rotatedSize = rotatedSizeFor(rotationDegrees, imageWidth ?? undefined, imageHeight ?? undefined);
       const normalized = await normalizeNativeProfilePhotoAsset(asset, crop, {
         rotationDegrees,
         rotatedHeight: rotatedSize.height,
         rotatedWidth: rotatedSize.width,
       });
-      await onSave(normalized, aspectOptions && aspectOptions.length > 0 ? currentAspect : null);
+      await onSave(normalized, aspectOptions && aspectOptions.length > 0 ? currentAspect : null, buildPresentationCrop());
     } catch (error) {
-      onError?.(error instanceof Error && error.message ? error.message : "Couldn't save that photo. Try again in a moment.");
+      onError?.(nativeSafeErrorCopy(error, "Couldn't save that photo. Try again in a moment."));
     } finally {
       setSaving(false);
     }
   };
 
+  const requestCancel = () => {
+    if (saving) return;
+    if (cropEdited) {
+      setCancelConfirmOpen(true);
+      return;
+    }
+    onCancel();
+  };
+
   const cropperContent = (
-    <Pressable onPress={presentation === "inline" ? undefined : onCancel} style={presentation === "inline" ? [styles.backdrop, styles.inlineBackdrop] : styles.backdrop}>
+    <Pressable onPress={presentation === "inline" ? undefined : requestCancel} style={presentation === "inline" ? [styles.backdrop, styles.inlineBackdrop] : styles.backdrop}>
         <Pressable onPress={(event) => event.stopPropagation()} style={styles.card}>
           <View style={styles.header}>
             <Text style={styles.title}>{title}</Text>
-            <Pressable accessibilityLabel="Close crop photo" accessibilityRole="button" onPress={onCancel} style={styles.closeButton}>
+            <Pressable accessibilityLabel="Close crop photo" accessibilityRole="button" onPress={requestCancel} style={styles.closeButton}>
               <Feather color={huddleColors.text} name="x" size={24} />
             </Pressable>
           </View>
@@ -425,6 +628,7 @@ export function NativeMediaImageCropper({
                   key={option}
                   onPress={() => {
                     setCurrentAspect(option);
+                    setCropEdited(true);
                     onAspectChange?.(option);
                   }}
                   style={[styles.aspectPill, currentAspect === option ? styles.aspectPillActive : null]}
@@ -439,7 +643,9 @@ export function NativeMediaImageCropper({
 
           <GestureDetector gesture={cropGesture}>
             <View
-              accessibilityHint="Drag the photo to choose the crop position. Pinch to zoom, twist to rotate, and double tap to fit."
+              accessibilityHint={previewOverlayFrame
+                ? "Drag and zoom to compose the full Polaroid photo. Keep your pet inside the banner preview rectangle."
+                : "Drag the photo to choose the crop position. Pinch to zoom, twist to rotate, and double tap to fit."}
               style={[
                 styles.cropFrame,
                 {
@@ -463,10 +669,57 @@ export function NativeMediaImageCropper({
                   ]}
                 />
               ) : null}
-              <View pointerEvents="none" style={styles.gridHorizontalTop} />
-              <View pointerEvents="none" style={styles.gridHorizontalBottom} />
-              <View pointerEvents="none" style={styles.gridVerticalLeft} />
-              <View pointerEvents="none" style={styles.gridVerticalRight} />
+              {previewOverlayFrame && !presentationCropAspect ? (
+                <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+                  <View style={[styles.previewScrim, { height: previewOverlayFrame.top, left: 0, right: 0, top: 0 }]} />
+                  <View style={[styles.previewScrim, { bottom: 0, left: 0, right: 0, top: previewOverlayFrame.top + previewOverlayFrame.height }]} />
+                  <View style={[styles.previewScrim, { height: previewOverlayFrame.height, left: 0, top: previewOverlayFrame.top, width: previewOverlayFrame.left }]} />
+                  <View style={[styles.previewScrim, { height: previewOverlayFrame.height, left: previewOverlayFrame.left + previewOverlayFrame.width, right: 0, top: previewOverlayFrame.top }]} />
+                  <View style={[styles.previewOverlay, previewOverlayFrame]} />
+                  <View style={[styles.previewOverlayLabel, { left: previewOverlayFrame.left + huddleSpacing.x2, top: previewOverlayFrame.top + huddleSpacing.x2 }]}>
+                    <Text style={styles.previewOverlayLabelText}>{previewOverlayLabel}</Text>
+                  </View>
+                </View>
+              ) : null}
+              {presentationCropAspect && previewOverlayFrame ? (
+                <>
+                  {presentationSelected ? (
+                    <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+                      {presentationCropAspect === 1 ? (
+                        <Svg height="100%" width="100%">
+                          <AnimatedMaskPath animatedProps={animatedAvatarMaskProps} fill="rgba(7, 13, 34, 0.46)" fillRule="evenodd" />
+                        </Svg>
+                      ) : (
+                        <>
+                          <Animated.View style={[styles.focusMask, styles.focusMaskTop, animatedMaskTopStyle]} />
+                          <Animated.View style={[styles.focusMask, styles.focusMaskBottom, animatedMaskBottomStyle]} />
+                          <Animated.View style={[styles.focusMask, styles.focusMaskLeft, animatedMaskLeftStyle]} />
+                          <Animated.View style={[styles.focusMask, styles.focusMaskRight, animatedMaskRightStyle]} />
+                        </>
+                      )}
+                    </View>
+                  ) : null}
+                  <GestureDetector gesture={presentationCropGesture}>
+                    <Animated.View
+                      accessibilityLabel={presentationCropLabel}
+                      accessibilityRole="adjustable"
+                      style={[
+                        styles.previewOverlay,
+                        presentationCropAspect === 1 ? styles.avatarCropFrame : null,
+                        presentationSelected ? styles.previewOverlaySelected : null,
+                        animatedPresentationFrameStyle,
+                      ]}
+                    >
+                      <View pointerEvents="none" style={styles.previewOverlayLabel}>
+                        <Text style={styles.previewOverlayLabelText}>{presentationCropLabel}</Text>
+                      </View>
+                      <GestureDetector gesture={presentationResizeGesture}>
+                        <View accessibilityLabel={`Resize ${presentationCropLabel}`} accessibilityRole="adjustable" style={styles.resizeHandle} />
+                      </GestureDetector>
+                    </Animated.View>
+                  </GestureDetector>
+                </>
+              ) : null}
             </View>
           </GestureDetector>
 
@@ -484,11 +737,11 @@ export function NativeMediaImageCropper({
           </View>
 
           <View style={styles.actions}>
-            <Pressable accessibilityRole="button" disabled={saving} onPress={onCancel} style={[styles.actionButton, styles.cancelButton, saving ? styles.disabled : null]}>
+            <Pressable accessibilityRole="button" disabled={saving} onPress={requestCancel} style={[styles.actionButton, styles.cancelButton, saving ? styles.disabled : null]}>
               <Text style={styles.cancelText}>Cancel</Text>
             </Pressable>
             <Pressable accessibilityRole="button" disabled={saving} onPress={handleSave} style={[styles.actionButton, styles.saveButton, saving ? styles.disabled : null]}>
-              {saving ? <ActivityIndicator color={huddleColors.onPrimary} /> : <Text style={styles.saveText}>Save</Text>}
+              {saving ? <NativeSpinner tone="primary" /> : <Text style={styles.saveText}>Save</Text>}
             </Pressable>
           </View>
         </Pressable>
@@ -500,8 +753,25 @@ export function NativeMediaImageCropper({
   }
 
   return (
-    <Modal animationType="fade" onRequestClose={onCancel} transparent visible={Boolean(asset)}>
-      {cropperContent}
+    <Modal animationType="fade" onRequestClose={requestCancel} transparent visible={Boolean(asset)}>
+      <GestureHandlerRootView style={styles.gestureRoot}>
+        {cropperContent}
+        <AppConfirmModal
+          body="Your crop, zoom, and rotation changes will be lost."
+          cancel="Keep editing"
+          confirm="Confirm"
+          destructive
+          onCancel={() => setCancelConfirmOpen(false)}
+          onConfirm={() => {
+            setCancelConfirmOpen(false);
+            onCancel();
+          }}
+          open={cancelConfirmOpen}
+          presentation="inline"
+          showClose
+          title="Discard photo edits?"
+        />
+      </GestureHandlerRootView>
     </Modal>
   );
 }
@@ -514,6 +784,8 @@ export function NativeProfilePhotoCropper({
   onSave,
   onSoloAspectChange,
   soloAspect,
+  avatarCrop = false,
+  initialPresentationCrop,
 }: NativeProfilePhotoCropperProps) {
   const resolvedAspect = aspect === "free" ? soloAspect : aspect;
   return (
@@ -528,13 +800,19 @@ export function NativeProfilePhotoCropper({
       }}
       onCancel={onCancel}
       onError={onError}
-      onSave={(nextAsset, selectedAspect) => onSave(nextAsset, aspect === "free" && (selectedAspect === "1:1" || selectedAspect === "4:5" || selectedAspect === "16:9") ? selectedAspect : null)}
+      onSave={(nextAsset, selectedAspect, presentationCrop) => onSave(nextAsset, aspect === "free" && (selectedAspect === "1:1" || selectedAspect === "4:5" || selectedAspect === "16:9") ? selectedAspect : null, presentationCrop)}
+      presentationCropAspect={avatarCrop ? 1 : undefined}
+      initialPresentationCrop={initialPresentationCrop}
+      presentationCropLabel="Avatar"
       title="Crop photo"
     />
   );
 }
 
 const styles = StyleSheet.create({
+  gestureRoot: {
+    flex: 1,
+  },
   backdrop: {
     flex: 1,
     alignItems: "center",
@@ -609,37 +887,58 @@ const styles = StyleSheet.create({
   cropImage: {
     position: "absolute",
   },
-  gridHorizontalTop: {
+  previewScrim: {
     position: "absolute",
-    top: "33.333%",
-    left: 0,
-    right: 0,
-    height: huddleProfilePhotoCropper.cropGridLineWidth,
-    backgroundColor: huddleColors.glassBorder,
+    backgroundColor: huddleColors.backdrop,
   },
-  gridHorizontalBottom: {
+  previewOverlay: {
     position: "absolute",
-    top: "66.666%",
-    left: 0,
-    right: 0,
-    height: huddleProfilePhotoCropper.cropGridLineWidth,
-    backgroundColor: huddleColors.glassBorder,
+    borderWidth: 1,
+    borderStyle: "dashed",
+    borderColor: huddleColors.mutedText,
+    borderRadius: huddleRadii.card,
   },
-  gridVerticalLeft: {
-    position: "absolute",
-    left: "33.333%",
-    top: 0,
-    bottom: 0,
-    width: huddleProfilePhotoCropper.cropGridLineWidth,
-    backgroundColor: huddleColors.glassBorder,
+  previewOverlaySelected: {
+    borderWidth: 2,
+    borderStyle: "solid",
+    borderColor: huddleColors.blue,
+    ...huddleShadows.photoControl,
   },
-  gridVerticalRight: {
+  avatarCropFrame: {
+    borderRadius: huddleRadii.pill,
+    overflow: "visible",
+  },
+  focusMask: {
     position: "absolute",
-    left: "66.666%",
-    top: 0,
-    bottom: 0,
-    width: huddleProfilePhotoCropper.cropGridLineWidth,
-    backgroundColor: huddleColors.glassBorder,
+    backgroundColor: "rgba(7, 13, 34, 0.46)",
+  },
+  focusMaskTop: { left: 0, right: 0, top: 0 },
+  focusMaskBottom: { bottom: 0, left: 0, right: 0 },
+  focusMaskLeft: { left: 0 },
+  focusMaskRight: { right: 0 },
+  resizeHandle: {
+    position: "absolute",
+    right: 5,
+    bottom: 5,
+    width: 14,
+    height: 14,
+    borderRadius: huddleRadii.pill,
+    backgroundColor: huddleColors.glassChrome,
+    borderWidth: 1,
+    borderColor: huddleColors.blue,
+  },
+  previewOverlayLabel: {
+    position: "absolute",
+    borderRadius: huddleRadii.pill,
+    backgroundColor: huddleColors.backdrop,
+    paddingHorizontal: huddleSpacing.x2,
+    paddingVertical: huddleSpacing.x1,
+  },
+  previewOverlayLabelText: {
+    fontFamily: "Urbanist-700",
+    fontSize: huddleType.meta,
+    lineHeight: huddleType.metaLine,
+    color: huddleColors.onPrimary,
   },
   controls: {
     marginTop: huddleSpacing.x4,

@@ -1,17 +1,18 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as SecureStore from "expo-secure-store";
 import type { Session } from "@supabase/supabase-js";
-import { supabase } from "./supabase";
+import { refreshNativeSessionOnce } from "./nativeFunctionClient";
 
-const BIOMETRIC_SESSION_KEY = "huddle:native:biometric-session";
-const BIOMETRIC_HINT_KEY = "huddle:native:biometric-session-enabled";
+const LEGACY_BIOMETRIC_HINT_KEY = "huddle:native:biometric-session-enabled";
+const BIOMETRIC_SESSION_KEY = "huddle.native.biometric-session";
+const BIOMETRIC_HINT_KEY = "huddle.native.biometric-session-enabled";
 
 type StoredBiometricSession = {
-  accessToken: string;
   refreshToken: string;
   email: string | null;
   userId: string;
   savedAt: string;
+  accessToken?: string;
 };
 
 export type NativeBiometricAvailability = {
@@ -22,7 +23,7 @@ export type NativeBiometricAvailability = {
 
 const secureStoreOptions: SecureStore.SecureStoreOptions = {
   requireAuthentication: true,
-  authenticationPrompt: "Use Face ID or Touch ID to sign in to Huddle.",
+  authenticationPrompt: "Use Face ID or Touch ID to sign in to huddle.",
   keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
 };
 
@@ -34,6 +35,12 @@ type LocalAuthenticationModule = {
   hasHardwareAsync: () => Promise<boolean>;
   isEnrolledAsync: () => Promise<boolean>;
   supportedAuthenticationTypesAsync: () => Promise<number[]>;
+  authenticateAsync: (options?: {
+    promptMessage?: string;
+    fallbackLabel?: string;
+    cancelLabel?: string;
+    disableDeviceFallback?: boolean;
+  }) => Promise<{ success: boolean; error?: string; warning?: string }>;
 };
 
 const loadLocalAuthentication = async (): Promise<LocalAuthenticationModule | null> => {
@@ -69,7 +76,7 @@ export const getNativeBiometricAvailability = async (): Promise<NativeBiometricA
 
 export const hasNativeBiometricSessionHint = async () => {
   try {
-    return (await AsyncStorage.getItem(BIOMETRIC_HINT_KEY)) === "1";
+    return (await AsyncStorage.getItem(BIOMETRIC_HINT_KEY)) === "1" || (await AsyncStorage.getItem(LEGACY_BIOMETRIC_HINT_KEY)) === "1";
   } catch {
     return false;
   }
@@ -78,24 +85,39 @@ export const hasNativeBiometricSessionHint = async () => {
 const setNativeBiometricSessionHint = async (enabled: boolean) => {
   if (enabled) {
     await AsyncStorage.setItem(BIOMETRIC_HINT_KEY, "1");
+    await AsyncStorage.setItem(LEGACY_BIOMETRIC_HINT_KEY, "1").catch(() => undefined);
     return;
   }
   await AsyncStorage.removeItem(BIOMETRIC_HINT_KEY);
+  await AsyncStorage.removeItem(LEGACY_BIOMETRIC_HINT_KEY).catch(() => undefined);
 };
 
-export const saveNativeBiometricSession = async (session: Session) => {
+export const saveNativeBiometricSession = async (session: Session, options: { prompt?: boolean } = {}) => {
   if (!session.access_token || !session.refresh_token) throw new Error("session_missing");
   const availability = await getNativeBiometricAvailability();
   if (!availability.available) throw new Error(availability.reason || "biometric_unavailable");
+  if (options.prompt !== false) {
+    const localAuth = await loadLocalAuthentication();
+    if (!localAuth) throw new Error("unsupported");
+    const setupAuth = await localAuth.authenticateAsync({
+      promptMessage: `Enable ${availability.label} for huddle`,
+      fallbackLabel: "Use Passcode",
+      cancelLabel: "Cancel",
+    });
+    if (!setupAuth.success) {
+      throw new Error(setupAuth.error || "biometric_setup_cancelled");
+    }
+  }
 
   const payload: StoredBiometricSession = {
-    accessToken: session.access_token,
     refreshToken: session.refresh_token,
     email: session.user.email || null,
     userId: session.user.id,
     savedAt: new Date().toISOString(),
   };
 
+  await SecureStore.deleteItemAsync(BIOMETRIC_SESSION_KEY, secureStoreOptions).catch(() => undefined);
+  await SecureStore.deleteItemAsync(BIOMETRIC_SESSION_KEY).catch(() => undefined);
   await SecureStore.setItemAsync(BIOMETRIC_SESSION_KEY, JSON.stringify(payload), secureStoreOptions);
   await setNativeBiometricSessionHint(true);
 };
@@ -117,19 +139,18 @@ export const restoreNativeBiometricSession = async () => {
   }
 
   const parsed = JSON.parse(raw) as Partial<StoredBiometricSession>;
-  if (!parsed.accessToken || !parsed.refreshToken) {
+  if (!parsed.refreshToken) {
     await clearNativeBiometricSession();
     throw new Error("biometric_session_invalid");
   }
 
-  const { data, error } = await supabase.auth.setSession({
-    access_token: parsed.accessToken,
-    refresh_token: parsed.refreshToken,
-  });
-  if (error || !data.session) {
+  const session = await refreshNativeSessionOnce({ refresh_token: parsed.refreshToken });
+  if (!session) {
     await clearNativeBiometricSession();
-    throw error || new Error("biometric_session_restore_failed");
+    throw new Error("biometric_session_restore_failed");
   }
-  await saveNativeBiometricSession(data.session);
-  return data.session;
+  await saveNativeBiometricSession(session, { prompt: false }).catch((error) => {
+    if (__DEV__) console.warn("NATIVE_BIOMETRIC_SESSION_REFRESH_SAVE_FAILED", error);
+  });
+  return session;
 };

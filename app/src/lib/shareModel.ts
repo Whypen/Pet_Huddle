@@ -1,4 +1,4 @@
-import { buildSharePreviewDescription, buildSharePreviewTitle } from "./sharePreview";
+import { buildAlertArea, buildAlertPreviewTitle, buildSharePreviewDescription, buildSharePreviewTitle } from "./sharePreview";
 
 export type ShareContentType = "thread" | "alert";
 export type ShareSurface = "Social" | "Map";
@@ -14,6 +14,21 @@ export type ShareModelInput = {
   contentSnippet?: string | null;
   imagePath?: string | null;
   nativeShareText?: string | null;
+  /**
+   * Alert facts, so an alert shared INTO a huddle chat is described exactly as
+   * the same alert shared out to WhatsApp. Absent for ordinary posts.
+   */
+  alertType?: string | null;
+  petType?: string | null;
+  incidentDistrict?: string | null;
+  incidentCity?: string | null;
+  archived?: boolean;
+  /**
+   * The alert's own headline. Separate from `contentSnippet` because the two
+   * fall back in OPPOSITE directions, exactly as `api/share.ts` does:
+   * the title prefers `title || description`, the description `description || title`.
+   */
+  alertHeadline?: string | null;
 };
 
 export type ShareModel = {
@@ -152,6 +167,12 @@ export const buildShareModel = ({
   contentSnippet,
   imagePath = "/huddle-logo.jpg",
   nativeShareText,
+  alertType,
+  petType,
+  incidentDistrict,
+  incidentCity,
+  archived,
+  alertHeadline,
 }: ShareModelInput): ShareModel => {
   const cleanOrigin = normalizeOrigin(origin);
   const shareId = buildCanonicalShareId(contentType, contentId);
@@ -162,7 +183,20 @@ export const buildShareModel = ({
     : contentType === "thread"
       ? `${cleanOrigin}/threads?focus=${encodeURIComponent(contentId)}`
       : `${cleanOrigin}/map?alert=${encodeURIComponent(contentId)}`;
-  const title = buildSharePreviewTitle(displayName, socialId);
+  // An alert says WHAT it is; a post says WHO posted it and what they wrote.
+  // Identical to `api/share.ts` — locked by `sharePreviewParity.test.ts`.
+  // `alertType` present on a thread means an alert-derived post: it reads as the
+  // alert even though its link opens the post, exactly as `api/share.ts` does.
+  const usesAlertGrammar = contentType === "alert" || Boolean(String(alertType || "").trim());
+  const title = usesAlertGrammar
+    ? buildAlertPreviewTitle({
+      alertType,
+      archived,
+      area: buildAlertArea(incidentDistrict, incidentCity),
+      headline: alertHeadline ?? contentSnippet,
+      petType,
+    })
+    : buildSharePreviewTitle(displayName, socialId, contentSnippet);
   const description = buildSharePreviewDescription(contentSnippet);
   const rawImage = String(imagePath || "").trim();
   const normalizedImagePath = rawImage || "/huddle-logo.jpg";

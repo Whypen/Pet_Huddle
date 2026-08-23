@@ -17,6 +17,8 @@ type SingleProps = {
   value: number;
   suffix?: string;
   step?: number;
+  showValue?: boolean;
+  thumbSize?: number;
   onChange: (value: number) => void;
 };
 
@@ -116,7 +118,7 @@ export function HuddleRangeControl({ min, max, values, suffix = "", step = 1, on
   );
 }
 
-export function HuddleSingleRangeControl({ min, max, value, suffix = "", step = 1, onChange }: SingleProps) {
+export function HuddleSingleRangeControl({ min, max, value, suffix = "", step = 1, showValue = true, thumbSize = THUMB, onChange }: SingleProps) {
   const [width, setWidth] = useState(0);
   const [trackX, setTrackX] = useState(0);
   const trackRef = useRef<View | null>(null);
@@ -149,7 +151,7 @@ export function HuddleSingleRangeControl({ min, max, value, suffix = "", step = 
 
   return (
     <View style={styles.wrap}>
-      <Text style={styles.value}>{value}{suffix}</Text>
+      {showValue ? <Text style={styles.value}>{value}{suffix}</Text> : null}
       <View
         {...pan.panHandlers}
         ref={trackRef}
@@ -161,7 +163,20 @@ export function HuddleSingleRangeControl({ min, max, value, suffix = "", step = 
       >
         <View style={styles.track} />
         <View style={[styles.activeTrack, { left: 0, width: x }]} />
-        <View pointerEvents="none" style={[styles.thumb, { left: x - THUMB / 2 }]} />
+        <View
+          pointerEvents="none"
+          style={[
+            styles.thumb,
+            {
+              left: x - thumbSize / 2,
+              width: thumbSize,
+              height: thumbSize,
+              borderRadius: thumbSize / 2,
+              borderWidth: thumbSize <= 18 ? 2 : 3,
+              top: (36 - thumbSize) / 2,
+            },
+          ]}
+        />
       </View>
     </View>
   );
@@ -184,7 +199,7 @@ const styles = StyleSheet.create({
   track: {
     height: 5,
     borderRadius: 999,
-    backgroundColor: huddleColors.blueSoft,
+    backgroundColor: huddleColors.glassControl,
   },
   activeTrack: {
     position: "absolute",

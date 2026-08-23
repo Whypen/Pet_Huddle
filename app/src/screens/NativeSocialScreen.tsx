@@ -1,25 +1,27 @@
-import { Feather, Ionicons } from "@expo/vector-icons";
+import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { openNativeShareSheet } from "../lib/nativeShareSheet";
+import { readNativeDisplayCacheItem, readNativeDisplayCacheKeys } from "../lib/nativeDisplayCacheStorage";
 import { Image as ExpoImage } from "expo-image";
-import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
+import { launchNativeImageLibraryAsync } from "../lib/nativeMediaPermissions";
 import { Fragment, createRef, useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode, type RefObject } from "react";
 import {
-  ActivityIndicator,
   Animated,
   Dimensions,
+  Easing,
   FlatList,
   Image,
-  KeyboardAvoidingView,
   Keyboard,
   LayoutAnimation,
   Linking,
   Modal,
+  PanResponder,
   Platform,
   Pressable,
   RefreshControl,
   ScrollView,
-  Share,
+
   StyleSheet,
   Text,
   TextInput,
@@ -36,26 +38,46 @@ import {
 if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
-import { normalizeQuotaTier, quotaConfig } from "../lib/quotaConfig_v1";
+import { normalizeQuotaTier } from "../lib/quotaConfig_v1";
 import { NativeLoadingState } from "../components/NativeLoadingState";
+import { NativeNavIcon } from "../components/NativeNavIcons";
+import { NativeShimmerSkeleton } from "../components/NativeShimmerSkeleton";
+import { NativeSpinner } from "../components/NativeSpinner";
+import { NativeToast, NATIVE_TOAST_DURATION_MS } from "../components/NativeToast";
 import { NativePublicProfileModal } from "../components/profile/NativePublicProfileModal";
 import { NativeSocialEmptyState, NativeSocialExternalLinkPreview, NativeSocialFeedCard, NativeSocialFilterBar, NativeSocialMediaCarousel } from "../components/social/NativeSocialFeedPrimitives";
 import { NativeSocialReplyComposerInput } from "../components/social/NativeSocialReplyComposerInput";
 import { NativeSocialReportModal } from "../components/social/NativeSocialReportModal";
 import { buildNativeReplyTree, type NativeSocialThreadedReply } from "../components/social/nativeSocialReplyTree";
-import { AppActionMenu, AppBottomSheet, AppBottomSheetFooter, AppBottomSheetHeader, AppBottomSheetScroll, AppConfirmModal, AppDestructiveSlideConfirm, AppModalActionRow, AppModalButton, AppModalCard, AppModalCloseButton, AppModalScroll, SlideToConfirm } from "../components/nativeModalPrimitives";
+import { AppActionMenu, AppBottomSheet, AppBottomSheetFooter, AppBottomSheetHeader, AppBottomSheetScroll, AppConfirmModal, AppDestructiveSlideConfirm, AppKeyboardAvoidingView as KeyboardAvoidingView, AppModalActionRow, AppModalButton, AppModalCard, AppModalCloseButton, AppModalScroll, SlideToConfirm } from "../components/nativeModalPrimitives";
 import { nativeModalStyles } from "../components/nativeModalPrimitives.styles";
 import { haptic } from "../lib/nativeHaptics";
-import { useShakeAnimation } from "../lib/nativeAnimations";
-import { createSingleRealtimeChannel } from "../lib/realtimeChannelManager";
-import { fetchNativeProfileSummary } from "../lib/nativeProfileSummary";
+import { useNativeLoadingDeadline } from "../lib/useNativeLoadingDeadline";
+import { isReduceMotionActive } from "../lib/nativeReduceMotion";
+import { applyNavMinimizeFromOffset, setNavMinimized } from "../lib/nativeNavScroll";
+import { nativeFreshImageKey, nativeFreshImageUri } from "../lib/nativeImageFreshness";
+import { nativeSafeErrorCopy } from "../lib/nativeSafeErrorCopy";
+import { NATIVE_SOCIAL_VIDEO_MAX_BYTES } from "../lib/nativeMediaPolicy";
+import {
+  averageNativeUploadProgress,
+  NATIVE_UPLOAD_PROGRESS_START,
+  nextNativeUploadProgress,
+} from "../lib/nativeUploadProgress";
+import { useErrorShake } from "../components/motion/useErrorShake";
+import { navigateNativeHuddleLink } from "../lib/nativeInternalLinks";
+import { createSinglePrivateBroadcastChannel, createSingleRealtimeChannel } from "../lib/realtimeChannelManager";
+import { nativeSocialRealtimeTopic } from "../lib/nativeSocialRealtime";
+import { fetchNativeProfileSummary, subscribeNativeProfileSummary } from "../lib/nativeProfileSummary";
 import { invalidateNativeBlockCascade } from "../lib/nativeBlockCascade";
 import { isNativeVerifiedProfile } from "../lib/nativeVerificationGate";
 import { isNativeRestrictionActive } from "../lib/nativeSafetyRestrictions";
-import { resolveNativeViewerScope, type NativeViewerScope } from "../lib/nativeViewerScope";
+import { readCachedNativeViewerScope, resolveNativeViewerScope, subscribeNativeViewerScope, type NativeViewerScope } from "../lib/nativeViewerScope";
 import {
   areNativeSocialUsersBlocked,
   blockNativeSocialUser,
+  buildNativeSocialSharePayload,
+  buildNativeSocialCursor,
+  buildNativeSocialImageMetadata,
   createNativeSocialMentionNotifications,
   createNativeSocialComment,
   createNativeSocialThread,
@@ -63,8 +85,11 @@ import {
   cleanupNativeSocialStorageImages,
   deleteNativeSocialComment,
   deleteNativeSocialThread,
+  extractCompletedNativeSocialPreviewUrl,
   extractNativeSocialFirstHttpUrl,
+  formatNativeShareChatActionLabel,
   fetchNativeSocialComments,
+  fetchNativeSocialThreadCounts,
   fetchNativeSocialFeedPage,
   fetchNativeSocialLinkPreviews,
   fetchNativeSocialPostPreferences,
@@ -84,6 +109,7 @@ import {
   setNativeSocialPostPinned,
   setNativeSocialPostSaved,
   setNativeSocialSupport,
+  stripNativeSocialExternalUrlFromText,
   updateNativeSupportedSocialThreadCache,
   resolveNativeSocialMentionsFromText,
   upsertNativeSocialNotificationWindow,
@@ -91,15 +117,18 @@ import {
   updateNativeSocialThread,
   uploadNativeSocialImage,
   writeNativeSocialStoredState,
+  type NativeSocialAuthor,
   type NativeSocialComment,
   type NativeSocialComposerMedia,
   type NativeSocialFeedCursor,
   type NativeSocialLinkPreview,
+  type NativeSocialMentionEntry,
   type NativeSocialMentionSuggestion,
   type NativeSocialShareTarget,
   type NativeSocialSortMode,
   type NativeSocialThread,
 } from "../lib/nativeSocial";
+import { fetchNativeMapAlertById } from "../lib/nativeMapData";
 import { createNativeProtectedActionError, getNativeProtectedActionResult, logNativeProtectedActionFailure, type NativeProtectedActionCleanupResult } from "../lib/nativeStorageCleanup";
 import {
   huddleButtons,
@@ -107,6 +136,7 @@ import {
   huddleFieldStates,
   huddleFormControls,
   huddleFormFields,
+  huddleGlassControls,
   huddleLayout,
   huddleMotion,
   huddleRadii,
@@ -117,6 +147,7 @@ import {
 } from "../theme/huddleDesignTokens";
 
 type NativeSocialScreenProps = {
+  active?: boolean;
   accessToken?: string | null;
   sessionKey?: string | null;
   userId: string | null;
@@ -134,10 +165,40 @@ type StoredSets = {
   status: "hydrating" | "fresh";
 };
 
+type VisibleProfileFallbackData = {
+  id: string;
+  display_name?: string | null;
+  social_id?: string | null;
+  avatar_url?: string | null;
+  is_verified?: boolean;
+  non_social?: boolean;
+  location_name?: string | null;
+  updated_at?: string | null;
+  last_active_at?: string | null;
+};
+
+const socialAuthorToPublicProfileFallback = (
+  userId: string | null | undefined,
+  author?: Partial<NativeSocialAuthor> | null,
+): VisibleProfileFallbackData | null => {
+  const id = String(userId || "").trim();
+  if (!id) return null;
+  return {
+    id,
+    display_name: author?.displayName ?? author?.socialId ?? null,
+    social_id: author?.socialId ?? null,
+    avatar_url: author?.avatarUrl ?? null,
+    is_verified: author?.isVerified === true || String(author?.verificationStatus || "").toLowerCase() === "verified",
+    non_social: false,
+    location_name: author?.locationCountry ?? null,
+  };
+};
+
 type NativeActionMenuAnchor = { x: number; y: number } | null;
 
 type NativeSocialComposerUploadMedia = NativeSocialComposerMedia & {
   error?: string | null;
+  progress?: number;
   status?: "queued" | "uploading" | "uploaded" | "error";
   uploadedUrl?: string | null;
 };
@@ -146,9 +207,17 @@ const REFRESH_DEBOUNCE_MS = 7000;
 const LINK_PREVIEW_DEBOUNCE_MS = 650;
 const SOCIAL_EFFECT_DEBOUNCE_MS = 450;
 const SOCIAL_REALTIME_REFRESH_COOLDOWN_MS = 1000;
+// Below this scroll offset the reader is treated as "at the top", so new posts are
+// merged in silently instead of being offered behind a pill.
+const NEW_POSTS_AUTO_MERGE_OFFSET = 48;
 
 const SOCIAL_FEED_CACHE_MAX_AGE_MS = 10 * 60 * 1000;
 const SOCIAL_COMMENTS_CACHE_MAX_AGE_MS = 10 * 60 * 1000;
+const SOCIAL_SCOPE_FALLBACK_MS = 2500;
+const SOCIAL_INITIAL_FEED_LIMIT = 8;
+const SOCIAL_MORE_FEED_LIMIT = 12;
+const SOCIAL_FEED_CACHE_ROW_LIMIT = 12;
+const SOCIAL_FEED_ENTRY_REUSE_MS = 30 * 1000;
 const SOCIAL_INITIAL_COMMENT_LIMIT = 5;
 const SOCIAL_OLDER_COMMENT_LIMIT = 10;
 const nativeSocialScreenSessionKey = (userId: string | null, sessionKey?: string | null) =>
@@ -157,11 +226,25 @@ const nativeSocialScreenSessionKey = (userId: string | null, sessionKey?: string
 const nativeSocialCommentsCacheKey = (userId: string, sessionKey: string, thread: Pick<NativeSocialThread, "id" | "commentCount" | "createdAt" | "updatedAt">) =>
   `native-social-comments:v4:${userId}:${sessionKey}:${thread.id}:${thread.commentCount}:${thread.updatedAt || thread.createdAt}`;
 const nativeSocialFeedCacheKey = (userId: string, sessionKey: string, country: string | null, sortMode: string) =>
-  `native-social-feed:v4:${userId}:${sessionKey}:${country || "global"}:${sortMode}`;
+  `native-social-feed:v5:${userId}:${sessionKey}:${country || "global"}:${sortMode}`;
+// Scope-independent boot snapshot. Written by the boot warm and read on mount with no
+// dependency on viewer-scope resolution, so the feed paints instantly (Threads-fast)
+// even before scope is known. The scoped cache + network load reconcile right after.
+const nativeSocialBootFeedCacheKey = (userId: string, sessionKey: string) =>
+  `native-social-feed-boot:v1:${userId}:${sessionKey}`;
+const normalizeSocialScopeCachePart = (value?: string | null) => {
+  const clean = typeof value === "string" ? value.trim().toLowerCase() : "";
+  return clean || null;
+};
+const nativeSocialFeedScopeCacheKey = (scope?: NativeViewerScope | null) => {
+  const currentCountry = normalizeSocialScopeCachePart(scope?.countryName || scope?.country);
+  const profileCountry = normalizeSocialScopeCachePart(scope?.profileCountryName || scope?.profileCountry);
+  return `${currentCountry || "global"}:${profileCountry || "profile-global"}`;
+};
 
 const readNativeSocialPersistentCache = async <T,>(key: string, maxAgeMs: number): Promise<T | null | undefined> => {
   try {
-    const raw = await AsyncStorage.getItem(key);
+    const raw = await readNativeDisplayCacheItem(key);
     if (!raw) return undefined;
     const parsed = JSON.parse(raw) as { cachedAt?: number; dbConfirmedAt?: number; source?: string; status?: string; value?: T | null };
     const confirmedAt = typeof parsed.dbConfirmedAt === "number" ? parsed.dbConfirmedAt : parsed.cachedAt;
@@ -189,8 +272,9 @@ export const purgeNativeSocialPersistentCache = async (userId: string, options?:
   const cleanUserId = String(userId || "").trim();
   if (!cleanUserId) return;
   try {
-    const keys = await AsyncStorage.getAllKeys();
+    const keys = await readNativeDisplayCacheKeys();
     const prefixes = [
+      `native-social-feed:v5:${cleanUserId}:`,
       `native-social-feed:v4:${cleanUserId}:`,
       `native-social-comments:v4:${cleanUserId}:`,
       `native-social-feed:v3:${cleanUserId}:`,
@@ -210,22 +294,39 @@ export const purgeNativeSocialPersistentCache = async (userId: string, options?:
   }
 };
 
-const mergeNativeSocialThreadsByRefresh = (current: NativeSocialThread[], fresh: NativeSocialThread[]) => {
-  const existingById = new Map(current.map((thread) => [thread.id, thread]));
-  const mergedFresh = fresh.map((thread) => ({ ...(existingById.get(thread.id) || {}), ...thread }));
-  const freshIds = new Set(fresh.map((thread) => thread.id));
-  const oldestFreshMs = fresh.reduce((oldest, thread) => {
-    const parsed = new Date(thread.createdAt).getTime();
-    return Number.isFinite(parsed) ? Math.min(oldest, parsed) : oldest;
-  }, Number.POSITIVE_INFINITY);
-  const olderLoaded = Number.isFinite(oldestFreshMs)
-    ? current.filter((thread) => {
-      if (freshIds.has(thread.id)) return false;
-      const parsed = new Date(thread.createdAt).getTime();
-      return Number.isFinite(parsed) && parsed < oldestFreshMs;
-    })
-    : [];
-  return [...mergedFresh, ...olderLoaded];
+export const warmNativeSocialFirstPageCache = async ({
+  accessToken,
+  sessionKey,
+  userId,
+  viewerScope,
+}: {
+  accessToken?: string | null;
+  sessionKey?: string | null;
+  userId: string;
+  viewerScope?: NativeViewerScope | null;
+}) => {
+  const cleanUserId = String(userId || "").trim();
+  const cacheSessionKey = nativeSocialScreenSessionKey(cleanUserId, sessionKey);
+  if (!cleanUserId) return;
+  const feedViewerScope = viewerScope ?? null;
+  const country = nativeSocialFeedScopeCacheKey(feedViewerScope);
+  const page = await fetchNativeSocialFeedPage({
+    accessToken,
+    // Warm a full screen's worth (cache row limit) rather than the smaller initial
+    // page, so the boot-window instant paint fills the viewport instead of a few rows.
+    limit: SOCIAL_FEED_CACHE_ROW_LIMIT,
+    sortMode: "Latest",
+    viewerId: cleanUserId,
+    viewerScope: feedViewerScope,
+  });
+  const warmedSnapshot = {
+    rows: page.rows.slice(0, SOCIAL_FEED_CACHE_ROW_LIMIT),
+    cursor: page.cursor,
+    hasMore: page.hasMore,
+  };
+  await writeNativeSocialPersistentCache(nativeSocialFeedCacheKey(cleanUserId, cacheSessionKey, country || null, "Latest"), warmedSnapshot);
+  // Also persist the scope-independent boot snapshot for instant first paint.
+  await writeNativeSocialPersistentCache(nativeSocialBootFeedCacheKey(cleanUserId, cacheSessionKey), warmedSnapshot);
 };
 
 const mergeNativeSocialComments = (current: NativeSocialComment[], incoming: NativeSocialComment[]) => {
@@ -253,36 +354,53 @@ const applyCommentSupportState = (
 
 const isPendingSocialId = (id: string) => id.startsWith("pending:");
 
+// nativeExactTokenRpc rejects with a plain { code, message, status } object rather
+// than an Error, so String(error) yields "[object Object]" and hides the cause.
+const describeNativeSocialError = (error: unknown) => {
+  if (error instanceof Error) return { message: error.message };
+  if (error && typeof error === "object") {
+    const record = error as { code?: unknown; message?: unknown; status?: unknown };
+    return {
+      code: record.code ? String(record.code) : null,
+      message: record.message ? String(record.message) : JSON.stringify(error),
+      status: typeof record.status === "number" ? record.status : null,
+    };
+  }
+  return { message: String(error) };
+};
+
+// Optimistic rows are local-only. Persisting them lets a pending id survive into the
+// next session, where it re-enters state alongside a fresh copy and collides on key.
+const withoutPendingSocialComments = (comments: NativeSocialComment[]) =>
+  comments.filter((comment) => !isPendingSocialId(comment.id));
+
+const dedupeNativeSocialComments = (comments: NativeSocialComment[]) => {
+  const seen = new Set<string>();
+  return comments.filter((comment) => {
+    if (!comment.id || seen.has(comment.id)) return false;
+    seen.add(comment.id);
+    return true;
+  });
+};
+
+let nativeSocialOptimisticCounter = 0;
+const nextOptimisticCommentId = () => {
+  nativeSocialOptimisticCounter += 1;
+  return `pending:comment:${Date.now()}:${nativeSocialOptimisticCounter}`;
+};
+
 const MAX_COMPOSER_WORDS = 500;
 const MAX_COMPOSER_MEDIA = 10;
+const SOCIAL_COMPOSER_TEXTAREA_HEIGHT = huddleType.labelLine * 4;
 const DELETE_THREAD_TIMEOUT_MS = 12000;
 const MIN_THREAD_MEDIA_ASPECT = 9 / 16;
 const MAX_THREAD_MEDIA_ASPECT = 1.91;
-const PULL_REFRESH_THRESHOLD = 44;
 const COMMENT_SNAP_DELAY_MS = 80;
 const COMMENT_SNAP_INTENT_TTL_MS = 600;
 const SOCIAL_TAGS = ["Social", "Pets", "Health", "Adoption", "News", "Events", "Market"];
 const SOCIAL_TAG_ALIASES: Record<string, string[]> = {
   Events: ["Events", "Meetup"],
   Market: ["Market", "Marketplace"],
-};
-
-const resolveNativeShareMediaUrl = async (mediaUrl: string) => {
-  const trimmed = mediaUrl.trim();
-  if (!trimmed || !FileSystem.cacheDirectory) return null;
-  try {
-    const parsed = new URL(trimmed);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return trimmed;
-    const extensionMatch = parsed.pathname.match(/\.(jpe?g|png|webp|gif|mp4|mov)$/i);
-    const extension = extensionMatch?.[1]?.toLowerCase() || "jpg";
-    const localUri = `${FileSystem.cacheDirectory}social-share-${encodeURIComponent(trimmed).slice(0, 72)}.${extension}`;
-    const existing = await FileSystem.getInfoAsync(localUri);
-    if (existing.exists) return localUri;
-    const downloaded = await FileSystem.downloadAsync(trimmed, localUri);
-    return downloaded.uri;
-  } catch {
-    return null;
-  }
 };
 
 const isPreviewableExternalUrl = (url: string | null) => {
@@ -373,13 +491,41 @@ const hydrateEditComposerMedia = (thread: NativeSocialThread | null): NativeSoci
   if (!thread?.images || thread.images.length === 0) return [];
   return thread.images
     .filter((url): url is string => typeof url === "string" && url.trim().length > 0)
-    .map((url) => ({
-      durationSeconds: null,
-      kind: "image" as const,
-      status: "uploaded" as const,
-      uri: url.trim(),
-      uploadedUrl: url.trim(),
-    }))
+    .map((url) => {
+      const cleanUrl = url.trim();
+      const metadata = thread.imageMetadata.find((item) => item.url === cleanUrl);
+      return {
+        durationSeconds: null,
+        height: metadata?.height ?? null,
+        kind: "image" as const,
+        progress: 100,
+        status: "uploaded" as const,
+        uri: cleanUrl,
+        uploadedUrl: cleanUrl,
+        width: metadata?.width ?? null,
+      };
+    })
+    .slice(0, MAX_COMPOSER_MEDIA);
+};
+
+const hydrateEditReplyComposerMedia = (comment: NativeSocialComment | null): NativeSocialComposerUploadMedia[] => {
+  if (!comment?.images || comment.images.length === 0) return [];
+  return comment.images
+    .filter((url): url is string => typeof url === "string" && url.trim().length > 0)
+    .map((url) => {
+      const cleanUrl = url.trim();
+      const metadata = comment.imageMetadata.find((item) => item.url === cleanUrl);
+      return {
+        durationSeconds: null,
+        height: metadata?.height ?? null,
+        kind: "image" as const,
+        progress: 100,
+        status: "uploaded" as const,
+        uri: cleanUrl,
+        uploadedUrl: cleanUrl,
+        width: metadata?.width ?? null,
+      };
+    })
     .slice(0, MAX_COMPOSER_MEDIA);
 };
 
@@ -389,6 +535,10 @@ const insertNativeMention = (value: string, activeQuery: NativeActiveMentionQuer
   const after = value.slice(activeQuery.tokenEnd);
   const suffix = after.startsWith(" ") || after.length === 0 ? after : ` ${after}`;
   return `${before}@${suggestion.socialId} ${suffix}`.replace(/[ \t]{2,}/g, " ");
+};
+
+const extractCompletedComposerPreviewUrl = (value: string) => {
+  return extractCompletedNativeSocialPreviewUrl(value);
 };
 
 const compactTime = (date: string) => {
@@ -438,7 +588,7 @@ const renderReplyComposerLayer = (value: string) => {
 
 function renderNativeSocialCommentText(
   comment: NativeSocialComment,
-  onOpenProfile: (userId: string) => void,
+  onOpenProfile: (userId: string, author?: Partial<NativeSocialAuthor> | null) => void,
   hiddenUrl?: string | null,
   mentionUserIdByHandle?: Map<string, string>,
 ): ReactNode[] {
@@ -482,8 +632,9 @@ function renderNativeSocialCommentText(
   return nodes;
 }
 
-function NativeSocialCommentMediaCarousel({ images }: { images: string[] }) {
+function NativeSocialCommentMediaCarousel({ comment }: { comment: NativeSocialComment }) {
   const [width, setWidth] = useState(0);
+  const images = comment.images;
   if (images.length === 0) return null;
 
   return (
@@ -493,7 +644,16 @@ function NativeSocialCommentMediaCarousel({ images }: { images: string[] }) {
     >
       <NativeSocialMediaCarousel
         contentWidth={Math.max(1, width || 1)}
-        items={images.map((uri) => ({ uri, kind: "image" as const }))}
+        items={images.map((uri) => {
+          const metadata = comment.imageMetadata.find((item) => item.url === uri);
+          return {
+            aspectRatio: metadata?.aspectRatio ?? null,
+            height: metadata?.height ?? null,
+            uri,
+            kind: "image" as const,
+            width: metadata?.width ?? null,
+          };
+        })}
         maxFrameHeight={280}
       />
     </View>
@@ -502,22 +662,50 @@ function NativeSocialCommentMediaCarousel({ images }: { images: string[] }) {
 
 function NativeSocialCompactReplyQuote({ comment }: { comment: NativeSocialComment }) {
   const image = comment.images[0] || "";
+  const authorLabel = comment.author.socialId || comment.author.displayName || "Reply";
   return (
     <View style={styles.replyQuote}>
       {image ? (
         <View style={styles.replyQuoteImageFrame}>
-          <ExpoImage accessibilityIgnoresInvertColors cachePolicy="memory-disk" contentFit="contain" source={{ uri: image }} style={styles.replyQuoteImage as ImageStyle} transition={120} />
+          <ExpoImage accessibilityIgnoresInvertColors cachePolicy="memory-disk" contentFit="contain" key={nativeFreshImageKey(image, image)} source={{ uri: nativeFreshImageUri(image, image) }} style={styles.replyQuoteImage as ImageStyle} transition={120} />
         </View>
       ) : null}
       <View style={styles.replyQuoteBodyBlock}>
-        <Text numberOfLines={1} style={styles.replyQuoteText}>{comment.author.socialId || comment.author.displayName || "Reply"}</Text>
+        <Text numberOfLines={1} style={styles.replyQuoteText}>{authorLabel}</Text>
         <Text numberOfLines={3} style={styles.replyQuoteBody}>{comment.content || "Media reply"}</Text>
       </View>
     </View>
   );
 }
 
+function NativeSocialFeedSkeleton() {
+  return (
+    <View style={styles.feedSkeletonStack} pointerEvents="none">
+      {[0, 1, 2].map((item) => (
+        <View key={item} style={styles.feedSkeletonCard}>
+          <View style={styles.feedSkeletonHeader}>
+            <NativeShimmerSkeleton style={styles.feedSkeletonAvatar} />
+            <View style={styles.feedSkeletonHeaderBody}>
+              <NativeShimmerSkeleton style={styles.feedSkeletonName} />
+              <NativeShimmerSkeleton style={styles.feedSkeletonMeta} />
+            </View>
+          </View>
+          <NativeShimmerSkeleton style={styles.feedSkeletonTitle} />
+          <NativeShimmerSkeleton style={styles.feedSkeletonBodyWide} />
+          <NativeShimmerSkeleton style={styles.feedSkeletonBodyNarrow} />
+          <View style={styles.feedSkeletonActions}>
+            <NativeShimmerSkeleton style={styles.feedSkeletonAction} />
+            <NativeShimmerSkeleton style={styles.feedSkeletonAction} />
+            <NativeShimmerSkeleton style={styles.feedSkeletonAction} />
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+}
+
 export function NativeSocialScreen({
+  active = true,
   accessToken,
   sessionKey,
   userId,
@@ -526,12 +714,22 @@ export function NativeSocialScreen({
   onNavigate,
   onScrollTopRef,
 }: NativeSocialScreenProps) {
+  const wasActiveRef = useRef(active);
   const [threads, setThreads] = useState<NativeSocialThread[]>([]);
   const [query, setQuery] = useState(() => sanitizeSearch(search));
+  const [socialControlsHidden, setSocialControlsHidden] = useState(false);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  // Synchronous mirror of the topic the user has *asked* for. selectedTags lags by one
+  // transition (~110ms), so tap handling must compare against this or taps made during
+  // a transition are silently dropped. null = "All".
+  const categoryTargetRef = useRef<string | null>(null);
   const [sortMode, setSortMode] = useState<NativeSocialSortMode>("Latest");
   const [feedScopeCountry, setFeedScopeCountry] = useState<string | null>(null);
+  // True when the server has signalled new posts that this feed has not pulled in
+  // yet. Drives the "New posts" pill; nothing is fetched until the reader taps it.
+  const [hasNewPosts, setHasNewPosts] = useState(false);
   const [viewerScope, setViewerScope] = useState<NativeViewerScope | null>(null);
+  const [locationScopeRevision, setLocationScopeRevision] = useState(0);
   const [storedSets, setStoredSets] = useState<StoredSets>({ saved: new Set(), pinned: new Set(), pinnedAt: new Map(), source: "cache", status: "hydrating" });
   const [blockedUsers, setBlockedUsers] = useState<Set<string>>(new Set());
   const [supportedThreadIds, setSupportedThreadIds] = useState<Set<string>>(new Set());
@@ -542,15 +740,37 @@ export function NativeSocialScreen({
   const [hasMore, setHasMore] = useState(true);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [revalidating, setRevalidating] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hideComposeFab, setHideComposeFab] = useState(false);
   const [error, setError] = useState("");
+  const requestIdRef = useRef(0);
+  const feedLoadGateRef = useRef<{ key: string | null; inFlight: boolean; lastStartedAt: number }>({ key: null, inFlight: false, lastStartedAt: 0 });
+  // Backstop: a loading flag still true past the deadline means something
+  // upstream never settled. Fall into this screen's normal retryable error
+  // state rather than spinning forever. See useNativeLoadingDeadline.ts.
+  useNativeLoadingDeadline(loading, {
+    onTrip: () => {
+      // Invalidate the timed-out attempt before releasing its gate. A late
+      // completion can no longer replace the committed feed, and Retry starts
+      // a genuinely new request instead of rejoining the stalled one.
+      requestIdRef.current += 1;
+      feedLoadGateRef.current.inFlight = false;
+      setLoading(false);
+      setRefreshing(false);
+      setRevalidating(false);
+      setLoadingMore(false);
+      setError("Unable to load Social right now.");
+    },
+  });
+
   const [composerOpen, setComposerOpen] = useState(false);
   const [moreThread, setMoreThread] = useState<NativeSocialThread | null>(null);
   const [moreThreadAnchor, setMoreThreadAnchor] = useState<NativeActionMenuAnchor>(null);
   const [reportThread, setReportThread] = useState<NativeSocialThread | null>(null);
   const [shareThread, setShareThread] = useState<NativeSocialThread | null>(null);
   const [profileUserId, setProfileUserId] = useState<string | null>(null);
+  const [profileFallbackData, setProfileFallbackData] = useState<VisibleProfileFallbackData | null>(null);
 
   const [editingThread, setEditingThread] = useState<NativeSocialThread | null>(null);
   const [commentsByThread, setCommentsByThread] = useState<Record<string, NativeSocialComment[]>>({});
@@ -572,17 +792,18 @@ export function NativeSocialScreen({
   const [commentReportTarget, setCommentReportTarget] = useState<NativeSocialComment | null>(null);
   const [moreCommentTarget, setMoreCommentTarget] = useState<{ comment: NativeSocialComment; thread: NativeSocialThread } | null>(null);
   const [moreCommentAnchor, setMoreCommentAnchor] = useState<NativeActionMenuAnchor>(null);
+  const [focusedThreadId, setFocusedThreadId] = useState<string | null>(null);
+  const [highlightedThreadId, setHighlightedThreadId] = useState<string | null>(null);
   const [deleteThreadTarget, setDeleteThreadTarget] = useState<NativeSocialThread | null>(null);
   const [blockThreadTarget, setBlockThreadTarget] = useState<NativeSocialThread | null>(null);
   const [blockCommentTarget, setBlockCommentTarget] = useState<NativeSocialComment | null>(null);
   const [deletingThreadId, setDeletingThreadId] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
-  const [quotaModalMessage, setQuotaModalMessage] = useState("");
   const [socialRestrictionModalOpen, setSocialRestrictionModalOpen] = useState(false);
   const [isGoldUser, setIsGoldUser] = useState(false);
-  const [socialPostingTier, setSocialPostingTier] = useState<"free" | "plus" | "gold">("free");
   const [socialPostingBlocked, setSocialPostingBlocked] = useState(false);
   const [feedScopeResolved, setFeedScopeResolved] = useState(false);
+  const [entryReady, setEntryReady] = useState(false);
   const currentSessionKey = useMemo(() => nativeSocialScreenSessionKey(userId, sessionKey), [sessionKey, userId]);
 
   const syncCommentSupportFromRows = useCallback((comments: NativeSocialComment[]) => {
@@ -609,19 +830,25 @@ export function NativeSocialScreen({
     y: event.nativeEvent.pageY,
   });
 
+  const openVisibleProfile = useCallback((nextUserId: string | null | undefined, author?: Partial<NativeSocialAuthor> | null) => {
+    const cleanUserId = String(nextUserId || "").trim();
+    if (!cleanUserId) return;
+    setProfileFallbackData(socialAuthorToPublicProfileFallback(cleanUserId, author));
+    setProfileUserId(cleanUserId);
+  }, []);
+
   useEffect(() => {
     const open = composerOpen || moreThread !== null || reportThread !== null || shareThread !== null || profileUserId !== null || commentReportTarget !== null || deleteThreadTarget !== null || blockThreadTarget !== null || blockCommentTarget !== null || moreCommentTarget !== null;
     onBottomSheetOpenChange?.(open);
     return () => onBottomSheetOpenChange?.(false);
   }, [blockCommentTarget, blockThreadTarget, commentReportTarget, composerOpen, deleteThreadTarget, moreCommentTarget, moreThread, onBottomSheetOpenChange, profileUserId, reportThread, shareThread]);
 
-  const requestIdRef = useRef(0);
   const socialSessionKeyRef = useRef(currentSessionKey);
-  const feedLoadGateRef = useRef<{ key: string | null; inFlight: boolean; lastStartedAt: number }>({ key: null, inFlight: false, lastStartedAt: 0 });
   const feedSessionIdRef = useRef(`feed-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   const lastRefreshAtRef = useRef(0);
   const lastScrollOffsetRef = useRef(0);
-  const composeFabTranslateYRef = useRef(new Animated.Value(0));
+  const composeFabRevealTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const composeFabOpacityRef = useRef(new Animated.Value(1));
   const trackedImpressionsRef = useRef<Set<string>>(new Set());
   const trackedDwellRef = useRef<Set<string>>(new Set());
   const dwellTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
@@ -635,8 +862,12 @@ export function NativeSocialScreen({
   const commentPanelNodeRefs = useRef<Map<string, RefObject<View | null>>>(new Map());
   const replyComposerNodeRefs = useRef<Map<string, RefObject<View | null>>>(new Map());
   const commentRowNodeRefs = useRef<Map<string, RefObject<View | null>>>(new Map());
+  const focusedThreadIdRef = useRef<string | null>(null);
+  const focusedThreadScrollDoneRef = useRef<string | null>(null);
+  const focusedThreadHighlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const listViewportRef = useRef<View | null>(null);
   const listHeightRef = useRef(0);
+  const carouselGestureActiveRef = useRef(false);
   const keyboardHeightRef = useRef(0);
   const activeComposerThreadIdRef = useRef<string | null>(null);
   const pendingSnapRef = useRef<{ threadId: string; target: "panel" | "composer"; anchorCommentId?: string | null; offset?: number } | null>(null);
@@ -647,10 +878,20 @@ export function NativeSocialScreen({
   const realtimeThreadRefreshInFlightRef = useRef<Set<string>>(new Set());
   const realtimeThreadRefreshLastAtRef = useRef<Map<string, number>>(new Map());
   const realtimeThreadRefreshTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  // Counter reconciliation is coalesced across every thread that changed, so a burst
+  // of likes/comments anywhere in the viewport costs exactly one batched query.
+  const pendingCountThreadIdsRef = useRef<Set<string>>(new Set());
+  const countRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const countRefreshInFlightRef = useRef(false);
   const realtimeCommentRefreshInFlightRef = useRef<Set<string>>(new Set());
   const realtimeCommentRefreshLastAtRef = useRef<Map<string, number>>(new Map());
   const realtimeCommentRefreshTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const topicCoverageAttemptRef = useRef<Set<string>>(new Set());
   const socialReportRollbackRef = useRef<null | (() => void)>(null);
+  const mutatedThreadIdsRef = useRef<Set<string>>(new Set());
+  const removedThreadIdsRef = useRef<Set<string>>(new Set());
+  const mutatedCommentIdsByThreadRef = useRef<Map<string, Set<string>>>(new Map());
+  const removedCommentIdsByThreadRef = useRef<Map<string, Set<string>>>(new Map());
   const [pullOffset, setPullOffset] = useState(0);
   const [debouncedPreviewUrlsKey, setDebouncedPreviewUrlsKey] = useState("");
   const [debouncedVisibleThreadIdsKey, setDebouncedVisibleThreadIdsKey] = useState("");
@@ -665,6 +906,24 @@ export function NativeSocialScreen({
 
   useEffect(() => { cursorRef.current = cursor; }, [cursor]);
   useEffect(() => { hasMoreRef.current = hasMore; }, [hasMore]);
+
+  /**
+   * Drop the deep-link focus target.
+   *
+   * `?focus=<id>` pins one post so a notification/share/map cross-post lands on it
+   * even when the active topic would filter it out. That injection deliberately
+   * bypasses tag filtering, so it MUST be released the moment the user steers the
+   * feed themselves — otherwise that single post keeps rendering under every topic
+   * for the rest of the session and reads as broken topic filtering.
+   */
+  const releaseFocusedThread = useCallback(() => {
+    if (!focusedThreadIdRef.current && !focusedThreadId) return;
+    focusedThreadIdRef.current = null;
+    focusedThreadScrollDoneRef.current = null;
+    setFocusedThreadId(null);
+    setHighlightedThreadId(null);
+  }, [focusedThreadId]);
+
   useEffect(() => { loadingMoreRef.current = loadingMore; }, [loadingMore]);
   useEffect(() => { sortModeRef.current = sortMode; }, [sortMode]);
   useEffect(() => {
@@ -676,33 +935,53 @@ export function NativeSocialScreen({
   }, [threads]);
   useEffect(() => () => {
     if (pendingSnapTimeoutRef.current) clearTimeout(pendingSnapTimeoutRef.current);
+    if (focusedThreadHighlightTimerRef.current) clearTimeout(focusedThreadHighlightTimerRef.current);
     realtimeThreadRefreshTimersRef.current.forEach((timer) => clearTimeout(timer));
     realtimeThreadRefreshTimersRef.current.clear();
     realtimeCommentRefreshTimersRef.current.forEach((timer) => clearTimeout(timer));
     realtimeCommentRefreshTimersRef.current.clear();
+    if (countRefreshTimerRef.current) clearTimeout(countRefreshTimerRef.current);
+    countRefreshTimerRef.current = null;
+    pendingCountThreadIdsRef.current.clear();
   }, []);
 
   useEffect(() => {
+    setEntryReady(false);
+    const frame = requestAnimationFrame(() => setEntryReady(true));
+    return () => cancelAnimationFrame(frame);
+  }, [currentSessionKey]);
+
+  useEffect(() => {
+    if (!entryReady) return;
     const params = parseSocialParams(search);
     if (params.focus) {
+      focusedThreadIdRef.current = params.focus;
+      focusedThreadScrollDoneRef.current = null;
+      setFocusedThreadId(params.focus);
       const requestSessionKey = currentSessionKey;
       void fetchNativeSocialThreadById(params.focus, accessToken).then((thread) => {
         if (socialSessionKeyRef.current !== requestSessionKey) return;
         if (!thread) return;
         setThreads((current) => current.some((item) => item.id === thread.id) ? current : [thread, ...current]);
-        if (params.mode === "comments" || !params.mode) {
+        if (params.mode === "comments") {
           setExpandedReplies((current) => new Set([...current, thread.id]));
           void loadCommentsForThread(thread);
         }
         if (params.mode === "share") setShareThread(thread);
-        if (params.mode === "profile") setProfileUserId(params.profileUser || thread.userId);
+        if (params.mode === "profile") openVisibleProfile(params.profileUser || thread.userId, params.profileUser && params.profileUser !== thread.userId ? null : thread.author);
       });
+    } else {
+      focusedThreadIdRef.current = null;
+      focusedThreadScrollDoneRef.current = null;
+      setFocusedThreadId(null);
+      setHighlightedThreadId(null);
     }
     if (params.mode === "compose") setComposerOpen(true);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accessToken, currentSessionKey, search]);
+  }, [accessToken, currentSessionKey, entryReady, openVisibleProfile, search]);
 
   useEffect(() => {
+    if (!entryReady) return;
     let active = true;
     void readNativeSocialStoredState(userId).then((stored) => {
       if (active) {
@@ -716,13 +995,13 @@ export function NativeSocialScreen({
       }
     });
     return () => { active = false; };
-  }, [userId]);
+  }, [entryReady, userId]);
 
   useEffect(() => {
+    if (!entryReady) return;
     if (!userId) {
       setBlockedUsers(new Set());
       setIsGoldUser(false);
-      setSocialPostingTier("free");
       setSocialPostingBlocked(false);
       setFeedScopeCountry(null);
       setViewerScope(null);
@@ -730,54 +1009,216 @@ export function NativeSocialScreen({
       return;
     }
     let active = true;
+    let freshViewerScopeApplied = false;
     setFeedScopeResolved(false);
     const requestSessionKey = currentSessionKey;
+    const scopeFallbackTimer = setTimeout(() => {
+      if (!active || socialSessionKeyRef.current !== requestSessionKey) return;
+      setFeedScopeResolved(true);
+    }, SOCIAL_SCOPE_FALLBACK_MS);
+    const profileSummaryPromise = fetchNativeProfileSummary(userId, { accessToken, sessionKey: requestSessionKey });
+    const freshViewerScopePromise = resolveNativeViewerScope({ userId, accessToken, sessionKey: requestSessionKey });
+    void readCachedNativeViewerScope(userId, { sessionKey: requestSessionKey })
+      .then((scope) => {
+        if (!active || !scope || freshViewerScopeApplied || socialSessionKeyRef.current !== requestSessionKey) return;
+        setViewerScope(scope);
+        setFeedScopeCountry(nativeSocialFeedScopeCacheKey(scope));
+        clearTimeout(scopeFallbackTimer);
+        setFeedScopeResolved(true);
+      })
+      .catch(() => undefined);
+    void freshViewerScopePromise.then((scope) => {
+      if (!active || !scope || socialSessionKeyRef.current !== requestSessionKey) return;
+      freshViewerScopeApplied = true;
+      setViewerScope(scope);
+      setFeedScopeCountry(nativeSocialFeedScopeCacheKey(scope));
+    }).catch(() => undefined);
     void loadNativeBlockedSocialUserIds(userId, accessToken)
       .then((ids) => { if (active && socialSessionKeyRef.current === requestSessionKey) setBlockedUsers(ids); })
       .catch(() => undefined);
     void Promise.allSettled([
-      fetchNativeProfileSummary(userId, { force: false, accessToken }),
-      resolveNativeViewerScope({ userId, accessToken }),
-    ]).then(([profileResult, scopeResult]) => {
+      profileSummaryPromise,
+      freshViewerScopePromise,
+    ]).then(([profileResult]) => {
       if (!active || socialSessionKeyRef.current !== requestSessionKey) return;
       const snapshot = profileResult.status === "fulfilled" ? profileResult.value : null;
-      const scope = scopeResult.status === "fulfilled" ? scopeResult.value : null;
       const tier = normalizeQuotaTier(snapshot?.profile?.effective_tier || snapshot?.profile?.tier || "free");
-      setSocialPostingTier(tier);
-      setIsGoldUser(tier === "gold");
-      setViewerScope(scope);
-      const country = typeof scope?.country === "string" ? scope.country.trim().toLowerCase() : "";
-      setFeedScopeCountry(country || null);
-    }).finally(() => { if (active) setFeedScopeResolved(true); });
+        setIsGoldUser(tier === "gold");
+    }).finally(() => {
+      clearTimeout(scopeFallbackTimer);
+      if (active) setFeedScopeResolved(true);
+    });
     void isNativeRestrictionActive("social_posting_disabled").then((blocked) => { if (active && socialSessionKeyRef.current === requestSessionKey) setSocialPostingBlocked(blocked); });
-    return () => { active = false; };
-  }, [accessToken, currentSessionKey, syncCommentSupportFromRows, userId]);
+    return () => {
+      active = false;
+      clearTimeout(scopeFallbackTimer);
+    };
+  }, [accessToken, currentSessionKey, entryReady, syncCommentSupportFromRows, userId]);
+
+  useEffect(() => {
+    if (!entryReady || !userId) return undefined;
+    return subscribeNativeViewerScope(userId, (scope) => {
+      if (socialSessionKeyRef.current !== currentSessionKey) return;
+      setViewerScope(scope);
+      setFeedScopeCountry(nativeSocialFeedScopeCacheKey(scope));
+      setFeedScopeResolved(true);
+      setLocationScopeRevision((revision) => revision + 1);
+    }, { sessionKey: currentSessionKey });
+  }, [currentSessionKey, entryReady, userId]);
+
+  useEffect(() => {
+    if (!entryReady) return undefined;
+    if (!userId) return undefined;
+    return subscribeNativeProfileSummary(userId, ({ profile }) => {
+      const verified = isNativeVerifiedProfile(profile);
+      const verificationStatus = verified ? "verified" : typeof profile?.verification_status === "string" ? profile.verification_status : null;
+      const displayName = String(profile?.display_name || "").trim();
+      const socialId = typeof profile?.social_id === "string" ? profile.social_id : null;
+      const avatarUrl = typeof profile?.avatar_url === "string" ? profile.avatar_url : null;
+      const locationCountry = typeof profile?.location_country === "string" ? profile.location_country : null;
+      setThreads((current) => current.map((thread) => thread.userId === userId
+        ? {
+          ...thread,
+          author: {
+            ...thread.author,
+            displayName: displayName || thread.author.displayName,
+            socialId: socialId ?? thread.author.socialId,
+            avatarUrl: avatarUrl ?? thread.author.avatarUrl,
+            verificationStatus,
+            locationCountry: locationCountry ?? thread.author.locationCountry,
+            isVerified: verified,
+          },
+        }
+        : thread));
+      setCommentsByThread((current) => {
+        const next: typeof current = {};
+        let changed = false;
+        Object.entries(current).forEach(([threadId, comments]) => {
+          const nextComments = comments.map((comment) => {
+            if (comment.userId !== userId) return comment;
+            changed = true;
+            return {
+              ...comment,
+              author: {
+                ...comment.author,
+                displayName: displayName || comment.author.displayName,
+                socialId: socialId ?? comment.author.socialId,
+                avatarUrl: avatarUrl ?? comment.author.avatarUrl,
+                verificationStatus,
+                locationCountry: locationCountry ?? comment.author.locationCountry,
+                isVerified: verified,
+              },
+            };
+          });
+          next[threadId] = nextComments;
+        });
+        return changed ? next : current;
+      });
+    }, { sessionKey });
+  }, [entryReady, sessionKey, userId]);
 
   useEffect(() => () => {
     dwellTimeoutsRef.current.forEach((timeoutId) => clearTimeout(timeoutId));
     dwellTimeoutsRef.current.clear();
+    if (composeFabRevealTimeoutRef.current) clearTimeout(composeFabRevealTimeoutRef.current);
+    composeFabRevealTimeoutRef.current = null;
   }, []);
 
   useEffect(() => {
-    if (hideComposeFab) {
-      Animated.timing(composeFabTranslateYRef.current, {
-        duration: huddleMotion.durations.base,
-        toValue: 100,
-        useNativeDriver: true,
-      }).start();
-    } else {
-      Animated.spring(composeFabTranslateYRef.current, {
-        toValue: 0,
-        friction: 7,
-        tension: 160,
-        useNativeDriver: true,
-      }).start();
-    }
+    Animated.timing(composeFabOpacityRef.current, {
+      duration: huddleMotion.durations.base,
+      toValue: hideComposeFab ? 0 : 1,
+      useNativeDriver: true,
+    }).start();
   }, [hideComposeFab]);
 
   const showNotice = useCallback((message: string) => {
     setNotice(message);
-    setTimeout(() => setNotice((current) => (current === message ? "" : current)), 2200);
+    setTimeout(() => setNotice((current) => (current === message ? "" : current)), NATIVE_TOAST_DURATION_MS);
+  }, []);
+
+  const markThreadMutated = useCallback((threadId: string) => {
+    if (!threadId) return;
+    mutatedThreadIdsRef.current.add(threadId);
+    removedThreadIdsRef.current.delete(threadId);
+  }, []);
+
+  const markThreadRemoved = useCallback((threadId: string) => {
+    if (!threadId) return;
+    removedThreadIdsRef.current.add(threadId);
+    mutatedThreadIdsRef.current.delete(threadId);
+    mutatedCommentIdsByThreadRef.current.delete(threadId);
+    removedCommentIdsByThreadRef.current.delete(threadId);
+  }, []);
+
+  const markCommentMutated = useCallback((threadId: string, commentId: string) => {
+    if (!threadId || !commentId) return;
+    const mutated = mutatedCommentIdsByThreadRef.current.get(threadId) ?? new Set<string>();
+    mutated.add(commentId);
+    mutatedCommentIdsByThreadRef.current.set(threadId, mutated);
+    removedCommentIdsByThreadRef.current.get(threadId)?.delete(commentId);
+  }, []);
+
+  const markCommentRemoved = useCallback((threadId: string, commentId: string) => {
+    if (!threadId || !commentId) return;
+    const removed = removedCommentIdsByThreadRef.current.get(threadId) ?? new Set<string>();
+    removed.add(commentId);
+    removedCommentIdsByThreadRef.current.set(threadId, removed);
+    mutatedCommentIdsByThreadRef.current.get(threadId)?.delete(commentId);
+  }, []);
+
+  const applyThreadMutationTruth = useCallback((incoming: NativeSocialThread[], current: NativeSocialThread[]) => {
+    const currentById = new Map(current.map((thread) => [thread.id, thread]));
+    const seen = new Set<string>();
+    const next = incoming
+      .filter((thread) => !removedThreadIdsRef.current.has(thread.id))
+      .map((thread) => {
+        seen.add(thread.id);
+        // Keep locally-mutated state (like/comment counts, edits) for mutated
+        // threads, but always take the server-authoritative author identity
+        // (avatar, name, verification) from the fresh row — otherwise a stale
+        // cached author keeps the avatar one upload behind the latest.
+        const local = currentById.get(thread.id);
+        return mutatedThreadIdsRef.current.has(thread.id) && local
+          ? { ...local, author: thread.author }
+          : thread;
+      });
+    current.forEach((thread) => {
+      if (mutatedThreadIdsRef.current.has(thread.id) && !removedThreadIdsRef.current.has(thread.id) && !seen.has(thread.id)) {
+        next.unshift(thread);
+      }
+    });
+    const focusedId = focusedThreadIdRef.current;
+    const focusedThread = focusedId ? currentById.get(focusedId) : null;
+    if (focusedThread && !removedThreadIdsRef.current.has(focusedThread.id) && !seen.has(focusedThread.id)) {
+      next.unshift(focusedThread);
+    }
+    return next;
+  }, []);
+
+  const applyCommentMutationTruth = useCallback((threadId: string, incoming: NativeSocialComment[], current: NativeSocialComment[]) => {
+    const removed = removedCommentIdsByThreadRef.current.get(threadId);
+    const mutated = mutatedCommentIdsByThreadRef.current.get(threadId);
+    if (!removed?.size && !mutated?.size) return incoming;
+    const currentById = new Map(current.map((comment) => [comment.id, comment]));
+    const seen = new Set<string>();
+    const next = incoming
+      .filter((comment) => !removed?.has(comment.id))
+      .map((comment) => {
+        seen.add(comment.id);
+        // Preserve local mutation state but refresh the author identity from the
+        // fresh row so avatars never lag one upload behind (see thread truth above).
+        const local = currentById.get(comment.id);
+        return mutated?.has(comment.id) && local
+          ? { ...local, author: comment.author }
+          : comment;
+      });
+    current.forEach((comment) => {
+      if (!mutated?.has(comment.id) || removed?.has(comment.id) || seen.has(comment.id)) return;
+      seen.add(comment.id);
+      next.push(comment);
+    });
+    return dedupeNativeSocialComments(next);
   }, []);
 
   const recordFeedEvent = useCallback((threadId: string, eventType: "impression" | "dwell_10s" | "profile_view" | "expand_post" | "save" | "comment" | "like" | "share" | "hide" | "block" | "open_comments") => {
@@ -819,7 +1260,7 @@ export function NativeSocialScreen({
     });
   }, [writeStoredSetsMirror]);
 
-  const load = useCallback(async (mode: "reset" | "more" | "refresh" = "reset") => {
+  const load = useCallback(async (mode: "reset" | "more" | "coverage" | "refresh" | "revalidate" = "reset") => {
     if (!userId) {
       setThreads([]);
       setLoading(false);
@@ -830,31 +1271,36 @@ export function NativeSocialScreen({
       return;
     }
     if (!feedScopeResolved) return;
-    if (mode === "more" && (!hasMoreRef.current || loadingMoreRef.current)) return;
+    if ((mode === "more" || mode === "coverage") && (!hasMoreRef.current || loadingMoreRef.current)) return;
+    if ((mode === "more" || mode === "coverage" || mode === "revalidate") && feedLoadGateRef.current.inFlight) return;
     if (mode === "refresh") {
       const now = Date.now();
       if (now - lastRefreshAtRef.current < REFRESH_DEBOUNCE_MS) return;
       lastRefreshAtRef.current = now;
     }
-    const requestId = ++requestIdRef.current;
     const requestSessionKey = currentSessionKey;
     const cacheWriteGuard = () => socialSessionKeyRef.current === requestSessionKey;
     const currentSortMode = sortModeRef.current;
-    const scopePoint = viewerScope?.primaryPoint ?? null;
+    const feedViewerScope = viewerScope;
+    const scopePoint = feedViewerScope?.primaryPoint ?? null;
     const scopeKey = JSON.stringify({
-      adminArea: viewerScope?.adminArea ?? null,
-      city: viewerScope?.city ?? null,
-      country: viewerScope?.country ?? null,
-      countryCode: viewerScope?.countryCode ?? null,
-      district: viewerScope?.district ?? null,
+      adminArea: feedViewerScope?.adminArea ?? null,
+      city: feedViewerScope?.city ?? null,
+      country: feedViewerScope?.country ?? null,
+      countryCode: feedViewerScope?.countryCode ?? null,
+      district: feedViewerScope?.district ?? null,
       lat: typeof scopePoint?.lat === "number" ? Number(scopePoint.lat.toFixed(4)) : null,
       lng: typeof scopePoint?.lng === "number" ? Number(scopePoint.lng.toFixed(4)) : null,
-      source: viewerScope?.source ?? null,
+      profileCountry: feedViewerScope?.profileCountry ?? null,
+      profileCountryName: feedViewerScope?.profileCountryName ?? null,
+      profileDistrict: feedViewerScope?.profileDistrict ?? null,
+      profileLocationName: feedViewerScope?.profileLocationName ?? null,
+      source: feedViewerScope?.source ?? null,
     });
     const feedCacheKey = nativeSocialFeedCacheKey(userId, requestSessionKey, feedScopeCountry, currentSortMode);
     const loadGateKey = JSON.stringify({
       country: feedScopeCountry || "global",
-      cursor: mode === "more" ? cursorRef.current : null,
+      cursor: mode === "more" || mode === "coverage" ? cursorRef.current : null,
       mode,
       session: requestSessionKey,
       scope: scopeKey,
@@ -870,11 +1316,17 @@ export function NativeSocialScreen({
       }>(feedCacheKey, SOCIAL_FEED_CACHE_MAX_AGE_MS);
 
       if (!cacheWriteGuard()) return;
-      if (cachedFeed?.rows?.length) {
-        setThreads(cachedFeed.rows);
+      if (cachedFeed) {
+        setThreads((current) => applyThreadMutationTruth(cachedFeed.rows, current));
         setCursor(cachedFeed.cursor as NativeSocialFeedCursor | null);
         setHasMore(cachedFeed.hasMore);
         setLoading(false);
+        const recentlyConfirmed = await readNativeSocialPersistentCache<{
+          rows: NativeSocialThread[];
+          cursor: string | null;
+          hasMore: boolean;
+        }>(feedCacheKey, SOCIAL_FEED_ENTRY_REUSE_MS);
+        if (recentlyConfirmed) return;
       } else {
         setLoading(true);
       }
@@ -887,7 +1339,14 @@ export function NativeSocialScreen({
       return;
     }
     feedLoadGateRef.current = { key: loadGateKey, inFlight: true, lastStartedAt: now };
-    if (mode === "refresh") setRefreshing(true);
+    // Bump the request id only after passing the dedupe gate, so a deduped re-fire
+    // can't invalidate the in-flight load's completion handler and orphan `loading`.
+    const requestId = ++requestIdRef.current;
+    if (mode === "refresh") {
+      topicCoverageAttemptRef.current.clear();
+      setRefreshing(true);
+    }
+    if (mode === "revalidate") setRevalidating(true);
     if (mode === "more") setLoadingMore(true);
     setError("");
     try {
@@ -895,36 +1354,53 @@ export function NativeSocialScreen({
         accessToken,
         viewerId: userId,
         sortMode: currentSortMode,
-        cursor: mode === "more" ? cursorRef.current : null,
-        viewerScope,
+        cursor: mode === "more" || mode === "coverage" ? cursorRef.current : null,
+        limit: mode === "more" || mode === "coverage" ? SOCIAL_MORE_FEED_LIMIT : SOCIAL_INITIAL_FEED_LIMIT,
+        viewerScope: feedViewerScope,
       });
       if (requestIdRef.current !== requestId || !cacheWriteGuard()) return;
       setThreads((current) => {
-        if (mode === "refresh") {
-          const merged = mergeNativeSocialThreadsByRefresh(current, page.rows);
-          if (cacheWriteGuard() && merged.length > 0) {
-            void writeNativeSocialPersistentCache(feedCacheKey, {
-              rows: merged.slice(0, 50),
-              cursor: cursorRef.current,
-              hasMore: hasMoreRef.current,
-            });
-          }
-          return merged;
+        const freshIds = new Set(page.rows.map((row) => row.id));
+        const shouldMerge = mode === "more" || mode === "coverage" || mode === "refresh" || mode === "revalidate";
+        const incoming = shouldMerge
+          ? [...page.rows, ...current.filter((thread) => !freshIds.has(thread.id))]
+          : page.rows;
+        const nextRows = applyThreadMutationTruth(incoming, current);
+        if (mode !== "reset" && cacheWriteGuard()) {
+          const cachedRows = nextRows.slice(0, SOCIAL_FEED_CACHE_ROW_LIMIT);
+          void writeNativeSocialPersistentCache(feedCacheKey, {
+            rows: cachedRows,
+            cursor: buildNativeSocialCursor(cachedRows[cachedRows.length - 1]),
+            hasMore: page.hasMore || nextRows.length > cachedRows.length,
+          });
         }
-        if (mode !== "more") return page.rows;
-        const existing = new Set(current.map((thread) => thread.id));
-        return [...current, ...page.rows.filter((thread) => !existing.has(thread.id))];
+        return nextRows;
       });
-      if (mode !== "refresh") {
+      if (mode === "more" || mode === "coverage") {
+        // Always advance terminal pagination truth, even if every row dedupes.
+        // Otherwise end-reached repeats the same cursor and loader forever.
+        cursorRef.current = page.cursor;
+        hasMoreRef.current = page.hasMore;
+        setCursor(page.cursor);
+        setHasMore(page.hasMore);
+      } else if (mode === "reset") {
+        cursorRef.current = page.cursor;
+        hasMoreRef.current = page.hasMore;
         setCursor(page.cursor);
         setHasMore(page.hasMore);
       }
-      if (mode !== "more" && page.rows.length > 0 && cacheWriteGuard()) {
-        void writeNativeSocialPersistentCache(feedCacheKey, {
-          rows: page.rows.slice(0, 50),
+      if (mode === "reset" && cacheWriteGuard()) {
+        const snapshot = {
+          rows: page.rows.slice(0, SOCIAL_FEED_CACHE_ROW_LIMIT),
           cursor: page.cursor,
           hasMore: page.hasMore,
-        });
+        };
+        void writeNativeSocialPersistentCache(feedCacheKey, snapshot);
+        // Keep the scope-independent boot snapshot fresh too, so every revisit (the
+        // screen remounts on each tab switch) paints instantly from the latest feed.
+        if (currentSortMode === "Latest") {
+          void writeNativeSocialPersistentCache(nativeSocialBootFeedCacheKey(userId, requestSessionKey), snapshot);
+        }
       }
     } catch {
       if (requestIdRef.current === requestId && mode === "reset") setError("Unable to load Social right now.");
@@ -933,15 +1409,103 @@ export function NativeSocialScreen({
       if (requestIdRef.current === requestId) {
         setLoading(false);
         setRefreshing(false);
+        setRevalidating(false);
         setLoadingMore(false);
       }
     }
-  }, [accessToken, currentSessionKey, feedScopeCountry, feedScopeResolved, userId, viewerScope]);
+  }, [accessToken, applyThreadMutationTruth, currentSessionKey, feedScopeCountry, feedScopeResolved, userId, viewerScope]);
+
+  const handledLocationScopeRevisionRef = useRef(0);
+  useEffect(() => {
+    if (!entryReady || !feedScopeResolved || locationScopeRevision === 0) return;
+    if (handledLocationScopeRevisionRef.current === locationScopeRevision) return;
+    handledLocationScopeRevisionRef.current = locationScopeRevision;
+    // Revalidate with the newly committed scope. A country-only cache key is
+    // intentionally retained for instant paint, but must never suppress an
+    // in-country district/coordinate change.
+    void load("revalidate");
+  }, [entryReady, feedScopeResolved, load, locationScopeRevision]);
 
   useEffect(() => {
-    if (!feedScopeResolved) return;
-    void load("reset");
-  }, [feedScopeResolved, load, sortMode]);
+    const becameActive = active && !wasActiveRef.current;
+    wasActiveRef.current = active;
+    if (!active) {
+      Keyboard.dismiss();
+      setComposerOpen(false);
+      setMoreThread(null);
+      setMoreThreadAnchor(null);
+      setReportThread(null);
+      setShareThread(null);
+      setProfileUserId(null);
+      setEditingThread(null);
+      setEditingComment(null);
+      setCommentReportTarget(null);
+      setMoreCommentTarget(null);
+      setMoreCommentAnchor(null);
+      setDeleteThreadTarget(null);
+      setBlockThreadTarget(null);
+      setBlockCommentTarget(null);
+      setSocialRestrictionModalOpen(false);
+      return;
+    }
+    // The mounted feed is already the last committed state. Realtime signals,
+    // explicit refresh, mutations, scope/filter changes and the new-posts CTA
+    // own reconciliation; ordinary navigation must remain network-free.
+    if (!becameActive) return;
+  }, [active]);
+
+  // Instant cache-first paint. The scoped `load` is gated behind feedScopeResolved,
+  // which can wait up to SOCIAL_SCOPE_FALLBACK_MS on a cold scope cache — wasting the
+  // boot/brand-window warm on first open. This effect reads the cached viewer scope
+  // (written by the boot warm) and paints the warmed feed immediately, the same
+  // cache-first behaviour Discover and Map already have. It never clobbers live data:
+  // it only paints when the feed is still empty and the session still matches, and the
+  // scoped `load` reconciles/refreshes right after.
+  useEffect(() => {
+    if (!entryReady || !userId) return undefined;
+    let active = true;
+    const requestSessionKey = currentSessionKey;
+    const paint = (cached: { rows: NativeSocialThread[]; cursor: string | null; hasMore: boolean } | null | undefined) => {
+      if (!active || !cached || socialSessionKeyRef.current !== requestSessionKey) return false;
+      setThreads((current) => (current.length ? current : applyThreadMutationTruth(cached.rows, current)));
+      setCursor((current) => (current ? current : (cached.cursor as NativeSocialFeedCursor | null)));
+      setHasMore(cached.hasMore);
+      setLoading(false);
+      return true;
+    };
+    void (async () => {
+      // 1. Scope-independent boot snapshot — paints instantly, no scope wait.
+      const boot = await readNativeSocialPersistentCache<{
+        rows: NativeSocialThread[];
+        cursor: string | null;
+        hasMore: boolean;
+      }>(nativeSocialBootFeedCacheKey(userId, requestSessionKey), SOCIAL_FEED_CACHE_MAX_AGE_MS).catch(() => null);
+      paint(boot);
+      // 2. Scoped snapshot if the cached scope is already available (more precise).
+      const scope = await readCachedNativeViewerScope(userId, { sessionKey: requestSessionKey }).catch(() => null);
+      if (!active || !scope || socialSessionKeyRef.current !== requestSessionKey) return;
+      const scoped = await readNativeSocialPersistentCache<{
+        rows: NativeSocialThread[];
+        cursor: string | null;
+        hasMore: boolean;
+      }>(nativeSocialFeedCacheKey(userId, requestSessionKey, nativeSocialFeedScopeCacheKey(scope), "Latest"), SOCIAL_FEED_CACHE_MAX_AGE_MS).catch(() => null);
+      paint(scoped);
+    })();
+    return () => { active = false; };
+  }, [applyThreadMutationTruth, currentSessionKey, entryReady, userId]);
+
+  useEffect(() => {
+    if (!entryReady || !feedScopeResolved) return;
+    // Fire the initial load on the next frame rather than via
+    // InteractionManager.runAfterInteractions. Outstanding interaction handles
+    // from boot/onboarding Animated loops (isInteraction defaults to true) could
+    // defer — sometimes indefinitely — the first load AND its cache read, so the
+    // skeleton stayed stuck until a later navigation drained the queue.
+    const frame = requestAnimationFrame(() => {
+      void load("reset");
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [entryReady, feedScopeResolved, load, sortMode]);
 
   const visibleThreads = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -966,7 +1530,11 @@ export function NativeSocialScreen({
         .toLowerCase()
         .includes(normalizedQuery);
     });
-    return [...searched].sort((a, b) => {
+    const focusedThread = focusedThreadId ? base.find((thread) => thread.id === focusedThreadId) : null;
+    const displayRows = focusedThread && !searched.some((thread) => thread.id === focusedThread.id)
+      ? [focusedThread, ...searched]
+      : searched;
+    return [...displayRows].sort((a, b) => {
       const aPinned = storedSets.status === "fresh" && storedSets.pinned.has(a.id);
       const bPinned = storedSets.status === "fresh" && storedSets.pinned.has(b.id);
       if (aPinned !== bPinned) return aPinned ? -1 : 1;
@@ -978,48 +1546,79 @@ export function NativeSocialScreen({
       const createdDiff = new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
       return createdDiff || b.id.localeCompare(a.id);
     });
-  }, [blockedUsers, commentsByThread, hiddenThreadIds, query, selectedTags, sortMode, storedSets.pinned, storedSets.pinnedAt, storedSets.saved, storedSets.status, threads]);
+  }, [blockedUsers, commentsByThread, focusedThreadId, hiddenThreadIds, query, selectedTags, sortMode, storedSets.pinned, storedSets.pinnedAt, storedSets.saved, storedSets.status, threads]);
+
+  useEffect(() => {
+    topicCoverageAttemptRef.current.clear();
+  }, [currentSessionKey, feedScopeCountry, sortMode]);
+
+  // Topic tabs are views over the shared feed, so they paint from memory with no
+  // loading state. If the loaded All page has no row for a selected topic, make one
+  // bounded background pagination attempt. Never let an empty FlatList repeatedly
+  // walk the entire feed or churn a loader when the server is exhausted.
+  useEffect(() => {
+    const selectedTopic = selectedTags[0];
+    if (!selectedTopic || query.trim() || loading || loadingMore || revalidating || !hasMore || visibleThreads.length > 0) return;
+    const attemptKey = `${currentSessionKey}:${feedScopeCountry || "global"}:${sortMode}:${selectedTopic}`;
+    if (topicCoverageAttemptRef.current.has(attemptKey)) return;
+    topicCoverageAttemptRef.current.add(attemptKey);
+    void load("coverage");
+  }, [currentSessionKey, feedScopeCountry, hasMore, load, loading, loadingMore, query, revalidating, selectedTags, sortMode, visibleThreads.length]);
 
   const loadedThreadIdsKey = useMemo(() => threads.map((thread) => thread.id).filter(Boolean).sort().join(","), [threads]);
   const visibleThreadIdsKey = useMemo(() => visibleThreads.map((thread) => thread.id).join(","), [visibleThreads]);
+
+  useEffect(() => {
+    if (!focusedThreadId || focusedThreadScrollDoneRef.current === focusedThreadId) return;
+    const index = visibleThreads.findIndex((thread) => thread.id === focusedThreadId);
+    if (index < 0) return;
+    const timer = setTimeout(() => {
+      focusedThreadScrollDoneRef.current = focusedThreadId;
+      listRef.current?.scrollToIndex({ animated: true, index, viewPosition: 0.5 });
+      setHighlightedThreadId(focusedThreadId);
+      if (focusedThreadHighlightTimerRef.current) clearTimeout(focusedThreadHighlightTimerRef.current);
+      focusedThreadHighlightTimerRef.current = setTimeout(() => {
+        setHighlightedThreadId((current) => current === focusedThreadId ? null : current);
+        focusedThreadHighlightTimerRef.current = null;
+      }, 2600);
+    }, 120);
+    return () => clearTimeout(timer);
+  }, [focusedThreadId, visibleThreads, visibleThreadIdsKey]);
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedVisibleThreadIdsKey(visibleThreadIdsKey), SOCIAL_EFFECT_DEBOUNCE_MS);
     return () => clearTimeout(timer);
   }, [visibleThreadIdsKey]);
 
+
   useEffect(() => {
     if (!userId || !accessToken || !loadedThreadIdsKey) return undefined;
     let active = true;
     const requestSessionKey = currentSessionKey;
     const ids = loadedThreadIdsKey.split(",").filter(Boolean);
-    void fetchNativeSocialPostPreferences(ids, accessToken)
-      .then((preferences) => {
-        if (!active || socialSessionKeyRef.current !== requestSessionKey) return;
-        applyDbPreferences(preferences, "replaceVisible", ids);
-      })
-      .catch(() => {
-        if (active && socialSessionKeyRef.current === requestSessionKey) showNotice("Saved and pinned posts could not sync.");
-      });
+    void (async () => {
+      let preferences: Awaited<ReturnType<typeof fetchNativeSocialPostPreferences>>;
+      try {
+        preferences = await fetchNativeSocialPostPreferences(ids, accessToken);
+      } catch {
+        // Preference hydration is secondary to the feed mutation. Retry once
+        // so a transient request failure self-heals without interrupting the
+        // user's successful post or surfacing an unrelated banner.
+        try {
+          preferences = await fetchNativeSocialPostPreferences(ids, accessToken);
+        } catch {
+          return;
+        }
+      }
+      if (!active || socialSessionKeyRef.current !== requestSessionKey) return;
+      applyDbPreferences(preferences, "replaceVisible", ids);
+    })();
     return () => { active = false; };
-  }, [accessToken, applyDbPreferences, currentSessionKey, loadedThreadIdsKey, showNotice, userId]);
-
-  const showQuotaBanner = useCallback((message: string) => {
-    setQuotaModalMessage(message);
-  }, []);
+  }, [accessToken, applyDbPreferences, currentSessionKey, loadedThreadIdsKey, userId]);
 
   const openPostingRestriction = useCallback(() => {
     setSocialRestrictionModalOpen(true);
   }, []);
-
-  const resolvePostingBlockedMessage = useCallback((error: unknown) => {
-    const raw = String((error as { message?: string })?.message || "");
-    const lower = raw.toLowerCase();
-    if (lower.includes("quota") || lower.includes("limit") || lower.includes("rate")) {
-      return quotaConfig.copy.threads.exhausted[socialPostingTier];
-    }
-    return null;
-  }, [socialPostingTier]);
 
   const queueCommentSnap = useCallback((threadId: string, target: "panel" | "composer", anchorCommentId?: string | null, offset?: number) => {
     if (!threadId) return;
@@ -1117,6 +1716,64 @@ export function NativeSocialScreen({
     return () => { active = false; };
   }, [accessToken, currentSessionKey, debouncedVisibleThreadIdsKey, feedScopeCountry, userId]);
 
+  /**
+   * Queue a counter reconciliation for one thread.
+   *
+   * Every caller — realtime support events, realtime comment events and scroll-in —
+   * funnels through here. Ids accumulate in a set and flush together on a single
+   * timer, so N threads changing at once is one round trip, not N. Only the two
+   * counters are patched; author, media and body are left untouched, which is what
+   * keeps this off the expensive fetchNativeSocialThreadById path.
+   */
+  const queueThreadCountRefresh = useCallback((threadIds: string | string[]) => {
+    if (!userId) return;
+    const incoming = Array.isArray(threadIds) ? threadIds : [threadIds];
+    incoming.forEach((threadId) => {
+      if (threadId) pendingCountThreadIdsRef.current.add(threadId);
+    });
+    if (pendingCountThreadIdsRef.current.size === 0) return;
+    if (countRefreshTimerRef.current) return;
+
+    countRefreshTimerRef.current = setTimeout(() => {
+      countRefreshTimerRef.current = null;
+      if (countRefreshInFlightRef.current) {
+        // Something is already in flight; re-arm so these ids ride the next flush
+        // instead of opening a second concurrent request.
+        if (pendingCountThreadIdsRef.current.size > 0) queueThreadCountRefresh([]);
+        return;
+      }
+      const ids = Array.from(pendingCountThreadIdsRef.current);
+      pendingCountThreadIdsRef.current.clear();
+      if (ids.length === 0) return;
+
+      countRefreshInFlightRef.current = true;
+      const requestSessionKey = currentSessionKey;
+      void fetchNativeSocialThreadCounts(ids, accessToken)
+        .then((rows) => {
+          if (!rows.length || socialSessionKeyRef.current !== requestSessionKey) return;
+          const byId = new Map(rows.map((row) => [row.threadId, row]));
+          const now = Date.now();
+          ids.forEach((threadId) => realtimeThreadRefreshLastAtRef.current.set(threadId, now));
+          setThreads((current) => {
+            let changed = false;
+            const nextThreads = current.map((thread) => {
+              const counts = byId.get(thread.id);
+              if (!counts) return thread;
+              if (thread.likes === counts.supportCount && thread.commentCount === counts.commentCount) return thread;
+              changed = true;
+              return { ...thread, likes: counts.supportCount, commentCount: counts.commentCount };
+            });
+            return changed ? nextThreads : current;
+          });
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          countRefreshInFlightRef.current = false;
+          if (pendingCountThreadIdsRef.current.size > 0) queueThreadCountRefresh([]);
+        });
+    }, SOCIAL_REALTIME_REFRESH_COOLDOWN_MS);
+  }, [accessToken, currentSessionKey, userId]);
+
   const scheduleRealtimeThreadRefresh = useCallback((threadId: string) => {
     if (!userId || !threadId) return;
     if (realtimeThreadRefreshTimersRef.current.has(threadId)) return;
@@ -1133,14 +1790,14 @@ export function NativeSocialScreen({
           return;
         }
         setThreads((current) => {
-          const nextThreads = current.map((thread) => (
+          const nextThreads = applyThreadMutationTruth(current.map((thread) => (
             thread.id === threadId
               ? { ...thread, ...freshThread }
               : thread
-          ));
+          )), current);
           if (cacheWriteGuard() && nextThreads.length > 0) {
             void writeNativeSocialPersistentCache(nativeSocialFeedCacheKey(userId, requestSessionKey, feedScopeCountry, sortModeRef.current), {
-              rows: nextThreads.slice(0, 50),
+              rows: nextThreads.slice(0, SOCIAL_FEED_CACHE_ROW_LIMIT),
               cursor: cursorRef.current,
               hasMore: hasMoreRef.current,
             });
@@ -1154,7 +1811,76 @@ export function NativeSocialScreen({
     const elapsed = Date.now() - (realtimeThreadRefreshLastAtRef.current.get(threadId) || 0);
     const delay = Math.max(0, SOCIAL_REALTIME_REFRESH_COOLDOWN_MS - elapsed);
     realtimeThreadRefreshTimersRef.current.set(threadId, setTimeout(run, delay));
-  }, [accessToken, currentSessionKey, feedScopeCountry, userId]);
+  }, [accessToken, applyThreadMutationTruth, currentSessionKey, feedScopeCountry, userId]);
+
+  /**
+   * New-post discovery.
+   *
+   * Every other Social channel filters on `id=eq.<threadId>` for threads already
+   * loaded, so a brand-new row — including a Map alert cross-posted via
+   * create_alert_thread_and_pin — has an id no filter matches and reaches nobody.
+   *
+   * This deliberately does NOT open an unfiltered postgres_changes listener (see
+   * realtimeScopeRegressionContract). It rides the same private invalidation bus the
+   * Map already uses: a trigger on threads calls private.send_huddle_invalidation on
+   * a country-scoped topic, so the server fans out one tiny "social.changed" ping
+   * instead of evaluating every INSERT against every subscriber's RLS.
+   *
+   * The ping carries no row data, so we reconcile with the cheap batched counts path
+   * only when the reader asks for it: others' posts just light up a pill.
+   */
+  useEffect(() => {
+    if (!userId || !entryReady) return undefined;
+    const topic = nativeSocialRealtimeTopic();
+
+    const handle = createSinglePrivateBroadcastChannel(
+      `native-social-new-threads:${userId}:${topic}`,
+      topic,
+      () => {
+        // Parity with Threads/X: if the reader is already at the top, fold new posts
+        // in silently. If they have scrolled into older content, never move the list
+        // under them — offer the pill and let them choose.
+        if (lastScrollOffsetRef.current <= NEW_POSTS_AUTO_MERGE_OFFSET) {
+          void load("revalidate");
+          return;
+        }
+        setHasNewPosts(true);
+      },
+    );
+
+    return () => {
+      void handle.dispose();
+    };
+  }, [entryReady, load, userId]);
+
+  const showNewPosts = useCallback(() => {
+    setHasNewPosts(false);
+    releaseFocusedThread();
+    listRef.current?.scrollToOffset({ offset: 0, animated: true });
+    haptic.primaryConfirm();
+    void load("reset");
+  }, [load, releaseFocusedThread]);
+
+  // Scroll-in reconciliation.
+  //
+  // A postgres_changes subscription only delivers events that happen *after* it is
+  // established, and subscriptions are scoped to the viewport. Without this, a like
+  // or comment that landed while a post was off-screen would still show the stale
+  // count when you scrolled back to it. One batched query per scroll settle closes
+  // that gap, which is what makes the counts trustworthy rather than merely live.
+  useEffect(() => {
+    if (!userId || !debouncedVisibleThreadIdsKey) return undefined;
+    const ids = debouncedVisibleThreadIdsKey.split(",").filter(Boolean);
+    if (ids.length === 0) return undefined;
+    // Skip threads whose counters a realtime flush already refreshed this second.
+    const now = Date.now();
+    const stale = ids.filter((threadId) => (
+      now - (realtimeThreadRefreshLastAtRef.current.get(threadId) || 0) >= SOCIAL_REALTIME_REFRESH_COOLDOWN_MS
+    ));
+    if (stale.length === 0) return undefined;
+    queueThreadCountRefresh(stale);
+    return undefined;
+  }, [debouncedVisibleThreadIdsKey, queueThreadCountRefresh, userId]);
 
   useEffect(() => {
     if (!userId || !debouncedVisibleThreadIdsKey) return undefined;
@@ -1186,7 +1912,9 @@ export function NativeSocialScreen({
               void updateNativeSupportedSocialThreadCache(userId, changedThreadId, supported);
             }
 
-            scheduleRealtimeThreadRefresh(changedThreadId);
+            // A support only ever moves a counter — reconcile the number, do not
+            // refetch and re-hydrate the whole thread.
+            queueThreadCountRefresh(changedThreadId);
           },
         );
       });
@@ -1196,7 +1924,7 @@ export function NativeSocialScreen({
     return () => {
       void handle.dispose();
     };
-  }, [debouncedVisibleThreadIdsKey, scheduleRealtimeThreadRefresh, userId]);
+  }, [debouncedVisibleThreadIdsKey, queueThreadCountRefresh, userId]);
 
   useEffect(() => {
     if (!userId || !debouncedVisibleThreadIdsKey) return undefined;
@@ -1206,6 +1934,17 @@ export function NativeSocialScreen({
 
     const handle = createSingleRealtimeChannel(`native-social-threads:${ids.slice().sort().join(",")}`, (channel) => {
       ids.forEach((threadId) => {
+        // Reply counts must move for every thread on screen, not only the ones whose
+        // replies are expanded. The expanded-thread channel below refetches the full
+        // comment list; this one only refreshes the thread row, which carries the
+        // count. Both go through the same 1s cooldown + in-flight guard.
+        channel.on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "thread_comments", filter: `thread_id=eq.${threadId}` },
+          () => {
+            queueThreadCountRefresh(threadId);
+          },
+        );
         channel.on(
           "postgres_changes",
           { event: "*", schema: "public", table: "threads", filter: `id=eq.${threadId}` },
@@ -1215,7 +1954,7 @@ export function NativeSocialScreen({
                 const nextThreads = current.filter((thread) => thread.id !== threadId);
                 if (socialSessionKeyRef.current === subscriptionSessionKey) {
                   void writeNativeSocialPersistentCache(nativeSocialFeedCacheKey(userId, subscriptionSessionKey, feedScopeCountry, sortModeRef.current), {
-                    rows: nextThreads.slice(0, 50),
+                    rows: nextThreads.slice(0, SOCIAL_FEED_CACHE_ROW_LIMIT),
                     cursor: cursorRef.current,
                     hasMore: hasMoreRef.current,
                   });
@@ -1235,13 +1974,13 @@ export function NativeSocialScreen({
     return () => {
       void handle.dispose();
     };
-  }, [currentSessionKey, debouncedVisibleThreadIdsKey, feedScopeCountry, scheduleRealtimeThreadRefresh, userId]);
+  }, [currentSessionKey, debouncedVisibleThreadIdsKey, feedScopeCountry, queueThreadCountRefresh, scheduleRealtimeThreadRefresh, userId]);
 
   const visiblePreviewUrlsKey = useMemo(() => (
     Array.from(new Set([
       ...visibleThreads.map((thread) => extractNativeSocialFirstHttpUrl(thread.content)),
       ...Object.values(commentsByThread).flat().map((comment) => extractNativeSocialFirstHttpUrl(comment.content)),
-      extractNativeSocialFirstHttpUrl(replyDraft),
+      extractCompletedComposerPreviewUrl(replyDraft),
     ].filter((url): url is string => isPreviewableExternalUrl(url)))).join("\n")
   ), [commentsByThread, replyDraft, visibleThreads]);
 
@@ -1287,15 +2026,17 @@ export function NativeSocialScreen({
     if (socialPostingBlocked) return openPostingRestriction();
     const titleValue = payload.title.trim();
     const contentValue = payload.content.trim();
-    if (!titleValue || !contentValue) return showNotice("Title and content are required.");
+    if (!titleValue || !contentValue) return showNotice("Oops! Don't leave this blank.");
     if (countWords(contentValue) > MAX_COMPOSER_WORDS) return showNotice("Post is too long.");
     const videoMedia = payload.media.find((item) => item.kind === "video");
-    if (videoMedia && !isGoldUser) return showNotice("Video upload is available for Gold members only.");
+    if (videoMedia && !isGoldUser) return showNotice("Video upload is available for huddle＊ members only.");
     if (videoMedia && editingThread?.providerVideoId) return showNotice("Only one video can be added to a post.");
     const uploadedForCleanup: string[] = [];
     const optimisticId = `pending:thread:${Date.now()}`;
     const optimisticCreatedAt = new Date().toISOString();
-    const optimisticImages = payload.media.filter((item) => item.kind === "image").map((item) => item.uploadedUrl || item.uri).filter(Boolean);
+    const optimisticImageMedia = payload.media.filter((item) => item.kind === "image");
+    const optimisticImages = optimisticImageMedia.map((item) => item.uri).filter(Boolean);
+    const optimisticImageMetadata = buildNativeSocialImageMetadata(optimisticImageMedia);
     const previousEditingThread = editingThread;
     const optimisticThread: NativeSocialThread = {
       id: previousEditingThread?.id || optimisticId,
@@ -1305,6 +2046,7 @@ export function NativeSocialScreen({
       hashtags: [],
       mentions: previousEditingThread?.mentions || [],
       images: optimisticImages,
+      imageMetadata: optimisticImageMetadata,
       createdAt: previousEditingThread?.createdAt || optimisticCreatedAt,
       updatedAt: optimisticCreatedAt,
       userId,
@@ -1317,6 +2059,8 @@ export function NativeSocialScreen({
       alertDistrict: previousEditingThread?.alertDistrict || null,
       hasAlertLink: previousEditingThread?.hasAlertLink || false,
       isSensitive: payload.isSensitive,
+      foundAt: previousEditingThread?.foundAt || null,
+      alertState: previousEditingThread?.alertState || "inactive",
       videoProvider: previousEditingThread?.videoProvider || null,
       providerVideoId: previousEditingThread?.providerVideoId || null,
       videoPlaybackUrl: previousEditingThread?.videoPlaybackUrl || null,
@@ -1325,6 +2069,11 @@ export function NativeSocialScreen({
       videoPreviewUrl: previousEditingThread?.videoPreviewUrl || null,
       videoDurationSeconds: previousEditingThread?.videoDurationSeconds || null,
       videoStatus: previousEditingThread?.videoStatus || null,
+      postCountry: previousEditingThread?.postCountry || viewerScope?.countryName || viewerScope?.country || viewerScope?.profileCountryName || viewerScope?.profileCountry || null,
+      postCity: previousEditingThread?.postCity || viewerScope?.city || viewerScope?.profileLocationName || null,
+      postDistrict: previousEditingThread?.postDistrict || viewerScope?.district || viewerScope?.profileDistrict || null,
+      postLanguage: previousEditingThread?.postLanguage || null,
+      postLocationSource: previousEditingThread?.postLocationSource || viewerScope?.source || null,
       author: previousEditingThread?.author || {
         displayName: "You",
         socialId: null,
@@ -1341,37 +2090,47 @@ export function NativeSocialScreen({
       hasAccessToken: Boolean(accessToken),
       threadId: optimisticThread.id,
     });
+    markThreadMutated(optimisticThread.id);
     setThreads((current) => previousEditingThread
       ? current.map((thread) => thread.id === previousEditingThread.id ? optimisticThread : thread)
       : [optimisticThread, ...current]);
     closeComposer();
     try {
       const imageMedia = payload.media.filter((item) => item.kind === "image");
+      const previousImageSet = new Set((previousEditingThread?.images || []).map((url) => url.trim()).filter(Boolean));
       const imageUrls = await Promise.all(imageMedia.map(async (media) => {
-        if (typeof media.uploadedUrl === "string" && media.uploadedUrl.trim().length > 0) return media.uploadedUrl.trim();
+        if (typeof media.uploadedUrl === "string" && media.uploadedUrl.trim().length > 0) {
+          const uploadedUrl = media.uploadedUrl.trim();
+          if (!previousImageSet.has(uploadedUrl)) uploadedForCleanup.push(uploadedUrl);
+          return uploadedUrl;
+        }
         if (media.uri.startsWith("http")) return media.uri;
-        const uploadedUrl = await uploadNativeSocialImage(userId, media, "thread", accessToken);
+        const uploadedUrl = await uploadNativeSocialImage(userId, media, "thread", accessToken, currentSessionKey);
         uploadedForCleanup.push(uploadedUrl);
         return uploadedUrl;
       }));
-      const video = videoMedia ? await createNativeSocialVideoUpload(userId, videoMedia, titleValue, accessToken) : null;
+      const imageMetadata = buildNativeSocialImageMetadata(imageMedia.map((media, index) => ({ ...media, uri: imageUrls[index] || media.uploadedUrl || media.uri })));
+      const video = videoMedia ? await createNativeSocialVideoUpload(userId, videoMedia, titleValue, accessToken, currentSessionKey) : null;
       const mentions = await resolveNativeSocialMentionsFromText(contentValue, accessToken);
       if (editingThread) {
         const mergedImages = imageUrls.filter((url): url is string => typeof url === "string" && url.trim().length > 0);
+        markThreadMutated(editingThread.id);
         await updateNativeSocialThread({
           accessToken,
           category: payload.category,
           content: contentValue,
           id: editingThread.id,
+          imageMetadata,
           images: mergedImages,
           isSensitive: payload.isSensitive,
           previousImages: editingThread.images,
+          sessionKey: currentSessionKey,
           title: titleValue,
           userId,
           video,
         });
         await persistNativeSocialPostMentions(editingThread.id, mentions, accessToken);
-        if (mentions.length > 0) await createNativeSocialMentionNotifications(editingThread.id, userId, mentions.map((entry) => entry.mentionedUserId), accessToken);
+        if (mentions.length > 0) await createNativeSocialMentionNotifications(editingThread.id, userId, mentions.map((entry) => entry.mentionedUserId), accessToken, currentSessionKey);
         const freshThread = await fetchNativeSocialThreadById(editingThread.id, accessToken);
         setThreads((current) => {
           const nextThreads = current.map((thread) => thread.id === editingThread.id ? {
@@ -1381,6 +2140,7 @@ export function NativeSocialScreen({
             content: freshThread?.content ?? contentValue,
             tags: freshThread?.tags ?? [payload.category],
             images: freshThread?.images ?? mergedImages,
+            imageMetadata: freshThread?.imageMetadata ?? imageMetadata,
             isSensitive: freshThread?.isSensitive ?? payload.isSensitive,
             localStatus: undefined,
             mentions,
@@ -1396,7 +2156,7 @@ export function NativeSocialScreen({
             } : {}),
           } : thread);
           void writeNativeSocialPersistentCache(nativeSocialFeedCacheKey(userId, currentSessionKey, feedScopeCountry, sortModeRef.current), {
-            rows: nextThreads.slice(0, 50),
+            rows: nextThreads.slice(0, SOCIAL_FEED_CACHE_ROW_LIMIT),
             cursor: cursorRef.current,
             hasMore: hasMoreRef.current,
           });
@@ -1405,15 +2165,42 @@ export function NativeSocialScreen({
         haptic.success();
         showNotice("Post updated.");
       } else {
-        const id = await createNativeSocialThread({ accessToken, category: payload.category, content: contentValue, images: imageUrls, isSensitive: payload.isSensitive, title: titleValue, userId, video });
+        const id = await createNativeSocialThread({ accessToken, category: payload.category, content: contentValue, imageMetadata, images: imageUrls, isSensitive: payload.isSensitive, postScope: viewerScope, sessionKey: currentSessionKey, title: titleValue, userId, video });
         if (id) {
-          await persistNativeSocialPostMentions(id, mentions, accessToken);
-          if (mentions.length > 0) await createNativeSocialMentionNotifications(id, userId, mentions.map((entry) => entry.mentionedUserId), accessToken);
-          const createdThread = await fetchNativeSocialThreadById(id, accessToken);
+          markThreadMutated(id);
+          // The post row is committed. Mention persistence, mention notifications and
+          // the read-back are all secondary — none of them may roll the post back or
+          // trigger the orphan-media cleanup in the catch below.
+          try {
+            await persistNativeSocialPostMentions(id, mentions, accessToken);
+            if (mentions.length > 0) await createNativeSocialMentionNotifications(id, userId, mentions.map((entry) => entry.mentionedUserId), accessToken, currentSessionKey);
+          } catch (mentionError) {
+            if (__DEV__) console.warn("NATIVE_SOCIAL_POST_MENTION_SYNC_FAILED", {
+              threadId: id,
+              ...describeNativeSocialError(mentionError),
+            });
+          }
+          const createdThread = await fetchNativeSocialThreadById(id, accessToken).catch(() => null);
           if (createdThread) {
-            setThreads((current) => [createdThread, ...current.filter((thread) => thread.id !== id && thread.id !== optimisticId)]);
+            setThreads((current) => {
+              const nextThreads = [createdThread, ...current.filter((thread) => thread.id !== id && thread.id !== optimisticId)];
+              void writeNativeSocialPersistentCache(nativeSocialFeedCacheKey(userId, currentSessionKey, feedScopeCountry, sortModeRef.current), {
+                rows: nextThreads.slice(0, SOCIAL_FEED_CACHE_ROW_LIMIT),
+                cursor: cursorRef.current,
+                hasMore: hasMoreRef.current,
+              });
+              return nextThreads;
+            });
           } else {
-            setThreads((current) => current.map((thread) => thread.id === optimisticId ? { ...optimisticThread, id, localStatus: undefined } : thread));
+            setThreads((current) => {
+              const nextThreads = current.map((thread) => thread.id === optimisticId ? { ...optimisticThread, id, localStatus: undefined } : thread);
+              void writeNativeSocialPersistentCache(nativeSocialFeedCacheKey(userId, currentSessionKey, feedScopeCountry, sortModeRef.current), {
+                rows: nextThreads.slice(0, SOCIAL_FEED_CACHE_ROW_LIMIT),
+                cursor: cursorRef.current,
+                hasMore: hasMoreRef.current,
+              });
+              return nextThreads;
+            });
           }
           haptic.success();
           showNotice("Thread posted.");
@@ -1423,7 +2210,7 @@ export function NativeSocialScreen({
       }
     } catch (error) {
       if (uploadedForCleanup.length > 0) {
-        const cleanupResult: NativeProtectedActionCleanupResult = await cleanupNativeSocialStorageImages(uploadedForCleanup, userId, accessToken, "social_thread_orphan_upload").catch(() => "failed" as const);
+        const cleanupResult: NativeProtectedActionCleanupResult = await cleanupNativeSocialStorageImages(uploadedForCleanup, userId, accessToken, "social_thread_orphan_upload", currentSessionKey).catch(() => "failed" as const);
         logNativeProtectedActionFailure("[native.social] thread_orphan_cleanup", createNativeProtectedActionError({
           ok: false,
           stage: getNativeProtectedActionResult(error)?.stage || "domain_save",
@@ -1435,28 +2222,29 @@ export function NativeSocialScreen({
       logNativeProtectedActionFailure("[native.social] submit_thread_failed", error);
       if (__DEV__) console.warn("NATIVE_SOCIAL_POST_OPTIMISTIC_ROLLBACK", {
         editing: Boolean(previousEditingThread),
-        message: error instanceof Error ? error.message : String(error),
         threadId: optimisticThread.id,
+        ...describeNativeSocialError(error),
       });
       setThreads((current) => previousEditingThread
         ? current.map((thread) => thread.id === previousEditingThread.id ? previousEditingThread : thread)
         : current.filter((thread) => thread.id !== optimisticId));
-      const quotaMessage = resolvePostingBlockedMessage(error);
-      showQuotaBanner(quotaMessage || "Unable to save post.");
+      showNotice("Not sent yet — your post is still in the composer.");
     }
-  }, [accessToken, closeComposer, currentSessionKey, editingThread, feedScopeCountry, isGoldUser, openPostingRestriction, refreshAroundMutation, resolvePostingBlockedMessage, showNotice, showQuotaBanner, socialPostingBlocked, userId]);
+  }, [accessToken, closeComposer, currentSessionKey, editingThread, feedScopeCountry, isGoldUser, markThreadMutated, openPostingRestriction, refreshAroundMutation, showNotice, socialPostingBlocked, userId, viewerScope]);
 
   const openNativeShare = useCallback(async (thread: NativeSocialThread) => {
-    const shareUrl = `https://huddle.pet/share/${encodeURIComponent(thread.id)}`;
-    const imageUrl = thread.images[0] || thread.videoThumbnailUrl || thread.videoPreviewUrl || "";
-    const mediaShareUrl = imageUrl ? await resolveNativeShareMediaUrl(imageUrl) : null;
-    const message = [
-      thread.title || "See this post on huddle.",
-      shareUrl,
-      imageUrl && !mediaShareUrl && imageUrl !== shareUrl ? imageUrl : "",
-    ].filter(Boolean).join("\n");
+    const share = buildNativeSocialSharePayload(thread);
     try {
-      await Share.share({ title: thread.title || "Post on huddle", message, url: mediaShareUrl || shareUrl });
+      // The post's own photo is attached when it has one: the OS decides which
+      // apps appear from the TYPE of the items it is handed, so a link-only
+      // share could never list TikTok or Instagram. The link travels alongside
+      // it, exactly once — `openNativeShareSheet` owns that rule.
+      await openNativeShareSheet({
+        imageUrl: thread.images[0] || null,
+        text: share.nativeShareText,
+        title: share.title,
+        url: share.canonicalUrl,
+      });
       const count = await recordNativeSocialShare(thread.id, accessToken);
       recordFeedEvent(thread.id, "share");
       setThreads((current) => current.map((item) => item.id === thread.id ? { ...item, shareCount: count ?? item.shareCount + 1 } : item));
@@ -1477,14 +2265,14 @@ export function NativeSocialScreen({
     if (!isSupported) haptic.selectTab(); // SO5: light tick on like-on; no haptic on like-off
     setSupportedThreadIds((current) => toggleSetValue(current, thread.id));
     setThreads((current) => current.map((item) => item.id === thread.id ? { ...item, likes: Math.max(0, item.likes + (isSupported ? -1 : 1)) } : item));
-    void setNativeSocialSupport(thread, userId, isSupported, accessToken)
+    void setNativeSocialSupport(thread, userId, isSupported, accessToken, currentSessionKey)
       .then(async (count) => {
         setThreads((current) => current.map((item) => item.id === thread.id ? { ...item, likes: count } : item));
         if (!isSupported) {
           recordFeedEvent(thread.id, "like");
           if (thread.userId !== userId) {
             try {
-              const profile = await fetchNativeProfileSummary(userId, { force: false, accessToken });
+              const profile = await fetchNativeProfileSummary(userId, { accessToken, sessionKey: currentSessionKey });
               await upsertNativeSocialNotificationWindow({
                 actorId: userId,
                 actorName: profile?.profile?.display_name || "Someone",
@@ -1492,6 +2280,7 @@ export function NativeSocialScreen({
                 href: `/social?focus=${thread.id}`,
                 kind: "like",
                 ownerUserId: thread.userId,
+                sessionKey: currentSessionKey,
                 subjectId: thread.id,
                 subjectType: "thread",
                 accessToken,
@@ -1515,7 +2304,7 @@ export function NativeSocialScreen({
         refreshAroundMutation();
         showNotice("Unable to update support.");
       });
-  }, [accessToken, blockedUsers, recordFeedEvent, refreshAroundMutation, showNotice, supportedThreadIds, userId]);
+  }, [accessToken, blockedUsers, currentSessionKey, recordFeedEvent, refreshAroundMutation, showNotice, supportedThreadIds, userId]);
 
   const confirmDeleteThread = useCallback((thread: NativeSocialThread) => {
     if (!userId || thread.userId !== userId) return;
@@ -1533,6 +2322,7 @@ export function NativeSocialScreen({
 
   const executeDeleteThread = useCallback(async () => {
     if (!deleteThreadTarget || !userId || deletingThreadId) return;
+    haptic.destructive();
     const thread = deleteThreadTarget;
     const threadId = thread.id;
     const previousThreads = threads;
@@ -1549,10 +2339,11 @@ export function NativeSocialScreen({
       setReplyComposerAnchorCommentId(null);
     }
     setThreads((current) => current.filter((item) => item.id !== threadId));
+    markThreadRemoved(threadId);
     if (__DEV__) console.log("NATIVE_SOCIAL_POST_DELETE_OPTIMISTIC_START", { threadId });
     try {
       const deleteResult = await Promise.race<boolean>([
-        deleteNativeSocialThread(thread, userId, accessToken).finally(() => {
+        deleteNativeSocialThread(thread, userId, accessToken, currentSessionKey).finally(() => {
           if (timeoutId) clearTimeout(timeoutId);
         }),
         new Promise<boolean>((_, reject) => {
@@ -1572,26 +2363,29 @@ export function NativeSocialScreen({
       if (message === timeoutMessage) {
         showNotice("Delete timed out. Pull to refresh to verify result.");
       } else {
-        showNotice(`Unable to delete post.${message ? ` ${message}` : ""}`);
+        showNotice("Unable to delete post.");
       }
       if (__DEV__) console.warn("NATIVE_SOCIAL_POST_DELETE_OPTIMISTIC_ROLLBACK", { message, threadId });
+      removedThreadIdsRef.current.delete(threadId);
       setThreads(previousThreads);
     } finally {
       setDeletingThreadId((current) => (current === threadId ? null : current));
       if (timeoutId) clearTimeout(timeoutId);
     }
-  }, [accessToken, deleteThreadTarget, deletingThreadId, replyFor, showNotice, threads, userId]);
+  }, [accessToken, currentSessionKey, deleteThreadTarget, deletingThreadId, markThreadRemoved, replyFor, showNotice, threads, userId]);
 
   const executeBlockThreadAuthor = useCallback(() => {
     if (!blockThreadTarget || !userId) return;
+    haptic.destructive();
     const thread = blockThreadTarget;
     const previousThreads = threads;
     const previousBlockedUsers = blockedUsers;
     setBlockThreadTarget(null);
     setBlockedUsers((current) => new Set([...current, thread.userId]));
+    markThreadRemoved(thread.id);
     setThreads((current) => current.filter((item) => item.userId !== thread.userId));
     if (__DEV__) console.log("NATIVE_SOCIAL_AUTHOR_BLOCK_OPTIMISTIC_START", { authorId: thread.userId, threadId: thread.id });
-    void blockNativeSocialUser(thread.userId, accessToken)
+    void blockNativeSocialUser(thread.userId, accessToken, userId, currentSessionKey)
       .then(() => {
         void invalidateNativeBlockCascade({ userId });
         recordFeedEvent(thread.id, "block");
@@ -1603,13 +2397,15 @@ export function NativeSocialScreen({
           threadId: thread.id,
         });
         setBlockedUsers(previousBlockedUsers);
+        removedThreadIdsRef.current.delete(thread.id);
         setThreads(previousThreads);
         showNotice("Unable to block user right now.");
       });
-  }, [accessToken, blockThreadTarget, blockedUsers, recordFeedEvent, showNotice, threads, userId]);
+  }, [accessToken, blockThreadTarget, blockedUsers, currentSessionKey, markThreadRemoved, recordFeedEvent, showNotice, threads, userId]);
 
   const executeBlockCommentAuthor = useCallback(() => {
     if (!blockCommentTarget || !userId) return;
+    haptic.destructive();
     const comment = blockCommentTarget;
     const previousBlockedUsers = blockedUsers;
     const previousHiddenCommentIds = hiddenCommentIds;
@@ -1618,7 +2414,7 @@ export function NativeSocialScreen({
     setBlockedUsers((current) => new Set([...current, comment.userId]));
     setHiddenCommentIds((current) => new Set([...current, ...hiddenByAuthor]));
     if (__DEV__) console.log("NATIVE_SOCIAL_COMMENT_AUTHOR_BLOCK_OPTIMISTIC_START", { authorId: comment.userId, commentId: comment.id });
-    void blockNativeSocialUser(comment.userId, accessToken)
+    void blockNativeSocialUser(comment.userId, accessToken, userId, currentSessionKey)
       .then(() => {
         void invalidateNativeBlockCascade({ userId });
         setMoreCommentTarget(null);
@@ -1633,10 +2429,10 @@ export function NativeSocialScreen({
         setHiddenCommentIds(previousHiddenCommentIds);
         showNotice("Unable to block user right now.");
       });
-  }, [accessToken, blockCommentTarget, blockedUsers, commentsByThread, hiddenCommentIds, showNotice, userId]);
+  }, [accessToken, blockCommentTarget, blockedUsers, commentsByThread, currentSessionKey, hiddenCommentIds, showNotice, userId]);
 
   const toggleSaved = useCallback((threadId: string) => {
-    if (!userId || !accessToken) {
+    if (!userId) {
       showNotice("Sign in required.");
       return;
     }
@@ -1658,7 +2454,7 @@ export function NativeSocialScreen({
   }, [accessToken, applyDbPreferences, recordFeedEvent, showNotice, storedSets.pinned, storedSets.pinnedAt, storedSets.saved, userId]);
 
   const togglePinned = useCallback((threadId: string) => {
-    if (!userId || !accessToken) {
+    if (!userId) {
       showNotice("Sign in required.");
       return;
     }
@@ -1722,8 +2518,11 @@ export function NativeSocialScreen({
       const cached = await readNativeSocialPersistentCache<NativeSocialComment[]>(cacheKey, SOCIAL_COMMENTS_CACHE_MAX_AGE_MS);
       if (socialSessionKeyRef.current !== requestSessionKey) return;
       if (cached) {
-        syncCommentSupportFromRows(cached);
-        setCommentsByThread((current) => ({ ...current, [targetThread.id]: cached }));
+        setCommentsByThread((current) => {
+          const nextComments = applyCommentMutationTruth(targetThread.id, cached, current[targetThread.id] || []);
+          syncCommentSupportFromRows(nextComments);
+          return { ...current, [targetThread.id]: nextComments };
+        });
         setThreads((current) => current.map((threadItem) => (
           threadItem.id === targetThread.id && cached.length > threadItem.commentCount ? { ...threadItem, commentCount: cached.length } : threadItem
         )));
@@ -1731,13 +2530,16 @@ export function NativeSocialScreen({
 
       const comments = await fetchNativeSocialComments(targetThread.id, { accessToken, limit: SOCIAL_INITIAL_COMMENT_LIMIT });
       if (socialSessionKeyRef.current !== requestSessionKey) return;
-      syncCommentSupportFromRows(comments);
-      setCommentsByThread((current) => ({ ...current, [targetThread.id]: comments }));
+      setCommentsByThread((current) => {
+        const nextComments = applyCommentMutationTruth(targetThread.id, comments, current[targetThread.id] || []);
+        syncCommentSupportFromRows(nextComments);
+        void writeNativeSocialPersistentCache(cacheKey, withoutPendingSocialComments(nextComments));
+        return { ...current, [targetThread.id]: nextComments };
+      });
       setCommentsCanLoadOlderByThread((current) => ({ ...current, [targetThread.id]: comments.length === SOCIAL_INITIAL_COMMENT_LIMIT }));
       setThreads((current) => current.map((threadItem) => (
         threadItem.id === targetThread.id && comments.length > threadItem.commentCount ? { ...threadItem, commentCount: comments.length } : threadItem
       )));
-      void writeNativeSocialPersistentCache(cacheKey, comments);
     })()
       .catch(() => setCommentLoadErrors((current) => ({ ...current, [targetThread.id]: "Comments could not load. Please try again." })))
       .finally(() => {
@@ -1747,7 +2549,7 @@ export function NativeSocialScreen({
           return next;
         });
       });
-  }, [accessToken, commentsLoadingThreads, currentSessionKey, syncCommentSupportFromRows, userId]);
+  }, [accessToken, applyCommentMutationTruth, commentsLoadingThreads, currentSessionKey, syncCommentSupportFromRows, userId]);
 
   const loadOlderCommentsForThread = useCallback((targetThread: NativeSocialThread) => {
     if (!userId || !targetThread.id || olderCommentsLoadingThreads.has(targetThread.id)) return;
@@ -1761,8 +2563,8 @@ export function NativeSocialScreen({
         if (socialSessionKeyRef.current !== requestSessionKey) return;
         syncCommentSupportFromRows(older);
         setCommentsByThread((current) => {
-          const nextComments = mergeNativeSocialComments(current[targetThread.id] || [], older);
-          void writeNativeSocialPersistentCache(nativeSocialCommentsCacheKey(userId, requestSessionKey, targetThread), nextComments);
+          const nextComments = applyCommentMutationTruth(targetThread.id, mergeNativeSocialComments(current[targetThread.id] || [], older), current[targetThread.id] || []);
+          void writeNativeSocialPersistentCache(nativeSocialCommentsCacheKey(userId, requestSessionKey, targetThread), withoutPendingSocialComments(nextComments));
           return { ...current, [targetThread.id]: nextComments };
         });
         setCommentsCanLoadOlderByThread((current) => ({ ...current, [targetThread.id]: older.length === SOCIAL_OLDER_COMMENT_LIMIT }));
@@ -1775,7 +2577,7 @@ export function NativeSocialScreen({
           return next;
         });
       });
-  }, [accessToken, commentsByThread, currentSessionKey, olderCommentsLoadingThreads, syncCommentSupportFromRows, userId]);
+  }, [accessToken, applyCommentMutationTruth, commentsByThread, currentSessionKey, olderCommentsLoadingThreads, syncCommentSupportFromRows, userId]);
 
   const openThreadReplies = useCallback((thread: NativeSocialThread) => {
     setExpandedReplies((current) => new Set([...current, thread.id]));
@@ -1805,14 +2607,17 @@ export function NativeSocialScreen({
         .then((comments) => {
           if (socialSessionKeyRef.current !== requestSessionKey) return;
           realtimeCommentRefreshLastAtRef.current.set(threadId, Date.now());
-          syncCommentSupportFromRows(comments);
-          setCommentsByThread((current) => ({ ...current, [threadId]: comments }));
+          setCommentsByThread((current) => {
+            const nextComments = applyCommentMutationTruth(threadId, comments, current[threadId] || []);
+            syncCommentSupportFromRows(nextComments);
+            const targetThread = threadsByIdRef.current.get(threadId);
+            if (userId && targetThread) void writeNativeSocialPersistentCache(nativeSocialCommentsCacheKey(userId, requestSessionKey, targetThread), withoutPendingSocialComments(nextComments));
+            return { ...current, [threadId]: nextComments };
+          });
           setCommentsCanLoadOlderByThread((current) => ({ ...current, [threadId]: comments.length === SOCIAL_INITIAL_COMMENT_LIMIT }));
           setThreads((current) => current.map((thread) => (
             thread.id === threadId ? { ...thread, commentCount: comments.length } : thread
           )));
-          const targetThread = threadsByIdRef.current.get(threadId);
-          if (userId && targetThread) void writeNativeSocialPersistentCache(nativeSocialCommentsCacheKey(userId, requestSessionKey, targetThread), comments);
         })
         .catch(() => undefined)
         .finally(() => {
@@ -1822,7 +2627,7 @@ export function NativeSocialScreen({
     const elapsed = Date.now() - (realtimeCommentRefreshLastAtRef.current.get(threadId) || 0);
     const delay = Math.max(0, SOCIAL_REALTIME_REFRESH_COOLDOWN_MS - elapsed);
     realtimeCommentRefreshTimersRef.current.set(threadId, setTimeout(run, delay));
-  }, [accessToken, currentSessionKey, syncCommentSupportFromRows, userId]);
+  }, [accessToken, applyCommentMutationTruth, currentSessionKey, syncCommentSupportFromRows, userId]);
 
   useEffect(() => {
     if (expandedReplies.size === 0) return undefined;
@@ -1882,6 +2687,19 @@ export function NativeSocialScreen({
     const canExpandBranch = item.depth < 2 && item.directChildCount > 0;
     const branchIds = [item.comment.id, ...tree.collectDescendantIds(item.comment.id)];
     const branchIsExpanded = expandedCommentBranches.has(item.comment.id);
+    const composerAnchorCommentId = canExpandBranch
+      ? item.depth === 1
+        ? tree.getLastDescendantId(item.comment.id)
+        : tree.getLastChildId(item.comment.id)
+      : item.comment.id;
+    const composerIsActive = replyFor === thread.id;
+    const composerTargetsThisComment = composerIsActive && replyTargetCommentId === item.comment.id;
+    const composerTargetsThisAnchor = composerIsActive && replyComposerAnchorCommentId === composerAnchorCommentId && !canExpandBranch;
+    if (composerTargetsThisComment || composerTargetsThisAnchor) {
+      queueCommentSnap(thread.id, "composer", composerAnchorCommentId);
+      setTimeout(() => replyInputRef.current?.focus(), COMMENT_SNAP_DELAY_MS);
+      return;
+    }
     if (canExpandBranch) {
       if (branchIsExpanded) {
         setExpandedCommentBranches((current) => {
@@ -1899,11 +2717,6 @@ export function NativeSocialScreen({
       }
       setExpandedCommentBranches((current) => new Set([...current, item.comment.id]));
     }
-    const composerAnchorCommentId = canExpandBranch
-      ? item.depth === 1
-        ? tree.getLastDescendantId(item.comment.id)
-        : tree.getLastChildId(item.comment.id)
-      : item.comment.id;
     setExpandedReplies((current) => new Set([...current, thread.id]));
     setReplyFor(thread.id);
     setReplyTargetCommentId(item.comment.id);
@@ -1916,16 +2729,21 @@ export function NativeSocialScreen({
   }, [clearReplyComposer, expandedCommentBranches, openPostingRestriction, queueCommentSnap, replyComposerAnchorCommentId, replyFor, replyTargetCommentId, socialPostingBlocked]);
 
   const pickReplyMedia = useCallback(async () => {
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) return;
-    const result = await ImagePicker.launchImageLibraryAsync({
-      allowsMultipleSelection: true,
-      mediaTypes: ["images"],
-      orderedSelection: true,
-      preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
-      quality: 0.86,
-      selectionLimit: Math.max(1, MAX_COMPOSER_MEDIA - replyMedia.length),
-    });
+    let result: Awaited<ReturnType<typeof ImagePicker.launchImageLibraryAsync>>;
+    try {
+      // Best-effort request; PHPicker presents regardless, so never hard-block.
+      result = await launchNativeImageLibraryAsync({
+        allowsMultipleSelection: true,
+        mediaTypes: ["images"],
+        orderedSelection: true,
+        preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
+        quality: 0.86,
+        selectionLimit: Math.max(1, MAX_COMPOSER_MEDIA - replyMedia.length),
+      });
+    } catch (error) {
+      showNotice(nativeSafeErrorCopy(error, "Couldn't open your photo library. Try again."));
+      return;
+    }
     queueCommentSnap(replyFor || "", "composer", replyComposerAnchorCommentId);
     if (result.canceled) return;
     const incoming = result.assets.map((asset) => ({
@@ -1939,7 +2757,7 @@ export function NativeSocialScreen({
       width: asset.width,
     }));
     setReplyMedia((current) => [...current, ...incoming].slice(0, MAX_COMPOSER_MEDIA));
-  }, [queueCommentSnap, replyComposerAnchorCommentId, replyFor, replyMedia.length]);
+  }, [queueCommentSnap, replyComposerAnchorCommentId, replyFor, replyMedia.length, showNotice]);
 
   useEffect(() => {
     activeComposerThreadIdRef.current = replyFor;
@@ -1956,22 +2774,37 @@ export function NativeSocialScreen({
     const submitFlightKey = buildNativeReplyFlightKey(thread.id, submittedParentCommentId, content, replyMedia);
     if (replySubmitLocksRef.current.has(submitFlightKey)) return;
     const parentComment = submittedParentCommentId ? (commentsByThread[thread.id] || []).find((comment) => comment.id === submittedParentCommentId) || null : null;
-    if (parentComment && await areNativeSocialUsersBlocked(userId, parentComment.userId, accessToken)) return showNotice("You cannot reply to this user.");
-    if (await areNativeSocialUsersBlocked(userId, thread.userId, accessToken)) return showNotice("You cannot reply to this user.");
+    // A transient failure of the block lookup must never swallow the reply. Only a
+    // confirmed block stops the submit; an unreachable check falls through and lets
+    // the server-side visibility gate be the authority.
+    const replyBlockedByRelationship = async (targetUserId: string | null | undefined) => {
+      if (!targetUserId) return false;
+      try {
+        return await areNativeSocialUsersBlocked(userId, targetUserId, accessToken);
+      } catch {
+        return false;
+      }
+    };
+    if (parentComment && await replyBlockedByRelationship(parentComment.userId)) return showNotice("You cannot reply to this user.");
+    if (await replyBlockedByRelationship(thread.userId)) return showNotice("You cannot reply to this user.");
     replySubmitLocksRef.current.add(submitFlightKey);
     setReplySubmittingByThread((current) => new Set([...current, thread.id]));
     const uploadedReplyImageUrls: string[] = [];
     const previousEditingComment = editingComment;
     const previousEditingComments = previousEditingComment ? commentsByThread[previousEditingComment.threadId] || [] : [];
-    const optimisticId = previousEditingComment?.comment.id || `pending:comment:${Date.now()}`;
+    const previousEditingCommentImages = previousEditingComment?.comment.images || [];
+    const optimisticId = previousEditingComment?.comment.id || nextOptimisticCommentId();
     const optimisticCreatedAt = new Date().toISOString();
-    const optimisticImages = replyMedia.filter((item) => item.kind === "image").map((item) => item.uri).filter(Boolean);
+    const optimisticImageMedia = replyMedia.filter((item) => item.kind === "image");
+    const optimisticImages = optimisticImageMedia.map((item) => item.uri).filter(Boolean);
+    const optimisticImageMetadata = buildNativeSocialImageMetadata(optimisticImageMedia);
     const optimisticComment: NativeSocialComment = {
       id: optimisticId,
       threadId: thread.id,
       parentCommentId: submittedParentCommentId,
       content,
-      images: previousEditingComment ? previousEditingComment.comment.images : optimisticImages,
+      images: optimisticImages,
+      imageMetadata: optimisticImageMetadata,
       createdAt: previousEditingComment?.comment.createdAt || optimisticCreatedAt,
       updatedAt: optimisticCreatedAt,
       userId,
@@ -1989,11 +2822,12 @@ export function NativeSocialScreen({
       viewerSupported: previousEditingComment?.comment.viewerSupported || false,
       localStatus: "pending",
     };
+    markCommentMutated(thread.id, optimisticId);
     setCommentsByThread((current) => {
       const existing = current[thread.id] || [];
       const nextComments = previousEditingComment
         ? existing.map((comment) => comment.id === previousEditingComment.comment.id ? optimisticComment : comment)
-        : [...existing, optimisticComment];
+        : dedupeNativeSocialComments([...existing, optimisticComment]);
       return { ...current, [thread.id]: nextComments };
     });
     if (!previousEditingComment) {
@@ -2008,63 +2842,124 @@ export function NativeSocialScreen({
     try {
       if (editingComment) {
         const mentions = await resolveNativeSocialMentionsFromText(content, accessToken);
-        await updateNativeSocialComment(editingComment.comment.id, userId, content, accessToken);
-        await replaceNativeSocialReplyMentions(editingComment.comment.id, mentions, accessToken);
+        const nextCommentImages = replyMedia.filter((item) => item.kind === "image").map((item) => item.uri).filter(Boolean);
+        const nextCommentImageMetadata = buildNativeSocialImageMetadata(replyMedia.filter((item) => item.kind === "image"));
+        markCommentMutated(editingComment.threadId, editingComment.comment.id);
+        await updateNativeSocialComment(editingComment.comment.id, userId, content, nextCommentImages, previousEditingCommentImages, accessToken, currentSessionKey, nextCommentImageMetadata);
+        // The edit is committed. Mention re-sync is secondary and must not roll it back.
+        try {
+          await replaceNativeSocialReplyMentions(editingComment.comment.id, mentions, accessToken);
+        } catch (mentionError) {
+          if (__DEV__) console.warn("NATIVE_SOCIAL_REPLY_EDIT_MENTION_SYNC_FAILED", {
+            commentId: editingComment.comment.id,
+            ...describeNativeSocialError(mentionError),
+          });
+        }
         setCommentsByThread((current) => {
           const nextComments = (current[editingComment.threadId] || []).map((comment) => (
-            comment.id === editingComment.comment.id ? { ...comment, content, mentions, localStatus: undefined } : comment
+            comment.id === editingComment.comment.id ? { ...comment, content, images: nextCommentImages, imageMetadata: nextCommentImageMetadata, mentions, localStatus: undefined } : comment
           ));
           const targetThread = threads.find((thread) => thread.id === editingComment.threadId);
-          if (targetThread) void writeNativeSocialPersistentCache(nativeSocialCommentsCacheKey(userId, currentSessionKey, targetThread), nextComments);
+          if (targetThread) void writeNativeSocialPersistentCache(nativeSocialCommentsCacheKey(userId, currentSessionKey, targetThread), withoutPendingSocialComments(nextComments));
           return { ...current, [editingComment.threadId]: nextComments };
         });
         showNotice("Reply updated.");
         clearReplyComposer();
         return;
       }
-      for (const media of replyMedia.filter((item) => item.kind === "image")) {
-        uploadedReplyImageUrls.push(await uploadNativeSocialImage(userId, media, "reply", accessToken));
+      const replyImageMedia = replyMedia.filter((item) => item.kind === "image");
+      for (const media of replyImageMedia) {
+        uploadedReplyImageUrls.push(await uploadNativeSocialImage(userId, media, "reply", accessToken, currentSessionKey));
       }
-      const id = await createNativeSocialComment({ accessToken, content, images: uploadedReplyImageUrls, parentCommentId: submittedParentCommentId, threadId: thread.id, userId });
+      const uploadedReplyImageMetadata = buildNativeSocialImageMetadata(replyImageMedia.map((media, index) => ({ ...media, uri: uploadedReplyImageUrls[index] || media.uri })));
+      const id = await createNativeSocialComment({
+        accessToken,
+        content,
+        imageMetadata: uploadedReplyImageMetadata,
+        images: uploadedReplyImageUrls,
+        parentCommentId: submittedParentCommentId,
+        sessionKey: currentSessionKey,
+        threadId: thread.id,
+        userId,
+      });
       if (!id) throw new Error("Unable to post reply.");
-      let mentions = await resolveNativeSocialMentionsFromText(content, accessToken);
+      markCommentMutated(thread.id, id);
+      // The optimistic row is superseded by `id`. Leaving its pending id in the
+      // mutated set makes applyCommentMutationTruth re-add a row the server will
+      // never return, which is how a stale "pending:comment:…" key came back and
+      // collided with the real one.
+      mutatedCommentIdsByThreadRef.current.get(thread.id)?.delete(optimisticId);
+      // The reply row is committed from here on. Mentions, profile lookup and
+      // notification fan-out are all secondary: a failure in any of them must
+      // never surface as a failed reply, because the reply did post.
+      let mentions: NativeSocialMentionEntry[] = [];
       try {
-        if (mentions.length > 0) {
-          await persistNativeSocialReplyMentions(id, mentions, accessToken);
-          await createNativeSocialMentionNotifications(thread.id, userId, mentions.map((entry) => entry.mentionedUserId), accessToken);
-        }
-      } catch {
+        // Costs nothing when the text has no "@" — it returns early without a request.
+        mentions = await resolveNativeSocialMentionsFromText(content, accessToken);
+      } catch (mentionError) {
         mentions = [];
-        showNotice("Reply posted, but mention syncing failed.");
+        if (__DEV__) console.warn("NATIVE_SOCIAL_REPLY_MENTION_RESOLVE_FAILED", describeNativeSocialError(mentionError));
       }
-      const profile = userId ? await fetchNativeProfileSummary(userId, { force: false, accessToken }) : null;
+      // Mention fan-out is for other people's notifications; the composer must not
+      // wait on it. Fire and forget.
+      if (mentions.length > 0) {
+        const mentionedIds = mentions.map((entry) => entry.mentionedUserId);
+        void (async () => {
+          try {
+            await persistNativeSocialReplyMentions(id, mentions, accessToken);
+            await createNativeSocialMentionNotifications(thread.id, userId, mentionedIds, accessToken, currentSessionKey);
+          } catch (mentionError) {
+            if (__DEV__) console.warn("NATIVE_SOCIAL_REPLY_MENTION_SYNC_FAILED", describeNativeSocialError(mentionError));
+          }
+        })();
+      }
+      let profile: Awaited<ReturnType<typeof fetchNativeProfileSummary>> | null = null;
+      try {
+        profile = userId ? await fetchNativeProfileSummary(userId, { accessToken, sessionKey: currentSessionKey }) : null;
+      } catch (profileError) {
+        if (__DEV__) console.warn("NATIVE_SOCIAL_REPLY_AUTHOR_SUMMARY_FAILED", {
+          commentId: id,
+          ...describeNativeSocialError(profileError),
+        });
+      }
       const actorName = profile?.profile?.display_name || "Someone";
-      if (thread.userId && thread.userId !== userId) {
-        await upsertNativeSocialNotificationWindow({
-          actorId: userId,
-          actorName,
-          category: "social",
-          href: `/social?focus=${thread.id}`,
-          kind: "comment",
-          ownerUserId: thread.userId,
-          subjectId: thread.id,
-          subjectType: "thread",
-          accessToken,
+      void (async () => {
+        try {
+          if (thread.userId && thread.userId !== userId) {
+          await upsertNativeSocialNotificationWindow({
+            actorId: userId,
+            actorName,
+            category: "social",
+            href: `/social?focus=${thread.id}`,
+            kind: "comment",
+            ownerUserId: thread.userId,
+            sessionKey: currentSessionKey,
+            subjectId: thread.id,
+            subjectType: "thread",
+            accessToken,
+          });
+        }
+        if (parentComment?.userId && parentComment.userId !== userId && parentComment.userId !== thread.userId) {
+          await upsertNativeSocialNotificationWindow({
+            actorId: userId,
+            actorName,
+            category: "social",
+            href: `/social?focus=${thread.id}`,
+            kind: "reply",
+            ownerUserId: parentComment.userId,
+            sessionKey: currentSessionKey,
+            subjectId: parentComment.id,
+            subjectType: "comment",
+            accessToken,
+          });
+        }
+      } catch (notifyError) {
+        if (__DEV__) console.warn("NATIVE_SOCIAL_REPLY_NOTIFY_FAILED", {
+          commentId: id,
+          ...describeNativeSocialError(notifyError),
         });
       }
-      if (parentComment?.userId && parentComment.userId !== userId && parentComment.userId !== thread.userId) {
-        await upsertNativeSocialNotificationWindow({
-          actorId: userId,
-          actorName,
-          category: "social",
-          href: `/social?focus=${thread.id}`,
-          kind: "reply",
-          ownerUserId: parentComment.userId,
-          subjectId: parentComment.id,
-          subjectType: "comment",
-          accessToken,
-        });
-      }
+      })();
       const optimisticCreatedAt = new Date().toISOString();
       const optimistic: NativeSocialComment = {
         id,
@@ -2072,6 +2967,7 @@ export function NativeSocialScreen({
         parentCommentId: submittedParentCommentId,
         content,
         images: uploadedReplyImageUrls,
+        imageMetadata: uploadedReplyImageMetadata,
         createdAt: optimisticCreatedAt,
         updatedAt: optimisticCreatedAt,
         userId,
@@ -2103,7 +2999,7 @@ export function NativeSocialScreen({
         const nextComments = [...deduped, optimistic];
         nextCommentCount = nextComments.length;
         void purgeNativeSocialPersistentCache(userId, { commentsOnlyForThreadId: thread.id });
-        void writeNativeSocialPersistentCache(nativeSocialCommentsCacheKey(userId, currentSessionKey, thread), nextComments);
+        void writeNativeSocialPersistentCache(nativeSocialCommentsCacheKey(userId, currentSessionKey, thread), withoutPendingSocialComments(nextComments));
         return { ...current, [thread.id]: nextComments };
       });
       setThreads((current) => current.map((item) => item.id === thread.id ? { ...item, commentCount: Math.max(item.commentCount, nextCommentCount || item.commentCount) } : item));
@@ -2114,7 +3010,7 @@ export function NativeSocialScreen({
       queueCommentSnap(thread.id, "composer", id);
     } catch (error) {
       if (!editingComment && uploadedReplyImageUrls.length > 0) {
-        const cleanupResult: NativeProtectedActionCleanupResult = await cleanupNativeSocialStorageImages(uploadedReplyImageUrls, userId, accessToken, "social_reply_orphan_upload").catch(() => "failed" as const);
+        const cleanupResult: NativeProtectedActionCleanupResult = await cleanupNativeSocialStorageImages(uploadedReplyImageUrls, userId, accessToken, "social_reply_orphan_upload", currentSessionKey).catch(() => "failed" as const);
         logNativeProtectedActionFailure("[native.social] reply_orphan_cleanup", createNativeProtectedActionError({
           ok: false,
           stage: getNativeProtectedActionResult(error)?.stage || "domain_save",
@@ -2127,22 +3023,24 @@ export function NativeSocialScreen({
       if (__DEV__) console.warn("NATIVE_SOCIAL_COMMENT_OPTIMISTIC_ROLLBACK", {
         commentId: optimisticId,
         editing: Boolean(previousEditingComment),
-        message: error instanceof Error ? error.message : String(error),
         threadId: thread.id,
+        ...describeNativeSocialError(error),
       });
       if (previousEditingComment) {
+        mutatedCommentIdsByThreadRef.current.get(previousEditingComment.threadId)?.delete(previousEditingComment.comment.id);
         setCommentsByThread((current) => ({ ...current, [previousEditingComment.threadId]: previousEditingComments }));
       } else {
+        // Nothing was committed, so remove the placeholder outright rather than
+        // leaving a stamped ghost in the thread. The composer still holds the
+        // draft and media, so the reply is one tap away from being sent again.
+        mutatedCommentIdsByThreadRef.current.get(thread.id)?.delete(optimisticId);
         setCommentsByThread((current) => ({
           ...current,
-          [thread.id]: (current[thread.id] || []).map((comment) => (
-            comment.id === optimisticId ? { ...comment, localStatus: "failed" as const } : comment
-          )),
+          [thread.id]: (current[thread.id] || []).filter((comment) => comment.id !== optimisticId),
         }));
         setThreads((current) => current.map((item) => item.id === thread.id ? { ...item, commentCount: Math.max(0, item.commentCount - 1) } : item));
       }
-      const quotaMessage = resolvePostingBlockedMessage(error);
-      showQuotaBanner(quotaMessage || (editingComment ? "Unable to edit reply." : "Unable to post reply."));
+      showNotice(editingComment ? "Not saved yet — your edit is still in the box." : "Not sent yet — your reply is still in the box.");
     } finally {
       replySubmitLocksRef.current.delete(submitFlightKey);
       setReplySubmittingByThread((current) => {
@@ -2151,11 +3049,12 @@ export function NativeSocialScreen({
         return next;
       });
     }
-  }, [accessToken, clearReplyComposer, commentsByThread, currentSessionKey, editingComment, openPostingRestriction, queueCommentSnap, recordFeedEvent, replyDraft, replyMedia, replySubmittingByThread, replyTargetCommentId, resolvePostingBlockedMessage, showNotice, showQuotaBanner, socialPostingBlocked, threads, userId]);
+  }, [accessToken, clearReplyComposer, commentsByThread, currentSessionKey, editingComment, markCommentMutated, openPostingRestriction, queueCommentSnap, recordFeedEvent, replyDraft, replyMedia, replySubmittingByThread, replyTargetCommentId, showNotice, socialPostingBlocked, threads, userId]);
 
   const deleteInlineComment = useCallback((thread: NativeSocialThread, comment: NativeSocialComment) => {
     if (!userId || comment.userId !== userId) return;
     const previousComments = commentsByThread[thread.id] || [];
+    markCommentRemoved(thread.id, comment.id);
     setCommentsByThread((current) => ({
       ...current,
       [thread.id]: (current[thread.id] || []).filter((entry) => entry.id !== comment.id),
@@ -2163,12 +3062,12 @@ export function NativeSocialScreen({
     setThreads((current) => current.map((item) => item.id === thread.id ? { ...item, commentCount: Math.max(0, item.commentCount - 1) } : item));
     if (replyTargetCommentId === comment.id) clearReplyComposer();
     if (__DEV__) console.log("NATIVE_SOCIAL_COMMENT_DELETE_OPTIMISTIC_START", { commentId: comment.id, threadId: thread.id });
-    void deleteNativeSocialComment(comment.id, userId, accessToken)
+    void deleteNativeSocialComment(comment.id, comment.images, userId, accessToken, currentSessionKey)
       .then(() => {
         setCommentsByThread((current) => {
           const nextComments = (current[thread.id] || []).filter((entry) => entry.id !== comment.id);
           void purgeNativeSocialPersistentCache(userId, { commentsOnlyForThreadId: thread.id });
-          void writeNativeSocialPersistentCache(nativeSocialCommentsCacheKey(userId, currentSessionKey, thread), nextComments);
+          void writeNativeSocialPersistentCache(nativeSocialCommentsCacheKey(userId, currentSessionKey, thread), withoutPendingSocialComments(nextComments));
           return { ...current, [thread.id]: nextComments };
         });
       })
@@ -2178,14 +3077,15 @@ export function NativeSocialScreen({
           message: error instanceof Error ? error.message : String(error),
           threadId: thread.id,
         });
+        removedCommentIdsByThreadRef.current.get(thread.id)?.delete(comment.id);
         setCommentsByThread((current) => ({ ...current, [thread.id]: previousComments }));
         setThreads((current) => current.map((item) => item.id === thread.id ? { ...item, commentCount: item.commentCount + 1 } : item));
         showNotice("Unable to delete reply.");
       });
-  }, [accessToken, clearReplyComposer, commentsByThread, currentSessionKey, replyTargetCommentId, showNotice, userId]);
+  }, [accessToken, clearReplyComposer, commentsByThread, currentSessionKey, markCommentRemoved, replyTargetCommentId, showNotice, userId]);
 
   const toggleCommentSupport = useCallback((thread: NativeSocialThread, comment: NativeSocialComment) => {
-    if (!userId || !accessToken) {
+    if (!userId) {
       showNotice("Sign in required.");
       return;
     }
@@ -2210,12 +3110,12 @@ export function NativeSocialScreen({
     });
     setCommentsByThread((current) => {
       const nextComments = applyCommentSupportState(current[thread.id] || [], comment.id, nextSupported, optimisticCount);
-      void writeNativeSocialPersistentCache(nativeSocialCommentsCacheKey(userId, requestSessionKey, thread), nextComments);
+      void writeNativeSocialPersistentCache(nativeSocialCommentsCacheKey(userId, requestSessionKey, thread), withoutPendingSocialComments(nextComments));
       return { ...current, [thread.id]: nextComments };
     });
 
-    void setNativeSocialCommentSupport(comment.id, nextSupported, accessToken)
-      .then((result) => {
+    void setNativeSocialCommentSupport(comment.id, nextSupported, accessToken, userId, currentSessionKey)
+      .then(async (result) => {
         if (socialSessionKeyRef.current !== requestSessionKey) return;
         if (__DEV__) console.log("NATIVE_SOCIAL_COMMENT_SUPPORT_RPC_RESULT", {
           commentId: comment.id,
@@ -2232,9 +3132,32 @@ export function NativeSocialScreen({
         });
         setCommentsByThread((current) => {
           const nextComments = applyCommentSupportState(current[thread.id] || [], comment.id, result.supported, result.supportCount);
-          void writeNativeSocialPersistentCache(nativeSocialCommentsCacheKey(userId, requestSessionKey, thread), nextComments);
+          void writeNativeSocialPersistentCache(nativeSocialCommentsCacheKey(userId, requestSessionKey, thread), withoutPendingSocialComments(nextComments));
           return { ...current, [thread.id]: nextComments };
         });
+        if (nextSupported && result.supported && comment.userId !== userId) {
+          try {
+            const profile = await fetchNativeProfileSummary(userId, { accessToken, sessionKey: currentSessionKey });
+            await upsertNativeSocialNotificationWindow({
+              actorId: userId,
+              actorName: profile?.profile?.display_name || "Someone",
+              category: "social",
+              href: `/social?focus=${thread.id}`,
+              kind: "comment_like",
+              ownerUserId: comment.userId,
+              sessionKey: currentSessionKey,
+              subjectId: comment.id,
+              subjectType: "comment",
+              accessToken,
+            });
+          } catch (notificationError) {
+            if (__DEV__) console.warn("NATIVE_SOCIAL_COMMENT_SUPPORT_NOTIFICATION_NON_FATAL", {
+              commentId: comment.id,
+              message: notificationError instanceof Error ? notificationError.message : String(notificationError),
+              threadId: thread.id,
+            });
+          }
+        }
       })
       .catch((error) => {
         if (socialSessionKeyRef.current !== requestSessionKey) return;
@@ -2252,7 +3175,7 @@ export function NativeSocialScreen({
         });
         setCommentsByThread((current) => {
           const nextComments = applyCommentSupportState(current[thread.id] || [], comment.id, wasSupported, previousCount);
-          void writeNativeSocialPersistentCache(nativeSocialCommentsCacheKey(userId, requestSessionKey, thread), nextComments);
+          void writeNativeSocialPersistentCache(nativeSocialCommentsCacheKey(userId, requestSessionKey, thread), withoutPendingSocialComments(nextComments));
           return { ...current, [thread.id]: nextComments };
         });
         showNotice("Unable to update reply support.");
@@ -2265,7 +3188,7 @@ export function NativeSocialScreen({
     const commentPanelRef = getViewNodeRef(commentPanelNodeRefs, item.id);
     const replyComposerRef = getViewNodeRef(replyComposerNodeRefs, `${item.id}:composer`);
     return (
-      <View ref={threadRef}>
+      <View ref={threadRef} style={highlightedThreadId === item.id ? styles.focusedThreadFrame : null}>
         <NativeSocialFeedCard
           expanded={expandedIds.has(item.id)}
           linkPreview={(() => {
@@ -2277,20 +3200,45 @@ export function NativeSocialScreen({
           supported={supportedThreadIds.has(item.id)}
           thread={item}
           onOpenMap={() => {
+            if (item.mapId && userId) {
+              // Start the canonical detail request before navigation. Map reuses
+              // this exact in-flight request, so the sheet is not gated by a
+              // duplicate cold fetch after the route transition.
+              void fetchNativeMapAlertById(item.mapId, userId, {
+                accessToken,
+                sessionKey: currentSessionKey,
+                source: "alert",
+              }).catch(() => undefined);
+            }
             onNavigate(item.mapId ? `/map?alert=${encodeURIComponent(item.mapId)}` : `/map?thread=${encodeURIComponent(item.id)}`);
           }}
-          onOpenExternalLink={(url) => { void Linking.openURL(url); }}
+          onOpenExternalLink={(url) => { if (!navigateNativeHuddleLink(url, onNavigate)) void Linking.openURL(url); }}
           onOpenProfile={(profileUserId) => {
             recordFeedEvent(item.id, "profile_view");
-            setProfileUserId(profileUserId || item.userId);
+            openVisibleProfile(profileUserId || item.userId, profileUserId && profileUserId !== item.userId ? null : item.author);
           }}
-          onOpenComments={() => openThreadReplies(item)}
+          commentsOpen={expandedReplies.has(item.id)}
+          onOpenComments={() => {
+            if (expandedReplies.has(item.id)) {
+              setExpandedReplies((current) => {
+                const next = new Set(current);
+                next.delete(item.id);
+                return next;
+              });
+              clearReplyComposer();
+            } else {
+              openThreadReplies(item);
+            }
+          }}
           onOpenMore={(event) => {
             setMoreThreadAnchor(getActionMenuAnchor(event));
             setMoreThread(item);
           }}
           onOpenShare={() => setShareThread(item)}
           onOpenSupport={() => toggleSupport(item)}
+          onMediaGestureActiveChange={(gestureActive) => {
+            carouselGestureActiveRef.current = gestureActive;
+          }}
           onOpenWebThread={() => openThreadReplies(item)}
           onToggleExpanded={() => {
             setExpandedIds((current) => {
@@ -2332,7 +3280,8 @@ export function NativeSocialScreen({
               setMoreCommentAnchor(getActionMenuAnchor(event));
               setMoreCommentTarget({ comment, thread: item });
             }}
-            onOpenProfile={setProfileUserId}
+            onOpenProfile={openVisibleProfile}
+            onNavigate={onNavigate}
             onPickReplyMedia={pickReplyMedia}
             onReload={() => loadCommentsForThread(item)}
             onLoadOlder={() => loadOlderCommentsForThread(item)}
@@ -2345,7 +3294,7 @@ export function NativeSocialScreen({
         ) : null}
       </View>
     );
-  }, [commentLoadErrors, commentsByThread, commentsCanLoadOlderByThread, commentsLoadingThreads, editingComment, expandedCommentBranches, expandedIds, expandedReplies, firePendingCommentSnap, handleReplyPress, hiddenCommentIds, likedCommentIds, linkPreviewByUrl, loadCommentsForThread, loadOlderCommentsForThread, olderCommentsLoadingThreads, onNavigate, openThreadReplies, pickReplyMedia, recordFeedEvent, replyComposerAnchorCommentId, replyDraft, replyFor, replyMedia, replySubmittingByThread, replyTargetCommentId, storedSets.pinned, storedSets.pinnedAt, storedSets.saved, submitReply, supportedThreadIds, togglePinned, toggleSaved, toggleSupport, toggleCommentBranch, toggleCommentSupport, userId]);
+  }, [accessToken, clearReplyComposer, commentLoadErrors, commentsByThread, commentsCanLoadOlderByThread, commentsLoadingThreads, currentSessionKey, editingComment, expandedCommentBranches, expandedIds, expandedReplies, firePendingCommentSnap, handleReplyPress, hiddenCommentIds, highlightedThreadId, likedCommentIds, linkPreviewByUrl, loadCommentsForThread, loadOlderCommentsForThread, olderCommentsLoadingThreads, onNavigate, openThreadReplies, openVisibleProfile, pickReplyMedia, recordFeedEvent, replyComposerAnchorCommentId, replyDraft, replyFor, replyMedia, replySubmittingByThread, replyTargetCommentId, storedSets.pinned, storedSets.pinnedAt, storedSets.saved, submitReply, supportedThreadIds, togglePinned, toggleSaved, toggleSupport, toggleCommentBranch, toggleCommentSupport, userId]);
 
   const handleViewableItemsChanged = useRef(({ changed }: { changed: ViewToken<NativeSocialThread>[] }) => {
     changed.forEach((entry) => {
@@ -2375,54 +3324,175 @@ export function NativeSocialScreen({
     });
   }).current;
 
-  const header = (
-    <View>
-      <View style={[styles.pullRefreshIndicator, { height: refreshing ? 30 : pullOffset > 0 ? Math.max(16, Math.min(30, pullOffset * 0.5)) : 0, opacity: refreshing || pullOffset > 0 ? 1 : 0 }]}>
-        <ActivityIndicator animating={refreshing || pullOffset >= PULL_REFRESH_THRESHOLD} color={huddleColors.mutedText} size="small" />
-        <Text style={styles.pullRefreshText}>{refreshing ? "Refreshing..." : pullOffset >= PULL_REFRESH_THRESHOLD ? "Release to refresh" : "Pull to refresh"}</Text>
-      </View>
-      <NativeSocialFilterBar
-        query={query}
-        selectedTags={selectedTags}
-        sortMode={sortMode}
-        onClearTags={() => setSelectedTags([])}
-        onQueryChange={setQuery}
-        onSortChange={setSortMode}
-        onToggleTag={(tag) => setSelectedTags((current) => current.includes(tag) ? current.filter((item) => item !== tag) : [...current, tag])}
-      />
-    </View>
-  );
+  const feedEmptyComponent = loading && threads.length === 0 ? <NativeSocialFeedSkeleton /> : <NativeSocialEmptyState />;
 
   const handleFeedScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const rawOffset = event.nativeEvent.contentOffset.y;
     const currentOffset = Math.max(0, rawOffset);
+    const directionDelta = currentOffset - lastScrollOffsetRef.current;
+    if (currentOffset <= 8) setSocialControlsHidden(false);
+    else if (directionDelta > 5) setSocialControlsHidden(true);
+    else if (directionDelta < -5) setSocialControlsHidden(false);
     if (rawOffset < 0 && !refreshing) setPullOffset(Math.min(Math.abs(rawOffset), 64));
     else if (pullOffset !== 0 && !refreshing) setPullOffset(0);
 
     const isScrollable = event.nativeEvent.contentSize.height > event.nativeEvent.layoutMeasurement.height + 8;
     if (!isScrollable) {
+      if (composeFabRevealTimeoutRef.current) {
+        clearTimeout(composeFabRevealTimeoutRef.current);
+        composeFabRevealTimeoutRef.current = null;
+      }
       setHideComposeFab(false);
+      setNavMinimized(false);
       lastScrollOffsetRef.current = currentOffset;
       return;
     }
-    const distanceToBottom = event.nativeEvent.contentSize.height - currentOffset - event.nativeEvent.layoutMeasurement.height;
-    const maxScrollDistance = Math.max(0, event.nativeEvent.contentSize.height - event.nativeEvent.layoutMeasurement.height);
-    const isShortFeed = maxScrollDistance <= 220;
-    const isScrollingUp = currentOffset < lastScrollOffsetRef.current - 4;
-    const isNearTop = currentOffset <= 24;
-    if (isShortFeed || isScrollingUp || isNearTop) {
-      setHideComposeFab(false);
-    } else {
-      setHideComposeFab(distanceToBottom < 220);
+    const delta = Math.abs(currentOffset - lastScrollOffsetRef.current);
+    const shouldHideForMotion = delta > 4;
+    if (shouldHideForMotion) {
+      if (composeFabRevealTimeoutRef.current) clearTimeout(composeFabRevealTimeoutRef.current);
+      composeFabRevealTimeoutRef.current = setTimeout(() => {
+        composeFabRevealTimeoutRef.current = null;
+        setHideComposeFab(false);
+      }, 150);
+      setHideComposeFab(true);
     }
+    applyNavMinimizeFromOffset(currentOffset, lastScrollOffsetRef.current);
     lastScrollOffsetRef.current = currentOffset;
   }, [pullOffset, refreshing]);
 
+  // SO12: category tabs — single-select with a coupled content transition.
+  // Ordered list mirrors the filter bar: index 0 = "All", then each SOCIAL_TAG.
+  // Both tab taps and horizontal swipes route through selectCategory so the
+  // animation, haptics and tab-strip indicator stay in sync.
+  //
+  // Motion: a two-phase directional handoff, not a hard cut. The outgoing feed
+  // glides out and dissolves (110ms, ease-in), the data swap + scroll-to-top
+  // happen while the layer is invisible (the only frame that could ever look
+  // "choppy" is hidden), then the incoming feed glides in from the direction
+  // of travel and settles on a spring while fading up (~240ms). Feels like
+  // paging between physical surfaces rather than re-filtering a list.
+  const feedSlideX = useRef(new Animated.Value(0)).current;
+  const feedOpacity = useRef(new Animated.Value(1)).current;
+  const feedTransitionRunningRef = useRef(false);
+  // Monotonic id so an interrupted transition's completion callback can tell that it
+  // has been superseded and must not commit its (now stale) category swap.
+  const feedTransitionGenerationRef = useRef(0);
+
+  const runFeedTransition = useCallback((direction: 1 | -1, swap: () => void) => {
+    if (isReduceMotionActive()) {
+      feedSlideX.setValue(0);
+      feedOpacity.setValue(1);
+      swap();
+      return;
+    }
+    // Rapid re-taps: the newest transition owns the layer — never queue animations.
+    //
+    // stopAnimation() still invokes the interrupted animation's completion callback
+    // (with finished:false), so without a generation guard a superseded transition
+    // would run its swap() after the newer one had already started, committing the
+    // category the user just moved away from. Only the current generation may swap.
+    const generation = feedTransitionGenerationRef.current + 1;
+    feedTransitionGenerationRef.current = generation;
+    feedSlideX.stopAnimation();
+    feedOpacity.stopAnimation();
+    feedTransitionRunningRef.current = true;
+    Animated.parallel([
+      Animated.timing(feedSlideX, { toValue: direction * -32, duration: 110, easing: Easing.in(Easing.quad), useNativeDriver: true }),
+      Animated.timing(feedOpacity, { toValue: 0, duration: 110, easing: Easing.in(Easing.quad), useNativeDriver: true }),
+    ]).start(() => {
+      if (feedTransitionGenerationRef.current !== generation) return;
+      swap();
+      feedSlideX.setValue(direction * 44);
+      Animated.parallel([
+        Animated.spring(feedSlideX, { toValue: 0, useNativeDriver: true, speed: 16, bounciness: 4 }),
+        Animated.timing(feedOpacity, { toValue: 1, duration: 240, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      ]).start(() => {
+        if (feedTransitionGenerationRef.current !== generation) return;
+        feedTransitionRunningRef.current = false;
+      });
+    });
+  }, [feedOpacity, feedSlideX]);
+
+  // category: null = "All".
+  //
+  // The "already here" check reads categoryTargetRef, NOT selectedTags. selectedTags
+  // only updates when the transition's swap lands ~110ms later, so comparing against
+  // it dropped taps made during a transition: tap a topic then immediately tap All,
+  // and selectedTags was still [] so this returned early and the All tap vanished.
+  // The ref records intent synchronously, so every tap is honoured.
+  const selectCategory = useCallback((category: string | null) => {
+    const currentCategory = categoryTargetRef.current;
+    if (currentCategory === category) return; // already here — no-op (and no transition)
+    const currentIndex = currentCategory === null ? 0 : Math.max(0, SOCIAL_TAGS.indexOf(currentCategory) + 1);
+    const nextIndex = category === null ? 0 : SOCIAL_TAGS.indexOf(category) + 1;
+    categoryTargetRef.current = category;
+    haptic.selectTab();
+    releaseFocusedThread();
+    runFeedTransition(nextIndex >= currentIndex ? 1 : -1, () => {
+      listRef.current?.scrollToOffset({ offset: 0, animated: false });
+      setSelectedTags(category === null ? [] : [category]);
+      // Switching topic is a pure client-side filter over the already-loaded feed —
+      // no network work is attached to the tap. Freshness comes from the entry load,
+      // pull-to-refresh, and the realtime new-post bus. The bounded topic-coverage
+      // effect still paginates in the background if a topic genuinely has no rows.
+    });
+  }, [releaseFocusedThread, runFeedTransition]);
+
+  // Swipe left → next category (right neighbour); swipe right → previous.
+  // At an edge, give a light boundary tap instead of switching.
+  const goToAdjacentCategory = useCallback((direction: 1 | -1) => {
+    const lastIndex = SOCIAL_TAGS.length; // "All" occupies index 0
+    // Same reasoning as selectCategory: read intent, not the lagging rendered state.
+    const currentTarget = categoryTargetRef.current;
+    const currentIndex = currentTarget === null ? 0 : Math.max(0, SOCIAL_TAGS.indexOf(currentTarget) + 1);
+    const nextIndex = currentIndex + direction;
+    if (nextIndex < 0 || nextIndex > lastIndex) {
+      haptic.swipeReturn(); // rubber-band feedback at the ends
+      return;
+    }
+    selectCategory(nextIndex === 0 ? null : SOCIAL_TAGS[nextIndex - 1]);
+  }, [selectCategory]);
+
+  // Keep the responder stable across renders while always calling the latest handler.
+  const goToAdjacentCategoryRef = useRef(goToAdjacentCategory);
+  useEffect(() => { goToAdjacentCategoryRef.current = goToAdjacentCategory; }, [goToAdjacentCategory]);
+
+  const feedSwipeResponder = useMemo(() => {
+    const HORIZONTAL_ACTIVATE = 24;
+    const COMMIT_DISTANCE = 56;
+    const VELOCITY_PROJECTION = 50;
+    const shouldClaim = (dx: number, dy: number) => !carouselGestureActiveRef.current && Math.abs(dx) > HORIZONTAL_ACTIVATE && Math.abs(dx) > Math.abs(dy) * 1.6;
+    return PanResponder.create({
+      // Bubble phase lets protected child carousels keep the gesture first.
+      onMoveShouldSetPanResponder: (_evt, gesture) => shouldClaim(gesture.dx, gesture.dy),
+      onPanResponderRelease: (_evt, gesture) => {
+        if (Math.abs(gesture.dx) <= Math.abs(gesture.dy)) return;
+        const projected = gesture.dx + gesture.vx * VELOCITY_PROJECTION;
+        if (Math.abs(projected) < COMMIT_DISTANCE) return;
+        goToAdjacentCategoryRef.current(projected < 0 ? 1 : -1);
+      },
+    });
+  }, []);
+
+  const header = (
+    <View>
+      <NativeSocialFilterBar
+        controlsHidden={socialControlsHidden}
+        query={query}
+        selectedTags={selectedTags}
+        sortMode={sortMode}
+        onClearTags={() => { selectCategory(null); }}
+        onQueryChange={(value) => { releaseFocusedThread(); setQuery(value); }}
+        onSortChange={setSortMode}
+        onToggleTag={(tag) => { selectCategory(tag); }}
+      />
+    </View>
+  );
+
   return (
     <View style={styles.root}>
-      {loading && threads.length === 0 ? (
-        <NativeLoadingState />
-      ) : error ? (
+      {error && threads.length === 0 ? (
         <View style={styles.centerState}>
           <Text style={styles.errorText}>{error}</Text>
           <Pressable accessibilityRole="button" onPress={() => void load("reset")} style={({ pressed }) => [styles.retryButton, pressed ? styles.pressed : null]}>
@@ -2445,26 +3515,36 @@ export function NativeSocialScreen({
             }
           }}
         >
+          {/* Tab strip lives OUTSIDE the animated layer AND outside the swipe
+              responder below. It has its own horizontal ScrollView (scrolling
+              to reveal "All" once you're several tabs to the right), and that
+              scroll must never compete with the feed's topic-swipe gesture —
+              putting feedSwipeResponder this high up used to make exactly that
+              contest happen, which is what made "All" hard to reach once it had
+              scrolled off-screen. */}
+          {header}
+          <Animated.View {...feedSwipeResponder.panHandlers} style={[styles.feedSlideLayer, { opacity: feedOpacity, transform: [{ translateX: feedSlideX }] }]}>
           <FlatList
             ref={listRef}
             alwaysBounceVertical
             bounces
             contentContainerStyle={styles.listContent}
             data={visibleThreads}
-            extraData={{ expandedIds, pinned: storedSets.pinned, pinnedAt: storedSets.pinnedAt, saved: storedSets.saved, supportedThreadIds }}
+            extraData={{ expandedIds, highlightedThreadId, pinned: storedSets.pinned, pinnedAt: storedSets.pinnedAt, saved: storedSets.saved, supportedThreadIds }}
             keyExtractor={(item) => item.id}
             keyboardShouldPersistTaps="handled"
-            ListEmptyComponent={<NativeSocialEmptyState />}
+            ListEmptyComponent={feedEmptyComponent}
             ListFooterComponent={loadingMore ? <NativeLoadingState variant="inline" /> : null}
-            ListHeaderComponent={header}
-            onEndReached={() => void load("more")}
-            onEndReachedThreshold={0.3}
+            onEndReached={() => {
+              if (visibleThreads.length > 0 && hasMore) void load("more");
+            }}
+            onEndReachedThreshold={0.65}
             refreshControl={<RefreshControl enabled refreshing={refreshing} onRefresh={() => { haptic.selectTab(); void load("refresh"); }} tintColor={huddleColors.blue} colors={[huddleColors.blue]} progressViewOffset={huddleSocial.feedTopInset} />}
             onScroll={handleFeedScroll}
             onScrollToIndexFailed={(info) => {
               listRef.current?.scrollToOffset({
                 animated: true,
-                offset: Math.max(0, info.averageItemLength * info.index - huddleSocial.commentComposerSnapOffset),
+                offset: Math.max(0, info.averageItemLength * info.index - Math.max(0, listHeightRef.current / 2)),
               });
             }}
             onViewableItemsChanged={handleViewableItemsChanged}
@@ -2474,26 +3554,43 @@ export function NativeSocialScreen({
             style={styles.list}
             viewabilityConfig={viewabilityConfigRef.current}
           />
+          </Animated.View>
         </View>
       )}
 
-      <Animated.View pointerEvents={hideComposeFab ? "none" : "auto"} style={[styles.composeFabWrap, { opacity: hideComposeFab ? 0 : 1, transform: [{ translateY: composeFabTranslateYRef.current }] }]}>
+      {hasNewPosts ? (
+        <View pointerEvents="box-none" style={styles.newPostsPillWrap}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Show new posts"
+            onPress={showNewPosts}
+            style={({ pressed }) => [styles.newPostsPill, pressed ? styles.newPostsPillPressed : null]}
+          >
+            <Feather color={huddleColors.onPrimary} name="arrow-up" size={huddleType.label} />
+            <Text style={styles.newPostsPillText}>New posts</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      <Animated.View pointerEvents={hideComposeFab ? "none" : "auto"} style={[styles.composeFabWrap, { opacity: composeFabOpacityRef.current }]}>
         <Pressable accessibilityRole="button" accessibilityLabel="Compose post" onPress={() => { if (socialPostingBlocked) { haptic.warning(); openPostingRestriction(); } else { haptic.primaryConfirm(); setEditingThread(null); setComposerOpen(true); } }} style={({ pressed }) => [styles.composeFab, pressed ? styles.composeFabPressed : null]}>
           <Feather color={huddleColors.iconMuted} name="edit-3" size={huddleType.h3} />
         </Pressable>
       </Animated.View>
-      {notice ? <View pointerEvents="none" style={styles.noticeToast}><Text style={styles.noticeToastText}>{notice}</Text></View> : null}
-      <NativeSocialComposerModal accessToken={accessToken} currentUserId={userId} editingThread={editingThread} isGoldUser={isGoldUser} linkPreviewByUrl={linkPreviewByUrl} open={composerOpen} onClose={closeComposer} onSubmit={submitComposer} />
+      {notice ? <NativeToast message={notice} /> : null}
+      <NativeSocialComposerModal accessToken={accessToken} currentSessionKey={currentSessionKey} currentUserId={userId} editingThread={editingThread} isGoldUser={isGoldUser} linkPreviewByUrl={linkPreviewByUrl} onNavigate={onNavigate} open={composerOpen} onClose={closeComposer} onSubmit={submitComposer} />
       <NativeSocialMoreModal anchor={moreThreadAnchor} currentUserId={userId} open={Boolean(moreThread)} thread={moreThread} onBlock={confirmBlockThreadAuthor} onClose={() => { setMoreThread(null); setMoreThreadAnchor(null); }} onDelete={confirmDeleteThread} onEdit={(thread) => { setMoreThread(null); setMoreThreadAnchor(null); setEditingThread(thread); setComposerOpen(true); }} onHide={(thread) => { setHiddenThreadIds((current) => new Set([...current, thread.id])); recordFeedEvent(thread.id, "hide"); setMoreThread(null); setMoreThreadAnchor(null); }} onReport={(thread) => { setReportThread(thread); setMoreThread(null); setMoreThreadAnchor(null); }} />
       <NativeSocialShareModal accessToken={accessToken} currentUserId={userId} open={Boolean(shareThread)} thread={shareThread} onClose={() => setShareThread(null)} onNativeShare={openNativeShare} onNotice={showNotice} onShared={(threadId, count) => { recordFeedEvent(threadId, "share"); setThreads((current) => current.map((item) => item.id === threadId ? { ...item, shareCount: count ?? item.shareCount + 1 } : item)); }} />
-      <NativeSocialReportModal accessToken={accessToken} currentUserId={userId} open={Boolean(reportThread)} target={reportThread} onClose={() => setReportThread(null)} onNotice={showNotice} onSubmitStart={() => {
+      <NativeSocialReportModal accessToken={accessToken} currentUserId={userId} sessionKey={currentSessionKey} open={Boolean(reportThread)} subject={reportThread ? { type: "social_post", id: reportThread.id, label: "Social Post" } : null} target={reportThread} onClose={() => setReportThread(null)} onNotice={showNotice} onSubmitStart={() => {
         const targetId = reportThread?.id;
         if (!targetId) return;
         const previousHiddenThreadIds = hiddenThreadIds;
         socialReportRollbackRef.current = () => setHiddenThreadIds(previousHiddenThreadIds);
         setHiddenThreadIds((current) => new Set([...current, targetId]));
+        markThreadRemoved(targetId);
         if (__DEV__) console.log("NATIVE_SOCIAL_POST_REPORT_OPTIMISTIC_START", { threadId: targetId });
       }} onSubmitFailure={() => {
+        if (reportThread?.id) removedThreadIdsRef.current.delete(reportThread.id);
         socialReportRollbackRef.current?.();
         socialReportRollbackRef.current = null;
         if (__DEV__) console.warn("NATIVE_SOCIAL_POST_REPORT_OPTIMISTIC_ROLLBACK", { threadId: reportThread?.id || null });
@@ -2502,19 +3599,22 @@ export function NativeSocialScreen({
         if (userId) void purgeNativeSocialPersistentCache(userId);
         if (reportThread) setThreads((current) => current.filter((thread) => thread.id !== reportThread.id));
       }} />
-      <NativeSocialReportModal accessToken={accessToken} currentUserId={userId} open={Boolean(commentReportTarget)} target={commentReportTarget ? { userId: commentReportTarget.userId, author: commentReportTarget.author } : null} onClose={() => setCommentReportTarget(null)} onNotice={showNotice} onSubmitStart={() => {
+      <NativeSocialReportModal accessToken={accessToken} currentUserId={userId} sessionKey={currentSessionKey} open={Boolean(commentReportTarget)} subject={commentReportTarget ? { type: commentReportTarget.parentCommentId ? "social_reply" : "social_comment", id: commentReportTarget.id, label: commentReportTarget.parentCommentId ? "Social Reply" : "Social Comment" } : null} target={commentReportTarget ? { userId: commentReportTarget.userId, author: commentReportTarget.author } : null} onClose={() => setCommentReportTarget(null)} onNotice={showNotice} onSubmitStart={() => {
         const targetId = commentReportTarget?.id;
         if (!targetId) return;
         const previousHiddenCommentIds = hiddenCommentIds;
         socialReportRollbackRef.current = () => setHiddenCommentIds(previousHiddenCommentIds);
         setHiddenCommentIds((current) => new Set([...current, targetId]));
+        if (commentReportTarget?.threadId) markCommentRemoved(commentReportTarget.threadId, targetId);
         if (__DEV__) console.log("NATIVE_SOCIAL_COMMENT_REPORT_OPTIMISTIC_START", { commentId: targetId });
       }} onSubmitFailure={() => {
+        if (commentReportTarget?.threadId && commentReportTarget?.id) removedCommentIdsByThreadRef.current.get(commentReportTarget.threadId)?.delete(commentReportTarget.id);
         socialReportRollbackRef.current?.();
         socialReportRollbackRef.current = null;
         if (__DEV__) console.warn("NATIVE_SOCIAL_COMMENT_REPORT_OPTIMISTIC_ROLLBACK", { commentId: commentReportTarget?.id || null });
       }} onSubmitSuccess={() => {
         socialReportRollbackRef.current = null;
+        if (commentReportTarget?.threadId && commentReportTarget?.id) markCommentRemoved(commentReportTarget.threadId, commentReportTarget.id);
         if (userId) void purgeNativeSocialPersistentCache(userId);
       }} />
       <NativeSocialConfirmModal
@@ -2546,17 +3646,6 @@ export function NativeSocialScreen({
         onConfirm={executeBlockCommentAuthor}
       />
       <NativeSocialInfoModal
-        actionLabel="See plans"
-        body={quotaModalMessage}
-        open={Boolean(quotaModalMessage)}
-        title="Posting limit reached"
-        onAction={() => {
-          setQuotaModalMessage("");
-          onNavigate("/premium");
-        }}
-        onClose={() => setQuotaModalMessage("")}
-      />
-      <NativeSocialInfoModal
         body="Your ability to post or reply has been limited due to recent account activity that does not meet our community safety standards."
         open={socialRestrictionModalOpen}
         title="Posting access limited"
@@ -2581,6 +3670,7 @@ export function NativeSocialScreen({
           setReplyTargetCommentId(comment.parentCommentId);
           setReplyComposerAnchorCommentId(comment.id);
           setReplyDraft(comment.content);
+          setReplyMedia(hydrateEditReplyComposerMedia(comment));
         }}
         onHide={(comment) => {
           setHiddenCommentIds((current) => new Set([...current, comment.id]));
@@ -2600,12 +3690,16 @@ export function NativeSocialScreen({
       />
       <NativePublicProfileModal
         accessToken={accessToken ?? null}
-        currentUserId={userId}
+        viewerUserId={userId}
         sessionKey={sessionKey}
-        onClose={() => setProfileUserId(null)}
+        fallbackData={profileFallbackData}
+        onClose={() => {
+          setProfileUserId(null);
+          setProfileFallbackData(null);
+        }}
         onNavigate={onNavigate}
         open={Boolean(profileUserId)}
-        userId={profileUserId}
+        profileUserId={profileUserId}
       />
     </View>
   );
@@ -2692,7 +3786,7 @@ function NativeSocialMentionSuggestionList({
         >
           <View style={styles.mentionSuggestionAvatar}>
             {suggestion.avatarUrl ? (
-              <ExpoImage accessibilityIgnoresInvertColors cachePolicy="memory-disk" contentFit="cover" source={{ uri: suggestion.avatarUrl }} style={styles.shareTargetAvatarImage as ImageStyle} transition={120} />
+              <ExpoImage accessibilityIgnoresInvertColors cachePolicy="memory-disk" contentFit="cover" key={nativeFreshImageKey(suggestion.avatarUrl, suggestion.avatarUrl)} source={{ uri: nativeFreshImageUri(suggestion.avatarUrl, suggestion.avatarUrl) }} style={styles.shareTargetAvatarImage as ImageStyle} transition={120} />
             ) : (
               <Text style={styles.mentionSuggestionInitial}>{(suggestion.socialId || "U").charAt(0).toUpperCase()}</Text>
             )}
@@ -2723,6 +3817,7 @@ function NativeSocialInlineReplies({
   onLikeComment,
   onLoadOlder,
   onMoreComment,
+  onNavigate,
   onOpenProfile,
   onPanelLayout,
   onPickReplyMedia,
@@ -2768,7 +3863,8 @@ function NativeSocialInlineReplies({
   onLikeComment: (comment: NativeSocialComment) => void;
   onLoadOlder: () => void;
   onMoreComment: (comment: NativeSocialComment, event: GestureResponderEvent) => void;
-  onOpenProfile: (userId: string) => void;
+  onNavigate: (path: string) => void;
+  onOpenProfile: (userId: string, author?: Partial<NativeSocialAuthor> | null) => void;
   onPanelLayout: () => void;
   onPickReplyMedia: () => void;
   onReload: () => void;
@@ -2783,8 +3879,8 @@ function NativeSocialInlineReplies({
   const [truncatedCommentTextIds, setTruncatedCommentTextIds] = useState<Set<string>>(new Set());
   const [mentionQuery, setMentionQuery] = useState<NativeActiveMentionQuery | null>(null);
   const [mentionSuggestions, setMentionSuggestions] = useState<NativeSocialMentionSuggestion[]>([]);
-  const replyFirstUrl = extractNativeSocialFirstHttpUrl(replyDraft);
-  const displayedReplyDraft = replyFirstUrl ? replyDraft.replace(replyFirstUrl, "").trim() : replyDraft;
+  const replyPreviewUrl = extractCompletedComposerPreviewUrl(replyDraft);
+  const displayedReplyDraft = replyPreviewUrl ? stripNativeSocialExternalUrlFromText(replyDraft, replyPreviewUrl) : replyDraft;
   const remainingReplyWords = MAX_COMPOSER_WORDS - countWords(replyDraft);
   const mentionUserIdByHandle = useMemo(() => {
     const next = new Map<string, string>();
@@ -2838,24 +3934,22 @@ function NativeSocialInlineReplies({
         </Text>
       ) : null}
       <View style={styles.replyComposerField}>
-        <View pointerEvents="none" style={styles.replyComposerTextLayerWrap}>
-          <Text style={styles.replyComposerTextLayer}>
-            {displayedReplyDraft ? renderReplyComposerLayer(displayedReplyDraft) : <Text style={styles.replyComposerPlaceholderText}>Leave a comment</Text>}
-          </Text>
+        <View style={styles.replyComposerInputViewport}>
+          <NativeSocialReplyComposerInput
+            ref={replyInputRef}
+            onBlur={() => setTimeout(() => setMentionQuery(null), 120)}
+            onChangeText={(value) => {
+              const nextValue = replyPreviewUrl ? `${value.trimEnd()} ${replyPreviewUrl} `.trimStart() : value;
+              onUpdateReplyDraft(nextValue);
+              setMentionQuery(findNativeActiveMentionQuery(nextValue, value.length));
+            }}
+            style={styles.replyComposerInput}
+            onSelectionChange={(event) => setMentionQuery(findNativeActiveMentionQuery(replyDraft, event.nativeEvent.selection.start))}
+            placeholder="Leave a comment"
+            scrollEnabled
+            value={displayedReplyDraft}
+          />
         </View>
-        <NativeSocialReplyComposerInput
-          ref={replyInputRef}
-          onBlur={() => setTimeout(() => setMentionQuery(null), 120)}
-          onChangeText={(value) => {
-            const nextValue = replyFirstUrl ? `${value.trimEnd()} ${replyFirstUrl}`.trim() : value;
-            onUpdateReplyDraft(nextValue);
-            setMentionQuery(findNativeActiveMentionQuery(nextValue, value.length));
-          }}
-          style={styles.replyComposerInput}
-          onSelectionChange={(event) => setMentionQuery(findNativeActiveMentionQuery(replyDraft, event.nativeEvent.selection.start))}
-          placeholder=""
-          value={displayedReplyDraft}
-        />
         {mentionQuery && mentionSuggestions.length > 0 ? (
           <NativeSocialMentionSuggestionList
             suggestions={mentionSuggestions}
@@ -2867,20 +3961,24 @@ function NativeSocialInlineReplies({
           />
         ) : null}
         {quotedReplyTarget ? <NativeSocialCompactReplyQuote comment={quotedReplyTarget} /> : null}
-        {replyFirstUrl ? (
+        {replyPreviewUrl ? (
           <NativeSocialExternalLinkPreview
-            linkPreview={linkPreviewByUrl[replyFirstUrl] || null}
-            onOpen={(url) => void Linking.openURL(url)}
-            url={replyFirstUrl}
+            linkPreview={linkPreviewByUrl[replyPreviewUrl] || null}
+            onOpen={(url) => { if (!navigateNativeHuddleLink(url, onNavigate)) void Linking.openURL(url); }}
+            onRemove={() => {
+              onUpdateReplyDraft(stripNativeSocialExternalUrlFromText(replyDraft, replyPreviewUrl));
+              setMentionQuery(null);
+            }}
+            url={replyPreviewUrl}
           />
         ) : null}
         <View style={styles.replyComposerControls}>
-          <Pressable accessibilityRole="button" disabled={Boolean(editingComment)} onPress={onPickReplyMedia} style={({ pressed }) => [styles.replyComposerIconButton, editingComment ? styles.disabled : null, pressed ? styles.pressed : null]}>
+          <Pressable accessibilityLabel="Add photo to reply" accessibilityRole="button" disabled={Boolean(editingComment)} onPress={onPickReplyMedia} style={({ pressed }) => [styles.replyComposerIconButton, editingComment ? styles.disabled : null, pressed ? styles.pressed : null]}>
             <Feather color={huddleColors.iconMuted} name="image" size={huddleSocial.actionIconSize} />
           </Pressable>
           {remainingReplyWords < 0 ? <Text style={styles.wordCounterError}>{remainingReplyWords}</Text> : null}
-          <Pressable accessibilityRole="button" disabled={replySubmitting || !replyDraft.trim() || remainingReplyWords < 0} onPress={onSubmitReply} style={({ pressed }) => [styles.replySendButton, replySubmitting || !replyDraft.trim() || remainingReplyWords < 0 ? styles.replySendButtonDisabled : null, pressed ? styles.pressed : null]}>
-            {replySubmitting ? <ActivityIndicator color={huddleColors.iconMuted} /> : <Feather color={replySubmitting || !replyDraft.trim() || remainingReplyWords < 0 ? huddleColors.iconSubtle : huddleColors.onPrimary} name="arrow-up" size={huddleSocial.actionIconSize} />}
+          <Pressable accessibilityLabel="Send reply" accessibilityRole="button" disabled={replySubmitting || !replyDraft.trim() || remainingReplyWords < 0} onPress={onSubmitReply} style={({ pressed }) => [styles.replySendButton, replySubmitting || !replyDraft.trim() || remainingReplyWords < 0 ? styles.replySendButtonDisabled : null, pressed ? styles.pressed : null]}>
+            {replySubmitting ? <NativeSpinner tone="muted" /> : <Feather color={replySubmitting || !replyDraft.trim() || remainingReplyWords < 0 ? huddleColors.iconSubtle : huddleColors.onPrimary} name="arrow-up" size={huddleSocial.actionIconSize} />}
           </Pressable>
         </View>
       </View>
@@ -2888,7 +3986,7 @@ function NativeSocialInlineReplies({
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.replyMediaRow}>
           {replyMedia.map((media, index) => (
             <View key={`${media.uri}-${index}`} style={[styles.mediaThumbWrap, { aspectRatio: composerMediaPreviewAspect(media) }]}>
-              <ExpoImage accessibilityIgnoresInvertColors cachePolicy="memory-disk" contentFit="cover" source={{ uri: media.uri }} style={styles.mediaThumb as ImageStyle} transition={120} />
+              <ExpoImage accessibilityIgnoresInvertColors cachePolicy="memory-disk" contentFit="cover" key={nativeFreshImageKey(media.uri, media.uri)} source={{ uri: nativeFreshImageUri(media.uri, media.uri) }} style={styles.mediaThumb as ImageStyle} transition={120} />
               <Pressable accessibilityLabel="Remove image" accessibilityRole="button" onPress={() => onRemoveReplyMedia(index)} style={styles.mediaRemoveButton}>
                 <Feather color={huddleColors.onPrimary} name="x" size={14} />
               </Pressable>
@@ -2912,10 +4010,9 @@ function NativeSocialInlineReplies({
           <Text style={styles.commentActionText}>Retry</Text>
         </Pressable>
       ) : null}
-      {!loading && !error && tree.threadedComments.length === 0 && !activeComposer ? <Text style={styles.emptyCommentText}>No replies yet.</Text> : null}
       {!loading && !error && canLoadOlder ? (
         <Pressable accessibilityRole="button" disabled={loadingOlder} onPress={onLoadOlder} style={({ pressed }) => [styles.inlineReplyState, pressed ? styles.pressed : null]}>
-          {loadingOlder ? <ActivityIndicator color={huddleColors.blue} /> : <Text style={styles.commentActionText}>Load older replies</Text>}
+          {loadingOlder ? <NativeSpinner tone="accent" /> : <Text style={styles.commentActionText}>Load older replies</Text>}
         </Pressable>
       ) : null}
       {tree.threadedComments.map((item, index) => {
@@ -2951,12 +4048,12 @@ function NativeSocialInlineReplies({
               ) : null)}
               {item.parentRailColumn !== null && !item.isMaxDepthContinuation ? <View style={[styles.replyRailDot, { left: item.parentRailColumn * huddleSocial.replyRailColumnWidth + railOffset - indent }]} /> : null}
               {item.hasVisibleChildComments && !item.activeRailColumns[item.childRailColumn] ? <View style={[styles.replyChildRail, { left: item.childRailColumn * huddleSocial.replyRailColumnWidth + railOffset - indent }]} /> : null}
-              <Pressable accessibilityRole="button" onPress={() => onOpenProfile(comment.userId)} style={styles.commentAvatar}>
-                {comment.author.avatarUrl ? <ExpoImage accessibilityIgnoresInvertColors cachePolicy="memory-disk" contentFit="cover" source={{ uri: comment.author.avatarUrl }} style={styles.shareTargetAvatarImage as ImageStyle} transition={120} /> : <Text style={styles.commentAvatarText}>{(comment.author.socialId || comment.author.displayName || "U").charAt(0).toUpperCase()}</Text>}
+              <Pressable accessibilityRole="button" onPress={() => onOpenProfile(comment.userId, comment.author)} style={styles.commentAvatar}>
+                {comment.author.avatarUrl ? <ExpoImage accessibilityIgnoresInvertColors cachePolicy="memory-disk" contentFit="cover" key={nativeFreshImageKey(comment.author.avatarUrl, comment.author.avatarUrl)} source={{ uri: nativeFreshImageUri(comment.author.avatarUrl, comment.author.avatarUrl) }} style={styles.shareTargetAvatarImage as ImageStyle} transition={120} /> : <Text style={styles.commentAvatarText}>{(comment.author.displayName || comment.author.socialId || "U").charAt(0).toUpperCase()}</Text>}
               </Pressable>
               <View style={styles.commentBody}>
                 <View style={styles.commentHeader}>
-                  <Text numberOfLines={1} style={styles.commentAuthor}>{comment.author.socialId || comment.author.displayName || "User"}</Text>
+                  <Text numberOfLines={1} onPress={() => onOpenProfile(comment.userId, comment.author)} style={styles.commentAuthor}>{comment.author.socialId || comment.author.displayName || "User"}</Text>
                   <Text style={styles.commentTime}>{compactTime(comment.createdAt)}</Text>
                 </View>
                 <Text
@@ -2989,21 +4086,25 @@ function NativeSocialInlineReplies({
                 {commentPreviewUrl ? (
                   <NativeSocialExternalLinkPreview
                     linkPreview={linkPreviewByUrl[commentPreviewUrl] || null}
-                    onOpen={(url) => void Linking.openURL(url)}
+                    onOpen={(url) => { if (!navigateNativeHuddleLink(url, onNavigate)) void Linking.openURL(url); }}
                     url={commentPreviewUrl}
                   />
                 ) : null}
-                {comment.images.length > 0 ? <NativeSocialCommentMediaCarousel images={comment.images} /> : null}
+                {comment.images.length > 0 ? <NativeSocialCommentMediaCarousel comment={comment} /> : null}
                 {comment.localStatus || isPendingSocialId(comment.id) ? (
-                  <Text style={styles.commentStatusText}>{comment.localStatus === "failed" ? "Could not post" : "Posting..."}</Text>
+                  <Text style={styles.commentStatusText}>Posting…</Text>
                 ) : null}
                 <View style={styles.commentIconActions}>
-                  <Pressable accessibilityRole="button" accessibilityState={{ selected: likedCommentIds.has(comment.id) }} hitSlop={huddleSpacing.x2} onPress={() => onLikeComment(comment)} style={({ pressed }) => [styles.commentIconButton, likedCommentIds.has(comment.id) ? styles.commentIconButtonActive : null, pressed ? styles.pressed : null]}>
-                    <Ionicons color={likedCommentIds.has(comment.id) ? huddleColors.blue : huddleColors.iconMuted} name="paw-outline" size={huddleSocial.actionIconSize} />
+                  <Pressable accessibilityRole="button" accessibilityState={{ selected: likedCommentIds.has(comment.id) }} hitSlop={huddleSpacing.x2} onPress={() => onLikeComment(comment)} style={({ pressed }) => [styles.commentIconButton, pressed ? styles.pressed : null]}>
+                    <MaterialCommunityIcons
+                      color={likedCommentIds.has(comment.id) ? huddleColors.coral : huddleColors.iconMuted}
+                      name={likedCommentIds.has(comment.id) ? "paw" : "paw-outline"}
+                      size={huddleSocial.actionIconSize}
+                    />
                     {comment.supportCount > 0 ? <View style={styles.commentActionBadge}><Text style={styles.commentActionBadgeText}>{comment.supportCount}</Text></View> : null}
                   </Pressable>
-                  <Pressable accessibilityRole="button" accessibilityLabel={canExpandBranch ? `${branchExpanded ? "Hide" : "View"} ${replyBadgeCount} ${replyBadgeCount === 1 ? "reply" : "replies"} and reply` : "Reply to comment"} hitSlop={huddleSpacing.x2} onPress={() => onReplyPress(item)} style={({ pressed }) => [styles.commentIconButton, replyFor === thread.id && replyTargetCommentId === comment.id ? styles.commentIconButtonActive : null, pressed ? styles.pressed : null]}>
-                    <Feather color={replyFor === thread.id && replyTargetCommentId === comment.id ? huddleColors.blue : huddleColors.iconMuted} name="message-circle" size={huddleSocial.actionIconSize} />
+                  <Pressable accessibilityRole="button" accessibilityLabel={canExpandBranch ? `${branchExpanded ? "Hide" : "View"} ${replyBadgeCount} ${replyBadgeCount === 1 ? "reply" : "replies"} and reply` : "Reply to comment"} hitSlop={huddleSpacing.x2} onPress={() => onReplyPress(item)} style={({ pressed }) => [styles.commentIconButton, pressed ? styles.pressed : null]}>
+                    <Feather color={replyFor === thread.id && replyTargetCommentId === comment.id ? huddleColors.coral : huddleColors.iconMuted} name="message-circle" size={huddleSocial.actionIconSize} />
                     {canExpandBranch ? <View style={styles.commentActionBadge}><Text style={styles.commentActionBadgeText}>{replyBadgeCount}</Text></View> : null}
                   </Pressable>
                   <Pressable accessibilityRole="button" accessibilityLabel="More reply actions" hitSlop={huddleSpacing.x2} onPress={(event) => onMoreComment(comment, event)} style={({ pressed }) => [styles.commentIconButton, pressed ? styles.pressed : null]}>
@@ -3023,20 +4124,24 @@ function NativeSocialInlineReplies({
 
 function NativeSocialComposerModal({
   accessToken,
+  currentSessionKey,
   currentUserId,
   editingThread,
   isGoldUser,
   linkPreviewByUrl,
   onClose,
+  onNavigate,
   onSubmit,
   open,
 }: {
   accessToken?: string | null;
+  currentSessionKey: string;
   currentUserId: string | null;
   editingThread: NativeSocialThread | null;
   isGoldUser: boolean;
   linkPreviewByUrl: Record<string, NativeSocialLinkPreview>;
   onClose: () => void;
+  onNavigate: (path: string) => void;
   onSubmit: (payload: { category: string; content: string; isSensitive: boolean; media: NativeSocialComposerUploadMedia[]; title: string }) => Promise<void>;
   open: boolean;
 }) {
@@ -3050,7 +4155,7 @@ function NativeSocialComposerModal({
   const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false);
   // Composer submit shake — fires when user attempts to slide without title or content
-  const [composerShakeAnim, triggerComposerShake] = useShakeAnimation();
+  const { shake: triggerComposerShake, shakeStyle: composerShakeStyle } = useErrorShake();
   // Composer field validation — broadcast pattern: slide always enabled; on commit failure, mark fields red + scroll + reset slider
   const [composerValidationErrors, setComposerValidationErrors] = useState<{ title?: boolean; content?: boolean }>({});
   const [composerSliderResetKey, setComposerSliderResetKey] = useState(0);
@@ -3061,15 +4166,14 @@ function NativeSocialComposerModal({
   const [mentionQuery, setMentionQuery] = useState<NativeActiveMentionQuery | null>(null);
   const [mentionSuggestions, setMentionSuggestions] = useState<NativeSocialMentionSuggestion[]>([]);
   const [contentFocused, setContentFocused] = useState(false);
+  const [contentScrollY, setContentScrollY] = useState(0);
+  const [mediaNotice, setMediaNotice] = useState("");
   const wordsUsed = countWords(content);
-  const contentFirstUrl = extractNativeSocialFirstHttpUrl(content);
-  const displayedContent = contentFirstUrl ? content.replace(contentFirstUrl, "").trim() : content;
+  const contentPreviewUrl = extractCompletedComposerPreviewUrl(content);
+  const displayedContent = contentPreviewUrl ? stripNativeSocialExternalUrlFromText(content, contentPreviewUrl) : content;
+  const [composerPreviewByUrl, setComposerPreviewByUrl] = useState<Record<string, NativeSocialLinkPreview>>({});
   const uploadProgress = useMemo(() => {
-    const imageMedia = media.filter((item) => item.kind === "image");
-    if (imageMedia.length === 0) return null;
-    const uploaded = imageMedia.filter((item) => item.status === "uploaded").length;
-    const uploading = imageMedia.some((item) => item.status === "uploading" || item.status === "queued");
-    return uploading ? Math.round((uploaded / imageMedia.length) * 100) : null;
+    return averageNativeUploadProgress(media, (item) => item.kind === "image");
   }, [media]);
 
   useEffect(() => {
@@ -3084,6 +4188,7 @@ function NativeSocialComposerModal({
     setMentionQuery(null);
     setMentionSuggestions([]);
     setContentFocused(false);
+    setMediaNotice("");
     lastFocusedComposerFieldRef.current = null;
     submittingRef.current = false;
     setSubmitting(false);
@@ -3102,6 +4207,7 @@ function NativeSocialComposerModal({
     setMentionQuery(null);
     setMentionSuggestions([]);
     setContentFocused(false);
+    setMediaNotice("");
     lastFocusedComposerFieldRef.current = null;
     submittingRef.current = false;
   }, [open]);
@@ -3122,6 +4228,33 @@ function NativeSocialComposerModal({
     setCategoryOpen((current) => !current);
   }, []);
 
+  const isNewUploadedComposerImage = useCallback((item: NativeSocialComposerUploadMedia) => (
+    item.kind === "image" &&
+    typeof item.uploadedUrl === "string" &&
+    item.uploadedUrl.trim().length > 0 &&
+    !(editingThread?.images || []).includes(item.uploadedUrl.trim())
+  ), [editingThread?.images]);
+
+  const cleanupComposerUploads = useCallback((items: NativeSocialComposerUploadMedia[], reason: string) => {
+    if (!currentUserId) return;
+    const urls = items.filter(isNewUploadedComposerImage).map((item) => item.uploadedUrl!.trim());
+    if (urls.length === 0) return;
+    void cleanupNativeSocialStorageImages(urls, currentUserId, accessToken, reason, currentSessionKey).catch(() => undefined);
+  }, [accessToken, currentSessionKey, currentUserId, isNewUploadedComposerImage]);
+
+  const closeComposerWithCleanup = useCallback(() => {
+    cleanupComposerUploads(media, "social_thread_composer_cancelled_upload");
+    onClose();
+  }, [cleanupComposerUploads, media, onClose]);
+
+  const removeComposerMedia = useCallback((index: number) => {
+    setMedia((current) => {
+      const target = current[index];
+      if (target) cleanupComposerUploads([target], "social_thread_composer_removed_media");
+      return current.filter((_, idx) => idx !== index);
+    });
+  }, [cleanupComposerUploads]);
+
   useEffect(() => {
     if (media.length > 0) return;
     setIsSensitive(false);
@@ -3139,21 +4272,43 @@ function NativeSocialComposerModal({
     return () => { active = false; };
   }, [accessToken, currentUserId, mentionQuery, open]);
 
+  useEffect(() => {
+    if (!open || !contentPreviewUrl || linkPreviewByUrl[contentPreviewUrl] || composerPreviewByUrl[contentPreviewUrl]) return;
+    let active = true;
+    setComposerPreviewByUrl((current) => ({
+      ...current,
+      [contentPreviewUrl]: { url: contentPreviewUrl, loading: true, failed: false, resolved: false },
+    }));
+    void fetchNativeSocialLinkPreviews([contentPreviewUrl], accessToken).then((previews) => {
+      if (!active) return;
+      setComposerPreviewByUrl((current) => ({ ...current, ...previews }));
+    });
+    return () => { active = false; };
+  }, [accessToken, composerPreviewByUrl, contentPreviewUrl, linkPreviewByUrl, open]);
+
   const pickMedia = useCallback(async () => {
     if (!currentUserId) return;
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) return;
-    const result = await ImagePicker.launchImageLibraryAsync({
-      allowsMultipleSelection: true,
-      mediaTypes: editingThread?.providerVideoId ? ["images"] : ["images", "videos"],
-      orderedSelection: true,
-      preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
-      quality: 0.86,
-      selectionLimit: Math.max(1, MAX_COMPOSER_MEDIA - media.length),
-    });
+    let result: Awaited<ReturnType<typeof ImagePicker.launchImageLibraryAsync>>;
+    try {
+      // Best-effort request; PHPicker presents regardless, so never hard-block.
+      result = await launchNativeImageLibraryAsync({
+        allowsMultipleSelection: true,
+        mediaTypes: editingThread?.providerVideoId ? ["images"] : ["images", "videos"],
+        orderedSelection: true,
+        preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
+        quality: 0.86,
+        selectionLimit: Math.max(1, MAX_COMPOSER_MEDIA - media.length),
+      });
+    } catch (error) {
+      setMediaNotice(nativeSafeErrorCopy(error, "Couldn't open your photo library. Try again."));
+      return;
+    }
     if (result.canceled) return;
     const hasExistingVideo = media.some((item) => item.kind === "video");
     const accepted: NativeSocialComposerUploadMedia[] = [];
+    let skippedVideoNeedsGold = false;
+    let skippedVideoDuplicate = false;
+    let skippedVideoTooLarge = false;
     for (const asset of result.assets) {
       const item = {
         durationSeconds: typeof asset.duration === "number" ? asset.duration / 1000 : null,
@@ -3165,25 +4320,50 @@ function NativeSocialComposerModal({
         uri: asset.uri,
         width: asset.width,
       };
-      if (item.kind === "video" && !isGoldUser) continue;
-      if (item.kind === "video" && (hasExistingVideo || accepted.some((next) => next.kind === "video"))) continue;
-      if (item.kind === "video" && Number(item.durationSeconds ?? 0) > 15.5) continue;
-      accepted.push({ ...item, status: item.kind === "image" ? "queued" : "uploaded", uploadedUrl: null });
+      if (item.kind === "video" && !isGoldUser) {
+        skippedVideoNeedsGold = true;
+        continue;
+      }
+      if (item.kind === "video" && (hasExistingVideo || accepted.some((next) => next.kind === "video"))) {
+        skippedVideoDuplicate = true;
+        continue;
+      }
+      if (item.kind === "video" && typeof item.size === "number" && item.size > NATIVE_SOCIAL_VIDEO_MAX_BYTES) {
+        skippedVideoTooLarge = true;
+        continue;
+      }
+      accepted.push({ ...item, progress: item.kind === "image" ? 0 : 100, status: item.kind === "image" ? "queued" : "uploaded", uploadedUrl: null });
     }
+    setMediaNotice(
+      skippedVideoNeedsGold ? "Video upload is available for huddle＊ members only." :
+      skippedVideoTooLarge ? "Choose a 15 seconds or shorter video." :
+      skippedVideoDuplicate ? "Only one video can be added to a post." :
+      accepted.length === 0 ? "No media was added." : ""
+    );
     setMedia((current) => [...current, ...accepted].slice(0, MAX_COMPOSER_MEDIA));
     if (lastFocusedComposerFieldRef.current) {
       setTimeout(() => scrollComposerFieldIntoView(lastFocusedComposerFieldRef.current as "category" | "title" | "content"), 220);
     }
     const uploadItems = accepted.filter((item) => item.kind === "image");
     const uploadOne = async (item: NativeSocialComposerUploadMedia) => {
-      setMedia((current) => current.map((entry) => entry.uri === item.uri ? { ...entry, status: "uploading", error: null } : entry));
+      setMedia((current) => current.map((entry) => entry.uri === item.uri ? { ...entry, progress: Math.max(entry.progress ?? 0, NATIVE_UPLOAD_PROGRESS_START), status: "uploading", error: null } : entry));
+      let progressTimer: ReturnType<typeof setInterval> | null = null;
       try {
-        const uploadedUrl = await uploadNativeSocialImage(currentUserId, item, "thread", accessToken);
-        setMedia((current) => current.map((entry) => entry.uri === item.uri ? { ...entry, status: "uploaded", uploadedUrl, error: null } : entry));
+        progressTimer = setInterval(() => {
+          setMedia((current) => current.map((entry) => (
+            entry.uri === item.uri && entry.status === "uploading"
+              ? { ...entry, progress: nextNativeUploadProgress(entry.progress ?? NATIVE_UPLOAD_PROGRESS_START) }
+              : entry
+          )));
+        }, 450);
+        const uploadedUrl = await uploadNativeSocialImage(currentUserId, item, "thread", accessToken, currentSessionKey);
+        setMedia((current) => current.map((entry) => entry.uri === item.uri ? { ...entry, progress: 100, status: "uploaded", uploadedUrl, error: null } : entry));
       } catch (error) {
         logNativeProtectedActionFailure("[native.social] upload_media_failed", error);
-        const message = error instanceof Error ? error.message : "Image upload failed";
-        setMedia((current) => current.map((entry) => entry.uri === item.uri ? { ...entry, status: "error", uploadedUrl: null, error: message } : entry));
+        const message = nativeSafeErrorCopy(error, "Couldn't upload that image. Remove it or try again.");
+        setMedia((current) => current.map((entry) => entry.uri === item.uri ? { ...entry, progress: 0, status: "error", uploadedUrl: null, error: message } : entry));
+      } finally {
+        if (progressTimer) clearInterval(progressTimer);
       }
     };
     const uploadQueue = async () => {
@@ -3198,7 +4378,7 @@ function NativeSocialComposerModal({
     requestAnimationFrame(() => {
       void uploadQueue();
     });
-  }, [accessToken, currentUserId, editingThread, isGoldUser, media, scrollComposerFieldIntoView]);
+  }, [accessToken, currentSessionKey, currentUserId, editingThread, isGoldUser, media, scrollComposerFieldIntoView]);
 
   const submit = useCallback(() => {
     if (submittingRef.current || submitting) return;
@@ -3207,7 +4387,6 @@ function NativeSocialComposerModal({
     const nextErrors = { title: !title.trim(), content: !content.trim() };
     setComposerValidationErrors(nextErrors);
     if (nextErrors.title || nextErrors.content) {
-      haptic.error();
       triggerComposerShake();
       setComposerSliderResetKey((current) => current + 1);
       if (nextErrors.title) scrollComposerFieldIntoView("title");
@@ -3224,13 +4403,13 @@ function NativeSocialComposerModal({
   }, [category, content, isSensitive, media, onSubmit, scrollComposerFieldIntoView, submitting, title, triggerComposerShake]);
 
   return (
-    <Modal presentationStyle="overFullScreen" animationType="slide" onRequestClose={onClose} transparent visible={open}>
+    <Modal presentationStyle="overFullScreen" animationType="slide" onRequestClose={closeComposerWithCleanup} transparent visible={open}>
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={0} style={[nativeModalStyles.appModalBackdrop, nativeModalStyles.appModalBottomSafeArea]}>
-        <Pressable accessibilityLabel="Close composer" accessibilityRole="button" onPress={onClose} style={StyleSheet.absoluteFill} />
-        <AppBottomSheet mode="autoMax" onClose={onClose}>
+        <Pressable accessibilityLabel="Close composer" accessibilityRole="button" onPress={closeComposerWithCleanup} style={StyleSheet.absoluteFill} />
+        <AppBottomSheet mode="autoMax" onClose={closeComposerWithCleanup}>
           <AppBottomSheetHeader>
             <Text style={styles.sheetTitle}>{editingThread ? "Edit post" : "Create post"}</Text>
-            <AppModalCloseButton onPress={onClose} />
+            <AppModalCloseButton onPress={closeComposerWithCleanup} />
           </AppBottomSheetHeader>
           <AppBottomSheetScroll fill scrollRef={composerScrollRef}>
             <View style={styles.composerFieldStack}>
@@ -3287,6 +4466,10 @@ function NativeSocialComposerModal({
               style={[styles.composerPlainField, focusedField === "title" ? styles.composerPlainFieldFocused : null, composerValidationErrors.title ? styles.composerPlainFieldError : null]}
             >
               <TextInput
+                multiline={false}
+                scrollEnabled
+                numberOfLines={1} lineBreakModeIOS="tail" lineBreakStrategyIOS="none"
+                textBreakStrategy="simple"
                 maxLength={140}
                 onChangeText={(value) => { setTitle(value); if (composerValidationErrors.title && value.trim()) setComposerValidationErrors((current) => ({ ...current, title: false })); }}
                 onBlur={() => setFocusedField(null)}
@@ -3310,7 +4493,7 @@ function NativeSocialComposerModal({
               style={[styles.composerPlainField, styles.composerPlainTextArea, contentFocused ? styles.composerPlainFieldFocused : null, composerValidationErrors.content ? styles.composerPlainFieldError : null]}
             >
               <View style={styles.composerMentionField}>
-                <Text style={styles.composerMentionTextLayer}>
+                <Text style={[styles.composerMentionTextLayer, { transform: [{ translateY: -contentScrollY }] }]}>
                   {displayedContent ? renderReplyComposerLayer(displayedContent) : <Text style={styles.composerMentionPlaceholder}>Share details</Text>}
                 </Text>
                 <TextInput
@@ -3322,7 +4505,7 @@ function NativeSocialComposerModal({
                     setTimeout(() => setMentionQuery(null), 120);
                   }}
                   onChangeText={(value) => {
-                    const nextValue = contentFirstUrl ? `${value.trimEnd()} ${contentFirstUrl}`.trim() : value;
+                    const nextValue = contentPreviewUrl ? `${value.trimEnd()} ${contentPreviewUrl} `.trimStart() : value;
                     setContent(nextValue);
                     if (composerValidationErrors.content && nextValue.trim()) setComposerValidationErrors((current) => ({ ...current, content: false }));
                     setMentionQuery(findNativeActiveMentionQuery(nextValue, value.length));
@@ -3334,6 +4517,7 @@ function NativeSocialComposerModal({
                     scrollComposerFieldIntoView("content");
                   }}
                   onSelectionChange={(event) => setMentionQuery(findNativeActiveMentionQuery(content, event.nativeEvent.selection.start))}
+                  onScroll={(event) => setContentScrollY(event.nativeEvent.contentOffset.y)}
                   placeholder="Share details"
                   placeholderTextColor="transparent"
                   scrollEnabled
@@ -3355,11 +4539,15 @@ function NativeSocialComposerModal({
                 }}
               />
             ) : null}
-            {contentFirstUrl ? (
+            {contentPreviewUrl ? (
               <NativeSocialExternalLinkPreview
-                linkPreview={linkPreviewByUrl[contentFirstUrl] || null}
-                onOpen={(url) => void Linking.openURL(url)}
-                url={contentFirstUrl}
+                linkPreview={linkPreviewByUrl[contentPreviewUrl] || composerPreviewByUrl[contentPreviewUrl] || null}
+                onOpen={(url) => { if (!navigateNativeHuddleLink(url, onNavigate)) void Linking.openURL(url); }}
+                onRemove={() => {
+                  setContent((current) => stripNativeSocialExternalUrlFromText(current, contentPreviewUrl));
+                  setMentionQuery(null);
+                }}
+                url={contentPreviewUrl}
               />
             ) : null}
             <View style={styles.mediaPickerBlock}>
@@ -3367,17 +4555,23 @@ function NativeSocialComposerModal({
                 <ScrollView bounces={false} directionalLockEnabled horizontal keyboardShouldPersistTaps="handled" nestedScrollEnabled showsHorizontalScrollIndicator={false} style={styles.mediaRailViewport} contentContainerStyle={styles.mediaThumbRow}>
                   {media.map((item, index) => (
                     <View key={`${item.uri}-${index}`} style={[styles.mediaThumbWrap, { aspectRatio: composerMediaPreviewAspect(item) }]}>
-                      {item.kind === "image" ? <ExpoImage cachePolicy="memory-disk" contentFit="cover" source={{ uri: item.uri }} style={styles.mediaThumb} transition={120} /> : <View style={styles.videoThumb}><Feather color={huddleColors.onPrimary} name="play" size={22} /></View>}
+                  {item.kind === "image" ? <ExpoImage cachePolicy="memory-disk" contentFit="cover" key={nativeFreshImageKey(item.uri, item.uri)} source={{ uri: nativeFreshImageUri(item.uri, item.uri) }} style={styles.mediaThumb} transition={120} /> : <View style={styles.videoThumb}><Feather color={huddleColors.onPrimary} name="play" size={22} /></View>}
                       {item.status === "uploading" && uploadProgress !== null && item.kind === "image" ? (
                         <View pointerEvents="none" style={styles.mediaUploadingOverlay}>
-                          <ActivityIndicator color={huddleColors.onPrimary} size="small" />
+                          <NativeSpinner tone="primary" />
                           <Text style={styles.mediaUploadingText}>Uploading {uploadProgress}%</Text>
                         </View>
                       ) : null}
-                      <Pressable accessibilityLabel="Remove image" accessibilityRole="button" onPress={() => setMedia((current) => current.filter((_, idx) => idx !== index))} style={styles.mediaRemoveButton}><Feather color={huddleColors.onPrimary} name="x" size={14} /></Pressable>
+                      <Pressable accessibilityLabel="Remove media" accessibilityRole="button" onPress={() => removeComposerMedia(index)} style={styles.mediaRemoveButton}><Feather color={huddleColors.onPrimary} name="x" size={14} /></Pressable>
                     </View>
                   ))}
                 </ScrollView>
+	              ) : null}
+              {mediaNotice ? (
+                <View style={styles.mediaNoticeRow}>
+                  <Feather color={huddleColors.blue} name="info" size={14} />
+                  <Text style={styles.mediaNoticeText}>{mediaNotice}</Text>
+                </View>
               ) : null}
             </View>
             {media.length > 0 ? (
@@ -3390,9 +4584,9 @@ function NativeSocialComposerModal({
           <AppBottomSheetFooter>
             <View style={styles.composerFooterRow}>
               <Pressable accessibilityLabel={isGoldUser ? "Add media" : "Add images"} accessibilityRole="button" disabled={!currentUserId} onPress={pickMedia} style={({ pressed }) => [styles.footerImageButton, !currentUserId ? styles.disabled : null, pressed ? styles.pressed : null]}>
-                <Feather color={huddleColors.mutedText} name="camera" size={huddleSocial.actionIconSize} />
+                <Feather color={huddleColors.blue} name="camera" size={huddleSocial.actionIconSize} />
               </Pressable>
-              <Animated.View style={{ flex: 1, transform: [{ translateX: composerShakeAnim }] }}>
+              <Animated.View style={[{ flex: 1 }, composerShakeStyle]}>
                 <SlideToConfirm
                   busy={submitting}
                   disabled={media.some((item) => item.status === "queued" || item.status === "uploading" || item.status === "error")}
@@ -3403,7 +4597,7 @@ function NativeSocialComposerModal({
               </Animated.View>
             </View>
           </AppBottomSheetFooter>
-        </AppBottomSheet>
+          </AppBottomSheet>
       </KeyboardAvoidingView>
     </Modal>
   );
@@ -3522,46 +4716,56 @@ function NativeSocialShareModal({
   thread: NativeSocialThread | null;
 }) {
   const [targets, setTargets] = useState<NativeSocialShareTarget[]>([]);
-  const [selectedKey, setSelectedKey] = useState("");
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set());
   const [searchQuery, setSearchQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
-
+  const [failedTargetAvatars, setFailedTargetAvatars] = useState<Set<string>>(() => new Set());
   useEffect(() => {
     if (!open || !currentUserId) {
       setTargets([]);
+      setSelectedKeys(new Set());
       return;
     }
     setLoading(true);
     setSearchQuery("");
+    setSelectedKeys(new Set());
+    setFailedTargetAvatars(new Set());
     void fetchNativeSocialShareTargets(currentUserId, accessToken)
-      .then((nextTargets) => {
-        setTargets(nextTargets);
-        setSelectedKey(nextTargets[0]?.chatId || "");
-      })
+      .then(setTargets)
       .catch(() => onNotice("Unable to load chats right now."))
       .finally(() => setLoading(false));
   }, [accessToken, currentUserId, onNotice, open]);
 
-  const selectedTarget = targets.find((target) => target.chatId === selectedKey) || null;
+  const selectedTargets = useMemo(
+    () => targets.filter((target) => selectedKeys.has(target.chatId)),
+    [selectedKeys, targets],
+  );
   const filteredTargets = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return targets;
     return targets.filter((target) => `${target.label} ${target.subtitle || ""}`.toLowerCase().includes(q));
   }, [searchQuery, targets]);
   const shareToChat = useCallback(() => {
-    if (!thread || !currentUserId || !selectedTarget || sending) return;
+    if (!thread || !currentUserId || selectedTargets.length === 0 || sending) return;
     setSending(true);
-    void sendNativeSocialShareToChat(thread, selectedTarget, currentUserId, accessToken)
-      .then(async () => {
+    void Promise.allSettled(selectedTargets.map((target) => (
+      sendNativeSocialShareToChat(thread, target, currentUserId, accessToken)
+    )))
+      .then(async (results) => {
+        const sharedCount = results.filter((result) => result.status === "fulfilled").length;
+        const failedCount = results.length - sharedCount;
+        if (sharedCount === 0) throw new Error("share_failed");
         const count = await recordNativeSocialShare(thread.id, accessToken);
         onShared(thread.id, count);
-        onNotice(`Shared to ${selectedTarget.label}.`);
+        onNotice(failedCount > 0
+          ? `Shared in ${sharedCount} chat${sharedCount === 1 ? "" : "s"}. ${failedCount} couldn't be sent.`
+          : `Shared in ${sharedCount} chat${sharedCount === 1 ? "" : "s"}.`);
         onClose();
       })
-      .catch(() => onNotice("Unable to share to Huddle Chats."))
+      .catch(() => onNotice("Unable to share in chat right now."))
       .finally(() => setSending(false));
-  }, [accessToken, currentUserId, onClose, onNotice, onShared, selectedTarget, sending, thread]);
+  }, [accessToken, currentUserId, onClose, onNotice, onShared, selectedTargets, sending, thread]);
 
   if (!thread) return null;
   return (
@@ -3573,14 +4777,18 @@ function NativeSocialShareModal({
             <Text style={styles.sheetTitle}>Share</Text>
             <AppModalCloseButton onPress={onClose} />
           </AppBottomSheetHeader>
-          <View style={styles.sheetContent}>
+          <View style={styles.shareSheetContent}>
             <View style={styles.shareSearchField}>
               <Feather color={huddleColors.iconSubtle} name="search" size={huddleSocial.actionIconSize} />
               <TextInput
+                multiline={false}
+                scrollEnabled
+                numberOfLines={1} lineBreakModeIOS="tail" lineBreakStrategyIOS="none"
+                textBreakStrategy="simple"
                 accessibilityLabel="Search share targets"
                 autoCorrect={false}
                 onChangeText={setSearchQuery}
-                placeholder="Search User name or Social ID"
+                placeholder="Search name or Social ID"
                 placeholderTextColor={huddleColors.mutedText}
                 style={styles.shareSearchInput}
                 value={searchQuery}
@@ -3590,11 +4798,16 @@ function NativeSocialShareModal({
               {loading ? <NativeLoadingState variant="inline" /> : filteredTargets.length === 0 ? <Text style={styles.emptyCommentText}>No chats found.</Text> : (
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.shareTargetRow}>
                   {filteredTargets.map((target) => {
-                    const selected = target.chatId === selectedKey;
+                    const selected = selectedKeys.has(target.chatId);
                     return (
-                      <Pressable key={target.chatId} accessibilityRole="button" accessibilityState={{ selected }} onPress={() => setSelectedKey(target.chatId)} style={({ pressed }) => [styles.shareTarget, pressed ? styles.pressed : null]}>
+                      <Pressable key={target.chatId} accessibilityRole="button" accessibilityState={{ selected }} onPress={() => setSelectedKeys((current) => {
+                        const next = new Set(current);
+                        if (next.has(target.chatId)) next.delete(target.chatId);
+                        else next.add(target.chatId);
+                        return next;
+                      })} style={({ pressed }) => [styles.shareTarget, pressed ? styles.pressed : null]}>
                         <View style={[styles.shareTargetAvatar, selected ? styles.shareTargetAvatarSelected : null]}>
-                          {target.avatarUrl ? <ExpoImage cachePolicy="memory-disk" contentFit="cover" source={{ uri: target.avatarUrl }} style={styles.shareTargetAvatarImage as ImageStyle} transition={120} /> : <Text style={styles.shareTargetInitial}>{target.label.charAt(0).toUpperCase()}</Text>}
+                          {target.avatarUrl && !failedTargetAvatars.has(target.avatarUrl) ? <ExpoImage cachePolicy="memory-disk" contentFit="cover" key={nativeFreshImageKey(target.avatarUrl, target.avatarUrl)} onError={() => setFailedTargetAvatars((current) => new Set([...current, target.avatarUrl as string]))} source={{ uri: nativeFreshImageUri(target.avatarUrl, target.avatarUrl) }} style={styles.shareTargetAvatarImage as ImageStyle} transition={120} /> : <Text style={styles.shareTargetInitial}>{target.label.charAt(0).toUpperCase()}</Text>}
                         </View>
                         <Text numberOfLines={1} style={styles.shareTargetName}>{target.label}</Text>
                         <Text numberOfLines={1} style={styles.shareTargetSubtitle}>{target.subtitle || "Chat"}</Text>
@@ -3604,17 +4817,19 @@ function NativeSocialShareModal({
                 </ScrollView>
               )}
             </View>
+          </View>
+          <AppBottomSheetFooter>
             <View style={styles.shareActionRow}>
-              <Pressable accessibilityRole="button" disabled={!selectedTarget || sending || loading} onPress={shareToChat} style={({ pressed }) => [styles.secondaryButton, !selectedTarget || sending || loading ? styles.disabled : null, pressed ? styles.pressed : null]}>
-                {sending ? <ActivityIndicator color={huddleColors.blue} /> : <Feather color={huddleColors.blue} name="send" size={18} />}
-                <Text style={styles.secondaryButtonText}>Huddle Chats</Text>
+              <Pressable accessibilityRole="button" disabled={selectedKeys.size === 0 || sending || loading} onPress={shareToChat} style={({ pressed }) => [styles.shareSecondaryButton, selectedKeys.size === 0 || sending || loading ? styles.disabled : null, pressed ? styles.pressed : null]}>
+                {sending ? <NativeSpinner tone="accent" /> : <NativeNavIcon color={huddleColors.blue} size={19} tab="chats" />}
+                <Text style={styles.secondaryButtonText}>{formatNativeShareChatActionLabel(selectedKeys.size)}</Text>
               </Pressable>
-              <Pressable accessibilityRole="button" onPress={() => { void onNativeShare(thread).then(onClose); }} style={({ pressed }) => [styles.secondaryButton, pressed ? styles.pressed : null]}>
+              <Pressable accessibilityRole="button" onPress={() => { void onNativeShare(thread).then(onClose); }} style={({ pressed }) => [styles.shareSecondaryButton, pressed ? styles.pressed : null]}>
                 <Feather color={huddleColors.blue} name="share-2" size={18} />
                 <Text style={styles.secondaryButtonText}>Share</Text>
               </Pressable>
             </View>
-          </View>
+          </AppBottomSheetFooter>
         </AppBottomSheet>
       </View>
     </Modal>
@@ -3680,7 +4895,7 @@ const styles = StyleSheet.create({
     paddingVertical: huddleFormControls.select.optionPaddingVertical,
   },
   categorySelectOptionActive: {
-    backgroundColor: huddleColors.primarySoftFill,
+    backgroundColor: huddleColors.glassControl,
   },
   categorySelectOptionText: {
     color: huddleColors.text,
@@ -3814,8 +5029,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     position: "relative",
   },
-  commentIconButtonActive: {
-    backgroundColor: huddleColors.primarySoftFill,
+  commentIconButtonLikeActive: {
+    backgroundColor: huddleColors.coralSoftFill,
   },
   commentSeeMoreButton: {
     alignSelf: "flex-start",
@@ -3846,17 +5061,23 @@ const styles = StyleSheet.create({
     paddingBottom: huddleSpacing.x1,
   },
   composerMentionField: {
-    minHeight: huddleLayout.fieldHeight * 2,
+    height: SOCIAL_COMPOSER_TEXTAREA_HEIGHT,
+    maxHeight: SOCIAL_COMPOSER_TEXTAREA_HEIGHT,
+    overflow: "hidden",
     position: "relative",
   },
   composerMentionInput: {
+    flexShrink: 1,
+    minWidth: 0,
     color: "transparent",
     fontFamily: "Urbanist-500",
     fontSize: 15,
     includeFontPadding: false,
     lineHeight: 20,
-    minHeight: huddleLayout.fieldHeight * 2,
+    height: SOCIAL_COMPOSER_TEXTAREA_HEIGHT,
+    maxHeight: SOCIAL_COMPOSER_TEXTAREA_HEIGHT,
     paddingHorizontal: 0,
+    overflow: "hidden",
     paddingTop: 0,
     paddingBottom: 0,
     textShadowColor: "transparent",
@@ -3874,7 +5095,7 @@ const styles = StyleSheet.create({
     includeFontPadding: false,
     left: 0,
     lineHeight: 20,
-    minHeight: huddleLayout.fieldHeight * 2,
+    minHeight: SOCIAL_COMPOSER_TEXTAREA_HEIGHT,
     padding: 0,
     position: "absolute",
     right: 0,
@@ -3906,6 +5127,8 @@ const styles = StyleSheet.create({
     ...huddleFieldStates.error,
   },
   composerPlainInput: {
+    flexShrink: 1,
+    minWidth: 0,
     height: huddleLayout.fieldHeight - 2,
     padding: 0,
     fontFamily: "Urbanist-500",
@@ -3914,9 +5137,10 @@ const styles = StyleSheet.create({
     includeFontPadding: false,
     textAlignVertical: "center",
     color: huddleColors.text,
+    overflow: "hidden",
   },
   composerPlainTextArea: {
-    minHeight: huddleLayout.fieldHeight * 2,
+    minHeight: SOCIAL_COMPOSER_TEXTAREA_HEIGHT,
     justifyContent: "flex-start",
     paddingTop: huddleSpacing.x2,
   },
@@ -3956,13 +5180,39 @@ const styles = StyleSheet.create({
     bottom: huddleLayout.navHeight + huddleSpacing.x8,
     height: huddleSocial.composeFabSize,
     position: "absolute",
-    right: huddleSpacing.x5,
+    left: huddleSpacing.x4,
     width: huddleSocial.composeFabSize,
     zIndex: 30,
     elevation: 30,
   },
   composeFabPressed: {
     ...huddleButtons.pressed,
+  },
+  newPostsPill: {
+    ...huddleButtons.primary,
+    alignSelf: "center",
+    alignItems: "center",
+    borderRadius: huddleRadii.pill,
+    flexDirection: "row",
+    gap: huddleSpacing.x2,
+    paddingHorizontal: huddleSpacing.x4,
+    paddingVertical: huddleSpacing.x2,
+  },
+  newPostsPillText: {
+    ...huddleButtons.label,
+    color: huddleColors.onPrimary,
+  },
+  newPostsPillPressed: {
+    ...huddleButtons.pressed,
+  },
+  newPostsPillWrap: {
+    left: 0,
+    position: "absolute",
+    right: 0,
+    top: huddleSpacing.x2,
+    zIndex: 40,
+    elevation: 40,
+    alignItems: "center",
   },
   disabled: {
     opacity: 0.45,
@@ -3990,14 +5240,75 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   footerImageButton: {
+    ...huddleGlassControls.borderlessSurface,
     alignItems: "center",
-    backgroundColor: huddleColors.divider,
-    borderColor: huddleColors.fieldBorder,
     borderRadius: huddleRadii.pill,
-    borderWidth: 1,
     height: 48,
     justifyContent: "center",
     width: 48,
+  },
+  feedSkeletonAction: {
+    borderRadius: huddleRadii.pill,
+    height: huddleSpacing.x7,
+    width: huddleSpacing.x10,
+  },
+  feedSkeletonActions: {
+    flexDirection: "row",
+    gap: huddleSpacing.x2,
+    marginTop: huddleSpacing.x4,
+  },
+  feedSkeletonAvatar: {
+    borderRadius: huddleRadii.pill,
+    height: huddleSpacing.x10,
+    width: huddleSpacing.x10,
+  },
+  feedSkeletonBodyNarrow: {
+    borderRadius: huddleRadii.pill,
+    height: huddleSpacing.x3,
+    width: "64%",
+  },
+  feedSkeletonBodyWide: {
+    borderRadius: huddleRadii.pill,
+    height: huddleSpacing.x3,
+    width: "92%",
+  },
+  feedSkeletonCard: {
+    backgroundColor: huddleColors.canvas,
+    borderColor: huddleColors.cardBorderSoft,
+    borderRadius: huddleRadii.card,
+    borderWidth: 1,
+    gap: huddleSpacing.x2,
+    padding: huddleSpacing.x4,
+    ...huddleShadows.glassElevation1,
+  },
+  feedSkeletonHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: huddleSpacing.x3,
+    marginBottom: huddleSpacing.x2,
+  },
+  feedSkeletonHeaderBody: {
+    flex: 1,
+    gap: huddleSpacing.x2,
+  },
+  feedSkeletonMeta: {
+    borderRadius: huddleRadii.pill,
+    height: huddleSpacing.x2,
+    width: "42%",
+  },
+  feedSkeletonName: {
+    borderRadius: huddleRadii.pill,
+    height: huddleSpacing.x3,
+    width: "58%",
+  },
+  feedSkeletonStack: {
+    gap: huddleSpacing.x4,
+    paddingTop: huddleSpacing.x2,
+  },
+  feedSkeletonTitle: {
+    borderRadius: huddleRadii.pill,
+    height: huddleSpacing.x4,
+    width: "72%",
   },
   mentionSuggestionAvatar: {
     alignItems: "center",
@@ -4069,6 +5380,9 @@ const styles = StyleSheet.create({
     gap: huddleSpacing.x2,
     paddingVertical: huddleSpacing.x3,
   },
+  feedSlideLayer: {
+    flex: 1,
+  },
   list: {
     flex: 1,
   },
@@ -4077,8 +5391,34 @@ const styles = StyleSheet.create({
     paddingHorizontal: huddleSpacing.x4,
     paddingTop: huddleSocial.feedTopInset,
   },
+  focusedThreadFrame: {
+    backgroundColor: huddleColors.glassControl,
+    borderRadius: huddleRadii.card,
+    marginHorizontal: -huddleSpacing.x1,
+    padding: huddleSpacing.x1,
+  },
   mediaPickerBlock: {
     gap: huddleSpacing.x3,
+  },
+  mediaNoticeRow: {
+    alignItems: "center",
+    alignSelf: "stretch",
+    backgroundColor: huddleColors.glassControl,
+    borderColor: huddleColors.fieldBorderSoft,
+    borderRadius: huddleRadii.field,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: huddleSpacing.x2,
+    marginTop: huddleSpacing.x1,
+    paddingHorizontal: huddleSpacing.x3,
+    paddingVertical: huddleSpacing.x2,
+  },
+  mediaNoticeText: {
+    color: huddleColors.text,
+    flex: 1,
+    fontFamily: "Urbanist-600",
+    fontSize: huddleType.helper,
+    lineHeight: huddleType.helperLine,
   },
   mediaRailViewport: {
     alignSelf: "stretch",
@@ -4161,36 +5501,8 @@ const styles = StyleSheet.create({
     backgroundColor: huddleColors.canvas,
     ...huddleShadows.glassElevation2,
   },
-  noticeToast: {
-    alignSelf: "center",
-    backgroundColor: huddleColors.text,
-    borderRadius: huddleRadii.pill,
-    bottom: huddleLayout.navHeight + huddleSpacing.x9,
-    paddingHorizontal: huddleSpacing.x4,
-    paddingVertical: huddleSpacing.x2,
-    position: "absolute",
-  },
-  noticeToastText: {
-    color: huddleColors.onPrimary,
-    fontFamily: "Urbanist-700",
-    fontSize: huddleType.helper,
-    lineHeight: huddleType.helperLine,
-  },
   pressed: {
     opacity: 0.76,
-  },
-  pullRefreshIndicator: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: huddleSpacing.x2,
-    justifyContent: "center",
-    overflow: "hidden",
-  },
-  pullRefreshText: {
-    color: huddleColors.caption,
-    fontFamily: "Urbanist-500",
-    fontSize: huddleType.helper,
-    lineHeight: huddleType.helperLine,
   },
   primaryButton: {
     ...huddleButtons.base,
@@ -4250,33 +5562,20 @@ const styles = StyleSheet.create({
     ...huddleFieldStates.focused,
     ...huddleShadows.glassElevation1,
   },
-  replyComposerTextLayerWrap: {
-    bottom: huddleSpacing.x2,
-    left: 0,
-    position: "absolute",
-    right: 0,
-    top: 0,
-    zIndex: 1,
-  },
-  replyComposerTextLayer: {
-    color: huddleColors.text,
-    fontFamily: "Urbanist-500",
-    fontSize: huddleType.label,
-    lineHeight: huddleType.labelLine,
-    paddingHorizontal: huddleSpacing.x4,
-    paddingTop: huddleSpacing.x2,
-    paddingBottom: huddleSpacing.x2,
+  replyComposerInputViewport: {
+    height: SOCIAL_COMPOSER_TEXTAREA_HEIGHT,
+    maxHeight: SOCIAL_COMPOSER_TEXTAREA_HEIGHT,
+    overflow: "hidden",
+    position: "relative",
   },
   replyComposerInput: {
     backgroundColor: "transparent",
-    color: "transparent",
+    color: huddleColors.text,
+    flexShrink: 1,
+    minWidth: 0,
     includeFontPadding: false,
-    textShadowColor: "transparent",
-    textShadowRadius: 0,
-    zIndex: 3,
-  },
-  replyComposerPlaceholderText: {
-    color: huddleColors.caption,
+    padding: 0,
+    overflow: "hidden",
   },
   replyComposerMentionText: {
     color: huddleColors.blue,
@@ -4342,8 +5641,8 @@ const styles = StyleSheet.create({
     paddingTop: huddleSpacing.x2,
   },
   replyMediaButton: {
+    ...huddleGlassControls.surface,
     alignItems: "center",
-    backgroundColor: huddleColors.primarySoftFill,
     borderRadius: huddleRadii.pill,
     height: huddleLayout.minTouch,
     justifyContent: "center",
@@ -4496,6 +5795,20 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: huddleSpacing.x3,
   },
+  shareSecondaryButton: {
+    ...huddleButtons.base,
+    ...huddleButtons.secondary,
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    justifyContent: "center",
+    gap: huddleSpacing.x2,
+  },
+  shareSheetContent: {
+    gap: huddleSpacing.x4,
+    paddingTop: huddleSpacing.x3,
+    paddingBottom: huddleSpacing.x3,
+  },
   shareSearchField: {
     alignItems: "center",
     backgroundColor: huddleColors.canvas,
@@ -4504,17 +5817,21 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     flexDirection: "row",
     gap: huddleSpacing.x2,
+    marginHorizontal: huddleSpacing.x6,
     minHeight: huddleLayout.fieldHeight,
     paddingHorizontal: huddleSpacing.x3,
   },
   shareSearchInput: {
     color: huddleColors.text,
     flex: 1,
+    minWidth: 0,
+    flexShrink: 1,
     fontFamily: "Urbanist-500",
     fontSize: huddleType.body,
     lineHeight: huddleType.body * huddleType.lineNormal,
     minHeight: huddleLayout.fieldHeight - huddleSpacing.x2,
     padding: 0,
+    overflow: "hidden",
   },
   shareTarget: {
     alignItems: "center",
@@ -4555,7 +5872,8 @@ const styles = StyleSheet.create({
   },
   shareTargetRow: {
     gap: huddleSpacing.x3,
-    paddingRight: huddleSpacing.x1,
+    paddingLeft: huddleSpacing.x5,
+    paddingRight: huddleSpacing.x6,
   },
   shareTargetSubtitle: {
     color: huddleColors.caption,
@@ -4566,7 +5884,6 @@ const styles = StyleSheet.create({
   },
   shareTargetsBlock: {
     justifyContent: "center",
-    minHeight: huddleSpacing.x10 + huddleSpacing.x8,
   },
   videoThumb: {
     alignItems: "center",

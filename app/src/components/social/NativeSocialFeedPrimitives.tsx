@@ -1,12 +1,19 @@
 import { Feather, FontAwesome, MaterialCommunityIcons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Image as ExpoImage } from "expo-image";
+import * as FileSystem from "expo-file-system/legacy";
 import { useVideoPlayer, VideoView } from "expo-video";
-import { memo, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { memo, type ReactNode, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Animated, Image as RNImage, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions, type GestureResponderEvent, type NativeSyntheticEvent, type TextLayoutEventData } from "react-native";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import Reanimated, { runOnJS, useAnimatedStyle, useSharedValue, withSpring } from "react-native-reanimated";
 import emptyChatImage from "../../../assets/Notifications/empty-chat-native.png";
 import { haptic } from "../../lib/nativeHaptics";
+import { useReduceMotion } from "../../lib/nativeReduceMotion";
+import { NativeProfileAvatar } from "../NativeProfileAvatar";
 import { NativeVerifiedBadge } from "../NativeVerifiedBadge";
+import { NativeToast } from "../NativeToast";
+import { AppConfirmModal } from "../nativeModalPrimitives";
 import {
   huddleColors,
   huddleFieldStates,
@@ -28,20 +35,115 @@ import {
   type NativeSocialSortMode,
   type NativeSocialThread,
 } from "../../lib/nativeSocial";
+import { nativeFreshImageKey, nativeFreshImageUri } from "../../lib/nativeImageFreshness";
+import { readNativeDisplayCacheItem } from "../../lib/nativeDisplayCacheStorage";
+import { getNativeMediaLibrarySavePermissionDetail, requestNativeMediaLibrarySavePermission } from "../../lib/nativeMediaPermissions";
 
 const NATIVE_SOCIAL_TAGS = ["Social", "Pets", "Health", "Adoption", "News", "Events", "Market"] as const;
+const NATIVE_SOCIAL_TABS = ["All", ...NATIVE_SOCIAL_TAGS] as const;
+// Half the 16pt inter-tab gap horizontally (neighbours meet, never overlap) and
+// enough vertically to lift the 32pt row to the 44pt minimum touch target.
+const NATIVE_SOCIAL_TAB_HIT_SLOP = { bottom: 6, left: 8, right: 8, top: 6 } as const;
 const NATIVE_SOCIAL_SORTS: NativeSocialSortMode[] = ["Latest", "Trending", "Saves"];
 const NATIVE_SENSITIVE_TAP_SEEN_KEY = "huddle_sensitive_tap_seen";
 
 const NATIVE_SOCIAL_MEDIA_ASPECT_CACHE_KEY = "native-social-media-aspect-cache:v1";
 const NATIVE_SOCIAL_MEDIA_ASPECT_CACHE_LIMIT = 300;
 
+async function saveExpandedImageToPhotos(uri: string): Promise<{ message: string; ok: boolean }> {
+  const current = await getNativeMediaLibrarySavePermissionDetail();
+  if (current.state !== "granted" && !current.canAskAgain) {
+    haptic.error();
+    return { ok: false, message: "Turn on Photos for huddle in Settings." };
+  }
+  const permission = await requestNativeMediaLibrarySavePermission();
+  if (permission.state !== "granted") {
+    haptic.error();
+    return { ok: false, message: "Photo access is needed to save this image." };
+  }
+  let localUri = uri;
+  let temporary = false;
+  try {
+    if (/^https?:\/\//i.test(uri)) {
+      const extension = uri.match(/\.([a-z0-9]{2,5})(?:[?#]|$)/i)?.[1] || "jpg";
+      localUri = `${FileSystem.cacheDirectory}huddle-expanded-${Date.now()}.${extension}`;
+      localUri = (await FileSystem.downloadAsync(uri, localUri)).uri;
+      temporary = true;
+    }
+    const MediaLibrary = await import("expo-media-library");
+    await MediaLibrary.saveToLibraryAsync(localUri);
+    haptic.success();
+    return { ok: true, message: "Saved to Photos" };
+  } catch {
+    haptic.error();
+    return { ok: false, message: "Couldn't save this image. Try again." };
+  } finally {
+    if (temporary) await FileSystem.deleteAsync(localUri, { idempotent: true }).catch(() => undefined);
+  }
+}
+
+export function NativeZoomableMedia({ children, onLongPress, onZoomChange, resetKey }: { children: ReactNode; onLongPress: () => void; onZoomChange: (zoomed: boolean) => void; resetKey?: string | number }) {
+  const scale = useSharedValue(1);
+  const savedScale = useSharedValue(1);
+  const translateX = useSharedValue(0);
+  const translateY = useSharedValue(0);
+  const savedX = useSharedValue(0);
+  const savedY = useSharedValue(0);
+  useEffect(() => {
+    scale.value = 1;
+    savedScale.value = 1;
+    translateX.value = 0;
+    translateY.value = 0;
+    savedX.value = 0;
+    savedY.value = 0;
+    onZoomChange(false);
+  }, [onZoomChange, resetKey, savedScale, savedX, savedY, scale, translateX, translateY]);
+  const pinch = Gesture.Pinch().onUpdate((event) => {
+    scale.value = Math.max(1, Math.min(4, savedScale.value * event.scale));
+  }).onEnd(() => {
+    savedScale.value = scale.value;
+    runOnJS(onZoomChange)(scale.value > 1.01);
+    if (scale.value <= 1.01) {
+      scale.value = withSpring(1);
+      translateX.value = withSpring(0);
+      translateY.value = withSpring(0);
+      savedX.value = 0;
+      savedY.value = 0;
+    }
+  });
+  const pan = Gesture.Pan().onUpdate((event) => {
+    if (scale.value <= 1) return;
+    const bound = 180 * (scale.value - 1);
+    translateX.value = Math.max(-bound, Math.min(bound, savedX.value + event.translationX));
+    translateY.value = Math.max(-bound, Math.min(bound, savedY.value + event.translationY));
+  }).onEnd(() => {
+    savedX.value = translateX.value;
+    savedY.value = translateY.value;
+  });
+  const longPress = Gesture.LongPress().minDuration(450).onEnd((_event, success) => {
+    if (success) runOnJS(onLongPress)();
+  });
+  const doubleTap = Gesture.Tap().numberOfTaps(2).maxDelay(240).onEnd((_event, success) => {
+    if (!success) return;
+    const nextScale = savedScale.value > 1.01 ? 1 : 2;
+    scale.value = withSpring(nextScale);
+    savedScale.value = nextScale;
+    translateX.value = withSpring(0);
+    translateY.value = withSpring(0);
+    savedX.value = 0;
+    savedY.value = 0;
+    runOnJS(onZoomChange)(nextScale > 1);
+  });
+  const animatedStyle = useAnimatedStyle(() => ({ transform: [{ translateX: translateX.value }, { translateY: translateY.value }, { scale: scale.value }] }));
+  return <GestureDetector gesture={Gesture.Simultaneous(pinch, pan, longPress, doubleTap)}><Reanimated.View style={[styles.expandedImageWrap, animatedStyle]}>{children}</Reanimated.View></GestureDetector>;
+}
+
 let nativeSocialMediaAspectMemoryCache: Record<string, number> | null = null;
 
 const readNativeSocialMediaAspectCache = async () => {
   if (nativeSocialMediaAspectMemoryCache) return nativeSocialMediaAspectMemoryCache;
   try {
-    const raw = await AsyncStorage.getItem(NATIVE_SOCIAL_MEDIA_ASPECT_CACHE_KEY);
+    const raw = await readNativeDisplayCacheItem(NATIVE_SOCIAL_MEDIA_ASPECT_CACHE_KEY);
     const parsed = raw ? JSON.parse(raw) : {};
     nativeSocialMediaAspectMemoryCache = parsed && typeof parsed === "object" ? parsed as Record<string, number> : {};
   } catch {
@@ -61,6 +163,7 @@ const writeNativeSocialMediaAspectCache = async (next: Record<string, number>) =
 
 
 type NativeSocialFilterBarProps = {
+  controlsHidden?: boolean;
   query: string;
   selectedTags: string[];
   sortMode: NativeSocialSortMode;
@@ -77,6 +180,7 @@ type NativeSocialFeedCardProps = {
   pinned: boolean;
   saved: boolean;
   supported: boolean;
+  commentsOpen?: boolean;
   onToggleExpanded: () => void;
   onTogglePinned: () => void;
   onToggleSaved: () => void;
@@ -88,6 +192,7 @@ type NativeSocialFeedCardProps = {
   onOpenMore: (event: GestureResponderEvent) => void;
   onOpenShare: () => void;
   onOpenSupport: () => void;
+  onMediaGestureActiveChange?: (active: boolean) => void;
 };
 
 const MIN_MEDIA_ASPECT = 9 / 16;
@@ -213,10 +318,17 @@ const formatNativeSocialTimeAgo = (date: string) => {
   return `${Math.floor(hours / 24)} days ago`;
 };
 
-const deriveNativeSocialDistrictLabel = (value: string | null | undefined) => {
+// Returns null when there is genuinely no location, so callers can fall through to
+// another source or render nothing. It must never invent a placeholder: a literal
+// "Map" string reads as a real place to the user, and a truthy floor also silently
+// defeats any `a || b` fallback chain built on top of it.
+const deriveNativeSocialDistrictLabel = (value: string | null | undefined): string | null => {
   const parts = String(value || "").split(",").map((part) => part.trim()).filter(Boolean);
-  if (parts.length >= 2) return parts[1];
-  return parts[0] || "Map";
+  if (parts.length >= 2) {
+    const broadLabels = new Set(["greater london", "uk", "u.k.", "united kingdom", "england"]);
+    return parts.find((part) => !broadLabels.has(part.toLowerCase())) || parts[0];
+  }
+  return parts[0] || null;
 };
 
 function NativeSocialBodyText({
@@ -280,7 +392,9 @@ function NativeSocialBodyText({
   return <Text numberOfLines={numberOfLines} onTextLayout={onTextLayout} style={styles.bodyText}>{nodes}</Text>;
 }
 
+
 export function NativeSocialFilterBar({
+  controlsHidden = false,
   query,
   selectedTags,
   sortMode,
@@ -290,35 +404,142 @@ export function NativeSocialFilterBar({
   onClearTags,
 }: NativeSocialFilterBarProps) {
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
+  const reduceMotion = useReduceMotion();
+  const controlsHideProgress = useRef(new Animated.Value(controlsHidden ? 1 : 0)).current;
+
+  useEffect(() => {
+    if (controlsHidden && sortMenuOpen) setSortMenuOpen(false);
+    Animated.timing(controlsHideProgress, {
+      toValue: controlsHidden ? 1 : 0,
+      duration: reduceMotion ? 0 : 180,
+      useNativeDriver: false,
+    }).start();
+  }, [controlsHidden, controlsHideProgress, reduceMotion, sortMenuOpen]);
+
+  // Category tabs are single-select (one active category at a time, like a
+  // platform segmented control); "All" is index 0. The active underline slides
+  // between tabs and the strip auto-scrolls so the active tab stays on screen,
+  // keeping tap and swipe navigation visually coupled.
+  const activeIndex = selectedTags.length === 0
+    ? 0
+    : Math.max(0, (NATIVE_SOCIAL_TAGS as readonly string[]).indexOf(selectedTags[0]) + 1);
+
+  const tabScrollRef = useRef<ScrollView | null>(null);
+  const tabLayoutsRef = useRef<Array<{ x: number; width: number } | undefined>>([]);
+  // Live geometry of the strip, needed to scroll it by the minimum amount.
+  const tabViewportWidthRef = useRef(0);
+  const tabScrollOffsetRef = useRef(0);
+  const underlineLeft = useRef(new Animated.Value(0)).current;
+  const [underlineReady, setUnderlineReady] = useState(false);
+  const indicatorWidth = huddleSocial.topicTabIndicatorWidth;
+
+  const placeUnderline = useCallback((index: number, animate: boolean) => {
+    const layout = tabLayoutsRef.current[index];
+    if (!layout) return;
+    const target = layout.x + layout.width / 2 - indicatorWidth / 2;
+    if (animate && !reduceMotion) {
+      Animated.spring(underlineLeft, { toValue: target, useNativeDriver: false, speed: 18, bounciness: 6 }).start();
+    } else {
+      underlineLeft.setValue(target);
+    }
+    // Scroll the strip ONLY when the active tab is not already fully visible, and
+    // then only by the minimum needed to reveal it.
+    //
+    // This used to be an unconditional scrollTo(layout.x - x4), which pinned the
+    // active tab to the LEFT EDGE of the viewport and therefore pushed every tab
+    // before it out of view. Selecting e.g. "Health" (x~155) scrolled to 139 even
+    // though Health was already fully on screen in a ~390pt viewport — and that
+    // scrolled "All" (x 16..37, the first tab) completely out of reach, so it could
+    // not be tapped at all until the user manually dragged the strip back.
+    const viewportWidth = tabViewportWidthRef.current;
+    if (viewportWidth > 0) {
+      const pad = huddleSpacing.x4;
+      const currentOffset = tabScrollOffsetRef.current;
+      const leftEdge = layout.x - pad;
+      const rightEdge = layout.x + layout.width + pad;
+      let nextOffset = currentOffset;
+      if (leftEdge < currentOffset) nextOffset = Math.max(0, leftEdge);
+      else if (rightEdge > currentOffset + viewportWidth) nextOffset = rightEdge - viewportWidth;
+      if (Math.abs(nextOffset - currentOffset) > 1) {
+        tabScrollOffsetRef.current = nextOffset;
+        tabScrollRef.current?.scrollTo({ x: nextOffset, animated: animate && !reduceMotion });
+      }
+    }
+    setUnderlineReady(true);
+  }, [indicatorWidth, reduceMotion, underlineLeft]);
+
+  useEffect(() => {
+    placeUnderline(activeIndex, underlineReady);
+  }, [activeIndex, placeUnderline, underlineReady]);
 
   return (
     <View style={styles.filterBlock}>
       <View style={styles.topicTabFrame}>
         <ScrollView
+          ref={tabScrollRef}
           horizontal
           alwaysBounceHorizontal={false}
+          automaticallyAdjustContentInsets={false}
           bounces={false}
           showsHorizontalScrollIndicator={false}
+          onLayout={(event) => { tabViewportWidthRef.current = event.nativeEvent.layout.width; }}
+          onScroll={(event) => { tabScrollOffsetRef.current = event.nativeEvent.contentOffset.x; }}
+          scrollEventThrottle={16}
           style={styles.topicTabScroller}
           contentContainerStyle={styles.tabRow}
         >
-          <Pressable accessibilityRole="button" onPress={onClearTags} style={({ pressed }) => [styles.tabButton, pressed ? styles.pressed : null]}>
-            <Text style={[styles.tabText, selectedTags.length === 0 ? styles.tabTextActive : null]}>All</Text>
-            <View style={[styles.tabUnderline, selectedTags.length === 0 ? styles.tabUnderlineActive : null]} />
-          </Pressable>
-          {NATIVE_SOCIAL_TAGS.map((tag) => (
-            <Pressable key={tag} accessibilityRole="button" onPress={() => onToggleTag(tag)} style={({ pressed }) => [styles.tabButton, pressed ? styles.pressed : null]}>
-              <Text style={[styles.tabText, selectedTags.includes(tag) ? styles.tabTextActive : null]}>{tag}</Text>
-              <View style={[styles.tabUnderline, selectedTags.includes(tag) ? styles.tabUnderlineActive : null]} />
-            </Pressable>
-          ))}
+          {NATIVE_SOCIAL_TABS.map((tab, index) => {
+            const isActive = index === activeIndex;
+            return (
+              <Pressable
+                key={tab}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: isActive }}
+                accessibilityLabel={tab === "All" ? "All posts" : `${tab} posts`}
+                onPress={() => (index === 0 ? onClearTags() : onToggleTag(tab))}
+                // The tab's box is exactly its text width (tabButton has no
+                // horizontal padding) and the row is 32pt tall, so "All" — the
+                // shortest label in the strip at ~21pt — had by far the smallest
+                // target and was the only tab that regularly missed taps.
+                // hitSlop enlarges the touch region only: no layout, spacing or
+                // visual change. 8pt horizontal exactly halves the 16pt inter-tab
+                // gap, so neighbours meet without overlapping (no ambiguous hits
+                // and no dead zone), and 6pt vertical brings 32pt up to 44pt.
+                hitSlop={NATIVE_SOCIAL_TAB_HIT_SLOP}
+                onLayout={(event) => {
+                  const { x, width } = event.nativeEvent.layout;
+                  tabLayoutsRef.current[index] = { x, width };
+                  if (index === activeIndex) placeUnderline(index, false);
+                }}
+                style={({ pressed }) => [styles.tabButton, pressed ? styles.pressed : null]}
+              >
+                <Text style={[styles.tabText, isActive ? styles.tabTextActive : null]}>{tab}</Text>
+              </Pressable>
+            );
+          })}
+          <Animated.View
+            pointerEvents="none"
+            style={[styles.tabUnderlineSlider, { width: indicatorWidth, opacity: underlineReady ? 1 : 0, transform: [{ translateX: underlineLeft }] }]}
+          />
         </ScrollView>
       </View>
+      <Animated.View
+        pointerEvents={controlsHidden ? "none" : "auto"}
+        style={[styles.searchSortReveal, {
+          height: controlsHideProgress.interpolate({ inputRange: [0, 1], outputRange: [huddleLayout.minTouch, 0] }),
+          opacity: controlsHideProgress.interpolate({ inputRange: [0, 0.7, 1], outputRange: [1, 0, 0] }),
+          transform: [{ translateY: controlsHideProgress.interpolate({ inputRange: [0, 1], outputRange: [0, -8] }) }],
+        }]}
+      >
       <View style={styles.searchSortRow}>
         <View style={styles.searchFieldWrap}>
           <View style={styles.searchField}>
             <Feather color={huddleColors.iconSubtle} name="search" size={huddleSocial.actionIconSize} />
             <TextInput
+                multiline={false}
+                scrollEnabled
+                numberOfLines={1} lineBreakModeIOS="tail" lineBreakStrategyIOS="none"
+                textBreakStrategy="simple"
               accessibilityLabel="Search social posts"
               autoCorrect={false}
               onChangeText={onQueryChange}
@@ -359,6 +580,7 @@ export function NativeSocialFilterBar({
           </Modal>
         </View>
       </View>
+      </Animated.View>
     </View>
   );
 }
@@ -370,7 +592,6 @@ const NativeSocialAvatar = memo(function NativeSocialAvatar({
   thread: NativeSocialThread;
   onOpenProfile: (userId?: string) => void;
 }) {
-  const initial = (thread.author.displayName || "Unknown").charAt(0).toUpperCase();
   const authorSocialId = String(thread.author.socialId || "").replace(/^@/, "").trim().toLowerCase();
   const authorName = String(thread.author.displayName || "").trim().toLowerCase();
   const authorVerified =
@@ -378,12 +599,16 @@ const NativeSocialAvatar = memo(function NativeSocialAvatar({
     String(thread.author.verificationStatus || "").toLowerCase() === "verified" ||
     (authorSocialId === "manager" && (authorName === "huddle" || authorName === "team huddle"));
   return (
-    <Pressable accessibilityRole="button" onPress={() => onOpenProfile(thread.userId)} style={({ pressed }) => [styles.avatarButton, authorVerified ? styles.avatarVerified : null, pressed ? styles.pressed : null]}>
-      {thread.author.avatarUrl ? (
-        <ExpoImage {...huddleImageDefaults} accessibilityIgnoresInvertColors source={{ uri: thread.author.avatarUrl }} style={styles.avatarImage} />
-      ) : (
-        <Text style={styles.avatarInitial}>{initial}</Text>
-      )}
+    <Pressable accessibilityRole="button" onPress={() => onOpenProfile(thread.userId)} style={({ pressed }) => [styles.avatarTouch, pressed ? styles.pressed : null]}>
+      <NativeProfileAvatar
+        userId={thread.userId}
+        uri={thread.author.avatarUrl}
+        size={huddleSocial.avatarSize}
+        ringWidth={huddleSocial.avatarBorderWidth}
+        verified={authorVerified}
+        name={thread.author.displayName}
+        engagement={thread.author.engagement}
+      />
       {authorVerified ? (
         <View style={styles.avatarVerifiedBadge}>
           <NativeVerifiedBadge compact variant="avatar" />
@@ -394,9 +619,13 @@ const NativeSocialAvatar = memo(function NativeSocialAvatar({
 });
 
 export type NativeSocialCarouselItem = {
+  aspectRatio?: number | null;
+  height?: number | null;
   kind?: "image" | "video";
   uri: string;
+  version?: string | null;
   videoUri?: string | null;
+  width?: number | null;
 };
 
 function NativeSocialExpandedVideo({
@@ -411,6 +640,7 @@ function NativeSocialExpandedVideo({
   uri: string | null | undefined;
 }) {
   const player = useVideoPlayer(uri || posterUri, (nextPlayer) => {
+    nextPlayer.audioMixingMode = "mixWithOthers";
     nextPlayer.loop = true;
     nextPlayer.muted = muted;
   });
@@ -428,9 +658,10 @@ function NativeSocialExpandedVideo({
   }, [active, player, uri]);
 
   if (!uri) {
+    const posterVersion = posterUri;
     return (
       <View style={styles.expandedImageWrap}>
-        <ExpoImage accessibilityIgnoresInvertColors cachePolicy="memory-disk" contentFit="contain" source={{ uri: posterUri }} style={styles.expandedImage} transition={120} />
+        <ExpoImage accessibilityIgnoresInvertColors cachePolicy="memory-disk" contentFit="contain" key={nativeFreshImageKey(posterUri, posterVersion)} source={{ uri: nativeFreshImageUri(posterUri, posterVersion) }} style={styles.expandedImage} transition={120} />
         <View style={styles.expandedVideoUnavailable}>
           <Feather color={huddleColors.onPrimary} name="play" size={huddleType.h2} />
           <Text style={styles.expandedVideoUnavailableText}>Video preview</Text>
@@ -471,14 +702,29 @@ export function NativeSocialExpandedMediaViewer({
   open: boolean;
   revealed?: boolean;
 }) {
+  // The carousel still owns aspect measurement for its thumbnails. The expanded
+  // viewer deliberately uses the whole screen and lets the image contain itself.
+  void aspectByUri;
   const scrollRef = useRef<ScrollView | null>(null);
   const { height, width } = useWindowDimensions();
   const [muted, setMuted] = useState(true);
+  const [imageZoomed, setImageZoomed] = useState(false);
+  const [saveTargetUri, setSaveTargetUri] = useState<string | null>(null);
+  const [saveNotice, setSaveNotice] = useState<string | null>(null);
+  const [savingImage, setSavingImage] = useState(false);
   const swipeDownStartRef = useRef<{ x: number; y: number } | null>(null);
   const swipeDownDeltaRef = useRef({ x: 0, y: 0 });
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setImageZoomed(false);
+      setSaveTargetUri(null);
+      setSaveNotice(null);
+      setSavingImage(false);
+      return;
+    }
+    setImageZoomed(false);
+    setSaveTargetUri(null);
     requestAnimationFrame(() => {
       scrollRef.current?.scrollTo({ animated: false, x: Math.max(0, activeIndex) * width });
     });
@@ -506,7 +752,16 @@ export function NativeSocialExpandedMediaViewer({
     const delta = swipeDownDeltaRef.current;
     swipeDownStartRef.current = null;
     swipeDownDeltaRef.current = { x: 0, y: 0 };
-    if (delta.y > 92 && Math.abs(delta.x) < 72) onClose();
+    if (!imageZoomed && delta.y > 92 && Math.abs(delta.x) < 72) onClose();
+  };
+
+  const confirmSaveImage = async () => {
+    if (!saveTargetUri || savingImage) return;
+    setSavingImage(true);
+    const result = await saveExpandedImageToPhotos(saveTargetUri);
+    setSavingImage(false);
+    setSaveTargetUri(null);
+    setSaveNotice(result.message);
   };
 
   return (
@@ -539,7 +794,11 @@ export function NativeSocialExpandedMediaViewer({
         <ScrollView
           ref={scrollRef}
           horizontal
-          pagingEnabled
+          pagingEnabled={!imageZoomed}
+          scrollEnabled={!imageZoomed}
+          onTouchEnd={handleSwipeDownEnd}
+          onTouchMove={handleSwipeDownMove}
+          onTouchStart={handleSwipeDownStart}
           showsHorizontalScrollIndicator={false}
           onMomentumScrollEnd={(event) => {
             const nextIndex = Math.round(event.nativeEvent.contentOffset.x / Math.max(width, 1));
@@ -547,25 +806,29 @@ export function NativeSocialExpandedMediaViewer({
           }}
         >
           {items.map((item, index) => {
-            const itemAspect = aspectByUri[item.uri] || huddleSocial.mediaFrameAspectRatio;
-            const maxMediaHeight = Math.max(1, height - huddleSpacing.x10 * 2);
-            const fittedWidth = Math.min(width, maxMediaHeight * itemAspect);
-            const fittedHeight = Math.min(maxMediaHeight, width / itemAspect);
             const hiddenSensitive = isSensitive && !revealed;
+            const imageVersion = item.version || item.uri;
             const mediaFrame = (
-              <View style={[styles.expandedMediaFrame, { height: fittedHeight, width: fittedWidth }]}>
+              <View style={[styles.expandedMediaFrame, { height, width }]}>
                 {item.kind === "video" && !hiddenSensitive ? (
                   <NativeSocialExpandedVideo active={index === activeIndex} muted={muted} posterUri={item.uri} uri={item.videoUri} />
                 ) : (
-                  <ExpoImage
-                    accessibilityIgnoresInvertColors
-                    blurRadius={hiddenSensitive ? huddleSocial.sensitiveBlurRadius : 0}
-                    cachePolicy="memory-disk"
-                    contentFit="contain"
-                    source={{ uri: item.uri }}
-                    style={styles.expandedImage}
-                    transition={120}
-                  />
+                  <NativeZoomableMedia
+                    onLongPress={() => { if (!hiddenSensitive) setSaveTargetUri(item.uri); }}
+                    onZoomChange={setImageZoomed}
+                    resetKey={`${open}:${activeIndex}`}
+                  >
+                    <ExpoImage
+                      accessibilityIgnoresInvertColors
+                      blurRadius={hiddenSensitive ? huddleSocial.sensitiveBlurRadius : 0}
+                      cachePolicy="memory-disk"
+                      contentFit="contain"
+                      key={nativeFreshImageKey(item.uri, imageVersion)}
+                      source={{ uri: nativeFreshImageUri(item.uri, imageVersion) }}
+                      style={styles.expandedImage}
+                      transition={120}
+                    />
+                  </NativeZoomableMedia>
                 )}
                 {hiddenSensitive ? (
                   <View pointerEvents="none" style={styles.expandedSensitiveOverlay}>
@@ -597,6 +860,16 @@ export function NativeSocialExpandedMediaViewer({
             ))}
           </View>
         ) : null}
+        <AppConfirmModal
+          body="Save this image to your photo library?"
+          confirmLabel="Save Image"
+          loading={savingImage}
+          onCancel={() => { if (!savingImage) setSaveTargetUri(null); }}
+          onConfirm={() => void confirmSaveImage()}
+          open={Boolean(saveTargetUri)}
+          title="Save image"
+        />
+        {saveNotice ? <NativeToast message={saveNotice} onDismiss={() => setSaveNotice(null)} /> : null}
       </View>
     </Modal>
   );
@@ -610,9 +883,12 @@ export function NativeSocialMediaCarousel({
   minFrameWidth,
   thumbnailFit = "contain",
   onDoubleTap,
+  onDoubleTapAt,
   onFrameHeightChange,
   onLongPress,
+  deferImageUntilMeasured = false,
   onPress,
+  onGestureActiveChange,
   contentWidth,
   maxFrameHeight,
   popIconVariant = "paw",
@@ -625,9 +901,15 @@ export function NativeSocialMediaCarousel({
   minFrameWidth?: number;
   thumbnailFit?: "contain" | "cover";
   onDoubleTap?: () => void;
+  // When provided, the carousel skips its internal pop overlay and forwards
+  // page-relative tap coordinates so the parent can render a fly-to-target
+  // burst (e.g. into the FeedCard action-bar like icon).
+  onDoubleTapAt?: (pageX: number, pageY: number) => void;
   onFrameHeightChange?: (height: number) => void;
   onLongPress?: () => void;
+  deferImageUntilMeasured?: boolean;
   onPress?: () => void;
+  onGestureActiveChange?: (active: boolean) => void;
   contentWidth?: number;
   maxFrameHeight?: number;
   popIconVariant?: "paw" | "heart";
@@ -636,19 +918,41 @@ export function NativeSocialMediaCarousel({
   const [revealed, setRevealed] = useState(false);
   const [sensitiveTapStage, setSensitiveTapStage] = useState<"toggle" | "fullscreen">("toggle");
   const [tapHintDismissed, setTapHintDismissed] = useState(false);
-  // SO9: big-heart pop visual on double-tap-to-like
-  const heartScale = useRef(new Animated.Value(0)).current;
+  // SO9: big-paw pop visual on double-tap-to-like.
+  // Instagram-style: tight punch-in with scale overshoot + brief rotation flutter,
+  // anchored at the tap point instead of always dead-center.
+  const reduceMotion = useReduceMotion();
+  const heartScale = useRef(new Animated.Value(0.35)).current;
   const heartOpacity = useRef(new Animated.Value(0)).current;
+  const heartRotation = useRef(new Animated.Value(0)).current;
+  const heartOriginX = useRef(new Animated.Value(0)).current;
+  const heartOriginY = useRef(new Animated.Value(0)).current;
   const [activeIndex, setActiveIndex] = useState(0);
   const [expandedIndex, setExpandedIndex] = useState(0);
   const [expandedOpen, setExpandedOpen] = useState(false);
+  const expandedOpenRef = useRef(false);
+  const mediaGestureChangeRef = useRef(onGestureActiveChange);
   const [aspectByUri, setAspectByUri] = useState<Record<string, number>>({});
   const scrollRef = useRef<ScrollView | null>(null);
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+  const suppressPressUntilRef = useRef(0);
   const { width } = useWindowDimensions();
   const resolvedContentWidth = contentWidth ?? Math.max(0, width - huddleSpacing.x8 - huddleSocial.avatarSize - huddleSpacing.x4);
   const media = items;
   const activeUri = media[activeIndex]?.uri || media[0]?.uri || "";
-  const activeSlideAspect = clampNativeSocialMediaAspect(aspectByUri[activeUri] || huddleSocial.mediaFrameAspectRatio);
+  const aspectForItem = useCallback((item: NativeSocialCarouselItem | undefined) => {
+    if (!item) return huddleSocial.mediaFrameAspectRatio;
+    const explicitAspect = typeof item.aspectRatio === "number" && Number.isFinite(item.aspectRatio) && item.aspectRatio > 0 ? item.aspectRatio : null;
+    const dimensionAspect = typeof item.width === "number" && typeof item.height === "number" && item.width > 0 && item.height > 0 ? item.width / item.height : null;
+    return clampNativeSocialMediaAspect(explicitAspect || dimensionAspect || aspectByUri[item.uri] || huddleSocial.mediaFrameAspectRatio);
+  }, [aspectByUri]);
+  const activeSlideAspect = aspectForItem(media[activeIndex] || media[0]);
+  const activeItem = media[activeIndex] || media[0];
+  const activeAspectResolved = Boolean(activeItem && (
+    activeItem.aspectRatio
+    || (activeItem.width && activeItem.height)
+    || aspectByUri[activeItem.uri]
+  ));
   const dynamicSingleImageWidth = fixedFrameHeight && media.length === 1
     ? Math.max(minFrameWidth ?? 1, Math.min(resolvedContentWidth, fixedFrameHeight * activeSlideAspect))
     : resolvedContentWidth;
@@ -660,8 +964,16 @@ export function NativeSocialMediaCarousel({
   const animatedHeightRef = useRef(new Animated.Value(activeFrameHeight));
 
   useEffect(() => {
+    mediaGestureChangeRef.current = onGestureActiveChange;
+  }, [onGestureActiveChange]);
+
+  useEffect(() => () => {
+    if (expandedOpenRef.current) mediaGestureChangeRef.current?.(false);
+  }, []);
+
+  useEffect(() => {
     let active = true;
-    void AsyncStorage.getItem(NATIVE_SENSITIVE_TAP_SEEN_KEY).then((value) => {
+    void readNativeDisplayCacheItem(NATIVE_SENSITIVE_TAP_SEEN_KEY).then((value) => {
       if (active) setTapHintDismissed(value === "1");
     });
     void readNativeSocialMediaAspectCache().then((cache) => {
@@ -674,7 +986,7 @@ export function NativeSocialMediaCarousel({
   }, []);
 
   const toggleSensitiveReveal = () => {
-    haptic.selectTab(); // SO9: subtle haptic on sensitive overlay reveal
+    haptic.reveal();
     setRevealed((current) => !current);
     if (!tapHintDismissed) {
       setTapHintDismissed(true);
@@ -686,6 +998,7 @@ export function NativeSocialMediaCarousel({
   const lastTapAtRef = useRef<number>(0);
   const pendingSingleTapRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const DOUBLE_TAP_GAP_MS = 280;
+  const HEART_POP_SIZE = 84;
 
   useEffect(() => {
     onFrameHeightChange?.(activeFrameHeight);
@@ -693,7 +1006,7 @@ export function NativeSocialMediaCarousel({
 
   useEffect(() => {
     media.forEach((item) => {
-      if (!item.uri || aspectByUri[item.uri]) return;
+      if (!item.uri || aspectByUri[item.uri] || item.aspectRatio || (item.width && item.height)) return;
       RNImage.getSize(
         item.uri,
         (imageWidth, imageHeight) => {
@@ -717,13 +1030,15 @@ export function NativeSocialMediaCarousel({
     };
   }, []);
 
-  if (media.length === 0) return null;
+  useEffect(() => {
+    Animated.timing(animatedHeightRef.current, {
+      duration: heightAnimationMs,
+      toValue: activeFrameHeight,
+      useNativeDriver: false,
+    }).start();
+  }, [activeFrameHeight, animatedHeightRef, heightAnimationMs]);
 
-  Animated.timing(animatedHeightRef.current, {
-    duration: heightAnimationMs,
-    toValue: activeFrameHeight,
-    useNativeDriver: false,
-  }).start();
+  if (media.length === 0) return null;
 
   const scrollToIndex = (index: number) => {
     const next = Math.max(0, Math.min(media.length - 1, index));
@@ -734,8 +1049,11 @@ export function NativeSocialMediaCarousel({
     });
   };
 
-  const handleMediaPress = (index: number) => {
+  const handleMediaPress = (index: number, event?: GestureResponderEvent) => {
+    if (Date.now() < suppressPressUntilRef.current) return;
     const nextIndex = Math.max(0, Math.min(media.length - 1, index));
+    const tapX = event?.nativeEvent.locationX ?? slideWidth / 2;
+    const tapY = event?.nativeEvent.locationY ?? activeFrameHeight / 2;
 
     // SO9: while sensitive overlay is up, ignore double-tap and only handle reveal
     if (isSensitive && !revealed) {
@@ -751,28 +1069,52 @@ export function NativeSocialMediaCarousel({
     // SO9: double-tap detection — second tap within DOUBLE_TAP_GAP_MS fires like
     const now = Date.now();
     const gap = now - lastTapAtRef.current;
-    if (gap < DOUBLE_TAP_GAP_MS && onDoubleTap) {
+    if (gap < DOUBLE_TAP_GAP_MS && (onDoubleTap || onDoubleTapAt)) {
       lastTapAtRef.current = 0;
       if (pendingSingleTapRef.current) {
         clearTimeout(pendingSingleTapRef.current);
         pendingSingleTapRef.current = null;
       }
       haptic.selectTab();
-      // SO9: big-heart pop animation — scale 0→1.15→1, fade 0→1→0 over ~600ms
-      heartScale.setValue(0);
+      // When the parent owns the burst (fly-to-action-bar), forward absolute
+      // page coords and skip the local in-place pop entirely.
+      if (onDoubleTapAt) {
+        onDoubleTapAt(event?.nativeEvent.pageX ?? 0, event?.nativeEvent.pageY ?? 0);
+        onDoubleTap?.();
+        return;
+      }
+      // Reduce Motion: register the like, skip the decorative pop entirely.
+      if (reduceMotion) {
+        onDoubleTap?.();
+        return;
+      }
+      // Fallback: standalone usage (chat dialogue, alert detail) — local burst
+      // anchored at tap point, scale punch with overshoot, brief rotation
+      // flutter, hold, quick fade. ~600ms total.
+      heartOriginX.setValue(tapX);
+      heartOriginY.setValue(tapY);
+      heartScale.setValue(0.35);
       heartOpacity.setValue(0);
+      heartRotation.setValue(0);
       Animated.parallel([
+        // Scale: spring overshoot 0.35 → 1.25 → settle 1.0 (≈220ms)
         Animated.sequence([
-          Animated.spring(heartScale, { toValue: 1.15, useNativeDriver: true, damping: 9, stiffness: 220, mass: 0.6 }),
-          Animated.timing(heartScale, { toValue: 1, duration: 120, useNativeDriver: true }),
+          Animated.spring(heartScale, { toValue: 1.25, useNativeDriver: true, damping: 8, stiffness: 240, mass: 0.45 }),
+          Animated.spring(heartScale, { toValue: 1.0, useNativeDriver: true, damping: 14, stiffness: 200, mass: 0.45 }),
         ]),
+        // Opacity: fast in (80ms), hold (260ms), fade out (260ms) ≈ 600ms total
         Animated.sequence([
           Animated.timing(heartOpacity, { toValue: 1, duration: 80, useNativeDriver: true }),
-          Animated.delay(280),
-          Animated.timing(heartOpacity, { toValue: 0, duration: 220, useNativeDriver: true }),
+          Animated.delay(260),
+          Animated.timing(heartOpacity, { toValue: 0, duration: 260, useNativeDriver: true }),
+        ]),
+        // Rotation flutter — quick tilt, spring back
+        Animated.sequence([
+          Animated.timing(heartRotation, { toValue: -1, duration: 100, useNativeDriver: true }),
+          Animated.spring(heartRotation, { toValue: 0, useNativeDriver: true, damping: 9, stiffness: 220, mass: 0.4 }),
         ]),
       ]).start();
-      onDoubleTap();
+      onDoubleTap?.();
       return;
     }
     lastTapAtRef.current = now;
@@ -782,6 +1124,11 @@ export function NativeSocialMediaCarousel({
     pendingSingleTapRef.current = setTimeout(() => {
       pendingSingleTapRef.current = null;
       setExpandedIndex(nextIndex);
+      // Full-screen media owns every horizontal gesture until it closes. Keep
+      // the parent topic pager locked for the entire viewer session—not only
+      // while the in-feed carousel has an active touch.
+      expandedOpenRef.current = true;
+      onGestureActiveChange?.(true);
       setExpandedOpen(true);
     }, onDoubleTap ? DOUBLE_TAP_GAP_MS : 0);
   };
@@ -794,6 +1141,31 @@ export function NativeSocialMediaCarousel({
           horizontal
           pagingEnabled
           showsHorizontalScrollIndicator={false}
+          onTouchStart={(event) => {
+            event.stopPropagation();
+            const touch = event.nativeEvent;
+            touchStartRef.current = { x: touch.pageX, y: touch.pageY };
+            onGestureActiveChange?.(true);
+          }}
+          onTouchMove={(event) => {
+            event.stopPropagation();
+            const start = touchStartRef.current;
+            if (!start) return;
+            const touch = event.nativeEvent;
+            if (Math.abs(touch.pageX - start.x) > 8 || Math.abs(touch.pageY - start.y) > 8) {
+              suppressPressUntilRef.current = Date.now() + 120;
+            }
+          }}
+          onTouchCancel={(event) => {
+            event.stopPropagation();
+            touchStartRef.current = null;
+            requestAnimationFrame(() => onGestureActiveChange?.(expandedOpenRef.current));
+          }}
+          onTouchEnd={(event) => {
+            event.stopPropagation();
+            touchStartRef.current = null;
+            requestAnimationFrame(() => onGestureActiveChange?.(expandedOpenRef.current));
+          }}
           contentContainerStyle={styles.mediaPagingRow}
           onMomentumScrollEnd={(event) => {
             const nextIndex = Math.round(event.nativeEvent.contentOffset.x / Math.max(slideWidth, 1));
@@ -801,19 +1173,20 @@ export function NativeSocialMediaCarousel({
           }}
         >
 	          {media.map((item, index) => {
-	            const itemAspect = clampNativeSocialMediaAspect(aspectByUri[item.uri] || huddleSocial.mediaFrameAspectRatio);
+	            const itemAspect = aspectForItem(item);
 		            const itemFrameHeight = fixedFrameHeight ?? heightForAspect(itemAspect);
 		            const fittedWidth = Math.min(slideWidth, itemFrameHeight * itemAspect);
 		            const fittedHeight = Math.min(itemFrameHeight, slideWidth / itemAspect);
                 const mediaWidth = thumbnailFit === "cover" ? slideWidth : fittedWidth;
                 const mediaHeight = thumbnailFit === "cover" ? itemFrameHeight : fittedHeight;
+                const imageVersion = item.version || item.uri;
 	            return (
               <Pressable
 		                key={`${item.kind}-${item.uri || index}`}
 		                accessibilityRole="button"
                     delayLongPress={260}
                     onLongPress={onLongPress}
-		                onPress={() => handleMediaPress(index)}
+		                onPress={(event) => handleMediaPress(index, event)}
 	                style={({ pressed }) => [styles.mediaFrame, { height: itemFrameHeight, width: slideWidth }, pressed ? styles.pressed : null]}
               >
                 {item.uri ? (
@@ -823,8 +1196,9 @@ export function NativeSocialMediaCarousel({
 	                      blurRadius={isSensitive && !revealed ? huddleSocial.sensitiveBlurRadius : 0}
 	                      cachePolicy="memory-disk"
 	                      contentFit={thumbnailFit}
-	                      source={{ uri: item.uri }}
-	                      style={[styles.mediaImage, { height: mediaHeight, width: mediaWidth }]}
+	                      key={nativeFreshImageKey(item.uri, imageVersion)}
+	                      source={{ uri: nativeFreshImageUri(item.uri, imageVersion) }}
+	                      style={[styles.mediaImage, { height: mediaHeight, width: mediaWidth }, deferImageUntilMeasured && index === activeIndex && !activeAspectResolved ? styles.mediaImagePending : null]}
 	                      transition={120}
 		                    />
                   </View>
@@ -867,12 +1241,26 @@ export function NativeSocialMediaCarousel({
             );
           })}
         </ScrollView>
-        {/* SO9: big-heart pop overlay — absolute-positioned, pointerEvents="none" so it never blocks taps */}
-        <Animated.View pointerEvents="none" style={[styles.heartPopOverlay, { opacity: heartOpacity, transform: [{ scale: heartScale }] }]}>
+        {/* SO9: pop overlay — anchored at tap point, pointerEvents="none" so it never blocks taps */}
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.heartPopAnchor,
+            {
+              opacity: heartOpacity,
+              transform: [
+                { translateX: Animated.subtract(heartOriginX, HEART_POP_SIZE / 2) },
+                { translateY: Animated.subtract(heartOriginY, HEART_POP_SIZE / 2) },
+                { scale: heartScale },
+                { rotate: heartRotation.interpolate({ inputRange: [-1, 1], outputRange: ["-9deg", "9deg"] }) },
+              ],
+            },
+          ]}
+        >
           {popIconVariant === "heart" ? (
-            <FontAwesome color="#FF3B5C" name="heart" size={108} style={styles.heartPopIcon} />
+            <FontAwesome color="#FF3B5C" name="heart" size={HEART_POP_SIZE} style={styles.heartPopIcon} />
           ) : (
-            <MaterialCommunityIcons color="#FFFFFF" name="paw" size={108} style={styles.heartPopIcon} />
+            <MaterialCommunityIcons color={huddleColors.coral} name="paw" size={HEART_POP_SIZE} style={styles.heartPopIcon} />
           )}
         </Animated.View>
       </Animated.View>
@@ -881,7 +1269,11 @@ export function NativeSocialMediaCarousel({
         aspectByUri={aspectByUri}
         isSensitive={isSensitive}
         items={media}
-        onClose={() => setExpandedOpen(false)}
+        onClose={() => {
+          expandedOpenRef.current = false;
+          onGestureActiveChange?.(false);
+          setExpandedOpen(false);
+        }}
         onIndexChange={setExpandedIndex}
         onToggleSensitive={toggleSensitiveReveal}
         open={expandedOpen}
@@ -901,7 +1293,7 @@ export function NativeSocialMediaCarousel({
           </Pressable>
         </View>
       ) : null}
-      {isSensitive ? <Text style={styles.sensitiveRevealHint}>{sensitiveTapStage === "fullscreen" ? "Tap again for full screen" : revealed ? "Tap to blur" : "Tap to view"}</Text> : null}
+      {isSensitive && revealed && sensitiveTapStage === "fullscreen" ? <Text style={styles.sensitiveRevealHint}>Tap again to enlarge</Text> : null}
     </View>
   );
 }
@@ -910,42 +1302,73 @@ function NativeSocialMediaStrip({
   thread,
   onOpenWebThread,
   onDoubleTap,
+  onDoubleTapAt,
+  onGestureActiveChange,
 }: {
   thread: NativeSocialThread;
   onOpenWebThread: () => void;
   onDoubleTap?: () => void;
+  onDoubleTapAt?: (pageX: number, pageY: number) => void;
+  onGestureActiveChange?: (active: boolean) => void;
 }) {
   const media = useMemo(() => {
-    const imageItems = thread.images.map((uri) => ({ uri, kind: "image" as const }));
+    const imageItems = thread.images.map((uri) => {
+      const metadata = thread.imageMetadata.find((item) => item.url === uri);
+      return {
+        aspectRatio: metadata?.aspectRatio ?? null,
+        height: metadata?.height ?? null,
+        uri,
+        version: uri,
+        kind: "image" as const,
+        width: metadata?.width ?? null,
+      };
+    });
     if (thread.videoProvider === "bunny_stream" && thread.providerVideoId) {
       const poster = thread.videoThumbnailUrl || thread.videoPreviewUrl || "";
-      return [...imageItems, { uri: poster, videoUri: thread.videoPlaybackUrl, kind: "video" as const }];
+      return [...imageItems, { uri: poster, version: poster || thread.providerVideoId, videoUri: thread.videoPlaybackUrl, kind: "video" as const }];
     }
     return imageItems;
-  }, [thread.images, thread.providerVideoId, thread.videoPlaybackUrl, thread.videoProvider, thread.videoPreviewUrl, thread.videoThumbnailUrl]);
+  }, [thread.imageMetadata, thread.images, thread.providerVideoId, thread.videoPlaybackUrl, thread.videoProvider, thread.videoPreviewUrl, thread.videoThumbnailUrl]);
 
-  return <NativeSocialMediaCarousel isSensitive={thread.isSensitive} items={media} onDoubleTap={onDoubleTap} onPress={onOpenWebThread} videoStatus={thread.videoStatus} />;
+  return <NativeSocialMediaCarousel isSensitive={thread.isSensitive} items={media} onDoubleTap={onDoubleTap} onDoubleTapAt={onDoubleTapAt} onGestureActiveChange={onGestureActiveChange} onPress={onOpenWebThread} videoStatus={thread.videoStatus} />;
 }
 
 export function NativeSocialExternalLinkPreview({
   linkPreview,
   onOpen,
+  onRemove,
   url,
 }: {
   linkPreview: NativeSocialLinkPreview | null;
   onOpen: (url: string) => void;
+  onRemove?: () => void;
   url: string;
 }) {
   return (
     <Pressable accessibilityRole="link" onPress={() => onOpen(url)} style={({ pressed }) => [styles.linkPreview, pressed ? styles.pressed : null]}>
+      {onRemove ? (
+        <Pressable
+          accessibilityLabel="Remove link preview"
+          accessibilityRole="button"
+          hitSlop={huddleSpacing.x1}
+          onPress={(event) => {
+            event.stopPropagation();
+            onRemove();
+          }}
+          style={({ pressed }) => [styles.linkPreviewRemoveButton, pressed ? styles.pressed : null]}
+        >
+          <Feather color={huddleColors.text} name="x" size={16} />
+        </Pressable>
+      ) : null}
       {linkPreview?.image ? (
-        <ExpoImage {...huddleImageDefaults} accessibilityIgnoresInvertColors source={{ uri: linkPreview.image }} style={styles.linkPreviewImage} />
+        <ExpoImage {...huddleImageDefaults} accessibilityIgnoresInvertColors key={nativeFreshImageKey(linkPreview.image, linkPreview.url || linkPreview.image)} source={{ uri: nativeFreshImageUri(linkPreview.image, linkPreview.url || linkPreview.image) }} style={styles.linkPreviewImage} />
       ) : linkPreview?.loading ? (
         <View style={styles.linkPreviewLoading} />
       ) : null}
       <View style={styles.linkPreviewBody}>
-        <Text style={styles.linkMeta}>{linkPreview?.siteName || hostLabel(url)}</Text>
+        <Text ellipsizeMode="tail" numberOfLines={1} style={styles.linkMeta}>{linkPreview?.siteName || hostLabel(url)}</Text>
         <Text numberOfLines={2} style={styles.linkTitle}>{linkPreview?.title || formatNativeSocialUrlLabel(url)}</Text>
+        {linkPreview?.description ? <Text numberOfLines={2} style={styles.linkDescription}>{linkPreview.description}</Text> : null}
         {linkPreview?.failed ? <Text style={styles.linkFailedText}>Preview unavailable</Text> : null}
       </View>
     </Pressable>
@@ -955,19 +1378,27 @@ export function NativeSocialExternalLinkPreview({
 function NativeSocialActionBar({
   thread,
   supported,
+  commentsOpen,
   onOpenComments,
   onOpenMore,
   onOpenWebThread,
   onOpenShare,
   onOpenSupport,
+  pawWrapperRef,
+  onPawLayout,
+  pawScale,
 }: {
   thread: NativeSocialThread;
   supported: boolean;
+  commentsOpen?: boolean;
   onOpenComments: () => void;
   onOpenMore: (event: GestureResponderEvent) => void;
   onOpenWebThread: () => void;
   onOpenShare: () => void;
   onOpenSupport: () => void;
+  pawWrapperRef?: RefObject<View | null>;
+  onPawLayout?: () => void;
+  pawScale?: Animated.Value;
 }) {
   const primaryTag = derivePrimaryTag(thread);
   const tagTone = deriveTagTone(thread, primaryTag);
@@ -983,26 +1414,51 @@ function NativeSocialActionBar({
     tagTone === "default" ? styles.tagText_default :
     styles.tagText_onFill;
   return (
+    <>
+    {/* Found sits on its own line, not in the meta row. The meta row already carries the
+        timestamp and tag beside a 136pt action cluster that never shrinks (React Native
+        defaults flexShrink to 0), so a third pill pushes the action icons off-screen on
+        anything narrower than a large phone -- and the badge widens as it ages. */}
+    {thread.foundAt ? (
+      <View style={styles.foundRow}>
+        <View style={[styles.tagPill, styles.tagPill_found]}>
+          <Feather color={huddleColors.onPrimary} name="check-circle" size={11} />
+          <Text numberOfLines={1} style={[styles.tagText, styles.tagText_onFill]}>
+            {`Found · ${formatNativeSocialTimeAgo(thread.foundAt)}`}
+          </Text>
+        </View>
+      </View>
+    ) : null}
     <View style={styles.actionRow}>
       <View style={styles.actionMeta}>
         <Text style={styles.timeText}>{formatNativeSocialTimeAgo(thread.createdAt)}</Text>
         {primaryTag ? (
           <View style={[styles.tagPill, tagPillToneStyle]}>
-            <Text style={[styles.tagText, tagTextToneStyle]}>{primaryTag}</Text>
+            <Text numberOfLines={1} style={[styles.tagText, tagTextToneStyle]}>{primaryTag}</Text>
           </View>
         ) : null}
       </View>
       <View style={styles.actionCluster}>
-        <Pressable accessibilityRole="button" accessibilityLabel={supported ? "Remove support" : "Support post"} accessibilityState={{ selected: supported }} onPress={onOpenSupport} hitSlop={huddleSpacing.x2} style={({ pressed }) => [styles.iconButton, supported ? styles.iconButtonActive : null, pressed ? styles.pressed : null]}>
-          <MaterialCommunityIcons color={supported ? huddleColors.blue : huddleColors.iconMuted} name="paw" size={huddleSocial.actionIconSize} />
+        <Pressable accessibilityRole="button" accessibilityLabel={supported ? "Remove support" : "Support post"} accessibilityState={{ selected: supported }} onPress={onOpenSupport} hitSlop={huddleSpacing.x2} style={({ pressed }) => [styles.iconButton, pressed ? styles.pressed : null]}>
+          <Animated.View
+            ref={pawWrapperRef}
+            onLayout={onPawLayout}
+            style={pawScale ? { transform: [{ scale: pawScale }] } : null}
+          >
+            <MaterialCommunityIcons
+              color={supported ? huddleColors.coral : huddleColors.iconMuted}
+              name={supported ? "paw" : "paw-outline"}
+              size={huddleSocial.actionIconSize}
+            />
+          </Animated.View>
           {thread.likes > 0 ? (
             <View style={styles.actionBadge}>
               <Text style={styles.actionCount}>{thread.likes}</Text>
             </View>
           ) : null}
         </Pressable>
-        <Pressable accessibilityRole="button" accessibilityLabel="Open replies" onPress={onOpenComments} hitSlop={huddleSpacing.x2} style={({ pressed }) => [styles.iconButton, pressed ? styles.pressed : null]}>
-          <Feather color={huddleColors.iconMuted} name="message-circle" size={huddleSocial.actionIconSize} />
+        <Pressable accessibilityRole="button" accessibilityLabel={commentsOpen ? "Hide replies" : "Open replies"} accessibilityState={{ expanded: Boolean(commentsOpen) }} onPress={onOpenComments} hitSlop={huddleSpacing.x2} style={({ pressed }) => [styles.iconButton, pressed ? styles.pressed : null]}>
+          <Feather color={commentsOpen ? huddleColors.coral : huddleColors.iconMuted} name="message-circle" size={huddleSocial.actionIconSize} />
           {thread.commentCount > 0 ? (
             <View style={styles.actionBadge}>
               <Text style={styles.actionCount}>{thread.commentCount}</Text>
@@ -1022,17 +1478,21 @@ function NativeSocialActionBar({
         </Pressable>
       </View>
     </View>
+    </>
   );
 }
 
 function NativeSocialAuthorHandle({ thread }: { thread: NativeSocialThread }) {
+  const socialAuthorLabel = thread.author.socialId || thread.author.displayName || "Anonymous";
+  const isPillar = thread.author.engagement?.tier === "pillar";
   return (
     <View style={styles.authorNameRow}>
-      <Text numberOfLines={1} style={styles.authorName}>{thread.author.displayName || "Anonymous"}</Text>
-      {thread.author.socialId ? <Text numberOfLines={1} style={styles.authorSocialId}>@{thread.author.socialId}</Text> : null}
+      <Text numberOfLines={1} style={[styles.authorName, isPillar ? styles.authorNameGold : null]}>{socialAuthorLabel}</Text>
     </View>
   );
 }
+
+const FEED_BURST_SIZE = 68;
 
 export const NativeSocialFeedCard = memo(function NativeSocialFeedCard({
   thread,
@@ -1041,6 +1501,7 @@ export const NativeSocialFeedCard = memo(function NativeSocialFeedCard({
   pinned,
   saved,
   supported,
+  commentsOpen,
   onToggleExpanded,
   onTogglePinned,
   onToggleSaved,
@@ -1052,6 +1513,7 @@ export const NativeSocialFeedCard = memo(function NativeSocialFeedCard({
   onOpenMore,
   onOpenShare,
   onOpenSupport,
+  onMediaGestureActiveChange,
 }: NativeSocialFeedCardProps) {
   const [contentLineCount, setContentLineCount] = useState(0);
   const firstUrl = extractNativeSocialFirstHttpUrl(thread.content);
@@ -1059,10 +1521,100 @@ export const NativeSocialFeedCard = memo(function NativeSocialFeedCard({
     ? thread.content
     : stripNativeSocialExternalUrlFromText(thread.content, firstUrl);
   const shouldCollapse = contentLineCount > huddleSocial.contentCollapsedLines;
-  const mapLabel = deriveNativeSocialDistrictLabel(thread.alertDistrict);
+  // alertDistrict comes from the alert row and disappears with it; postDistrict is written
+  // onto the thread at cross-post time and survives, so the location text outlives the pin.
+  const alertLocationLabel = deriveNativeSocialDistrictLabel(thread.alertDistrict)
+    || deriveNativeSocialDistrictLabel(thread.postDistrict);
+  const alertIsOpenable = thread.alertState === "active" && Boolean(thread.mapId);
+
+  // SO9: Instagram-style fly-to-action-bar burst. Burst pops at the tap point,
+  // briefly holds, then translates to the action-bar paw while scaling down
+  // and fading; on landing, the action-bar paw plays a small punch.
+  const reduceMotion = useReduceMotion();
+  const cardRef = useRef<View | null>(null);
+  const pawWrapperRef = useRef<View | null>(null);
+  const cardOriginRef = useRef({ x: 0, y: 0 });
+  const pawCenterRef = useRef({ x: 0, y: 0 });
+  const burstScale = useRef(new Animated.Value(0.35)).current;
+  const burstOpacity = useRef(new Animated.Value(0)).current;
+  const burstRotation = useRef(new Animated.Value(0)).current;
+  const burstX = useRef(new Animated.Value(-FEED_BURST_SIZE)).current;
+  const burstY = useRef(new Animated.Value(-FEED_BURST_SIZE)).current;
+  const pawScale = useRef(new Animated.Value(1)).current;
+
+  const handleCardLayout = useCallback(() => {
+    cardRef.current?.measureInWindow((x, y) => {
+      cardOriginRef.current = { x, y };
+    });
+  }, []);
+
+  const handlePawLayout = useCallback(() => {
+    pawWrapperRef.current?.measureInWindow((x, y, w, h) => {
+      pawCenterRef.current = {
+        x: x + w / 2 - cardOriginRef.current.x,
+        y: y + h / 2 - cardOriginRef.current.y,
+      };
+    });
+  }, []);
+
+  const runBurst = useCallback((localX: number, localY: number, target: { x: number; y: number }) => {
+    // Reduce Motion: the like is already registered by the media layer; skip the
+    // fly-to-action-bar burst and paw punch entirely.
+    if (reduceMotion) return;
+    burstX.setValue(localX);
+    burstY.setValue(localY);
+    burstScale.setValue(0.35);
+    burstOpacity.setValue(0);
+    burstRotation.setValue(0);
+    Animated.parallel([
+      Animated.sequence([
+        Animated.spring(burstScale, { toValue: 1.25, useNativeDriver: true, damping: 8, stiffness: 240, mass: 0.45 }),
+        Animated.spring(burstScale, { toValue: 1.0, useNativeDriver: true, damping: 14, stiffness: 200, mass: 0.45 }),
+        Animated.delay(120),
+        Animated.timing(burstScale, { toValue: 0.18, duration: 300, useNativeDriver: true }),
+      ]),
+      Animated.sequence([
+        Animated.timing(burstOpacity, { toValue: 1, duration: 80, useNativeDriver: true }),
+        Animated.delay(380),
+        Animated.timing(burstOpacity, { toValue: 0, duration: 220, useNativeDriver: true }),
+      ]),
+      Animated.sequence([
+        Animated.timing(burstRotation, { toValue: -1, duration: 100, useNativeDriver: true }),
+        Animated.spring(burstRotation, { toValue: 0, useNativeDriver: true, damping: 9, stiffness: 220, mass: 0.4 }),
+      ]),
+      Animated.sequence([
+        Animated.delay(400),
+        Animated.parallel([
+          Animated.timing(burstX, { toValue: target.x, duration: 300, useNativeDriver: true }),
+          Animated.timing(burstY, { toValue: target.y, duration: 300, useNativeDriver: true }),
+        ]),
+      ]),
+    ]).start(() => {
+      // Punch the action-bar paw on receipt.
+      Animated.sequence([
+        Animated.spring(pawScale, { toValue: 1.22, useNativeDriver: true, damping: 8, stiffness: 240, mass: 0.4 }),
+        Animated.spring(pawScale, { toValue: 1, useNativeDriver: true, damping: 14, stiffness: 200, mass: 0.4 }),
+      ]).start();
+    });
+  }, [burstOpacity, burstRotation, burstScale, burstX, burstY, pawScale, reduceMotion]);
+
+  const handleDoubleTapAt = useCallback((pageX: number, pageY: number) => {
+    // Re-measure card + paw positions because scroll may have shifted them.
+    cardRef.current?.measureInWindow((cx, cy) => {
+      cardOriginRef.current = { x: cx, y: cy };
+      pawWrapperRef.current?.measureInWindow((px, py, pw, ph) => {
+        const target = {
+          x: px + pw / 2 - cx,
+          y: py + ph / 2 - cy,
+        };
+        pawCenterRef.current = target;
+        runBurst(pageX - cx, pageY - cy, target);
+      });
+    });
+  }, [runBurst]);
 
   return (
-    <View style={styles.card}>
+    <View ref={cardRef} onLayout={handleCardLayout} style={styles.card}>
       <View style={styles.cardRow}>
         <NativeSocialAvatar thread={thread} onOpenProfile={onOpenProfile} />
         <View style={styles.cardContent}>
@@ -1077,12 +1629,22 @@ export const NativeSocialFeedCard = memo(function NativeSocialFeedCard({
           <Pressable accessibilityRole="button" onPress={() => onOpenProfile(thread.userId)} style={styles.authorTextBlock}>
             <NativeSocialAuthorHandle thread={thread} />
           </Pressable>
-          <Text style={styles.titleText}>{thread.title}</Text>
-          {thread.hasAlertLink || thread.mapId ? (
-            <Pressable accessibilityRole="button" onPress={onOpenMap} style={({ pressed }) => [styles.mapLink, pressed ? styles.pressed : null]}>
-              <Text style={styles.mapPin}>📍</Text>
-              <Text style={styles.mapLinkText}>{mapLabel}</Text>
-            </Pressable>
+          <Text ellipsizeMode="tail" numberOfLines={2} style={styles.titleText}>{thread.title}</Text>
+          {alertLocationLabel ? (
+            // A pin that can still be opened stays a link. Once it is gone -- deleted,
+            // found, expired, or not visible to this viewer -- the same place becomes
+            // ordinary text. A link that cannot travel anywhere is worse than no link.
+            alertIsOpenable ? (
+              <Pressable accessibilityRole="button" onPress={onOpenMap} style={({ pressed }) => [styles.mapLink, pressed ? styles.pressed : null]}>
+                <Text style={styles.mapPin}>📍</Text>
+                <Text ellipsizeMode="tail" numberOfLines={1} style={styles.mapLinkText}>{alertLocationLabel}</Text>
+              </Pressable>
+            ) : (
+              <View style={styles.mapLink}>
+                <Text style={styles.mapPin}>📍</Text>
+                <Text ellipsizeMode="tail" numberOfLines={1} style={styles.mapLinkPlainText}>{alertLocationLabel}</Text>
+              </View>
+            )
           ) : null}
           {visibleContent ? (
             <NativeSocialBodyText
@@ -1105,23 +1667,60 @@ export const NativeSocialFeedCard = memo(function NativeSocialFeedCard({
           {firstUrl ? (
             <Pressable accessibilityRole="link" onPress={() => onOpenExternalLink(firstUrl)} style={({ pressed }) => [styles.linkPreview, pressed ? styles.pressed : null]}>
               {linkPreview?.image ? (
-                <ExpoImage {...huddleImageDefaults} accessibilityIgnoresInvertColors source={{ uri: linkPreview.image }} style={styles.linkPreviewImage} />
+                <ExpoImage {...huddleImageDefaults} accessibilityIgnoresInvertColors key={nativeFreshImageKey(linkPreview.image, linkPreview.url || linkPreview.image)} source={{ uri: nativeFreshImageUri(linkPreview.image, linkPreview.url || linkPreview.image) }} style={styles.linkPreviewImage} />
               ) : linkPreview?.loading ? (
                 <View style={styles.linkPreviewLoading} />
               ) : null}
               <View style={styles.linkPreviewBody}>
-                <Text style={styles.linkMeta}>{linkPreview?.siteName || hostLabel(firstUrl)}</Text>
+                <Text ellipsizeMode="tail" numberOfLines={1} style={styles.linkMeta}>{linkPreview?.siteName || hostLabel(firstUrl)}</Text>
                 <Text numberOfLines={2} style={styles.linkTitle}>{linkPreview?.title || formatNativeSocialUrlLabel(firstUrl)}</Text>
+                {linkPreview?.description ? <Text numberOfLines={2} style={styles.linkDescription}>{linkPreview.description}</Text> : null}
                 {linkPreview?.failed ? <Text style={styles.linkFailedText}>Preview unavailable</Text> : null}
               </View>
             </Pressable>
           ) : null}
           {thread.hashtags.length > 0 ? <Text style={styles.hashtagText}>{thread.hashtags.slice(0, 3).map((tag) => tag.startsWith("#") ? tag : `#${tag}`).join(" ")}</Text> : null}
-          <NativeSocialMediaStrip thread={thread} onDoubleTap={() => { if (!supported) onOpenSupport(); }} onOpenWebThread={onOpenWebThread} />
-          {thread.localStatus ? <Text style={styles.localStatusText}>{thread.localStatus === "failed" ? "Could not post" : "Posting..."}</Text> : null}
-          <NativeSocialActionBar supported={supported} thread={thread} onOpenComments={onOpenComments} onOpenMore={onOpenMore} onOpenShare={onOpenShare} onOpenSupport={onOpenSupport} onOpenWebThread={onOpenWebThread} />
+          <NativeSocialMediaStrip
+            thread={thread}
+            onDoubleTap={() => { if (!supported) onOpenSupport(); }}
+            onDoubleTapAt={handleDoubleTapAt}
+            onGestureActiveChange={onMediaGestureActiveChange}
+            onOpenWebThread={onOpenWebThread}
+          />
+          {thread.localStatus ? <Text style={styles.localStatusText}>Posting…</Text> : null}
+          <NativeSocialActionBar
+            commentsOpen={commentsOpen}
+            supported={supported}
+            thread={thread}
+            onOpenComments={onOpenComments}
+            onOpenMore={onOpenMore}
+            onOpenShare={onOpenShare}
+            onOpenSupport={onOpenSupport}
+            onOpenWebThread={onOpenWebThread}
+            pawWrapperRef={pawWrapperRef}
+            onPawLayout={handlePawLayout}
+            pawScale={pawScale}
+          />
         </View>
       </View>
+      {/* Fly-to-action-bar burst overlay. Card-relative absolute positioning. */}
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          styles.feedBurst,
+          {
+            opacity: burstOpacity,
+            transform: [
+              { translateX: Animated.subtract(burstX, FEED_BURST_SIZE / 2) },
+              { translateY: Animated.subtract(burstY, FEED_BURST_SIZE / 2) },
+              { scale: burstScale },
+              { rotate: burstRotation.interpolate({ inputRange: [-1, 1], outputRange: ["-9deg", "9deg"] }) },
+            ],
+          },
+        ]}
+      >
+        <MaterialCommunityIcons color={huddleColors.coral} name="paw" size={FEED_BURST_SIZE} />
+      </Animated.View>
     </View>
   );
 });
@@ -1163,6 +1762,7 @@ const styles = StyleSheet.create({
   actionMeta: {
     alignItems: "center",
     flexDirection: "row",
+    flexShrink: 1,
     gap: huddleSpacing.x2,
     minWidth: 0,
   },
@@ -1171,12 +1771,21 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     marginTop: huddleSpacing.x3,
   },
+  foundRow: {
+    alignSelf: "flex-start",
+    marginTop: huddleSpacing.x3,
+  },
   authorName: {
     color: huddleColors.text,
     flexShrink: 1,
     fontFamily: "Urbanist-600",
-    fontSize: huddleType.label,
+    fontSize: 15,
     lineHeight: huddleType.labelLine,
+  },
+  authorNameGold: {
+    // Solid gold tint only here (no animated sweep) — feed rows render many
+    // avatars at once, so the shimmer sweep stays reserved for the profile hero.
+    color: "#C8861A",
   },
   authorNameRow: {
     alignItems: "center",
@@ -1196,31 +1805,12 @@ const styles = StyleSheet.create({
     minWidth: 0,
     paddingRight: huddleSocial.topActionsReservedWidth,
   },
-  avatarButton: {
+  avatarTouch: {
     alignItems: "center",
-    backgroundColor: huddleColors.mutedCanvas,
-    borderColor: huddleColors.fieldBorderStrong,
-    borderRadius: huddleRadii.pill,
-    borderWidth: huddleSocial.avatarBorderWidth,
     height: huddleSocial.avatarSize,
     justifyContent: "center",
-    overflow: "visible",
     position: "relative",
     width: huddleSocial.avatarSize,
-  },
-  avatarImage: {
-    borderRadius: huddleRadii.pill,
-    height: "100%",
-    overflow: "hidden",
-    width: "100%",
-  },
-  avatarInitial: {
-    color: huddleColors.text,
-    fontFamily: "Urbanist-700",
-    fontSize: huddleType.label,
-  },
-  avatarVerified: {
-    borderColor: huddleColors.blue,
   },
   avatarVerifiedBadge: {
     bottom: -1,
@@ -1232,7 +1822,7 @@ const styles = StyleSheet.create({
   bodyText: {
     color: huddleColors.text,
     fontFamily: "Urbanist-400",
-    fontSize: huddleType.label,
+    fontSize: 15,
     lineHeight: huddleType.h4Line,
   },
   bodyTextBold: {
@@ -1246,6 +1836,17 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     paddingBottom: huddleSpacing.x4,
     paddingTop: huddleSpacing.x4,
+    position: "relative",
+    overflow: "visible",
+  },
+  feedBurst: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    width: 68,
+    height: 68,
+    alignItems: "center",
+    justifyContent: "center",
   },
   cardContent: {
     flex: 1,
@@ -1284,6 +1885,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   filterBlock: {
+    backgroundColor: huddleColors.canvas,
     gap: huddleSpacing.x2,
     paddingBottom: huddleSpacing.x2,
     position: "relative",
@@ -1305,7 +1907,7 @@ const styles = StyleSheet.create({
     position: "relative",
   },
   iconButtonActive: {
-    backgroundColor: huddleColors.primarySoftFill,
+    backgroundColor: huddleColors.coralSoftFill,
     borderRadius: huddleRadii.pill,
   },
   inlineLinkText: {
@@ -1314,10 +1916,19 @@ const styles = StyleSheet.create({
     textDecorationLine: "underline",
   },
   linkMeta: {
+    flexShrink: 1,
+    minWidth: 0,
     color: huddleColors.caption,
     fontFamily: "Urbanist-500",
     fontSize: huddleType.helper,
     lineHeight: huddleType.helperLine,
+  },
+  linkDescription: {
+    color: huddleColors.caption,
+    fontFamily: "Urbanist-500",
+    fontSize: huddleType.helper,
+    lineHeight: huddleType.helperLine,
+    marginTop: huddleSpacing.x1,
   },
   linkFailedText: {
     color: huddleColors.caption,
@@ -1327,6 +1938,7 @@ const styles = StyleSheet.create({
     marginTop: huddleSpacing.x1,
   },
   linkPreview: {
+    backgroundColor: huddleColors.canvas,
     borderColor: huddleColors.fieldBorderSoft,
     borderRadius: huddleRadii.field,
     borderWidth: 1,
@@ -1335,6 +1947,7 @@ const styles = StyleSheet.create({
     ...huddleShadows.glassElevation1,
   },
   linkPreviewBody: {
+    backgroundColor: huddleColors.canvas,
     paddingHorizontal: huddleSpacing.x3,
     paddingVertical: huddleSpacing.x2,
   },
@@ -1347,6 +1960,20 @@ const styles = StyleSheet.create({
     backgroundColor: huddleColors.mutedCanvas,
     height: huddleSocial.linkPreviewImageHeight,
     width: "100%",
+  },
+  linkPreviewRemoveButton: {
+    alignItems: "center",
+    backgroundColor: huddleColors.canvas,
+    borderColor: huddleColors.fieldBorderSoft,
+    borderRadius: 15,
+    borderWidth: 1,
+    height: 30,
+    justifyContent: "center",
+    position: "absolute",
+    right: huddleSpacing.x2,
+    top: huddleSpacing.x2,
+    width: 30,
+    zIndex: 2,
   },
   linkTitle: {
     color: huddleColors.text,
@@ -1366,16 +1993,28 @@ const styles = StyleSheet.create({
     alignItems: "center",
     alignSelf: "flex-start",
     flexDirection: "row",
-    gap: huddleSpacing.x2,
+    gap: huddleSpacing.x1,
     marginTop: huddleSpacing.x1,
     minHeight: huddleSpacing.x6,
   },
   mapLinkText: {
+    flexShrink: 1,
+    minWidth: 0,
     color: huddleColors.blue,
     fontFamily: "Urbanist-700",
     fontSize: huddleSocial.mapLinkFontSize,
     lineHeight: huddleType.labelLine,
     textDecorationLine: "underline",
+  },
+  // Same metrics as mapLinkText so the row does not shift when a pin stops being
+  // openable -- only the colour and the underline go away.
+  mapLinkPlainText: {
+    flexShrink: 1,
+    minWidth: 0,
+    color: huddleColors.subtext,
+    fontFamily: "Urbanist-600",
+    fontSize: huddleSocial.mapLinkFontSize,
+    lineHeight: huddleType.labelLine,
   },
   mapPin: {
     fontSize: huddleSocial.mapLinkFontSize,
@@ -1399,6 +2038,9 @@ const styles = StyleSheet.create({
   mediaImage: {
     borderRadius: huddleRadii.field,
     overflow: "hidden",
+  },
+  mediaImagePending: {
+    opacity: 0,
   },
   mediaImageContainBox: {
     alignItems: "center",
@@ -1464,22 +2106,26 @@ const styles = StyleSheet.create({
     gap: huddleSpacing.x2,
     height: 44,
     paddingHorizontal: huddleSpacing.x3,
-    ...huddleShadows.glassElevation1,
   },
   searchInput: {
     color: huddleColors.text,
     flex: 1,
+    flexShrink: 1,
     fontFamily: "Urbanist-500",
     fontSize: huddleType.label,
     height: 42,
     lineHeight: huddleType.labelLine,
     minWidth: 0,
     padding: 0,
+    overflow: "hidden",
   },
   searchSortRow: {
     alignItems: "center",
     flexDirection: "row",
     gap: huddleSpacing.x2,
+  },
+  searchSortReveal: {
+    overflow: "hidden",
   },
   sensitiveOverlay: {
     alignItems: "center",
@@ -1506,14 +2152,14 @@ const styles = StyleSheet.create({
     fontSize: huddleType.label,
     lineHeight: huddleType.labelLine,
   },
-  heartPopOverlay: {
-    alignItems: "center",
-    bottom: 0,
-    justifyContent: "center",
-    left: 0,
+  heartPopAnchor: {
     position: "absolute",
-    right: 0,
+    left: 0,
     top: 0,
+    width: 84,
+    height: 84,
+    alignItems: "center",
+    justifyContent: "center",
   },
   heartPopIcon: {
     textShadowColor: "rgba(0, 0, 0, 0.35)",
@@ -1532,7 +2178,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     minWidth: 104,
     paddingHorizontal: huddleSpacing.x3,
-    ...huddleShadows.glassElevation1,
   },
   sortFieldFocused: {
     ...huddleFieldStates.focused,
@@ -1560,7 +2205,7 @@ const styles = StyleSheet.create({
     maxHeight: huddleFormControls.select.menuMaxHeight,
     position: "absolute",
     right: huddleSpacing.x4,
-    top: huddleLayout.headerHeight + huddleSocial.feedTopInset + huddleSpacing.x10,
+    top: huddleSocial.feedTopInset + huddleSpacing.x10,
     width: 208,
     zIndex: 10,
     ...huddleShadows.glassElevation1,
@@ -1576,7 +2221,7 @@ const styles = StyleSheet.create({
     paddingVertical: huddleFormControls.select.optionPaddingVertical,
   },
   sortOptionActive: {
-    backgroundColor: huddleColors.primarySoftFill,
+    backgroundColor: huddleColors.glassControl,
   },
   sortOptionText: {
     color: huddleColors.text,
@@ -1602,6 +2247,13 @@ const styles = StyleSheet.create({
   tagPill_brand: {
     backgroundColor: huddleColors.blue,
     borderColor: huddleColors.blue,
+  },
+  tagPill_found: {
+    alignItems: "center",
+    backgroundColor: huddleColors.success,
+    borderColor: huddleColors.success,
+    flexDirection: "row",
+    gap: huddleSpacing.x1,
   },
   tagPill_caution: {
     backgroundColor: huddleColors.blue,
@@ -1666,6 +2318,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: huddleSpacing.x4,
     minHeight: huddleSocial.topicTabRowHeight,
+    paddingLeft: huddleSpacing.x4,
     paddingRight: huddleSpacing.x4,
   },
   topicTabScroller: {
@@ -1696,6 +2349,14 @@ const styles = StyleSheet.create({
   tabUnderlineActive: {
     backgroundColor: huddleColors.blue,
     opacity: 1,
+  },
+  tabUnderlineSlider: {
+    backgroundColor: huddleColors.blue,
+    borderRadius: huddleSocial.topicTabIndicatorRadius,
+    bottom: huddleSpacing.x1,
+    height: huddleSocial.topicTabIndicatorHeight,
+    left: 0,
+    position: "absolute",
   },
   topIconButton: {
     alignItems: "center",
@@ -1803,7 +2464,6 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: huddleSpacing.x2,
   },
   expandedImageWrap: {
     width: "100%",

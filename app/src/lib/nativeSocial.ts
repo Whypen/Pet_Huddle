@@ -5,22 +5,40 @@ import { manipulateAsync, SaveFormat } from "expo-image-manipulator";
 import { buildShareModel, serializeChatShareMessage } from "./shareModel";
 import { nativeExactTokenRpc } from "./nativeExactTokenRequest";
 import { fetchNativeEngagementTiers, type NativeEngagementSummary } from "./nativeEngagement";
-import { getFreshNativeAccessToken } from "./nativeFunctionClient";
+import { createNativeAuthenticatedHeaders, getFreshNativeAccessToken } from "./nativeFunctionClient";
+import { fetchNativeResponseWithTimeout, isNativeRequestTimeoutError, NATIVE_MEDIA_UPLOAD_TIMEOUT_MS } from "./nativeTimeout";
 import { supabaseAnonKey, supabaseUrl } from "./supabase";
 import { readNativeLocalMediaFile } from "./nativeLocalMediaUpload";
+import { NATIVE_SOCIAL_VIDEO_MAX_BYTES, validateNativeSocialVideoSelection } from "./nativeMediaPolicy";
 import { registerNativeMediaAsset } from "./nativeMediaAssets";
 import { normalizeNativeSocialShareTargetsForDisplay } from "./nativeSocialShareTargets";
 import { createNativeProtectedActionError, requestNativeStorageCleanupResult, type NativeProtectedActionCleanupResult } from "./nativeStorageCleanup";
 import { requireCurrentNativeSession } from "./nativeSessionGuard";
 import { resolveNativeProfileImageUrlAsync } from "./nativeStorageUrlCache";
 import type { NativeViewerScope } from "./nativeViewerScope";
+import { readNativeDisplayCacheItem, readNativeDisplayCacheItems, readNativeDisplayCacheKeys } from "./nativeDisplayCacheStorage";
 
 export type NativeSocialSortMode = "Latest" | "Trending" | "Saves";
+
+// Ships with the feed row. Replaces the old per-post probe that called the map alert
+// endpoint once per visible card just to learn whether the pin still existed.
+export type NativeSocialAlertState = "active" | "found" | "inactive";
+
+const normalizeAlertState = (value: unknown): NativeSocialAlertState =>
+  value === "active" || value === "found" ? value : "inactive";
 
 const recordedSocialFeedEventKeys = new Set<string>();
 const passiveSocialFeedEventWindow: number[] = [];
 const PASSIVE_SOCIAL_FEED_EVENT_LIMIT = 3;
 const PASSIVE_SOCIAL_FEED_EVENT_WINDOW_MS = 10_000;
+
+const nativeSocialDebug = (...args: unknown[]) => {
+  if (__DEV__) console.log(...args);
+};
+
+const nativeSocialDebugWarn = (...args: unknown[]) => {
+  if (__DEV__) console.warn(...args);
+};
 
 export type NativeSocialFeedCursor = {
   created_at: string;
@@ -99,6 +117,11 @@ export type NativeSocialThread = {
   alertType: string | null;
   alertDistrict: string | null;
   hasAlertLink: boolean;
+  // Permanent, viewer-agnostic: set when the originating Lost alert was marked Found.
+  foundAt: string | null;
+  // Server-resolved openability of the originating pin. "inactive" deliberately collapses
+  // deleted / expired / not-visible so nothing about a hidden alert is disclosed.
+  alertState: NativeSocialAlertState;
   isSensitive: boolean;
   videoProvider: "bunny_stream" | null;
   providerVideoId: string | null;
@@ -114,7 +137,7 @@ export type NativeSocialThread = {
   postLanguage: string | null;
   postLocationSource: string | null;
   author: NativeSocialAuthor;
-  localStatus?: "pending" | "failed";
+  localStatus?: "pending";
 };
 
 export type NativeSocialImageMetadata = {
@@ -149,7 +172,7 @@ export type NativeSocialComment = {
   mentions: NativeSocialMentionEntry[];
   supportCount: number;
   viewerSupported: boolean;
-  localStatus?: "pending" | "failed";
+  localStatus?: "pending";
 };
 
 export type NativeSocialShareTarget = {
@@ -239,7 +262,6 @@ const parseNativeSocialImageMetadata = (value: unknown, fallbackImages: string[]
 const HUDDLE_PREVIEW_IMAGE = "https://huddle.pet/brandweb/og-card.png";
 const HUDDLE_PREVIEW_TITLE = "huddle — Pet safety, community & care";
 const HUDDLE_PREVIEW_DESCRIPTION = "One app for lost pets, trusted carers, local pet community, and organised pet records. No pet left behind.";
-const SOCIAL_VIDEO_MAX_SECONDS = 15;
 
 const base64ToUint8Array = (base64: string) => {
   const binary = globalThis.atob(base64);
@@ -297,13 +319,11 @@ const nativeSocialFunctionRequest = async <T = unknown>(
 ) => {
   const token = await getFreshNativeAccessToken(accessToken);
   if (!token) throw new Error("auth_required");
-  const response = await fetch(`${supabaseUrl}/functions/v1/${functionName}`, {
+  const response = await fetchNativeResponseWithTimeout(`${supabaseUrl}/functions/v1/${functionName}`, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      apikey: supabaseAnonKey,
+    headers: createNativeAuthenticatedHeaders(token, {
       "content-type": "application/json",
-    },
+    }),
     body: JSON.stringify(body),
   });
   const raw = await response.text();
@@ -500,6 +520,8 @@ export const mapNativeSocialFeedRow = (row: Record<string, unknown>): NativeSoci
     alertType: cleanString(row.alert_type) || null,
     alertDistrict: cleanString(row.alert_district) || null,
     hasAlertLink: Boolean(mapId && row.has_alert_link === true),
+    foundAt: cleanString(row.found_at) || null,
+    alertState: normalizeAlertState(row.alert_state),
     isSensitive: row.is_sensitive === true,
     videoProvider: row.video_provider === "bunny_stream" ? "bunny_stream" : null,
     providerVideoId: cleanString(row.provider_video_id) || null,
@@ -576,6 +598,8 @@ export async function hydrateNativeSocialRows(rows: NativeSocialThread[], access
       alertType: cleanString(hydration.alert_type) || thread.alertType,
       alertDistrict: cleanString(hydration.alert_district) || thread.alertDistrict,
       hasAlertLink: Boolean((cleanString(hydration.map_id) || thread.mapId) && (hydration.has_alert_link === true || thread.hasAlertLink)),
+      foundAt: cleanString(hydration.found_at) || thread.foundAt,
+      alertState: normalizeAlertState(hydration.alert_state),
       videoProvider: hydration.video_provider === "bunny_stream" ? "bunny_stream" : thread.videoProvider,
       providerVideoId: cleanString(hydration.provider_video_id) || thread.providerVideoId,
       videoPlaybackUrl: cleanString(hydration.video_playback_url) || thread.videoPlaybackUrl,
@@ -634,6 +658,8 @@ async function hydrateNativeSocialCommentImageMetadata(comments: NativeSocialCom
   ));
 }
 
+const nativeSocialFeedInFlight = new Map<string, Promise<NativeSocialFeedPage>>();
+
 export async function fetchNativeSocialFeedPage(options: {
   viewerId: string;
   accessToken?: string | null;
@@ -674,20 +700,40 @@ export async function fetchNativeSocialFeedPage(options: {
       sourceConsistent: options.viewerScope.sourceConsistent,
     } : null,
   };
-  const { data, error } = await nativeExactTokenRpc("get_social_feed", params, options.accessToken);
-  if (error) throw error;
-  const fetchedRows = (Array.isArray(data) ? data : []).map((row) => mapNativeSocialFeedRow(row as Record<string, unknown>));
-  const baseRows = fetchedRows.slice(0, limit);
-  const rowsWithMedia = await hydrateNativeSocialThreadImageMetadata(baseRows, options.accessToken);
-  const rows = await hydrateNativeSocialRows(rowsWithMedia, options.accessToken).catch((error) => {
-    if (__DEV__) console.warn("NATIVE_SOCIAL_HYDRATION_NON_FATAL", { message: String((error as { message?: unknown })?.message || error) });
-    return resolveNativeSocialThreadAvatarUrls(rowsWithMedia);
+  const requestKey = JSON.stringify(params);
+  const existing = nativeSocialFeedInFlight.get(requestKey);
+  if (existing) return existing;
+  const request = (async () => {
+    const { data, error } = await nativeExactTokenRpc("get_social_feed", params, options.accessToken);
+    if (error) throw error;
+    const fetchedRows = (Array.isArray(data) ? data : []).map((row) => mapNativeSocialFeedRow(row as Record<string, unknown>));
+    const baseRows = fetchedRows.slice(0, limit);
+    // Image metadata and row hydration each read only from `baseRows` and never from each
+    // other's result, so they can run concurrently instead of one waiting on the other.
+    const [rowsWithMedia, hydratedBase] = await Promise.all([
+      hydrateNativeSocialThreadImageMetadata(baseRows, options.accessToken),
+      hydrateNativeSocialRows(baseRows, options.accessToken).catch((error) => {
+        if (__DEV__) console.warn("NATIVE_SOCIAL_HYDRATION_NON_FATAL", { message: String((error as { message?: unknown })?.message || error) });
+        return resolveNativeSocialThreadAvatarUrls(baseRows);
+      }),
+    ]);
+    const imageMetadataByThreadId = new Map(
+      rowsWithMedia.filter((row) => row.imageMetadata !== undefined).map((row) => [row.id, row.imageMetadata]),
+    );
+    const rows = hydratedBase.map((row) => {
+      const imageMetadata = imageMetadataByThreadId.get(row.id);
+      return imageMetadata !== undefined ? { ...row, imageMetadata } : row;
+    });
+    return {
+      rows,
+      hasMore: fetchedRows.length > limit,
+      cursor: buildNativeSocialCursor(rows[rows.length - 1] ?? baseRows[baseRows.length - 1]),
+    };
+  })().finally(() => {
+    if (nativeSocialFeedInFlight.get(requestKey) === request) nativeSocialFeedInFlight.delete(requestKey);
   });
-  return {
-    rows,
-    hasMore: fetchedRows.length > limit,
-    cursor: buildNativeSocialCursor(rows[rows.length - 1] ?? baseRows[baseRows.length - 1]),
-  };
+  nativeSocialFeedInFlight.set(requestKey, request);
+  return request;
 }
 
 export async function fetchNativeSocialThreadById(threadId: string, accessToken?: string | null): Promise<NativeSocialThread | null> {
@@ -700,6 +746,40 @@ export async function fetchNativeSocialThreadById(threadId: string, accessToken?
   const [rowWithMedia] = await hydrateNativeSocialThreadImageMetadata([baseRow], accessToken);
   const [hydrated] = await hydrateNativeSocialRows([rowWithMedia || baseRow], accessToken).catch(() => resolveNativeSocialThreadAvatarUrls([rowWithMedia || baseRow]));
   return hydrated || null;
+}
+
+export type NativeSocialThreadCounts = {
+  threadId: string;
+  supportCount: number;
+  commentCount: number;
+};
+
+/**
+ * Batched counter read for many threads at once.
+ *
+ * This is the cheap path used by realtime and by scroll-in reconciliation. It
+ * deliberately does NOT hydrate authors, media or engagement tiers the way
+ * fetchNativeSocialThreadById does — moving a number must not cost four round trips.
+ */
+export async function fetchNativeSocialThreadCounts(
+  threadIds: string[],
+  accessToken?: string | null,
+): Promise<NativeSocialThreadCounts[]> {
+  const ids = Array.from(new Set(threadIds.map((id) => String(id || "").trim()).filter(Boolean)));
+  if (ids.length === 0) return [];
+  const { data, error } = await nativeExactTokenRpc<Array<Record<string, unknown>>>(
+    "get_native_social_thread_counts",
+    { p_thread_ids: ids },
+    accessToken,
+  );
+  if (error || !Array.isArray(data)) return [];
+  return data
+    .map((row) => ({
+      threadId: cleanString(row.thread_id),
+      supportCount: toNumber(row.support_count, 0),
+      commentCount: toNumber(row.comment_count, 0),
+    }))
+    .filter((row) => Boolean(row.threadId));
 }
 
 export async function loadNativeBlockedSocialUserIds(userId: string, accessToken?: string | null): Promise<Set<string>> {
@@ -738,7 +818,7 @@ const readSocialSupportedThreadsCache = async (userId: string): Promise<Set<stri
   const memory = socialSupportedThreadsMemoryCache.get(userId);
   if (memory) return new Set(memory);
   try {
-    const raw = await AsyncStorage.getItem(socialSupportedThreadsCacheKey(userId));
+    const raw = await readNativeDisplayCacheItem(socialSupportedThreadsCacheKey(userId));
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return null;
@@ -832,8 +912,13 @@ export async function fetchNativeSocialComments(threadId: string, options: { acc
     { p_thread_id: threadId, p_before_created_at: options.beforeCreatedAt ?? null, p_limit: limit },
     options.accessToken,
   );
-  const comments = await hydrateNativeSocialCommentImageMetadata((Array.isArray(data) ? data : []).map((row) => mapNativeSocialCommentRow(row, threadId)), options.accessToken);
-  const engagementByUserId = await fetchNativeEngagementTiers(comments.map((comment) => comment.userId), options.accessToken);
+  const rawComments = (Array.isArray(data) ? data : []).map((row) => mapNativeSocialCommentRow(row, threadId));
+  // Image metadata hydration and engagement-tier lookup both only need `rawComments`
+  // (ids/userIds), not each other's result, so they can run concurrently.
+  const [comments, engagementByUserId] = await Promise.all([
+    hydrateNativeSocialCommentImageMetadata(rawComments, options.accessToken),
+    fetchNativeEngagementTiers(rawComments.map((comment) => comment.userId), options.accessToken),
+  ]);
   return Promise.all(comments.map(async (comment) => ({
     ...comment,
     author: {
@@ -865,17 +950,15 @@ export async function uploadNativeSocialImage(userId: string, media: NativeSocia
       await FileSystem.deleteAsync(normalized.uri, { idempotent: true }).catch(() => undefined);
     }
   }
-  const response = await fetch(`${supabaseUrl}/storage/v1/object/notices/${path.split("/").map((part) => encodeURIComponent(part)).join("/")}`, {
+  const response = await fetchNativeResponseWithTimeout(`${supabaseUrl}/storage/v1/object/notices/${path.split("/").map((part) => encodeURIComponent(part)).join("/")}`, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      apikey: supabaseAnonKey,
+    headers: createNativeAuthenticatedHeaders(token, {
       "cache-control": "3600",
       "content-type": "image/jpeg",
       "x-upsert": "false",
-    },
+    }),
     body,
-  });
+  }, NATIVE_MEDIA_UPLOAD_TIMEOUT_MS);
   if (!response.ok) {
     throw createNativeProtectedActionError({
       ok: false,
@@ -903,7 +986,7 @@ export async function uploadNativeSocialImage(userId: string, media: NativeSocia
     });
   }
   if (__DEV__) {
-    console.log("STORAGE_URL_GET_PUBLIC", { bucket: "notices", path });
+    nativeSocialDebug("STORAGE_URL_GET_PUBLIC", { bucket: "notices", path });
   }
   return buildPublicStorageUrl("notices", path);
 }
@@ -953,17 +1036,15 @@ export async function uploadNativeServiceChatAttachmentImage(options: {
       await FileSystem.deleteAsync(normalized.uri, { idempotent: true }).catch(() => undefined);
     }
   }
-  const response = await fetch(`${supabaseUrl}/storage/v1/object/${encodeStorageObjectPath("care_attachments", path)}`, {
+  const response = await fetchNativeResponseWithTimeout(`${supabaseUrl}/storage/v1/object/${encodeStorageObjectPath("care_attachments", path)}`, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      apikey: supabaseAnonKey,
+    headers: createNativeAuthenticatedHeaders(token, {
       "cache-control": "3600",
       "content-type": mime,
       "x-upsert": "false",
-    },
+    }),
     body,
-  });
+  }, NATIVE_MEDIA_UPLOAD_TIMEOUT_MS);
   if (!response.ok) {
     throw createNativeProtectedActionError({
       ok: false,
@@ -1052,32 +1133,25 @@ export async function uploadNativeServiceCareEvidenceImage(options: {
     );
     const body = base64ToUint8Array(base64);
     if (body.byteLength === 0) throw new Error("Selected image is empty.");
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), NATIVE_SERVICE_CARE_EVIDENCE_UPLOAD_TIMEOUT_MS);
     let response: Response;
     try {
-      response = await fetch(`${supabaseUrl}/storage/v1/object/${encodeStorageObjectPath("service_care_evidence", path)}`, {
+      response = await fetchNativeResponseWithTimeout(`${supabaseUrl}/storage/v1/object/${encodeStorageObjectPath("service_care_evidence", path)}`, {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          apikey: supabaseAnonKey,
+        headers: createNativeAuthenticatedHeaders(token, {
           "cache-control": "3600",
           "content-type": "image/jpeg",
           "x-upsert": "false",
-        },
+        }),
         body,
-        signal: controller.signal,
-      });
+      }, NATIVE_SERVICE_CARE_EVIDENCE_UPLOAD_TIMEOUT_MS);
     } catch (error) {
       throw createNativeProtectedActionError({
         ok: false,
         stage: "upload",
-        originalError: controller.signal.aborted ? new Error("care_update_upload_timeout") : error,
+        originalError: isNativeRequestTimeoutError(error) ? new Error("care_update_upload_timeout") : error,
         cleanupAttempted: false,
         cleanupResult: "not_needed",
       });
-    } finally {
-      clearTimeout(timeoutId);
     }
     if (!response.ok) {
       throw createNativeProtectedActionError({
@@ -1144,17 +1218,15 @@ export async function uploadNativeServiceCareAgreementSignatureImage(options: {
   const base64 = await FileSystem.readAsStringAsync(options.media.uri, { encoding: FileSystem.EncodingType.Base64 });
   const body = base64ToUint8Array(base64);
   if (body.byteLength === 0) throw new Error("Signature image is empty.");
-  const response = await fetch(`${supabaseUrl}/storage/v1/object/${encodeStorageObjectPath("care_agreements", path)}`, {
+  const response = await fetchNativeResponseWithTimeout(`${supabaseUrl}/storage/v1/object/${encodeStorageObjectPath("care_agreements", path)}`, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      apikey: supabaseAnonKey,
+    headers: createNativeAuthenticatedHeaders(token, {
       "cache-control": "31536000",
       "content-type": "image/png",
       "x-upsert": "false",
-    },
+    }),
     body,
-  });
+  }, NATIVE_MEDIA_UPLOAD_TIMEOUT_MS);
   if (!response.ok) {
     throw createNativeProtectedActionError({
       ok: false,
@@ -1294,13 +1366,17 @@ const computeRemovedNoticeImageUrls = (previousImages: string[] | undefined, nex
 
 export async function createNativeSocialVideoUpload(userId: string, media: NativeSocialComposerMedia, title: string, accessToken?: string | null, sessionKey?: string | null) {
   const session = requireNativeSocialSession({ accessToken, sessionKey, userId });
-  if (Number(media.durationSeconds ?? 0) > SOCIAL_VIDEO_MAX_SECONDS + 0.5) {
-    throw new Error("Video must be trimmed to 15 seconds before upload.");
-  }
-  const file = await readNativeLocalMediaFile(media.uri, { fileName: media.name, mimeType: media.mimeType }, { fallbackContentType: "video/mp4", fallbackExtension: "mp4" });
+  validateNativeSocialVideoSelection(media);
+  const file = await readNativeLocalMediaFile(media.uri, { fileName: media.name, mimeType: media.mimeType }, {
+    allowedKinds: ["video"],
+    fallbackContentType: "video/mp4",
+    fallbackExtension: "mp4",
+    maxBytes: NATIVE_SOCIAL_VIDEO_MAX_BYTES,
+    oversizedMessage: "Choose a 15 seconds or shorter video.",
+  });
   const tus = await import("tus-js-client");
   const blob = new Blob([file.body], { type: file.contentType || media.mimeType || "video/mp4" });
-  const durationSeconds = Math.max(1, Math.min(SOCIAL_VIDEO_MAX_SECONDS, Number(media.durationSeconds ?? SOCIAL_VIDEO_MAX_SECONDS)));
+  const durationSeconds = Math.max(1, Number(media.durationSeconds ?? 15));
   const createData = await nativeSocialFunctionRequest<{
     videoId: string;
     libraryId: string;
@@ -1317,7 +1393,7 @@ export async function createNativeSocialVideoUpload(userId: string, media: Nativ
     durationSeconds,
     fileName: media.name || "social-video.mp4",
     fileType: file.contentType || media.mimeType || "video/mp4",
-    fileSize: Number(media.size || file.size || blob.size || 0),
+    fileSize: Number(file.size || blob.size || 0),
   }, session.accessToken);
   if (!createData?.videoId) throw new Error("Video upload authorization failed.");
 
@@ -1438,7 +1514,7 @@ export async function updateNativeSocialThread(args: {
   if (removedImageUrls.length > 0) {
     void cleanupNativeSocialStorageImages(removedImageUrls, session.userId, session.accessToken, "update_social_thread_removed_media", session.sessionKey).catch((cleanupError) => {
       if (__DEV__) {
-        console.warn("[social.update_thread_removed_media_cleanup.failed]", {
+        nativeSocialDebugWarn("[social.update_thread_removed_media_cleanup.failed]", {
           threadId: args.id,
           error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
         });
@@ -1455,7 +1531,7 @@ export async function deleteNativeSocialThread(thread: NativeSocialThread, userI
   if (deleted && thread.images.length > 0) {
     void cleanupNativeSocialStorageImages(thread.images, session.userId, session.accessToken, "delete_social_thread", session.sessionKey).catch((cleanupError) => {
       if (__DEV__) {
-        console.warn("[social.delete_thread_media_cleanup.failed]", {
+        nativeSocialDebugWarn("[social.delete_thread_media_cleanup.failed]", {
           threadId: thread.id,
           error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
         });
@@ -1464,7 +1540,7 @@ export async function deleteNativeSocialThread(thread: NativeSocialThread, userI
   }
   if (thread.providerVideoId) {
     void deleteNativeSocialVideo(thread.providerVideoId, session.accessToken).catch((videoError) => {
-      console.error("[social.delete_thread_video.failed]", {
+      nativeSocialDebugWarn("[social.delete_thread_video.failed]", {
         threadId: thread.id,
         error: videoError instanceof Error ? videoError.message : String(videoError),
       });
@@ -1510,7 +1586,7 @@ export async function updateNativeSocialComment(commentId: string, userId: strin
   if (removedImageUrls.length > 0) {
     void cleanupNativeSocialStorageImages(removedImageUrls, session.userId, session.accessToken, "update_social_comment_removed_media", session.sessionKey).catch((cleanupError) => {
       if (__DEV__) {
-        console.warn("[social.update_comment_removed_media_cleanup.failed]", {
+        nativeSocialDebugWarn("[social.update_comment_removed_media_cleanup.failed]", {
           commentId,
           error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
         });
@@ -1657,7 +1733,7 @@ export async function deleteNativeSocialComment(commentId: string, commentImages
   if (deleted && commentImages.length > 0) {
     void cleanupNativeSocialStorageImages(commentImages, session.userId, session.accessToken, "delete_social_comment", session.sessionKey).catch((cleanupError) => {
       if (__DEV__) {
-        console.warn("[social.delete_comment_media_cleanup.failed]", {
+        nativeSocialDebugWarn("[social.delete_comment_media_cleanup.failed]", {
           commentId,
           error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
         });
@@ -1750,23 +1826,31 @@ export async function blockNativeSocialUser(authorId: string, accessToken?: stri
   await nativeSocialRpc("block_user", { p_blocked_id: authorId }, session.accessToken);
 }
 
+// Matches every Social cache family at ANY schema version:
+//   native-social-feed:v5:<user>:...        (active feed cache)
+//   native-social-feed-boot:v1:<user>:...   (boot snapshot, painted before scope resolves)
+//   native-social-comments:v4:<user>:...    (per-thread comments)
+// Deliberately version-agnostic. This purge previously hard-coded v3/v4 feed keys
+// while the screen had moved to v5 and gained a separate boot snapshot, so purging
+// after a Map cross-post left the caches the feed actually reads fully intact — the
+// new post then stayed invisible behind the 30s entry-reuse window. Never reintroduce
+// a hard-coded version list here; bumping a cache version must not silently disable
+// invalidation.
+const NATIVE_SOCIAL_CACHE_KEY_PATTERN = /^native-social-(?:feed|feed-boot|comments):v\d+:/;
+
 export const purgeNativeSocialPersistentCache = async (userId: string, options?: { commentsOnlyForThreadId?: string | null }) => {
   const cleanUserId = String(userId || "").trim();
   if (!cleanUserId) return;
   try {
-    const keys = await AsyncStorage.getAllKeys();
-    const prefixes = [
-      `native-social-feed:v4:${cleanUserId}:`,
-      `native-social-comments:v4:${cleanUserId}:`,
-      `native-social-feed:v3:${cleanUserId}:`,
-      `native-social-comments:v3:${cleanUserId}:`,
-    ];
+    const keys = await readNativeDisplayCacheKeys();
     const removals = keys.filter((key) => {
+      if (!NATIVE_SOCIAL_CACHE_KEY_PATTERN.test(key)) return false;
+      if (!key.includes(`:${cleanUserId}:`)) return false;
       if (options?.commentsOnlyForThreadId) {
-        return key.startsWith(`native-social-comments:v3:${cleanUserId}:${options.commentsOnlyForThreadId}:`) ||
-          (key.startsWith(`native-social-comments:v4:${cleanUserId}:`) && key.includes(`:${options.commentsOnlyForThreadId}:`));
+        return key.startsWith("native-social-comments:")
+          && key.includes(`:${options.commentsOnlyForThreadId}:`);
       }
-      return prefixes.some((prefix) => key.startsWith(prefix));
+      return true;
     });
     if (removals.length > 0) await AsyncStorage.multiRemove(removals);
   } catch {
@@ -1782,6 +1866,11 @@ export async function reportNativeSocialUser(args: {
   reporterId: string;
   source?: "Social" | "Chat" | "Group Chat" | "Map";
   sourceOrigin?: "social" | "friends chats" | "maps" | "other";
+  subject?: {
+    id: string;
+    label: string;
+    type: "social_post" | "social_comment" | "social_reply" | "group_chat" | "direct_chat" | "map_alert" | "care_booking" | "profile";
+  } | null;
   targetUserId: string;
   targetName?: string | null;
   attachmentUrls?: string[];
@@ -1795,6 +1884,9 @@ export async function reportNativeSocialUser(args: {
     p_details: args.details,
     p_attachment_urls: args.attachmentUrls ?? [],
     p_source: args.sourceOrigin ?? "social",
+    p_subject_type: args.subject?.type ?? "profile",
+    p_subject_id: args.subject?.id ?? args.targetUserId,
+    p_subject_label: args.subject?.label ?? "Profile",
   }, session.accessToken);
   const reportId = (() => {
     if (!data || typeof data !== "object") return null;
@@ -1809,17 +1901,6 @@ export async function reportNativeSocialUser(args: {
       p_reported_message_id: null,
     }, session.accessToken);
   }
-  void nativeSocialFunctionRequest("support-request", {
-      subject: `Report: ${args.targetName || args.targetUserId}`,
-      message: JSON.stringify({
-        target_user_id: args.targetUserId,
-        categories: args.categories,
-        other: args.other || "",
-        details: args.details || "",
-        attachments: args.attachmentUrls ?? [],
-      }),
-      source: args.source ?? "Social",
-  }, session.accessToken).catch(() => undefined);
 }
 
 export async function recordNativeSocialShare(threadId: string, accessToken?: string | null): Promise<number | null> {
@@ -1837,7 +1918,24 @@ export async function fetchNativeSocialShareTargets(userId: string, accessToken?
   return normalizeNativeSocialShareTargetsForDisplay(Array.isArray(data) ? data : []);
 }
 
+export const formatNativeShareChatActionLabel = (targetCount: number) => {
+  const count = Math.max(0, Math.floor(Number(targetCount) || 0));
+  if (count === 0) return "Share in Chat";
+  return `Share in ${count} chat${count === 1 ? "" : "s"}`;
+};
+
 export function buildNativeSocialSharePayload(thread: NativeSocialThread) {
+  // AN ALERT-DERIVED POST READS AS ITS ALERT, IN CHAT TOO.
+  //
+  // `api/share.ts` already does this for external unfurls by looking the alert
+  // up from the thread. Without the same rule here, the identical post would
+  // arrive in a huddle chat as "Sam (@sam): ..." and in WhatsApp as "Lost cat
+  // in Kowloon City: ..." — one incident described two ways.
+  //
+  // The feed row carries the alert's type, district and found state but NOT its
+  // species, so the internal line is the shorter of the two truthful forms.
+  // The grammar itself is shared and parity-tested.
+  const derivedFromAlert = thread.hasAlertLink && Boolean(thread.alertType);
   return buildShareModel({
     origin: "https://huddle.pet",
     contentType: "thread",
@@ -1848,14 +1946,25 @@ export function buildNativeSocialSharePayload(thread: NativeSocialThread) {
     contentSnippet: thread.content,
     imagePath: thread.images[0] || "/huddle-logo.jpg",
     nativeShareText: thread.title || "See this post on huddle.",
+    ...(derivedFromAlert
+      ? {
+        alertHeadline: thread.title || thread.content || null,
+        alertType: thread.alertType,
+        archived: Boolean(thread.foundAt),
+        incidentDistrict: thread.alertDistrict,
+      }
+      : {}),
   });
 }
 
 export function buildNativeMapAlertSharePayload(alert: {
+  alert_type?: string | null;
   creator?: { display_name?: string | null; social_id?: string | null } | null;
   description?: string | null;
   id: string;
+  location_district?: string | null;
   media_urls?: string[] | null;
+  pet_type?: string | null;
   photo_url?: string | null;
   title?: string | null;
 }) {
@@ -1875,6 +1984,14 @@ export function buildNativeMapAlertSharePayload(alert: {
     contentSnippet: alert.description || alert.title || null,
     imagePath: firstAlertImage || "/huddle-logo.jpg",
     nativeShareText: alert.title || "See this alert to help look out for the pet community!",
+    // An alert shared into a huddle chat is described exactly as the same alert
+    // shared out to WhatsApp — one incident, one sentence. The map RPC carries
+    // the district but no city, so the internal line is the shorter of the two
+    // truthful forms; the grammar itself is shared and parity-tested.
+    alertHeadline: alert.title || alert.description || null,
+    alertType: alert.alert_type ?? null,
+    incidentDistrict: alert.location_district ?? null,
+    petType: alert.pet_type ?? null,
   });
 }
 
@@ -1886,11 +2003,17 @@ export async function sendNativeSocialShareToChat(thread: NativeSocialThread, ta
   }, accessToken);
 }
 
-export async function sendNativeMapAlertShareToChat(alert: Parameters<typeof buildNativeMapAlertSharePayload>[0], target: NativeSocialShareTarget, userId: string, accessToken?: string | null) {
+export async function sendNativeMapAlertShareToChat(alert: Parameters<typeof buildNativeMapAlertSharePayload>[0], target: NativeSocialShareTarget, userId: string, accessToken?: string | null, directShareUrl?: string | null) {
   if (!userId || !target.chatId) throw new Error("Share target is unavailable.");
+  const share = buildNativeMapAlertSharePayload(alert);
+  const normalizedDirectUrl = String(directShareUrl || "").trim();
   await nativeSocialRpc("send_native_social_share_to_chat", {
     p_chat_id: target.chatId,
-    p_content: serializeChatShareMessage(buildNativeMapAlertSharePayload(alert)),
+    p_content: serializeChatShareMessage(normalizedDirectUrl ? {
+      ...share,
+      appUrl: normalizedDirectUrl,
+      canonicalUrl: normalizedDirectUrl,
+    } : share),
   }, accessToken);
 }
 
@@ -1938,7 +2061,7 @@ export async function recordNativeSocialFeedEvent({
 
 async function readNativeStoredLinkPreviewMap(): Promise<Record<string, NativeSocialLinkPreview & { fetchedAt?: number }>> {
   try {
-    const raw = await AsyncStorage.getItem(LINK_PREVIEW_STORAGE_KEY);
+    const raw = await readNativeDisplayCacheItem(LINK_PREVIEW_STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) as Record<string, NativeSocialLinkPreview & { fetchedAt?: number }> : {};
     if (!parsed || typeof parsed !== "object") return {};
     const now = Date.now();
@@ -2039,10 +2162,10 @@ export async function fetchNativeSocialLinkPreviews(urls: string[], accessToken?
 
 export async function readNativeSocialStoredState(userId: string | null | undefined): Promise<StoredThreadState> {
   try {
-    const [savedRaw, pinnedRaw] = await Promise.all([
-      AsyncStorage.getItem(nativeSocialSavesStorageKey(userId)),
-      AsyncStorage.getItem(nativeSocialPinsStorageKey(userId)),
-    ]);
+    const [savedRaw, pinnedRaw] = (await readNativeDisplayCacheItems([
+      nativeSocialSavesStorageKey(userId),
+      nativeSocialPinsStorageKey(userId),
+    ])).map((row) => row[1]);
     const saved = savedRaw ? JSON.parse(savedRaw) as unknown : [];
     const pinned = pinnedRaw ? JSON.parse(pinnedRaw) as unknown : [];
     const savedEnvelope = saved && typeof saved === "object" && !Array.isArray(saved) ? saved as StoredThreadState : null;

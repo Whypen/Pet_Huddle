@@ -1,9 +1,17 @@
 import { supabaseAnonKey, supabaseUrl } from "./supabase";
+import { createNativeAuthenticatedHeaders, getFreshNativeAccessToken } from "./nativeFunctionClient";
+import { fetchWithNativeTimeout, isNativeRequestTimeoutError } from "./nativeTimeout";
+
+const NATIVE_EXACT_TOKEN_RPC_TIMEOUT_MS = 10000;
 
 export type NativeExactTokenError = {
   code?: string | null;
   message: string;
   status: number;
+};
+
+type NativeExactTokenOptions = {
+  expectedUserId?: string | null;
 };
 
 const parseJsonSafely = (raw: string): unknown => {
@@ -26,22 +34,44 @@ export const nativeExactTokenRpc = async <T = unknown>(
   fn: string,
   params: Record<string, unknown> = {},
   accessToken?: string | null,
+  options: NativeExactTokenOptions = {},
 ): Promise<{ data: T | null; error: NativeExactTokenError | null }> => {
-  const token = String(accessToken || "").trim();
+  const token = await getFreshNativeAccessToken(accessToken, options.expectedUserId);
   if (!token) {
     return { data: null, error: { code: "missing_access_token", message: "missing_access_token", status: 401 } };
   }
 
-  const response = await fetch(`${supabaseUrl}/rest/v1/rpc/${fn}`, {
+  const result = await fetchWithNativeTimeout(`${supabaseUrl}/rest/v1/rpc/${fn}`, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      apikey: supabaseAnonKey,
+    headers: createNativeAuthenticatedHeaders(token, {
       "content-type": "application/json",
-    },
+    }),
     body: JSON.stringify(params),
-  });
-  const raw = await response.text();
+  }, NATIVE_EXACT_TOKEN_RPC_TIMEOUT_MS);
+  if (!result.ok) {
+    return {
+      data: null,
+      error: {
+        code: result.timedOut ? "rpc_timeout" : "rpc_network_error",
+        message: result.timedOut ? "request_timeout" : String((result.error as { message?: unknown })?.message || "network_error"),
+        status: 0,
+      },
+    };
+  }
+  const response = result.response;
+  let raw: string;
+  try {
+    raw = await response.text();
+  } catch (error) {
+    return {
+      data: null,
+      error: {
+        code: isNativeRequestTimeoutError(error) ? "rpc_timeout" : "rpc_network_error",
+        message: isNativeRequestTimeoutError(error) ? "request_timeout" : String((error as { message?: unknown })?.message || "network_error"),
+        status: 0,
+      },
+    };
+  }
   const parsed = parseJsonSafely(raw);
   if (!response.ok) {
     return {
@@ -55,4 +85,3 @@ export const nativeExactTokenRpc = async <T = unknown>(
   }
   return { data: parsed as T, error: null };
 };
-

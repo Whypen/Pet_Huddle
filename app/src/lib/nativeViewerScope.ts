@@ -3,6 +3,17 @@ import { getNativeCurrentCoordinates, getNativeForegroundLocationPermissionDetai
 import { nativeExactTokenRpc } from "./nativeExactTokenRequest";
 
 const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
+const VIEWER_SCOPE_CACHE_VERSION = 1;
+const VIEWER_SCOPE_CACHE_MAX_AGE_MS = 10 * 60 * 1000;
+// Boot-to-first-page navigation happens within seconds. Every scope source is
+// safe to reuse in that short window; longer reuse remains limited to device
+// GPS below so profile/pin changes still reconcile promptly.
+const VIEWER_SCOPE_ENTRY_REUSE_MS = 30 * 1000;
+const viewerScopeInFlight = new Map<string, Promise<NativeViewerScope>>();
+const viewerScopeMemoryCache = new Map<string, { scope: NativeViewerScope; storedAt: number }>();
+const viewerScopeListeners = new Map<string, Set<(scope: NativeViewerScope) => void>>();
+const viewerScopeLegacyCleanupDone = new Set<string>();
+let coordinateLegacyCleanupDone = false;
 
 export type NativeViewerScopeSource =
   | "live_device_gps"
@@ -24,6 +35,12 @@ export type NativeViewerScope = {
   countryCode: string | null;
   countryName: string | null;
   primaryPoint: NativeViewerScopePoint | null;
+  profilePoint?: NativeViewerScopePoint | null;
+  profileCountry?: string | null;
+  profileCountryCode?: string | null;
+  profileCountryName?: string | null;
+  profileDistrict?: string | null;
+  profileLocationName?: string | null;
   ownPinPoint: NativeViewerScopePoint | null;
   recentUserPoint: NativeViewerScopePoint | null;
   country: string | null;
@@ -47,11 +64,20 @@ type NativeViewerScopeRpcRow = {
   recent_user_point?: NativeViewerScopeRpcPoint | null;
   profile_point?: NativeViewerScopeRpcPoint | null;
   country?: string | null;
+  city?: string | null;
   district?: string | null;
   location_name?: string | null;
 };
 
 const coordinatePersistentKey = (accuracy: "balanced" | "high") => `native-location-coordinate:v1:${accuracy}`;
+const viewerScopePersistentKey = (userId: string, sessionKey?: string | null) =>
+  `native-viewer-scope:v${VIEWER_SCOPE_CACHE_VERSION}:${String(userId || "").trim()}:${String(sessionKey || "default")}`;
+
+const clearLegacyViewerScopeCacheOnce = async (key: string) => {
+  if (viewerScopeLegacyCleanupDone.has(key)) return;
+  viewerScopeLegacyCleanupDone.add(key);
+  await AsyncStorage.removeItem(key).catch(() => undefined);
+};
 
 const normalizePoint = (value: unknown): NativeViewerScopePoint | null => {
   if (!value || typeof value !== "object") return null;
@@ -66,6 +92,73 @@ const cleanText = (value: unknown) => {
   const text = String(value || "").trim();
   return text || null;
 };
+
+const isViewerScope = (value: unknown): value is NativeViewerScope => {
+  if (!value || typeof value !== "object") return false;
+  const scope = value as Partial<NativeViewerScope>;
+  return typeof scope.resolvedAt === "string" &&
+    typeof scope.source === "string" &&
+    "primaryPoint" in scope &&
+    "country" in scope &&
+    "district" in scope;
+};
+
+export async function readCachedNativeViewerScope(userId: string | null | undefined, options: { sessionKey?: string | null; maxAgeMs?: number } = {}): Promise<NativeViewerScope | null> {
+  const cleanUserId = String(userId || "").trim();
+  if (!cleanUserId) return null;
+  const key = viewerScopePersistentKey(cleanUserId, options.sessionKey);
+  // ViewerScope includes an exact primary point. Keep it memory-only, but do
+  // actually reuse the boot-confirmed value so every mounted tab does not repeat
+  // GPS + viewer-scope RPC work immediately after the brand-loading sweep.
+  const cached = viewerScopeMemoryCache.get(key);
+  const maxAgeMs = options.maxAgeMs ?? VIEWER_SCOPE_CACHE_MAX_AGE_MS;
+  if (cached && Date.now() - cached.storedAt <= maxAgeMs) return cached.scope;
+  if (cached) viewerScopeMemoryCache.delete(key);
+  await clearLegacyViewerScopeCacheOnce(key);
+  return null;
+}
+
+export async function writeCachedNativeViewerScope(userId: string | null | undefined, scope: NativeViewerScope | null, options: { sessionKey?: string | null } = {}) {
+  const cleanUserId = String(userId || "").trim();
+  if (!cleanUserId || !scope) return;
+  const key = viewerScopePersistentKey(cleanUserId, options.sessionKey);
+  const previous = viewerScopeMemoryCache.get(key)?.scope ?? null;
+  viewerScopeMemoryCache.set(key, { scope, storedAt: Date.now() });
+  await clearLegacyViewerScopeCacheOnce(key);
+  if (nativeViewerScopeIdentity(previous) === nativeViewerScopeIdentity(scope)) return;
+  viewerScopeListeners.get(key)?.forEach((listener) => listener(scope));
+}
+
+const nativeViewerScopeIdentity = (scope: NativeViewerScope | null) => scope ? JSON.stringify({
+  adminArea: scope.adminArea,
+  city: scope.city,
+  countryCode: scope.countryCode,
+  countryName: scope.countryName,
+  district: scope.district,
+  lat: scope.primaryPoint ? Number(scope.primaryPoint.lat.toFixed(4)) : null,
+  lng: scope.primaryPoint ? Number(scope.primaryPoint.lng.toFixed(4)) : null,
+  source: scope.source,
+}) : "";
+
+// One event per meaningful area change. Consumers keep their committed UI on
+// screen and revalidate only the location-dependent data behind it.
+export function subscribeNativeViewerScope(
+  userId: string | null | undefined,
+  listener: (scope: NativeViewerScope) => void,
+  options: { sessionKey?: string | null } = {},
+) {
+  const cleanUserId = String(userId || "").trim();
+  if (!cleanUserId) return () => undefined;
+  const key = viewerScopePersistentKey(cleanUserId, options.sessionKey);
+  const listeners = viewerScopeListeners.get(key) ?? new Set<(scope: NativeViewerScope) => void>();
+  listeners.add(listener);
+  viewerScopeListeners.set(key, listeners);
+  return () => {
+    const current = viewerScopeListeners.get(key);
+    current?.delete(listener);
+    if (current?.size === 0) viewerScopeListeners.delete(key);
+  };
+}
 
 const normalizedText = (value: string | null) => String(value || "").trim().toLowerCase();
 
@@ -97,7 +190,9 @@ const buildConsistentScope = ({
   recentUserPoint,
   profilePoint,
   profileCountry,
+  profileCity,
   profileDistrict,
+  profileLocationName,
   sourceComponents,
   resolvedAt,
 }: {
@@ -108,11 +203,15 @@ const buildConsistentScope = ({
   recentUserPoint: NativeViewerScopePoint | null;
   profilePoint: NativeViewerScopePoint | null;
   profileCountry: string | null;
+  profileCity: string | null;
   profileDistrict: string | null;
+  profileLocationName: string | null;
   sourceComponents?: NativeLocationComponents | null;
   resolvedAt: string;
 }): NativeViewerScope => {
-  const profileComponents = normalizeNativeLocationTextFields({ country: profileCountry, district: profileDistrict });
+  const profileComponents = normalizeNativeLocationTextFields({ country: profileCountry, city: profileCity, district: profileDistrict });
+  const accountCountry = profileComponents.countryName || profileCountry;
+  const accountDistrict = profileComponents.district || profileDistrict;
   const components = sourceComponents ?? null;
   const gpsCachedPoint = cachedDevicePoint || dbCachedDevicePoint || recentUserPoint;
   const base = {
@@ -120,6 +219,12 @@ const buildConsistentScope = ({
     city: null as string | null,
     countryCode: null as string | null,
     countryName: null as string | null,
+    profilePoint,
+    profileCountry: accountCountry,
+    profileCountryCode: profileComponents.countryCode,
+    profileCountryName: accountCountry,
+    profileDistrict: accountDistrict,
+    profileLocationName,
     ownPinPoint: null,
     recentUserPoint: null,
     sourceConsistent: true,
@@ -182,10 +287,10 @@ const buildConsistentScope = ({
       ...base,
       city: profileComponents.city,
       primaryPoint: profilePoint,
-      country: profileComponents.countryName || profileCountry,
+      country: accountCountry,
       countryCode: profileComponents.countryCode,
-      countryName: profileComponents.countryName || profileCountry,
-      district: profileComponents.district || profileDistrict,
+      countryName: accountCountry,
+      district: accountDistrict,
       source: "profile_location_geog",
     };
   }
@@ -195,10 +300,10 @@ const buildConsistentScope = ({
       ...base,
       primaryPoint: null,
       city: profileComponents.city,
-      country: profileComponents.countryName || profileCountry,
+      country: accountCountry,
       countryCode: profileComponents.countryCode,
-      countryName: profileComponents.countryName || profileCountry,
-      district: profileComponents.district || profileDistrict,
+      countryName: accountCountry,
+      district: accountDistrict,
       droppedFields: profilePoint ? ["profile_point"] : [],
       reason: profilePoint ? "profile_point_outside_profile_country" : "profile_text_fallback",
       source: "country_district_fallback",
@@ -226,16 +331,10 @@ const buildConsistentScope = ({
 };
 
 const readCachedDeviceCoordinates = async (): Promise<NativeViewerScopePoint | null> => {
-  for (const accuracy of ["high", "balanced"] as const) {
-    try {
-      const raw = await AsyncStorage.getItem(coordinatePersistentKey(accuracy));
-      if (!raw) continue;
-      const parsed = JSON.parse(raw) as { ts?: number; value?: NativeViewerScopePoint | null };
-      if (typeof parsed.ts !== "number" || Date.now() - parsed.ts > TWO_HOURS_MS) continue;
-      const point = normalizePoint(parsed.value);
-      if (point) return point;
-    } catch {
-      // Corrupt coordinate cache should not block exact-token DB scope resolution.
+  if (!coordinateLegacyCleanupDone) {
+    coordinateLegacyCleanupDone = true;
+    for (const accuracy of ["high", "balanced"] as const) {
+      await AsyncStorage.removeItem(coordinatePersistentKey(accuracy)).catch(() => undefined);
     }
   }
   return null;
@@ -263,17 +362,48 @@ const sourcePointForComponents = ({
 export async function resolveNativeViewerScope({
   userId,
   accessToken,
+  devicePoint,
+  sessionKey,
+  force = false,
 }: {
   userId: string | null;
   accessToken?: string | null;
+  devicePoint?: NativeViewerScopePoint | null;
+  sessionKey?: string | null;
+  force?: boolean;
 }): Promise<NativeViewerScope> {
   const expectedUserId = String(userId || "").trim();
   const resolvedAt = new Date().toISOString();
   if (!expectedUserId) throw new Error("viewer_scope_missing_user_id");
+  if (!force) {
+    const entryCachedScope = await readCachedNativeViewerScope(expectedUserId, {
+      maxAgeMs: VIEWER_SCOPE_ENTRY_REUSE_MS,
+      sessionKey,
+    });
+    if (entryCachedScope) return entryCachedScope;
+    const cachedScope = await readCachedNativeViewerScope(expectedUserId, {
+      maxAgeMs: VIEWER_SCOPE_CACHE_MAX_AGE_MS,
+      sessionKey,
+    });
+    if (
+      cachedScope &&
+      (cachedScope.source === "live_device_gps" || cachedScope.source === "cached_device_gps")
+    ) {
+      return cachedScope;
+    }
+  }
+
+  const requestKey = `${expectedUserId}:${String(sessionKey || "default")}`;
+  const existing = viewerScopeInFlight.get(requestKey);
+  if (existing) return existing;
+
+  const request = (async () => {
 
   const permission = await getNativeForegroundLocationPermissionDetail().catch(() => ({ canAskAgain: true, state: "unknown" as const }));
   const locationGranted = permission.state === "granted";
-  const liveDevicePoint = locationGranted ? await getNativeCurrentCoordinates({ force: true }).catch(() => null) : null;
+  const liveDevicePoint = locationGranted
+    ? devicePoint !== undefined ? devicePoint : await getNativeCurrentCoordinates({ force }).catch(() => null)
+    : null;
   const cachedDevicePoint = !liveDevicePoint ? await readCachedDeviceCoordinates() : null;
 
   const { data, error } = await nativeExactTokenRpc<NativeViewerScopeRpcRow[]>(
@@ -292,7 +422,9 @@ export async function resolveNativeViewerScope({
   const recentUserPoint = normalizePoint(row.recent_user_point);
   const profilePoint = normalizePoint(row.profile_point);
   const profileCountry = cleanText(row.country);
+  const profileCity = cleanText(row.city);
   const profileDistrict = cleanText(row.district);
+  const profileLocationName = cleanText(row.location_name);
   const selectedPoint = sourcePointForComponents({ liveDevicePoint, cachedDevicePoint, dbCachedDevicePoint, ownPinPoint, recentUserPoint });
   const sourceComponents = selectedPoint ? await reverseGeocodeNativeLocationComponents(selectedPoint.lat, selectedPoint.lng).catch(() => null) : null;
   const scope = buildConsistentScope({
@@ -303,7 +435,9 @@ export async function resolveNativeViewerScope({
     recentUserPoint,
     profilePoint,
     profileCountry,
+    profileCity,
     profileDistrict,
+    profileLocationName,
     sourceComponents,
     resolvedAt,
   });
@@ -326,5 +460,13 @@ export async function resolveNativeViewerScope({
     });
   }
 
+  void writeCachedNativeViewerScope(expectedUserId, scope, { sessionKey });
   return scope;
+  })();
+  viewerScopeInFlight.set(requestKey, request);
+  try {
+    return await request;
+  } finally {
+    if (viewerScopeInFlight.get(requestKey) === request) viewerScopeInFlight.delete(requestKey);
+  }
 }

@@ -1,15 +1,31 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { readNativeDisplayCacheItem, readNativeDisplayCacheItems, readNativeDisplayCacheKeys } from "../lib/nativeDisplayCacheStorage";
 import { Feather, FontAwesome5, MaterialCommunityIcons } from "@expo/vector-icons";
+import { NativeGlyph } from "../components/NativeGlyphIcons";
+import { NativeGlassCircle } from "../components/NativeGlassCircle";
 import { Image as ExpoImage } from "expo-image";
-import * as FileSystem from "expo-file-system/legacy";
 import { LinearGradient } from "expo-linear-gradient";
 import * as ImagePicker from "expo-image-picker";
-import type { ReactNode } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Animated, AppState, Dimensions, Easing, Image, Keyboard, KeyboardAvoidingView as RNKeyboardAvoidingView, Modal, PanResponder, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions, type ImageSourcePropType, type ImageStyle, type NativeScrollEvent, type NativeSyntheticEvent, type StyleProp, type ViewStyle } from "react-native";
-import { KeyboardAvoidingView } from "react-native-keyboard-controller";
+import type { ReactNode, RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Animated, AppState, Dimensions, Easing, Image, Keyboard, Modal, PanResponder, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions, type ImageSourcePropType, type ImageStyle, type NativeScrollEvent, type NativeSyntheticEvent, type StyleProp, type TextInputProps, type ViewStyle } from "react-native";
+import { NativeSpinner } from "../components/NativeSpinner";
+import { NativeDiscoverCoachMarks } from "../components/coachmarks/NativeDiscoverCoachMarks";
+import { NativeToast, NATIVE_TOAST_DURATION_MS } from "../components/NativeToast";
+import { NativeLocationPinButton } from "../components/NativeLocationPinButton";
+import { NativeGlassSurface } from "../components/NativeGlassSurface";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { getQuotaCapsForTier, normalizeQuotaTier, quotaConfig } from "../lib/quotaConfig_v1";
+import {
+  mergeNativeStableDiscoveryDeck,
+  nativeDiscoveryCycleIsActive,
+  nativeDiscoveryCycleStartedAtStorageKey,
+  nativeDiscoveryPassedCycleStorageKey,
+  nativeDiscoveryStableDeckStorageKey,
+  nativeDiscoveryTailRefillAttemptKey,
+  selectNativeDailyUnpassedProfiles,
+  shouldRefillNativeDiscoveryTail,
+} from "../lib/nativeDiscoveryDeckPolicy";
 import { isNativeVerifiedProfile } from "../lib/nativeVerificationGate";
 import { NativeLoadingState } from "../components/NativeLoadingState";
 import { NativeChatRowSkeleton, NativeGroupCardSkeleton, NativeShimmerSkeleton } from "../components/NativeShimmerSkeleton";
@@ -20,13 +36,20 @@ import {
   createNativeGroupChat,
   declineNativeGroupInvite,
   ensureNativeDirectChatRoom,
+  extractNativeAvatarStorageObjectPath,
   archiveNativeChatRoomForCurrentUser,
   clearCachedNativeChatMessages,
   fetchNativeExploreGroups,
   fetchNativeMatchedRailSummary,
+  matchedSummaryToInboxRow,
   fetchNativePendingGroupInvitePrompts,
   fetchNativeGroupPreviewMembers,
+  peekNativeGroupPreviewMembers,
+  fetchNativeGroupChatEvents,
+  fetchNativeGroupChatEventsCached,
+  peekNativeGroupChatEvents,
   fetchNativeGroupManagementSnapshot,
+  fetchNativeViewerUpcomingGroupEvents,
   fetchNativeViewerGroupContext,
   fetchNativeChatDiscoveryProfiles,
   fetchNativeChatRoom,
@@ -40,6 +63,7 @@ import {
   joinNativeGroupByCode,
   joinNativePublicGroup,
   markNativeChatRoomRead,
+  patchCachedNativeChatInboxGroupRows,
   requestNativeGroupJoin,
   resolveNativeChatInboxRowNavigation,
   searchNativeChatInbox,
@@ -50,6 +74,7 @@ import {
   removeNativeGroupMember,
   sendNativeChatMessage,
   setNativeGroupMuteState,
+  subscribeNativeChatUnmatchCommitted,
   updateNativeGroupChatMetadata,
   updateNativeGroupJoinRequest,
   uploadNativeChatStorageObject,
@@ -58,12 +83,19 @@ import {
   type NativeChatDiscoverStatus,
   type NativeExploreGroup,
   type NativeGroupManagementSnapshot,
+  type NativeGroupChatEvent,
   type NativeChatInboxRow,
   type NativeChatInboxScope,
+  type NativeMatchedRailSummary,
 } from "../lib/nativeChat";
 import { haptic } from "../lib/nativeHaptics";
-import { useShakeAnimation } from "../lib/nativeAnimations";
+import { useNativeLoadingDeadline } from "../lib/useNativeLoadingDeadline";
+import { markNativeNewChatSignal } from "../lib/nativeNewChatSignal";
+import { readNativeChatsInboxHandoff, writeNativeChatsInboxHandoff, writeNativeChatsLastTabHandoff, writeNativeChatSelectedRowHandoff } from "../lib/nativeChatHandoff";
+import { useErrorShake } from "../components/motion/useErrorShake";
+import { useNativeModalTransition } from "../lib/nativeModalTransition";
 import { fetchNativeServiceProviderDetail, incrementNativeServiceProviderView, type NativeServiceProvider } from "../lib/nativeService";
+import { nativePetSpeciesEmojiOrText } from "../lib/nativePetEmoji";
 import {
   buildNativePetFocusLabel,
   nativePetBreedOptionsForSpeciesLabel,
@@ -72,38 +104,48 @@ import {
 } from "../lib/nativePetTaxonomy";
 import {
   extractNativeCountryFromPlaceLabel,
-  fetchNativeLocationSuggestions,
+  fetchNativePrioritizedLocationSuggestions,
   getNativeForegroundLocationPermissionDetail,
-  openNativeLocationSettings,
+  openNativeAppSettings,
   requestNativeForegroundLocationPermissionDetail,
+  subscribeNativeLocationPermissionDetail,
   type NativeLocationPermissionDetail,
   type NativeLocationSuggestion,
+  type NativeResolvedLocation,
 } from "../lib/nativeLocation";
-import { fetchNativeProfileSummary } from "../lib/nativeProfileSummary";
-import { sendNativePublicProfileStarChat, sendNativePublicProfileWave } from "../lib/nativePublicProfile";
+import { mergeNativeDiscoveryPermissionDeck } from "../lib/nativeDiscoveryPermissionDeck";
+import { fetchNativeProfileSummary, isNativeProfileAtLeastAge, subscribeNativeProfileSummary } from "../lib/nativeProfileSummary";
+import { setNativeFriendsMatchingEnabled } from "../lib/nativeFriendsMatching";
+import { fetchNativePublicProfile, sendNativePublicProfileStarChat, sendNativePublicProfileWave, type NativePublicProfile } from "../lib/nativePublicProfile";
 import { nativeExactTokenRpc } from "../lib/nativeExactTokenRequest";
+import { isNativeCoachMarkSeen } from "../lib/nativeCoachMarks";
+import { getFreshNativeAccessToken } from "../lib/nativeFunctionClient";
+import { invalidateNativeBlockCascade } from "../lib/nativeBlockCascade";
+import { nativeFreshImageKey, nativeFreshImageUri } from "../lib/nativeImageFreshness";
+import { nativePetPresentationImageStyle } from "../lib/nativePetPhotoPresentation";
+import { readNativeLocalMediaFile } from "../lib/nativeLocalMediaUpload";
 import { createNativeProtectedActionError, logNativeProtectedActionFailure, requestNativeStorageCleanupResult } from "../lib/nativeStorageCleanup";
 import { resolveNativeAvatarUrl } from "../lib/nativeStorageUrlCache";
 import { searchNativeSocialMentionSuggestions, type NativeSocialMentionSuggestion } from "../lib/nativeSocial";
-import { resolveNativeViewerScope, type NativeViewerScope } from "../lib/nativeViewerScope";
-import {
-  unreadTotalWithReadOverlay,
-} from "../lib/nativeChatMirror";
-import { createSingleRealtimeChannel } from "../lib/realtimeChannelManager";
+import { resolveNativeViewerScope, subscribeNativeViewerScope, type NativeViewerScope } from "../lib/nativeViewerScope";
+import { createSinglePrivateBroadcastChannel, createSingleRealtimeChannel } from "../lib/realtimeChannelManager";
 import type { NativeProfileUploadAsset } from "../lib/nativeProfilePhotos";
 import { supabase, supabaseUrl } from "../lib/supabase";
-import { huddleButtons, huddleColors, huddleFieldStates, huddleFormControls, huddleImageDefaults, huddleLayout, huddleMap, huddleRadii, huddleShadows, huddleSpacing, huddleType } from "../theme/huddleDesignTokens";
+import { huddleButtons, huddleCoachMark, huddleColors, huddleFieldStates, huddleFormControls, huddleGlassControls, huddleImageDefaults, huddleLayout, huddleMap, huddleRadii, huddleShadows, huddleSocial, huddleSpacing, huddleType } from "../theme/huddleDesignTokens";
 import discoverAgeGateImage from "../../assets/Notifications/discover-age-gate.png";
 import emptyChatImage from "../../assets/Notifications/empty-chat-native.png";
 import emptyChatImageFallback from "../../assets/Notifications/empty-chat.png";
+import { NativeContactFriendRequests } from "../components/chat/NativeContactFriendRequests";
 import matchedImage from "../../assets/Notifications/matched.png";
 import serviceImage from "../../assets/Notifications/Service.jpg";
 import teamHuddleLogo from "../../assets/huddle-logo-transparent.png";
-import profilePlaceholder from "../../huddle Design System/assets/ProfilePlaceholder.png";
-import { NativePublicProfileModal } from "../components/profile/NativePublicProfileModal";
+import profilePlaceholder from "../../assets/ProfilePlaceholder.png";
+import { NativePublicProfileModal, ProfileUpgradeModal, StarsExhaustedModal } from "../components/profile/NativePublicProfileModal";
 import { NativeCarerProfileContent } from "../components/service/NativeCarerProfileContent";
 import { NativeMediaImageCropper } from "../components/profile/NativeProfilePhotoCropper";
+import { pickNativeProfilePhoto } from "../components/profile/NativeProfilePhotoPicker";
 import { NativeVerifiedBadge } from "../components/NativeVerifiedBadge";
+import { NativeEngagementSparkleInline } from "../components/NativeProfileAvatar";
 import { NativeFormTextField } from "../components/NativeFormField";
 import { HuddleRangeControl, HuddleSingleRangeControl } from "../components/HuddleRangeControl";
 import {
@@ -114,8 +156,10 @@ import {
   AppBottomSheetFooter,
   AppBottomSheetHeader,
   AppBottomSheetScroll,
+  AppKeyboardAvoidingView as KeyboardAvoidingView,
   AppModalButton,
   AppModalCard,
+  AppModalCloseButton,
   AppModalField,
   AppModalIconButton,
   AppModalScroll,
@@ -125,8 +169,10 @@ import Reanimated, {
   Easing as ReanimEasing,
   Extrapolation,
   interpolate,
+  interpolateColor,
   runOnJS,
   useAnimatedStyle,
+  useReducedMotion,
   useSharedValue,
   withDelay,
   withRepeat,
@@ -135,11 +181,24 @@ import Reanimated, {
   withTiming,
   type SharedValue,
 } from "react-native-reanimated";
+import { NativeAuroraCover } from "../components/NativeAuroraCover";
+import { peekVisibleUserPinIds, subscribeVisibleUserPinIds } from "../lib/nativeMapData";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { BlurView as RNBlurView } from "@react-native-community/blur";
 // MatchModal blob shapes — irregular vertical ovals with a strong left bulge (blue) and a slight
 // concave waist (coral). Drawn as SVG paths so the outline + image clip stay pixel-precise.
 import Svg, { Defs as SvgDefs, ClipPath as SvgClipPath, Image as SvgImage, Mask as SvgMask, Path as SvgPath, G as SvgG, Rect as SvgRect, Text as SvgText } from "react-native-svg";
+
+let ChatGlassViewComponent: typeof import("expo-glass-effect").GlassView | null = null;
+let CHAT_LIQUID_GLASS = false;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const glass = require("expo-glass-effect") as typeof import("expo-glass-effect");
+  CHAT_LIQUID_GLASS = glass.isLiquidGlassAvailable();
+  if (CHAT_LIQUID_GLASS) ChatGlassViewComponent = glass.GlassView;
+} catch {
+  CHAT_LIQUID_GLASS = false;
+}
 
 type NativeChatsTab = "friends" | "groups" | "service" | "discover";
 type NativeChatsTopTab = "discover" | "community" | "chats";
@@ -152,12 +211,15 @@ type PendingGroupCoverCropTarget = {
   target: "create" | "edit";
 } | null;
 type GroupDetailsErrors = { cover?: boolean; description?: boolean; location?: boolean; name?: boolean };
-type MatchModalState = { userId: string; name: string; avatarUrl: string | null; roomId: string | null };
+type MatchModalState = { userId: string; name: string; avatarUrl: string | null };
 type SelfMatchProfile = { name: string; avatarUrl: string | null };
-type StarConfirmTarget = { id: string; displayName: string };
-type DiscoverySendCueKind = "wave" | "star";
+type StarConfirmTarget = { id: string; displayName: string; actionId: string };
+type ProfileSheetFallbackData = Record<string, unknown>;
+type DiscoverySendCueKind = "star";
 type NativeViewerPetSignal = { species: string; breed: string };
-const DISCOVER_AGE_GATE_COPY = "Discover & Chat features are for 16+ only.\nFor now, join the social conversation and help protect the pack by keeping an eye on the Map.";
+const nativeDiscoveryActionId = (kind: "wave" | "star", targetId: string) =>
+  `${kind}:${targetId}:${Date.now()}:${Math.random().toString(36).slice(2, 12)}`;
+const DISCOVER_AGE_GATE_COPY = "Discover is available to people aged 16+ only.\nYou can still use Social, Chats, and Map.";
 
 const GROUP_EXPLORE_SORT_OPTIONS: Array<{ value: NativeGroupExploreSort; label: string }> = [
   { value: "relevance", label: "Relevance" },
@@ -166,47 +228,21 @@ const GROUP_EXPLORE_SORT_OPTIONS: Array<{ value: NativeGroupExploreSort; label: 
   { value: "popularity", label: "Popularity" },
 ];
 
-const base64ToArrayBuffer = (base64: string) => {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-  const cleanBase64 = base64.replace(/[^A-Za-z0-9+/=]/g, "");
-  const padding = cleanBase64.endsWith("==") ? 2 : cleanBase64.endsWith("=") ? 1 : 0;
-  const byteLength = Math.max(0, Math.floor((cleanBase64.length * 3) / 4) - padding);
-  const bytes = new Uint8Array(byteLength);
-  let buffer = 0;
-  let bits = 0;
-  let index = 0;
-
-  for (const char of cleanBase64) {
-    if (char === "=") break;
-    const value = chars.indexOf(char);
-    if (value < 0) continue;
-    buffer = (buffer << 6) | value;
-    bits += 6;
-    if (bits >= 8 && index < byteLength) {
-      bits -= 8;
-      bytes[index] = (buffer >> bits) & 0xff;
-      index += 1;
-    }
-  }
-
-  return bytes.buffer;
-};
-
 const uploadNativeGroupCover = async (options: { accessToken?: string | null; asset: PendingGroupCover; chatId: string; userId: string }) => {
-  if (!options.accessToken) throw new Error("missing_access_token");
+  const accessToken = await getFreshNativeAccessToken(options.accessToken);
+  if (!accessToken) throw new Error("missing_access_token");
   if (!options.chatId) throw new Error("missing_group");
   if (options.asset.size !== null && options.asset.size > 15 * 1024 * 1024) throw new Error("file_too_large");
-  const extension = (options.asset.name.includes(".") ? options.asset.name.split(".").pop() : options.asset.mime.split("/").pop())?.replace(/[^a-z0-9]/gi, "").toLowerCase() || "jpg";
-  const objectName = `groups/${options.chatId}/${options.userId}-${Date.now()}.${extension}`;
-  const base64 = await FileSystem.readAsStringAsync(options.asset.uri, { encoding: FileSystem.EncodingType.Base64 });
-  const body = base64ToArrayBuffer(base64);
+  const file = await readNativeLocalMediaFile(options.asset.uri, { fileName: options.asset.name, mimeType: options.asset.mime }, { fallbackContentType: "image/jpeg", fallbackExtension: "jpg" });
+  const uploadId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  const objectName = `groups/${options.chatId}/cover-${uploadId}.${file.extension}`;
   try {
     await uploadNativeChatStorageObject({
-      accessToken: options.accessToken,
+      accessToken,
       bucket: "avatars",
       path: objectName,
-      body,
-      contentType: options.asset.mime || "image/jpeg",
+      body: file.body,
+      contentType: file.contentType || options.asset.mime || "image/jpeg",
       upsert: true,
     });
   } catch (error) {
@@ -224,9 +260,9 @@ const uploadNativeGroupCover = async (options: { accessToken?: string | null; as
     p_content_type: "group_cover",
     p_expires_at: null,
     p_object_path: objectName,
-  }, options.accessToken);
+  }, accessToken);
   if (registerError) {
-    const cleanupResult = await requestNativeStorageCleanupResult("avatars", objectName, "register_group_cover_media_failed", options.accessToken);
+    const cleanupResult = await requestNativeStorageCleanupResult("avatars", objectName, "register_group_cover_media_failed", accessToken);
     throw createNativeProtectedActionError({
       ok: false,
       stage: "register",
@@ -241,11 +277,14 @@ const uploadNativeGroupCover = async (options: { accessToken?: string | null; as
   };
 };
 type NativeChatsScreenProps = {
+  active?: boolean;
   accessToken?: string | null;
+  careMarketIsActive?: boolean;
   userId: string | null;
   search?: string;
   sessionKey?: string | null;
   onBottomSheetOpenChange?: (open: boolean) => void;
+  friendRequestUnread?: boolean;
   onNavigate: (path: string) => void;
 };
 
@@ -291,14 +330,47 @@ const ALL_LANGUAGES = [
 const PET_FOCUS_OPTIONS = ["All", ...nativePetFocusLabels];
 const GROUP_PET_FOCUS_MAX = 3;
 const GROUP_DESCRIPTION_WORD_LIMIT = 100;
+const GROUP_DESCRIPTION_FIELD_MIN_HEIGHT = huddleType.labelLine * 2;
+const GROUP_DESCRIPTION_FIELD_MAX_HEIGHT = 92;
 const countWords = (value: string) => value.trim().split(/\s+/).filter(Boolean).length;
+const safeQuotaNumber = (value: unknown) => {
+  const numeric = Number(value ?? 0);
+  return Number.isFinite(numeric) ? numeric : 0;
+};
+const parseProfileExperienceYears = (value: unknown) => {
+  if (value == null || value === "") return null;
+  const direct = Number(value);
+  if (Number.isFinite(direct) && direct > 0) return direct;
+  const match = String(value).match(/\d+(?:\.\d+)?/);
+  if (!match) return null;
+  const parsed = Number(match[0]);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
 const estimatePetFocusChipUnits = (value: string) => value.length * 8 + 28;
 const shouldCollapsePetFocusChips = (values: string[]) => values.reduce((total, value) => total + estimatePetFocusChipUnits(value), 0) + Math.max(0, values.length - 1) * 6 > 315;
+const normalizeCountryForSurfaceScope = (value?: string | null) => String(value || "").trim().toLowerCase();
+const resolveGroupExploreCountryFromScope = (scope?: NativeViewerScope | null) => (
+  scope?.countryName ||
+  scope?.country ||
+  scope?.profileCountryName ||
+  scope?.profileCountry ||
+  null
+);
+const groupMatchesViewerCountry = (group: NativeExploreGroup, country?: string | null) => {
+  const viewerCountry = normalizeCountryForSurfaceScope(country);
+  if (!viewerCountry) return false;
+  return normalizeCountryForSurfaceScope(group.locationCountry) === viewerCountry;
+};
 const INBOX_FIRST_PAGE = 10;
 const INBOX_NEXT_PAGE = 20;
 const DISCOVERY_VISIBLE_COUNT = 20;
 const DISCOVERY_MAX_RADIUS_KM = 150;
 const DISCOVERY_HEIGHT_MAX_CM = 250;
+// Send-cue runway. Star is rare and paid so it carries more weight than a wave,
+// but it follows a confirm modal — the person has already committed twice, and
+// ceremony after a confirmation is just delay.
+const NATIVE_STAR_CUE_MS = 400;
+
 const SWIPE_COMMIT_OFFSET = 110;
 const SWIPE_COMMIT_OFFSET_LAST = 130;
 const SWIPE_COMMIT_VELOCITY = 0.8;
@@ -306,24 +378,76 @@ const SWIPE_VELOCITY_MIN_OFFSET = 80;
 const SWIPE_VERTICAL_BOUND = 80;
 const DISCOVERY_FLING_X = Math.max(Dimensions.get("window").width, 430) * 1.05;
 const FILTER_SHEET_SCROLL_MAX_HEIGHT = Math.round(Dimensions.get("window").height * 0.58);
-const discoveryPassedKey = (userId: string) => `native-chats:discovery-passed:${userId}`;
-const discoveryPassedSessionKey = (userId: string) => `native-chats:discovery-passed-session:${userId}`;
+// Fisher-Yates shuffle for the discovery deck — used by pull-to-refresh to reorder the
+// current unpassed stack so a refresh visibly reshuffles instead of re-showing the same
+// deterministic order.
+const shuffleDiscoveryDeck = <T,>(deck: T[]): T[] => {
+  const next = [...deck];
+  for (let i = next.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [next[i], next[j]] = [next[j], next[i]];
+  }
+  return next;
+};
+
 const discoveryHandledKey = (userId: string) => `native-chats:discovery-handled:${userId}`;
 const discoveryFiltersKey = (userId: string) => `native-chats:discovery-filters:v2:${userId}`;
-const discoverySeenTodayKey = (userId: string, day: string) => `native-chats:discovery-seen:${day}:${userId}`;
-const chatsDiscoverProfilesCacheKey = (userId: string, filterKey: string, tier: string, country: string | null) => `native-chats:discover-cache:v2:${userId}:${tier}:${country || "global"}:${filterKey}`;
-const chatsExploreGroupsCacheKey = (userId: string) => `native-chats:groups-explore-cache:v1:${userId}`;
+const CHATS_EXPLORE_GROUPS_CACHE_PREFIX = "native-chats:groups-explore-cache:";
+const chatsExploreGroupsCacheKey = (userId: string, scopeKey: string) => (
+  `native-chats:groups-explore-cache:v5:${userId}:${encodeURIComponent(scopeKey || "global")}`
+);
 const chatsInboxRowsCacheKey = (userId: string, sessionKey: string | null | undefined, mainTab: Exclude<NativeChatsTab, "discover">) => `native-chats:inbox-cache:v3:${userId}:${sessionKey || `${userId}:0`}:${mainTab}`;
 const chatsServiceTabProbeCacheKey = (userId: string, sessionKey: string | null | undefined) => `native-chats:service-tab-probe:v2:${userId}:${sessionKey || `${userId}:0`}`;
 const chatsGroupDetailsCacheKey = (userId: string, chatId: string, isExplore: boolean) => `native-chats:groupSnapshot:v2:${userId}:${isExplore ? "explore" : "manage"}:${chatId}`;
 const CHATS_DISCOVER_CACHE_LIMIT = 8;
+// How many queued cards behind the visible top card get canonical-hydrated ahead of a swipe.
+// Bounded on purpose: deep prefetch would spend a canonical fetch on cards most sessions
+// never reach.
+const DISCOVERY_QUEUED_HYDRATION_DEPTH = 2;
+const DISCOVERY_QUEUED_HYDRATION_MAX_ATTEMPTS = 2;
+
+// A refresh may improve ranking, but it must not move cards already committed to
+// the visible deck. Existing order wins; newly eligible profiles append behind it.
+const resetDiscoveryCanonicalPreviewState = (profiles: NativeChatDiscoveryProfile[]) => profiles.map((profile) => ({
+  ...profile,
+  bio: null,
+  canonicalProfileLoaded: false,
+  canonicalProfileFailed: false,
+}));
+
+const applyCanonicalProfilePreviewToDiscoveryProfile = (profile: NativeChatDiscoveryProfile, detail: NativePublicProfile): NativeChatDiscoveryProfile => {
+  const visibleBio = detail.visibility.show_bio ? detail.bio.trim() : "";
+  const publicPets = detail.petHeads.map((pet) => ({
+    ageYears: pet.ageYears ?? null,
+    id: pet.id,
+    isPublic: pet.isPublic !== false,
+    name: pet.name ?? null,
+    photoUrl: pet.photoUrl ?? null,
+    photoPosition: pet.photoPosition ?? null,
+    species: pet.species ?? null,
+    updatedAt: pet.updatedAt ?? null,
+  }));
+  const canonicalExperienceYears = parseProfileExperienceYears(detail.experienceYears);
+  return {
+    ...profile,
+    bio: visibleBio || null,
+    canonicalProfileLoaded: true,
+    canonicalProfileFailed: false,
+    petExperience: detail.petExperience.length > 0 ? detail.petExperience : profile.petExperience,
+    petExperienceYears: canonicalExperienceYears ?? profile.petExperienceYears,
+    pets: publicPets.length > 0 ? publicPets : profile.pets,
+    socialRoles: detail.availabilityStatus.length > 0 ? detail.availabilityStatus : profile.socialRoles,
+    socialRole: detail.availabilityStatus[0] ?? profile.socialRole,
+  };
+};
+
 const CHATS_GROUP_EXPLORE_CACHE_LIMIT = 5;
 const CHATS_CACHE_MAX_AGE_MS = 10 * 60 * 1000;
 const DISCOVERY_ROLLBACK_REQUEUE_OFFSET = 4;
 
 const readChatsCache = async <T,>(key: string): Promise<T | null> => {
   try {
-    const raw = await AsyncStorage.getItem(key);
+    const raw = await readNativeDisplayCacheItem(key);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as { cachedAt?: number; value?: T };
     if (typeof parsed.cachedAt !== "number" || Date.now() - parsed.cachedAt > CHATS_CACHE_MAX_AGE_MS) {
@@ -343,6 +467,49 @@ const writeChatsCache = async <T,>(key: string, value: T) => {
   } catch {
     // AsyncStorage can be unavailable in constrained dev/runtime contexts.
   }
+};
+
+const patchNativeChatsGroupCaches = async (
+  userId: string | null | undefined,
+  chatId: string,
+  patch: Partial<NativeChatInboxRow> & Partial<NativeExploreGroup>,
+  insertGroup?: NativeExploreGroup | null,
+) => {
+  const viewer = String(userId || "").trim();
+  if (!viewer || !chatId) return;
+  const keys = await readNativeDisplayCacheKeys();
+  await Promise.all(keys.filter((key) => (
+    (key.startsWith(CHATS_EXPLORE_GROUPS_CACHE_PREFIX) && key.includes(`:${viewer}:`)) ||
+    key === `native-chats:groups-explore-cache:v1:${viewer}` ||
+    key.startsWith(`native-chats:groupSnapshot:v2:${viewer}:`)
+  )).map(async (key) => {
+    try {
+      const raw = await readNativeDisplayCacheItem(key);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as { cachedAt?: number; value?: unknown };
+      if (!parsed || typeof parsed !== "object") return;
+      if (key === `native-chats:groups-explore-cache:v1:${viewer}` || key.startsWith(`native-chats:groups-explore-cache:v2:${viewer}:`)) {
+        const value = parsed.value as { invited?: NativeExploreGroup[]; groups?: NativeExploreGroup[] } | null;
+        const groups = Array.isArray(value?.groups) ? value.groups : [];
+        const nextGroups = groups.some((group) => group.id === chatId)
+          ? groups.map((group) => group.id === chatId ? { ...group, ...patch } : group)
+          : insertGroup ? [{ ...insertGroup, ...patch }, ...groups] : groups;
+        await AsyncStorage.setItem(key, JSON.stringify({
+          cachedAt: Date.now(),
+          value: {
+            invited: Array.isArray(value?.invited) ? value.invited.map((group) => group.id === chatId ? { ...group, ...patch } : group) : [],
+            groups: nextGroups,
+          },
+        }));
+        return;
+      }
+      if (key.endsWith(`:${chatId}`)) {
+        await AsyncStorage.setItem(key, JSON.stringify({ cachedAt: Date.now(), value: { ...(parsed.value as object || {}), ...patch } }));
+      }
+    } catch {
+      // Cache patching is best-effort; the next DB refresh remains authoritative.
+    }
+  }));
 };
 
 type NativeChatsInboxMirrorEnvelope = {
@@ -405,8 +572,8 @@ const FILTER_ROWS: Array<{ key: keyof NativeChatDiscoveryFilters; label: string;
 
 const FILTER_GROUPS: Array<{ title: string; tier: FilterTier; rows: typeof FILTER_ROWS }> = [
   { title: "Basic", tier: "free", rows: FILTER_ROWS.filter((row) => row.tier === "free") },
-  { title: "Huddle+", tier: "plus", rows: FILTER_ROWS.filter((row) => row.tier === "plus") },
-  { title: "Gold", tier: "gold", rows: FILTER_ROWS.filter((row) => row.tier === "gold") },
+  { title: "huddle+", tier: "plus", rows: FILTER_ROWS.filter((row) => row.tier === "plus") },
+  { title: "huddle＊", tier: "gold", rows: FILTER_ROWS.filter((row) => row.tier === "gold") },
 ];
 
 const SPECIES_CHIP_EMOJI: Record<string, string> = {
@@ -458,9 +625,22 @@ const parseInitialGroupDetailId = (search?: string) => {
   return String(params.get("detail") || params.get("group") || "").trim() || null;
 };
 
+const parseInitialServiceRoomId = (search?: string) => {
+  const params = new URLSearchParams(String(search || "").replace(/^\?/, ""));
+  if (params.get("tab") !== "service") return null;
+  return String(params.get("room") || params.get("serviceRoom") || "").trim() || null;
+};
+
+const parseInitialJoinCode = (search?: string) => {
+  const params = new URLSearchParams(String(search || "").replace(/^\?/, ""));
+  if (params.get("tab") !== "groups") return null;
+  const code = String(params.get("joinCode") || "").trim().toUpperCase();
+  return /^[A-Z0-9]{6}$/.test(code) ? code : null;
+};
+
 const scopeForTab = (tab: Exclude<NativeChatsTab, "discover">): NativeChatInboxScope => {
   if (tab === "groups") return "groups";
-  if (tab === "service") return "all";
+  if (tab === "service") return "service";
   return "friends";
 };
 
@@ -476,31 +656,97 @@ const compactTime = (value: string | null) => {
   return `${Math.floor(hours / 24)}d`;
 };
 
+// Honest "last event" label for group cards: the most recent PAST event reads
+// as "Xh"/"Xd ago", the 6-7 day edge reads as "last week", and anything older
+// than a week — or a group with no events at all — is hidden entirely rather
+// than showing a stale or meaningless date.
+const groupCardLastEventLabel = (events: NativeGroupChatEvent[] | null) => {
+  if (!events || events.length === 0) return null;
+  const now = Date.now();
+  let mostRecentPastMs: number | null = null;
+  for (const event of events) {
+    const startsMs = new Date(event.startsAt).getTime();
+    if (!Number.isFinite(startsMs) || startsMs > now) continue;
+    if (mostRecentPastMs === null || startsMs > mostRecentPastMs) mostRecentPastMs = startsMs;
+  }
+  if (mostRecentPastMs === null) return null;
+  const hours = (now - mostRecentPastMs) / 3_600_000;
+  if (hours >= 168) return null;
+  if (hours >= 144) return "last week";
+  return compactTime(new Date(mostRecentPastMs).toISOString());
+};
+
 const displayName = (row: NativeChatInboxRow) => {
   if (row.roomType === "group") return row.chatName || "Group chat";
   if (row.roomType === "service") return row.peerName || row.chatName || "Care chat";
   return row.peerName || row.chatName || "Conversation";
 };
 
+const discoveryProfileToPublicProfileFallback = (profile: NativeChatDiscoveryProfile): ProfileSheetFallbackData => ({
+  id: profile.id,
+  display_name: profile.displayName,
+  avatar_url: profile.avatarUrl,
+  bio: profile.bio,
+  gender_genre: profile.gender,
+  height: profile.height,
+  school: profile.school,
+  major: profile.major,
+  location_name: profile.locationName,
+  is_verified: profile.isVerified,
+  has_car: profile.hasCar,
+  user_role: profile.socialRole,
+  pet_experience: profile.petExperience,
+  pet_experience_years: profile.petExperienceYears,
+  relationship_status: profile.relationshipStatus,
+  availability_status: profile.socialRoles,
+  created_at: profile.createdAt,
+  updated_at: profile.updatedAt,
+  last_active_at: profile.lastActiveAt,
+  effective_tier: profile.tier,
+  tier: profile.tier,
+  social_album: profile.socialAlbum,
+  pet_heads: profile.pets.map((pet, index) => ({
+    id: `${profile.id}:discover-pet:${index}`,
+    name: pet.name,
+    species: pet.species,
+    is_active: true,
+    is_public: true,
+  })),
+});
+
 const isTeamHuddleRow = (row: NativeChatInboxRow) => (
   row.peerUserId === TEAM_HUDDLE_USER_ID || isNativeTeamHuddleIdentity(displayName(row), row.peerSocialId)
 );
 
-const isCareInboxRow = (row: NativeChatInboxRow) => row.roomType === "service" || isTeamHuddleRow(row);
+const isCareInboxRow = (row: NativeChatInboxRow) => row.roomType === "service";
+
+const hasVisibleRowsForInboxTab = (tab: Exclude<NativeChatsTab, "discover">, sourceRows: NativeChatInboxRow[]) => {
+  if (tab === "groups") return sourceRows.some((row) => row.roomType === "group");
+  if (tab === "service") return sourceRows.some(isCareInboxRow);
+  return sourceRows.some((row) => row.roomType !== "group" && !isCareInboxRow(row));
+};
 
 const appendReturnTo = (path: string, returnTo: string) => `${path}${path.includes("?") ? "&" : "?"}returnTo=${encodeURIComponent(returnTo)}`;
 
-const carePreviewForKind = (kind: string, row?: NativeChatInboxRow, userId?: string | null) => {
+const carePreviewForKind = (kind: string, row?: NativeChatInboxRow, userId?: string | null, payload?: Record<string, unknown>) => {
   const normalized = kind.trim();
   const actorName = row?.lastMessageSenderId === userId ? "You" : displayName(row || {} as NativeChatInboxRow);
   const startedTime = row?.lastMessageAt ? new Date(row.lastMessageAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
   if (normalized === "service_request_sent") {
-    return row?.serviceRequesterId === userId
+    // The event author is available in the first inbox payload; the service row can
+    // briefly still be resolving after the request is sent.
+    return row?.lastMessageSenderId === userId
       ? "Your booking request has been sent."
       : "You have received a booking request.";
   }
   if (normalized === "service_request_updated" || normalized === "service_quote_sent") return `Care Scope has been updated by ${actorName}.`;
   if (normalized === "service_request_withdrawn") return "Request withdrawn";
+  if (normalized === "service_booking_cancelled" || normalized === "voluntary_booking_cancelled") {
+    const policy = String(payload?.policy || "").toLowerCase();
+    return /lte_24h/.test(policy)
+      ? `${actorName} cancelled close to the booking. huddle is reviewing this cancellation.`
+      : `${actorName} cancelled the booking.`;
+  }
   if (normalized === "service_booked") return "All set! Your care session is locked in.";
   if (normalized === "service_pin_shared") return row?.serviceRequesterId === userId ? "You Start PIN is sent." : "You've received the Start PIN.";
   if (normalized === "service_check_in" || normalized === "service_in_progress") return `Care session started${startedTime ? ` at ${startedTime}` : ""}.`;
@@ -519,9 +765,14 @@ const parseInboxPreview = (content: string | null, row?: NativeChatInboxRow, use
     if (kind === "star_intro") return String(parsed.text || "Sent a Star to connect.").trim();
     if (kind === "huddle_share") {
       const share = parsed.share && typeof parsed.share === "object" ? parsed.share as Record<string, unknown> : {};
-      return String(share.chatHeadline || share.title || "Shared from Huddle").trim();
+      return String(share.chatHeadline || share.title || "Shared from huddle").trim();
     }
-    const carePreview = carePreviewForKind(kind, row, userId);
+    if (kind === "service_care_update") {
+      const note = String(parsed.note || parsed.text || "").trim();
+      if (note) return note;
+      return parsed.photo || String(parsed.photoUrl || "").trim() ? "Shared a photo update" : "Shared a care update";
+    }
+    const carePreview = carePreviewForKind(kind, row, userId, parsed);
     if (carePreview) return carePreview;
     const messageText = String(parsed.text || "").trim();
     if (messageText) return messageText;
@@ -591,23 +842,27 @@ function ResilientAvatarImage({
   resizeMode = "cover",
   style,
   uri,
+  version,
 }: {
   fallback: ReactNode;
   resizeMode?: "cover" | "contain";
   style: StyleProp<ImageStyle>;
   uri: string | null | undefined;
+  version?: string | null;
 }) {
-  const resolved = useMemo(() => resolveNativeAvatarUrl(uri) || (typeof uri === "string" && /^https?:\/\//i.test(uri) ? uri : null), [uri]);
+  const resolved = useMemo(() => resolveNativeAvatarUrl(uri), [uri]);
   const [failed, setFailed] = useState(false);
   useEffect(() => setFailed(false), [resolved]);
   if (!resolved || failed) return <>{fallback}</>;
+  const imageVersion = version || resolved;
   return (
     <ExpoImage
       accessibilityIgnoresInvertColors
       cachePolicy="memory-disk"
       contentFit={resizeMode}
+      key={nativeFreshImageKey(resolved, imageVersion)}
       onError={() => setFailed(true)}
-      source={{ uri: resolved }}
+      source={{ uri: nativeFreshImageUri(resolved, imageVersion) }}
       style={style}
       transition={120}
     />
@@ -620,33 +875,36 @@ function NativeUserAvatar({
   isTeamHuddle = false,
   name,
   size,
+  version,
 }: {
   avatarUrl: string | null;
   isVerified: boolean;
   isTeamHuddle?: boolean;
   name: string;
   size: "md" | "lg";
+  version?: string | null;
 }) {
   const frameStyle = size === "lg" ? styles.userAvatarLg : styles.userAvatarMd;
   const imageStyle = size === "lg" ? styles.userAvatarImageLg : styles.userAvatarImageMd;
   const verifiedBadgeStyle = size === "lg" ? styles.userAvatarVerifiedBadgeLg : styles.userAvatarVerifiedBadgeMd;
   return (
-    <View style={[frameStyle, isVerified ? styles.userAvatarVerified : styles.userAvatarUnverified]}>
+    <View style={[frameStyle, isVerified ? styles.userAvatarVerified : null]}>
       <ResilientAvatarImage
         fallback={<Image accessibilityLabel={name || "User"} resizeMode={isTeamHuddle ? "contain" : "cover"} source={isTeamHuddle ? teamHuddleLogo : profilePlaceholder} style={imageStyle} />}
         resizeMode={isTeamHuddle ? "contain" : "cover"}
         style={imageStyle}
         uri={isTeamHuddle ? null : avatarUrl}
+        version={version}
       />
       {isVerified ? <View style={verifiedBadgeStyle}><NativeVerifiedBadge compact variant="avatar" /></View> : null}
     </View>
   );
 }
 
-function VerifiedMemberAvatar({ avatarUrl, isVerified, name }: { avatarUrl: string | null; isVerified: boolean; name: string }) {
+function VerifiedMemberAvatar({ avatarUrl, isVerified, name, version }: { avatarUrl: string | null; isVerified: boolean; name: string; version?: string | null }) {
   return (
     <View style={[styles.memberAvatarFrame, isVerified ? styles.memberAvatarFrameVerified : null]}>
-      <ResilientAvatarImage fallback={<Text style={styles.memberAvatarInitial}>{initials(name)}</Text>} style={styles.memberAvatarImage} uri={avatarUrl} />
+      <ResilientAvatarImage fallback={<Text style={styles.memberAvatarInitial}>{initials(name)}</Text>} style={styles.memberAvatarImage} uri={avatarUrl} version={version} />
       {isVerified ? <View style={styles.memberVerifiedBadge}><NativeVerifiedBadge compact variant="avatar" /></View> : null}
     </View>
   );
@@ -685,6 +943,42 @@ const petLine = (profile: NativeChatDiscoveryProfile) => {
   if (profile.petSpecies.length > 0) return profile.petSpecies.slice(0, 3).join(" · ");
   if (/^animal friend\s*\(no pet\)$/i.test(profile.socialRole || "")) return "Animal Friend";
   return profile.socialRole || "Pet people nearby";
+};
+
+const formatDiscoverySpecies = (value?: string | null) => {
+  const clean = String(value || "").trim();
+  if (!clean) return "Pet";
+  return clean
+    .split(/[\s_/-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
+};
+
+const discoveryProfileFacts = (profile: NativeChatDiscoveryProfile) => {
+  const species = profile.petSpecies.map(formatDiscoverySpecies).filter(Boolean);
+  const experience = profile.petExperience.map((item) => String(item || "").trim()).filter(Boolean);
+  const years = profile.petExperienceYears && profile.petExperienceYears > 0
+    ? `${profile.petExperienceYears} ${profile.petExperienceYears === 1 ? "year" : "years"} experience`
+    : "";
+  return [years, ...species.slice(0, 3), ...experience.slice(0, 2)]
+    .filter(Boolean)
+    .filter((value, index, values) => values.indexOf(value) === index)
+    .slice(0, 4);
+};
+
+const discoveryPackEmojiItems = (profile: NativeChatDiscoveryProfile, pets: NativeChatDiscoveryProfile["pets"]) => {
+  const speciesSource = pets.length > 0
+    ? pets.map((pet) => pet.species || "").filter(Boolean)
+    : [
+      ...profile.petSpecies,
+      ...profile.petExperience.map((item) => String(item || "").split(/[•·]/)[0] || ""),
+    ];
+  return speciesSource
+    .map(formatDiscoverySpecies)
+    .map(nativePetSpeciesEmojiOrText)
+    .filter(Boolean)
+    .filter((value, valueIndex, values) => values.indexOf(value) === valueIndex);
 };
 
 const filterOptionsForKey = (key: keyof NativeChatDiscoveryFilters) => {
@@ -759,8 +1053,8 @@ const normalizeTier = (value: unknown): "free" | "plus" | "gold" => {
 
 const discoveryTierLabel = (value: unknown) => {
   const tier = normalizeTier(value);
-  if (tier === "gold") return "Gold";
-  if (tier === "plus") return "Huddle+";
+  if (tier === "gold") return "huddle＊";
+  if (tier === "plus") return "huddle+";
   return null;
 };
 
@@ -771,18 +1065,65 @@ const DISCOVERY_DECK_TO_ISLAND_GAP = 8;
 const DISCOVERY_STACK_AFTER_CARD = DISCOVERY_QUEUED_PEEK_DEPTH + DISCOVERY_DECK_TO_ISLAND_GAP + DISCOVERY_ISLAND_HEIGHT;
 const DISCOVERY_NAV_MIN_GAP = 24;
 const DISCOVERY_CHROME_RESERVE = 224;
+const DISCOVERY_NAV_TIGHT_GAP = 2;
+const DISCOVERY_BIO_FULL_HEIGHT = 92;
+const DISCOVERY_BIO_COMPACT_HEIGHT = 74;
+const DISCOVERY_BIO_SINGLE_HEIGHT = 56;
 
 const DISCOVERY_DECK_REFERENCE_WIDTH = 360;
-const DISCOVERY_QUEUED_SIDE_GAP_1 = (DISCOVERY_DECK_REFERENCE_WIDTH * (1 - 0.86)) / 2;
+const DISCOVERY_QUEUED_SIDE_GAP_1 = (DISCOVERY_DECK_REFERENCE_WIDTH * (1 - 0.92)) / 2;
 const DISCOVERY_QUEUED_SIDE_GAP_2 = (DISCOVERY_DECK_REFERENCE_WIDTH * (1 - 0.78)) / 2;
 const DISCOVERY_QUEUED_SIDE_GAP_3 = (DISCOVERY_DECK_REFERENCE_WIDTH * (1 - 0.70)) / 2;
+const DISCOVERY_PROFILE_CARD_BORDER_WIDTH = 1;
+type DiscoveryBioMode = "full" | "compact" | "single" | "hidden";
+const discoveryCardMetrics = (viewportWidth: number, viewportHeight: number, bottomInset: number, stackTopY: number | null) => {
+  const cardWidth = Math.max(280, Math.min(viewportWidth - (viewportWidth <= 390 ? huddleSpacing.x5 : huddleSpacing.x6), 360));
+  const navBottomOffset = Math.max(huddleSpacing.x2, bottomInset + 8);
+  const navTopY = viewportHeight - navBottomOffset - huddleLayout.navHeight;
+  const measuredStackSlot = stackTopY == null
+    ? viewportHeight - DISCOVERY_CHROME_RESERVE - huddleLayout.navHeight - bottomInset - DISCOVERY_NAV_TIGHT_GAP
+    : navTopY - stackTopY - DISCOVERY_NAV_TIGHT_GAP;
+  const maxCardHeight = Math.max(0, measuredStackSlot - DISCOVERY_QUEUED_PEEK_DEPTH);
+  const desiredPhotoHeight = cardWidth * 1.25;
+  let bioMode: DiscoveryBioMode = "hidden";
+  let bioPanelHeight = 0;
+  if (maxCardHeight >= desiredPhotoHeight + DISCOVERY_BIO_FULL_HEIGHT) {
+    bioMode = "full";
+    bioPanelHeight = DISCOVERY_BIO_FULL_HEIGHT;
+  } else if (maxCardHeight >= desiredPhotoHeight + DISCOVERY_BIO_COMPACT_HEIGHT) {
+    bioMode = "compact";
+    bioPanelHeight = DISCOVERY_BIO_COMPACT_HEIGHT;
+  } else if (maxCardHeight >= desiredPhotoHeight + DISCOVERY_BIO_SINGLE_HEIGHT) {
+    bioMode = "single";
+    bioPanelHeight = DISCOVERY_BIO_SINGLE_HEIGHT;
+  }
+  const cardHeight = bioMode === "hidden"
+    ? maxCardHeight
+    : Math.min(maxCardHeight, desiredPhotoHeight + bioPanelHeight);
+  return {
+    bioMode,
+    bioPanelHeight,
+    cardHeight,
+    cardWidth,
+    maxCardHeight,
+    photoHeight: cardHeight - bioPanelHeight,
+  };
+};
 const discoveryQueuedSideGap = (index: number) => {
   if (index === 1) return DISCOVERY_QUEUED_SIDE_GAP_1;
   if (index === 2) return DISCOVERY_QUEUED_SIDE_GAP_2;
   return DISCOVERY_QUEUED_SIDE_GAP_3;
 };
 const discoveryQueuedScaleX = (index: number, cardWidth: number) => Math.max(0.7, (cardWidth - discoveryQueuedSideGap(index) * 2) / cardWidth);
-const discoveryQueuedTranslateY = (index: number) => index === 1 ? -2 : index === 2 ? 4 : 10;
+// The settled navy wash is painted inside the prepared card's 1px frame.
+// Static layer 2 must end at this painted width—not at 92% of the outer box—
+// so the reset swaps equal visible bounds.
+const discoverySettledNavyScaleX = (cardWidth: number) => {
+  const preparedOuterScale = discoveryQueuedScaleX(1, cardWidth);
+  const preparedInnerRatio = Math.max(0, cardWidth - DISCOVERY_PROFILE_CARD_BORDER_WIDTH * 2) / cardWidth;
+  return preparedOuterScale * preparedInnerRatio;
+};
+const discoveryQueuedTranslateY = (index: number) => index === 1 ? 0 : index === 2 ? 6 : 12;
 const discoveryQueuedScrimColor = (index: number) => index === 1
   ? "rgba(17,37,126,0.84)"
   : index === 2
@@ -857,6 +1198,57 @@ const groupActivityValue = (group: NativeExploreGroup) => {
   return Math.max(Number.isFinite(last) ? last : 0, Number.isFinite(created) ? created : 0);
 };
 
+// Picks the event the countdown badge should describe: an event currently in
+// progress wins outright (any of them — "Event now" reads the same either
+// way); otherwise the soonest future event. Already-ended events are ignored.
+// Array order from the RPC is not guaranteed, so this can't just take [0].
+const pickActiveOrNextGroupEvent = (events: NativeGroupChatEvent[], nowMs = Date.now()): NativeGroupChatEvent | null => {
+  let best: NativeGroupChatEvent | null = null;
+  let bestStarts = Infinity;
+  for (const event of events) {
+    const starts = new Date(event.startsAt).getTime();
+    const ends = event.endsAt ? new Date(event.endsAt).getTime() : NaN;
+    if (!Number.isFinite(starts) || starts <= 0) continue;
+    const hasEnded = Number.isFinite(ends) && ends > 0 && ends <= nowMs;
+    if (hasEnded) continue;
+    const inProgress = starts <= nowMs;
+    if (inProgress) return event; // currently happening — show immediately
+    if (starts < bestStarts) {
+      bestStarts = starts;
+      best = event;
+    }
+  }
+  return best;
+};
+
+type GroupEventCountdown = { label: string; active: boolean };
+
+// Human countdown, not odometer copy: "Event in 46 mins" under the hour,
+// "Event in 2h 15m" under a day, "Event in 3 days" beyond. An event currently
+// in progress reads "Event happening" (the badge adds the pulse + going count).
+const groupNextEventCountdownLabel = (startsAt?: string | null, endsAt?: string | null, nowMs = Date.now()): GroupEventCountdown | null => {
+  const starts = startsAt ? new Date(startsAt).getTime() : 0;
+  const ends = endsAt ? new Date(endsAt).getTime() : 0;
+  if (!Number.isFinite(starts) || starts <= 0) return null;
+  if (Number.isFinite(ends) && ends > 0 && ends <= nowMs) return null;
+  const diffMs = starts - nowMs;
+  if (diffMs <= 0) return { label: "Event happening", active: true };
+  const totalMinutes = Math.ceil(diffMs / 60000);
+  if (totalMinutes < 60) return { label: `Event in ${totalMinutes} ${totalMinutes === 1 ? "min" : "mins"}`, active: false };
+  const totalHours = Math.floor(totalMinutes / 60);
+  if (totalHours < 24) {
+    const minutes = totalMinutes % 60;
+    return { label: minutes > 0 ? `Event in ${totalHours}h ${minutes}m` : `Event in ${totalHours}h`, active: false };
+  }
+  const days = Math.round(totalHours / 24);
+  return { label: `Event in ${days} ${days === 1 ? "day" : "days"}`, active: false };
+};
+
+const groupImageVersion = (group: NativeExploreGroup | NativeChatInboxRow, fallback?: string | null) => {
+  const row = group as NativeExploreGroup & NativeChatInboxRow & { updatedAt?: string | null };
+  return row.updatedAt || row.activityTs || row.lastMessageAt || row.createdAt || row.id || row.chatId || fallback || null;
+};
+
 const normalizeGroupSignal = (value: string | null | undefined) => String(value || "").trim().toLowerCase();
 
 const groupPetRelevance = (group: NativeExploreGroup, viewerPets: NativeViewerPetSignal[]) => {
@@ -918,6 +1310,101 @@ const sortExploreGroups = (
   return groupActivityValue(right) - groupActivityValue(left);
 });
 
+type GroupCoverNextEvent = { title?: string | null; startsAt?: string | null; endsAt?: string | null; rsvpCount?: number };
+
+const nativeInboxGroupToExploreGroup = (row: NativeChatInboxRow, nextEvent?: GroupCoverNextEvent | null): NativeExploreGroup => ({
+  id: row.chatId,
+  inviteId: null,
+  name: row.chatName || "Group",
+  avatarUrl: row.avatarUrl,
+  memberCount: row.memberCount,
+  petFocus: row.petFocus,
+  locationLabel: row.locationLabel,
+  locationCountry: row.locationCountry,
+  locationDistrict: null,
+  joinMethod: row.joinMethod,
+  description: row.description,
+  createdBy: row.createdBy,
+  createdAt: row.createdAt,
+  lastMessageAt: row.lastMessageAt,
+  visibility: row.visibility,
+  roomCode: row.roomCode,
+  invitePending: false,
+  inviterName: null,
+  requested: false,
+  joined: true,
+  nextEventTitle: nextEvent?.title ?? null,
+  nextEventStartsAt: nextEvent?.startsAt ?? null,
+  nextEventEndsAt: nextEvent?.endsAt ?? null,
+});
+
+const mergeExploreGroups = (joinedRows: NativeChatInboxRow[], groups: NativeExploreGroup[], joinedNextEventByChatId: Map<string, GroupCoverNextEvent> = new Map()) => {
+  const byId = new Map<string, NativeExploreGroup>();
+  joinedRows
+    .filter((row) => row.roomType === "group" && row.visibility === "public")
+    .map((row) => nativeInboxGroupToExploreGroup(row, joinedNextEventByChatId.get(row.chatId)))
+    .forEach((group) => byId.set(group.id, group));
+  groups.forEach((group) => {
+    if (!byId.has(group.id)) byId.set(group.id, group);
+  });
+  return Array.from(byId.values());
+};
+
+const buildCreatedGroupInboxRow = (input: {
+  avatarUrl: string | null;
+  chatId: string;
+  createdAt: string;
+  createdBy: string;
+  description: string | null;
+  joinMethod: "instant" | "request";
+  locationCountry: string | null;
+  locationLabel: string | null;
+  memberCount?: number;
+  name: string;
+  petFocus: string[];
+  visibility: "public" | "private";
+}): NativeChatInboxRow => ({
+  activityTs: input.createdAt,
+  avatarUrl: input.avatarUrl,
+  blockedByMe: false,
+  blockedByThem: false,
+  chatId: input.chatId,
+  chatName: input.name,
+  createdAt: input.createdAt,
+  createdBy: input.createdBy,
+  description: input.description,
+  joinMethod: input.joinMethod,
+  lastMessageAt: input.createdAt,
+  lastMessageContent: null,
+  lastMessageId: null,
+  lastMessageReadByOther: false,
+  lastMessageSenderId: null,
+  lastMessageSenderName: null,
+  matchedAt: null,
+  locationCountry: input.locationCountry,
+  locationLabel: input.locationLabel,
+  memberCount: Math.max(1, Math.floor(input.memberCount ?? 1)),
+  unmatchedByMe: false,
+  unmatchedByThem: false,
+  petFocus: input.petFocus,
+  peerAvatarUrl: null,
+  peerAvailabilityLabel: null,
+  peerHasCar: false,
+  peerIsVerified: false,
+  peerName: null,
+  peerSocialId: null,
+  peerUserId: null,
+  roomCode: null,
+  roomType: "group",
+  serviceProviderId: null,
+  serviceRequestCard: null,
+  serviceRequesterId: null,
+  serviceStatus: null,
+  shapeIssue: null,
+  unreadCount: 0,
+  visibility: input.visibility,
+});
+
 const preferConversationRow = (current: NativeChatInboxRow | undefined, candidate: NativeChatInboxRow) => {
   if (!current) return candidate;
   const currentHasMessage = Boolean(current.lastMessageAt) || Boolean(String(current.lastMessageContent || "").trim());
@@ -961,23 +1448,6 @@ const hasReciprocalWave = async (viewerId: string, targetUserId: string, accessT
   return data === true;
 };
 
-const readSeenMatchSet = async (viewerId: string, accessToken?: string | null) => {
-  const [localRaw, serverResult] = await Promise.all([
-    AsyncStorage.getItem(seenMatchesKey(viewerId)),
-    nativeExactTokenRpc<Array<{ matched_user_id?: string | null }>>("get_native_seen_match_ids", {}, accessToken),
-  ]);
-  const seen = new Set<string>();
-  try {
-    const parsed = JSON.parse(String(localRaw || "[]")) as unknown;
-    if (Array.isArray(parsed)) parsed.map(String).filter(Boolean).forEach((id) => seen.add(id));
-  } catch {
-    // Ignore corrupt local cache; server rows below keep the modal from replaying.
-  }
-  const serverRows = serverResult.error ? [] : (((serverResult.data || []) as unknown) as Array<{ matched_user_id?: string | null }>);
-  serverRows.map((row) => String(row.matched_user_id || "").trim()).filter(Boolean).forEach((id) => seen.add(id));
-  return seen;
-};
-
 const seenMatchesKey = (userId: string) => `huddle:discover:seen-matches:${userId}`;
 const matchedDiscoveryKey = (userId: string) => `huddle:discover:matched:${userId}`;
 
@@ -1002,24 +1472,6 @@ const distanceKm = (lat1: number, lng1: number, lat2: number, lng2: number) => {
     Math.sin(dLat / 2) * Math.sin(dLat / 2) +
     Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
   return 6371 * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
-};
-
-const COUNTRY_ALIASES: Record<string, string> = {
-  hk: "hong kong",
-  "hong kong sar": "hong kong",
-  "hong kong s.a.r.": "hong kong",
-  us: "united states",
-  usa: "united states",
-  "u.s.a.": "united states",
-  "united states of america": "united states",
-  uk: "united kingdom",
-  "u.k.": "united kingdom",
-};
-
-const normalizeCountryKey = (value: string | null | undefined) => {
-  const normalized = String(value || "").trim().toLowerCase();
-  if (!normalized) return "";
-  return COUNTRY_ALIASES[normalized] || normalized;
 };
 
 const applyDiscoveryFilters = (
@@ -1057,30 +1509,6 @@ const applyDiscoveryFilters = (
 // ── Custom pill icons ─────────────────────────────────────────────
 // Discover: Fluent "people-search" (filled) — magnifier + person silhouette.
 // Source: https://icon-sets.iconify.design/fluent/people-search-24-filled/
-function DiscoverPillIcon({ size, color }: { size: number; color: string }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24">
-      <SvgPath
-        fill={color}
-        d="M11.91 14h7.843a2.25 2.25 0 0 1 2.25 2.25v.905A3.75 3.75 0 0 1 20.696 20C19.13 21.345 16.89 22.002 14 22.002h-.179a1.75 1.75 0 0 0-.221-1.897l-.111-.121l-2.23-2.224a5.48 5.48 0 0 0 .65-3.76M6.5 10.5a4.5 4.5 0 0 1 3.46 7.377l2.823 2.814a.75.75 0 0 1-.975 1.134l-.085-.072l-2.903-2.896A4.5 4.5 0 1 1 6.5 10.5m0 1.5a3 3 0 1 0 0 6a3 3 0 0 0 0-6M14 2.005a5 5 0 1 1 0 10a5 5 0 0 1 0-10"
-      />
-    </Svg>
-  );
-}
-
-// Community: Fluent "people-community-20-filled" — symmetric three-person filled icon,
-// same Fluent filled family as the Discover icon. Single clean path, no mask tricks.
-// Source: microsoft/fluentui-system-icons
-function CommunityPillIcon({ size, color }: { size: number; color: string }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 20 20">
-      <SvgPath
-        fill={color}
-        d="M10 2C8.34315 2 7 3.34315 7 5C7 6.65685 8.34315 8 10 8C11.6569 8 13 6.65685 13 5C13 3.34315 11.6569 2 10 2ZM5.0528 9.99585C5.01946 10.1587 5.00195 10.3273 5.00195 10.5V14C5.00195 15.5286 5.68794 16.897 6.76887 17.8142C6.7124 17.832 6.65527 17.8487 6.59751 17.8642C4.46365 18.4359 2.2703 17.1696 1.69853 15.0357L1.05148 12.6209C0.837071 11.8207 1.31194 10.9982 2.11214 10.7838L5.0528 9.99585ZM13.235 17.8142C14.316 16.897 15.002 15.5286 15.002 14V10.5C15.002 10.3273 14.9844 10.1587 14.9511 9.99585L17.8918 10.7838C18.692 10.9982 19.1668 11.8207 18.9524 12.6209L18.3054 15.0357C17.7336 17.1696 15.5403 18.4359 13.4064 17.8642C13.3486 17.8487 13.2915 17.832 13.235 17.8142ZM16.5 4C15.1193 4 14 5.11929 14 6.5C14 7.88071 15.1193 9 16.5 9C17.8807 9 19 7.88071 19 6.5C19 5.11929 17.8807 4 16.5 4ZM3.5 4C2.11929 4 1 5.11929 1 6.5C1 7.88071 2.11929 9 3.5 9C4.88071 9 6 7.88071 6 6.5C6 5.11929 4.88071 4 3.5 4ZM7.5 9C6.67157 9 6 9.67157 6 10.5V14C6 16.2091 7.79086 18 10 18C12.2091 18 14 16.2091 14 14V10.5C14 9.67157 13.3284 9 12.5 9H7.5Z"
-      />
-    </Svg>
-  );
-}
 
 // Glass-tinted active segment for the Discover|Community|Chats pill rail.
 // Always mounted inside every pill Pressable so the BlurView never cold-starts.
@@ -1089,10 +1517,20 @@ function CommunityPillIcon({ size, color }: { size: number; color: string }) {
 function TopSegmentGlassLayer({ visible }: { visible: boolean }) {
   return (
     <View pointerEvents="none" style={[topSegmentGlassStyles.clip, !visible && topSegmentGlassStyles.hidden]}>
-      <RNBlurView blurAmount={16} blurType="light" style={StyleSheet.absoluteFill} />
+      {CHAT_LIQUID_GLASS && ChatGlassViewComponent ? (
+        <ChatGlassViewComponent
+          glassEffectStyle="clear"
+          isInteractive
+          tintColor="rgba(33,69,207,0.72)"
+          pointerEvents="none"
+          style={StyleSheet.absoluteFill}
+        />
+      ) : (
+        <RNBlurView blurAmount={22} blurType="light" style={StyleSheet.absoluteFill} />
+      )}
       <View style={topSegmentGlassStyles.tint} />
       <LinearGradient
-        colors={["rgba(255, 255, 255, 0.32)", "rgba(255, 255, 255, 0)"]}
+        colors={["rgba(255, 255, 255, 0.42)", "rgba(255, 255, 255, 0.04)"]}
         end={{ x: 0, y: 1 }}
         start={{ x: 0, y: 0 }}
         style={topSegmentGlassStyles.highlight}
@@ -1104,47 +1542,21 @@ function TopSegmentGlassLayer({ visible }: { visible: boolean }) {
 const topSegmentGlassStyles = StyleSheet.create({
   clip: { ...StyleSheet.absoluteFillObject, borderRadius: huddleRadii.pill, overflow: "hidden" },
   hidden: { opacity: 0 },
-  // Translucent blue gives the glass-tinted body; full huddleColors.blue would be opaque.
-  tint: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(33, 69, 207, 0.82)" },
+  tint: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(33, 69, 207, 0.88)" },
   // Top-edge highlight ≈ glass dome curvature.
   highlight: { position: "absolute", left: 0, right: 0, top: 0, height: "55%" },
   // Inner hairline border ≈ rim of polished glass.
-  border: { ...StyleSheet.absoluteFillObject, borderRadius: huddleRadii.pill, borderWidth: 0.5, borderColor: "rgba(255, 255, 255, 0.22)" },
+  border: { ...StyleSheet.absoluteFillObject, borderRadius: huddleRadii.pill, borderWidth: 0.5, borderColor: "rgba(255, 255, 255, 0.46)" },
 });
 
-// Phase K: neuglass toast — floats over discover, auto-dismisses, prettier than Bumble's banner
-const DISCOVER_TOAST_INTENTS: Record<string, { color: string; icon: string }> = {
-  wave: { color: huddleColors.blue, icon: "hand-wave" },
-  star: { color: huddleColors.premiumGold, icon: "star-outline" },
-  error: { color: "#E94C5C", icon: "alert-circle-outline" },
-};
-function DiscoverToast({ message, onDismiss }: { message: string; onDismiss: () => void }) {
-  const translateYSV = useSharedValue(-64);
-  const opacitySV = useSharedValue(0);
+function ChatsToast({ message, onDismiss }: { message: string; onDismiss: () => void }) {
   useEffect(() => {
-    translateYSV.value = withSpring(0, { damping: 18, stiffness: 260, mass: 0.6 });
-    opacitySV.value = withTiming(1, { duration: 200 });
     const t = setTimeout(() => {
-      translateYSV.value = withTiming(-64, { duration: 260 });
-      opacitySV.value = withTiming(0, { duration: 220 }, () => runOnJS(onDismiss)());
-    }, 3200);
+      onDismiss();
+    }, NATIVE_TOAST_DURATION_MS);
     return () => clearTimeout(t);
-  }, [message, onDismiss, opacitySV, translateYSV]);
-  const toastStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: translateYSV.value }],
-    opacity: opacitySV.value,
-  }));
-  const lowerMsg = message.toLowerCase();
-  const intentKey = Object.keys(DISCOVER_TOAST_INTENTS).find((k) => lowerMsg.includes(k)) ?? "wave";
-  const intent = DISCOVER_TOAST_INTENTS[intentKey] ?? DISCOVER_TOAST_INTENTS.wave;
-  return (
-    <Reanimated.View pointerEvents="none" style={[styles.discoverToastWrap, toastStyle]}>
-      <RNBlurView blurAmount={20} blurType="light" style={StyleSheet.absoluteFill} />
-      <View style={[styles.discoverToastIntentBar, { backgroundColor: intent.color }]} />
-      <MaterialCommunityIcons color={intent.color} name={intent.icon as never} size={18} style={styles.discoverToastIcon} />
-      <Text numberOfLines={2} style={styles.discoverToastText}>{message}</Text>
-    </Reanimated.View>
-  );
+  }, [message, onDismiss]);
+  return <NativeToast message={message} onDismiss={onDismiss} />;
 }
 
 function QueuedCardPrivacyLayer({ style }: { style?: StyleProp<ViewStyle> }) {
@@ -1156,51 +1568,139 @@ function QueuedCardPrivacyLayer({ style }: { style?: StyleProp<ViewStyle> }) {
   );
 }
 
+type DiscoverLocationPermissionCoverProps = { canAskAgain: boolean; onPress: () => void };
+
+function DiscoverLocationPermissionCover({ canAskAgain, onPress }: DiscoverLocationPermissionCoverProps) {
+  return (
+    <View accessibilityViewIsModal style={[styles.discoveryPausedCover, styles.discoveryLocationPermissionInCard]}>
+      <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+        <RNBlurView blurAmount={22} blurType="light" style={StyleSheet.absoluteFill} />
+        <View style={styles.discoveryQueuedPrivacyWash} />
+      </View>
+      <View style={styles.discoveryPausedContent}>
+        <Text style={styles.discoveryPausedTitle}>Discover your pet people</Text>
+        <Text style={styles.discoveryPausedBody}>{canAskAgain ? "Turn on location to find pet people near you." : "Turn on Location for huddle in Settings."}</Text>
+        <Pressable
+          accessibilityRole="button"
+          onPress={onPress}
+          style={({ pressed }) => [styles.discoveryPausedButton, pressed && huddleButtons.pressed]}
+        >
+          <Text style={styles.discoveryPausedButtonText}>{canAskAgain ? "Turn On Location" : "Open huddle Settings"}</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+function DiscoveryStarControlVisual({ standalone = false }: { standalone?: boolean }) {
+  return (
+    <View style={standalone ? styles.discoveryInlineStar : undefined}>
+      <NativeGlassCircle blurAmount={6} blurType="ultraThinMaterial" forceFallback fallbackTint="rgba(255,117,31,0.36)" glassOpacity={0} highlightOpacity={0} navFillOnLiquidGlass={false} bodyGradient={{ colors: ["rgba(255,190,120,0.95)", "rgba(255,117,31,1)", "rgba(202,72,4,1)"], locations: [0, 0.44, 1], start: { x: 0.2, y: 0 }, end: { x: 0.74, y: 1 } }} sheen rimColor="rgba(255,246,238,1)" size={38} tint="rgba(255,117,31,0.92)">
+        <MaterialCommunityIcons color={huddleColors.onPrimary} name="star" size={23} />
+      </NativeGlassCircle>
+    </View>
+  );
+}
+
+function DiscoveryWaveControlVisual({ iconStyle, standalone = false }: { iconStyle?: StyleProp<ViewStyle>; standalone?: boolean }) {
+  return (
+    <View style={standalone ? styles.discoveryGlassWave : undefined}>
+      <NativeGlassCircle blurAmount={11} blurType="ultraThinMaterial" forceFallback fallbackTint="transparent" glassOpacity={0} highlightOpacity={0} navFillOnLiquidGlass={false} sheen rimColor="rgba(255,255,255,0.52)" size={60} tint="rgba(255,255,255,0.10)">
+        <Reanimated.View style={iconStyle}>
+          <MaterialCommunityIcons color={huddleColors.blue} name="paw" size={30} style={styles.discoveryWaveIcon} />
+        </Reanimated.View>
+      </NativeGlassCircle>
+    </View>
+  );
+}
+
 function DiscoveryProfileCard({
   busy,
+  cardRef,
   chips,
+  deckTransitionActive = false,
   index,
   isDeepestQueued,
   isLast,
   liftKind,
+  stackTopY,
   swipeXSV,
+  paused,
+  locationPermissionCover,
+  preparedBehind = false,
+  enablingPaused,
   onSwipePhaseChange,
   profile,
   onPass,
   onProfileTap,
   onStar,
   onWave,
+  onWaveIntent,
+  onEnablePaused,
+  starRef,
+  waveRef,
 }: {
   busy: boolean;
+  cardRef?: RefObject<View | null>;
   chips: string[];
+  deckTransitionActive?: boolean;
   index: number;
   isDeepestQueued: boolean;
   isLast: boolean;
   liftKind: DiscoverySendCueKind | null; // D1: when set, card runs sync lift+halo+fade overlay
+  stackTopY: number | null;
   swipeXSV: SharedValue<number>;
+  paused?: boolean;
+  locationPermissionCover?: DiscoverLocationPermissionCoverProps;
+  preparedBehind?: boolean;
+  enablingPaused?: boolean;
   onSwipePhaseChange: (active: boolean) => void;
   profile: NativeChatDiscoveryProfile;
   onPass: (profile: NativeChatDiscoveryProfile) => void;
   onProfileTap: (profile: NativeChatDiscoveryProfile) => void;
   onStar: (profile: NativeChatDiscoveryProfile) => void;
   onWave: (profile: NativeChatDiscoveryProfile) => Promise<boolean>;
+  onWaveIntent: (profile: NativeChatDiscoveryProfile) => void;
+  onEnablePaused?: () => void;
+  starRef?: RefObject<View | null>;
+  waveRef?: RefObject<View | null>;
 }) {
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const { height: viewportHeight, width: viewportWidth } = useWindowDimensions();
-  const cardWidth = Math.max(300, Math.min(viewportWidth - huddleSpacing.x6, 360));
-  const cardHeight = cardWidth * 1.25;
-  // Card-unit reservation. Tight against the deepest queued card peek (no decorative bars now).
-  // layerStackBottom = top card bottom + Q3 peek (20). islandTop = layerStackBottom + 8 px tight gap.
-  const layerStackBottom = cardHeight + DISCOVERY_QUEUED_PEEK_DEPTH;
-  const islandTop = layerStackBottom + DISCOVERY_DECK_TO_ISLAND_GAP;
-  const gluedStackHeight = islandTop + DISCOVERY_ISLAND_HEIGHT;
+  const screenInsets = useSafeAreaInsets();
+  const { bioMode, bioPanelHeight, cardWidth, maxCardHeight, photoHeight } = discoveryCardMetrics(viewportWidth, viewportHeight, screenInsets.bottom, stackTopY);
+  const rawBioPreview = profile.bio?.trim() || "";
+  // Truncation is handled by numberOfLines + ellipsizeMode on the <Text> below,
+  // which is pixel-accurate. A blind character cap used to cut bios short while
+  // the 1–2 line panel still had room. We only collapse internal whitespace so
+  // stray newlines don't waste the available lines.
+  const bioPreview = rawBioPreview.replace(/\s+/g, " ");
+  const publicPets = profile.pets.filter((pet) => pet.id || pet.name || pet.species || pet.photoUrl);
+  const packDisplayItems = discoveryPackEmojiItems(profile, publicPets);
+  const packEmojiText = packDisplayItems.join(" · ");
+  const journeyYears = profile.petExperienceYears && profile.petExperienceYears > 0 ? `${profile.petExperienceYears} ${profile.petExperienceYears === 1 ? "YEAR" : "YEARS"}` : "";
+  const journeyText = journeyYears ? `${journeyYears}${packEmojiText ? ` WITH ${packEmojiText}` : ""}` : "";
+  const canShowFallbackLowerContent = profile.canonicalProfileLoaded || profile.canonicalProfileFailed;
+  const lowerContentKind: "bio" | "journey" | "pack" | "none" =
+    rawBioPreview ? "bio" : !canShowFallbackLowerContent ? "none" : journeyText ? "journey" : packDisplayItems.length > 0 ? "pack" : "none";
+  const packLabel = lowerContentKind === "journey" ? "PET JOURNEY: " : "THE PACK: ";
+  const packLine = lowerContentKind === "journey" ? journeyText : packEmojiText;
+  const showLowerSurface = lowerContentKind !== "none" && bioMode !== "hidden" && bioPanelHeight > 0;
+  const packPanelHeight = bioMode === "full" ? 64 : 56;
+  const renderedBioPanelHeight = showLowerSurface ? (lowerContentKind === "pack" || lowerContentKind === "journey" ? Math.min(bioPanelHeight, packPanelHeight) : bioPanelHeight) : 0;
+  const renderedPhotoHeight = showLowerSurface ? maxCardHeight - renderedBioPanelHeight : maxCardHeight;
+  const renderedCardHeight = renderedPhotoHeight + renderedBioPanelHeight;
+  const bioLines = bioMode === "full" || bioMode === "compact" ? 2 : 1;
+  // Card-unit reservation. Tight against the deepest queued card peek (v2: actions are on-card,
+  // so there is no island reservation — the peek sits directly below the card).
+  const layerStackBottom = renderedCardHeight + DISCOVERY_QUEUED_PEEK_DEPTH;
   // Compute compactActions ONCE per card lifetime (mount). Locking it prevents the action layout
   // from switching mid-session while the user is reading the card.
-  const compactActionsInitial = viewportHeight < cardHeight + DISCOVERY_STACK_AFTER_CARD + DISCOVERY_CHROME_RESERVE + DISCOVERY_NAV_MIN_GAP;
+  const compactActionsInitial = viewportHeight < renderedCardHeight + DISCOVERY_STACK_AFTER_CARD + DISCOVERY_CHROME_RESERVE + DISCOVERY_NAV_MIN_GAP;
   const compactActionsRef = useRef(compactActionsInitial);
   const compactActions = compactActionsRef.current;
-  const roleLabel = profile.socialRole ? petLine(profile) : "";
-  const tierLabel = discoveryTierLabel(profile.tier);
+  const roleLabel = petLine(profile);
+  const displayName = (profile.displayName || "huddle member").trim().toUpperCase();
   const commitOffset = isLast ? SWIPE_COMMIT_OFFSET_LAST : SWIPE_COMMIT_OFFSET;
   const springCfg = isLast ? SPRING_CFG_LAST : SPRING_CFG;
 
@@ -1209,62 +1709,64 @@ function DiscoveryProfileCard({
   const translateY = useSharedValue(0);
   const committedDirSV = useSharedValue<-1 | 0 | 1>(0); // -1=left, 0=none, 1=right
   const hasCrossed = useSharedValue(false);
-  const touchOriginYSV = useSharedValue(cardHeight * 0.5);
+  const touchOriginYSV = useSharedValue(renderedCardHeight * 0.5);
   const gestureStartMsSV = useSharedValue(0);
 
-  // Wave button — idle micro-rotation. Sine-eased, fewer segments, longer arc + rest. Reads as a
-  // natural little wave every ~5s instead of the previous 4-segment robotic flip.
-  // Only the top card (index === 0) animates so we don't burn CPU on stacked queued cards.
   const waveIconRotSV = useSharedValue(0);
-  useEffect(() => {
-    if (index !== 0) return;
-    const easeSin = ReanimEasing.inOut(ReanimEasing.sin);
-    waveIconRotSV.value = withRepeat(
-      withSequence(
-        withTiming(-7, { duration: 320, easing: easeSin }),
-        withTiming(7, { duration: 360, easing: easeSin }),
-        withTiming(-4, { duration: 280, easing: easeSin }),
-        withTiming(0, { duration: 220, easing: easeSin }),
-        withDelay(3800, withTiming(0, { duration: 0 })),
-      ),
-      -1,
-      false,
-    );
-  }, [index, waveIconRotSV]);
   const waveIconAnimatedStyle = useAnimatedStyle(() => ({ transform: [{ rotate: `${waveIconRotSV.value}deg` }] }));
 
-  const clearSwipeState = useCallback(() => {
-    translateX.value = 0;
-    translateY.value = 0;
-    committedDirSV.value = 0;
-    swipeXSV.value = 0;
-    onSwipePhaseChange(false);
-  }, [committedDirSV, onSwipePhaseChange, swipeXSV, translateX, translateY]);
-
   const doPass = useCallback((p: NativeChatDiscoveryProfile) => {
-    clearSwipeState();
+    // Remove while the outgoing card is still fully off-screen. Resetting its
+    // transform first produces a one-frame snap back to center before unmount.
     onPass(p);
-  }, [clearSwipeState, onPass]);
+    onSwipePhaseChange(false);
+  }, [onPass, onSwipePhaseChange]);
 
   const doWave = useCallback((p: NativeChatDiscoveryProfile) => {
-    clearSwipeState();
-    void onWave(p).then((committed) => {
+    // handleWaveDiscovery removes accepted cards synchronously before its first
+    // await. Keep this outgoing instance off-screen and let the newly keyed top
+    // card mount at rest; only restore when the action was rejected.
+    const result = onWave(p);
+    onSwipePhaseChange(false);
+    void result.then((committed) => {
       if (!committed) {
         haptic.error();
         committedDirSV.value = 0;
-        swipeXSV.value = 0;
-        onSwipePhaseChange(false);
+        swipeXSV.value = withSpring(0, springCfg);
         translateX.value = withSpring(0, springCfg);
         translateY.value = withSpring(0, springCfg);
       }
     });
-  }, [clearSwipeState, committedDirSV, onSwipePhaseChange, springCfg, swipeXSV, onWave, translateX, translateY]);
+  }, [committedDirSV, onSwipePhaseChange, springCfg, onWave, swipeXSV, translateX, translateY]);
+
+  const runPassExit = useCallback(() => {
+    if (busy || committedDirSV.value !== 0) return;
+    committedDirSV.value = -1;
+    onSwipePhaseChange(true);
+    haptic.toggleControl();
+    swipeXSV.value = withTiming(-150, { duration: 210, easing: ReanimEasing.out(ReanimEasing.cubic) });
+    translateX.value = withTiming(-DISCOVERY_FLING_X, { duration: 210, easing: ReanimEasing.out(ReanimEasing.cubic) }, () => {
+      runOnJS(doPass)(profile);
+    });
+  }, [busy, committedDirSV, doPass, onSwipePhaseChange, profile, swipeXSV, translateX]);
+
+  const runWaveExit = useCallback(() => {
+    if (busy || committedDirSV.value !== 0) return;
+    committedDirSV.value = 1;
+    onSwipePhaseChange(true);
+    haptic.primaryConfirm();
+    onWaveIntent(profile);
+    swipeXSV.value = withTiming(150, { duration: 210, easing: ReanimEasing.out(ReanimEasing.cubic) });
+    translateX.value = withTiming(DISCOVERY_FLING_X, { duration: 210, easing: ReanimEasing.out(ReanimEasing.cubic) }, () => {
+      runOnJS(doWave)(profile);
+    });
+  }, [busy, committedDirSV, doWave, onSwipePhaseChange, onWaveIntent, profile, swipeXSV, translateX]);
 
   const panGesture = useMemo(() =>
     Gesture.Pan()
       .activeOffsetX([-8, 8])
       .failOffsetY([-40, 40])
-      .enabled(index === 0)
+      .enabled(index === 0 && !paused)
       .onBegin((e) => {
         hasCrossed.value = false;
         gestureStartMsSV.value = Date.now();
@@ -1287,7 +1789,7 @@ function DiscoveryProfileCard({
       .onEnd((e) => {
         const elapsedMs = Date.now() - gestureStartMsSV.value;
         if (busy || elapsedMs < 100) {
-          swipeXSV.value = 0;
+          swipeXSV.value = withSpring(0, springCfg);
           translateX.value = withSpring(0, springCfg);
           translateY.value = withSpring(0, springCfg);
           runOnJS(onSwipePhaseChange)(false);
@@ -1300,25 +1802,27 @@ function DiscoveryProfileCard({
           e.translationX <= -commitOffset ||
           (e.velocityX <= -(SWIPE_COMMIT_VELOCITY * 1000) && e.translationX < -SWIPE_VELOCITY_MIN_OFFSET);
         // Diagonal Y component proportional to distance from card vertical center
-        const pivotOffsetY = touchOriginYSV.value - cardHeight * 0.5;
+        const pivotOffsetY = touchOriginYSV.value - renderedCardHeight * 0.5;
         const flingY = pivotOffsetY * 0.35;
         if (rightCommit) {
           committedDirSV.value = 1;
           runOnJS(haptic.primaryConfirm)();
-          const dur = Math.max(180, Math.min(380, 380 - Math.abs(e.velocityX) * 0.15));
-          // W1: 200ms held climax before fly-off so the stamp is visible.
-          // W2: release easing (out cubic) instead of escape easing (in cubic).
-          translateX.value = withDelay(200, withTiming(DISCOVERY_FLING_X, { duration: dur, easing: ReanimEasing.out(ReanimEasing.cubic) }, () => {
+          runOnJS(onWaveIntent)(profile);
+          const dur = Math.max(170, Math.min(260, 300 - Math.abs(e.velocityX) * 0.12));
+          // Fly off immediately on commit (no held delay — the stamp it waited for is gone).
+          swipeXSV.value = withTiming(150, { duration: dur, easing: ReanimEasing.out(ReanimEasing.cubic) });
+          translateX.value = withTiming(DISCOVERY_FLING_X, { duration: dur, easing: ReanimEasing.out(ReanimEasing.cubic) }, () => {
             runOnJS(doWave)(profile);
-          }));
-          translateY.value = withDelay(200, withTiming(flingY, { duration: dur }));
+          });
+          translateY.value = withTiming(flingY, { duration: dur });
           return;
         }
         if (leftCommit) {
           committedDirSV.value = -1;
           runOnJS(haptic.toggleControl)();
-          const dur = Math.max(180, Math.min(380, 380 - Math.abs(e.velocityX) * 0.15));
-          translateX.value = withTiming(-DISCOVERY_FLING_X, { duration: dur, easing: ReanimEasing.in(ReanimEasing.cubic) }, () => {
+          const dur = Math.max(170, Math.min(260, 300 - Math.abs(e.velocityX) * 0.12));
+          swipeXSV.value = withTiming(-150, { duration: dur, easing: ReanimEasing.out(ReanimEasing.cubic) });
+          translateX.value = withTiming(-DISCOVERY_FLING_X, { duration: dur, easing: ReanimEasing.out(ReanimEasing.cubic) }, () => {
             runOnJS(doPass)(profile);
           });
           translateY.value = withTiming(flingY, { duration: dur });
@@ -1327,13 +1831,13 @@ function DiscoveryProfileCard({
         // Spring return with overshoot personality
         // D4: gate haptic on |translationX| > 20 so micro-drags don't fire it
         if (Math.abs(e.translationX) > 20) runOnJS(haptic.swipeReturn)();
-        swipeXSV.value = 0;
+        swipeXSV.value = withSpring(0, springCfg);
         translateX.value = withSpring(0, springCfg, () => {
           runOnJS(onSwipePhaseChange)(false);
         });
         translateY.value = withSpring(0, springCfg);
       }),
-    [busy, cardHeight, commitOffset, committedDirSV, doPass, doWave, gestureStartMsSV, hasCrossed, index, onSwipePhaseChange, profile, springCfg, swipeXSV, touchOriginYSV, translateX, translateY]
+    [busy, commitOffset, committedDirSV, doPass, doWave, gestureStartMsSV, hasCrossed, index, onSwipePhaseChange, onWaveIntent, paused, profile, renderedCardHeight, springCfg, swipeXSV, touchOriginYSV, translateX, translateY]
   );
 
   // D1: lift progress drives the sync card lift+halo+fade when liftKind is set.
@@ -1356,7 +1860,7 @@ function DiscoveryProfileCard({
     const tx = translateX.value;
     const ty = translateY.value;
     // Arc correction: pivot at touch origin, compensate vertical drift
-    const pivotY = touchOriginYSV.value - cardHeight * 0.5;
+    const pivotY = touchOriginYSV.value - renderedCardHeight * 0.5;
     const rot = interpolate(tx, [-180, 0, 180], [-10, 0, 10], Extrapolation.CLAMP);
     const rotRad = (rot * Math.PI) / 180;
     const compensateY = -pivotY * (1 - Math.cos(rotRad));
@@ -1387,67 +1891,64 @@ function DiscoveryProfileCard({
   });
 
   const waveTintStyle = useAnimatedStyle(() => ({
-    opacity: committedDirSV.value === 1
-      ? 0.2
-      : interpolate(translateX.value, [0, 63, 180], [0, 0.1, 0.2], Extrapolation.CLAMP),
+    // The blue right-swipe tint used to remain locked at 22% after commit,
+    // visually impersonating the decorative navy layer even after that wash
+    // had already cleared. Keep only a brief directional cue, then remove it
+    // on the same aggressive runway as the prepared-card wash.
+    opacity: interpolate(
+      translateX.value,
+      [0, commitOffset * 0.1, commitOffset * 0.22],
+      [0, 0.1, 0],
+      Extrapolation.CLAMP,
+    ),
   }));
 
   const passTintStyle = useAnimatedStyle(() => ({
     opacity: committedDirSV.value === -1
-      ? 0.24
-      : interpolate(translateX.value, [-180, -99, -45, 0], [0.24, 0.16, 0.08, 0], Extrapolation.CLAMP),
+      ? 0.22
+      : interpolate(translateX.value, [-commitOffset, -commitOffset * 0.5, 0], [0.22, 0.1, 0], Extrapolation.CLAMP),
   }));
 
-  const passStampStyle = useAnimatedStyle(() => {
-    const cd = committedDirSV.value;
+  // v2: the corner CTAs ARE the swipe feedback — the committed-direction control grows + brightens
+  // as you drag, so tapping and swiping read as the same gesture. Drag right → Wave; left → Next.
+  const waveReactStyle = useAnimatedStyle(() => {
     const tx = translateX.value;
-    const stampRot = interpolate(tx, [-180, 0, 180], [8, 0, -8], Extrapolation.CLAMP);
-    // Steep ramp: invisible until 55px, then rapid reveal
+    const progress = interpolate(tx, [0, commitOffset], [0, 1], Extrapolation.CLAMP);
+    // Pin the paw on screen as the card swipes/flings right: fully cancel the
+    // card's rightward travel so the button stays put (and grows) instead of
+    // riding the card off-screen. Only for rightward (wave) drags.
+    const counter = tx > 0 ? -tx : 0;
     return {
-      opacity: cd === -1
-        ? 1
-        : interpolate(tx, [-160, -110, -55, 0], [1, 0.75, 0.04, 0], Extrapolation.CLAMP),
       transform: [
-        { translateX: cd === -1 ? 0 : interpolate(tx, [-160, -36, 0], [0, 6, 18], Extrapolation.CLAMP) },
-        { translateY: cd === -1 ? 0 : interpolate(tx, [-160, -36, 0], [0, 4, 12], Extrapolation.CLAMP) },
-        { scale: cd === -1 ? 1 : interpolate(tx, [-160, -55, 0], [1, 0.9, 0.7], Extrapolation.CLAMP) },
-        { rotate: `${stampRot}deg` },
+        { translateX: counter },
+        { scale: interpolate(progress, [0, 1], [1, 1.3], Extrapolation.CLAMP) },
       ],
     };
   });
-
-  const waveStampStyle = useAnimatedStyle(() => {
-    const cd = committedDirSV.value;
-    const tx = translateX.value;
-    const stampRot = interpolate(tx, [-180, 0, 180], [8, 0, -8], Extrapolation.CLAMP);
-    // Steep ramp: invisible until 55px, then rapid reveal
+  const nextReactStyle = useAnimatedStyle(() => {
+    const progress = interpolate(translateX.value, [-commitOffset, 0], [1, 0], Extrapolation.CLAMP);
     return {
-      opacity: cd === 1
-        ? 1
-        : interpolate(tx, [0, 55, 110, 160], [0, 0.04, 0.75, 1], Extrapolation.CLAMP),
-      transform: [
-        { translateX: cd === 1 ? 0 : interpolate(tx, [0, 36, 160], [-18, -6, 0], Extrapolation.CLAMP) },
-        { translateY: cd === 1 ? 0 : interpolate(tx, [0, 36, 160], [12, 4, 0], Extrapolation.CLAMP) },
-        { scale: cd === 1 ? 1.05 : interpolate(tx, [0, 55, 110, 160], [0.54, 0.7, 0.94, 1.05], Extrapolation.CLAMP) },
-        { rotate: `${stampRot}deg` },
-      ],
+      backgroundColor: interpolateColor(progress, [0, 1], ["rgba(17,24,39,0.18)", "rgba(233,76,92,0.34)"]),
+      borderColor: interpolateColor(progress, [0, 1], ["rgba(255,255,255,0.28)", "rgba(255,255,255,0.72)"]),
+      opacity: interpolate(progress, [0, 1], [0.92, 1], Extrapolation.CLAMP),
+      transform: [{ scale: interpolate(progress, [0, 1], [1, 1.3], Extrapolation.CLAMP) }],
     };
   });
 
-  // Phase F: island/traffic button container fades during drag
-  const buttonFadeStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(Math.abs(swipeXSV.value), [0, 60, 120], [1, 0.4, 0], Extrapolation.CLAMP),
-  }));
-
-  // Queued real-card geometry uses fixed pixel side gaps derived from the decorative deck spec:
-  // scaleX 0.86 / 0.78 / 0.70 at 360px reference width => 25.2 / 39.6 / 54px side gaps.
-  //   scaleY = 1                              → card stays full-height
-  //   translateY -2 / 4 / 10                  → each peek band is exactly 6 px tall (evenly spaced)
-  // On swipe, each card scales-X up and translates UP toward the slot directly above.
-  //   Q1 (closest):  25.2 px side gap → full width, TY -2 → -8
-  //   Q2 (middle):   39.6 px side gap → 25.2 px side gap, TY 4 → -2
-  //   Q3 (deepest):  54 px side gap → 39.6 px side gap, TY 10 → 4
+  // Restore the original full-card deck: the prepared profile owns the 92%
+  // second-card slot, while the deeper full cards sit behind it.
+  const preparedBaseScale = Math.max(0.7, (cardWidth - DISCOVERY_QUEUED_SIDE_GAP_1 * 2) / cardWidth);
   const queuedAnimatedStyle = useAnimatedStyle(() => {
+    if (preparedBehind) {
+      const progress = deckTransitionActive ? Math.min(1, Math.abs(swipeXSV.value) / 150) : 0;
+      return {
+        transform: [
+          { translateY: 0 },
+          { scaleX: interpolate(progress, [0, 1], [preparedBaseScale, 1], Extrapolation.CLAMP) },
+          { scaleY: 1 },
+        ],
+      };
+    }
     if (index === 0) {
       return { transform: [{ translateY: 0 }, { scaleX: 1 }, { scaleY: 1 }] };
     }
@@ -1456,13 +1957,47 @@ function DiscoveryProfileCard({
     const scale1 = Math.max(0.7, (cardWidth - DISCOVERY_QUEUED_SIDE_GAP_1 * 2) / cardWidth);
     const scale2 = Math.max(0.7, (cardWidth - DISCOVERY_QUEUED_SIDE_GAP_2 * 2) / cardWidth);
     const scale3 = Math.max(0.7, (cardWidth - DISCOVERY_QUEUED_SIDE_GAP_3 * 2) / cardWidth);
-    if (index === 1) { baseSx = scale1; peakSx = 1.0;  baseTY = -2; peakTY = -8; }
-    else if (index === 2) { baseSx = scale2; peakSx = scale1; baseTY =  4; peakTY = -2; }
-    else { baseSx = scale3; peakSx = scale2; baseTY = 10; peakTY =  4; }
+    if (index === 1) { baseSx = scale1; peakSx = 1.0;  baseTY = 0; peakTY = -2; }
+    else if (index === 2) { baseSx = scale2; peakSx = scale1; baseTY = 6; peakTY = 0; }
+    else { baseSx = scale3; peakSx = scale2; baseTY = 12; peakTY = 6; }
     const scaleX = baseSx + progress * (peakSx - baseSx);
     const tY = baseTY + progress * (peakTY - baseTY);
     return { transform: [{ translateY: tY }, { scaleX }, { scaleY: 1 }] };
   });
+  const preparedRevealWashStyle = useAnimatedStyle(() => {
+    if (!preparedBehind) return { opacity: 0, transform: [{ scaleX: 1 }] };
+    const distance = deckTransitionActive ? Math.abs(swipeXSV.value) : 0;
+    const progress = Math.min(1, distance / 150);
+    const outerScale = interpolate(progress, [0, 1], [preparedBaseScale, 1], Extrapolation.CLAMP);
+    return {
+      opacity: interpolate(distance, [0, commitOffset * 0.1, commitOffset * 0.22], [1, 0.25, 0], Extrapolation.CLAMP),
+      // Counter-scale only the navy name-area cover. The real prepared card can
+      // promote 92%→100%, but the visible navy layer remains exactly 92% wide,
+      // matching the newly mounted second layer after commit.
+      transform: [{ scaleX: preparedBaseScale / outerScale }],
+    };
+  });
+  const controlsHandoffStyle = useAnimatedStyle(() => {
+    const distance = deckTransitionActive ? Math.abs(swipeXSV.value) : 0;
+    if (preparedBehind) {
+      return {
+        opacity: interpolate(distance, [0, commitOffset * 0.42, commitOffset], [0, 0, 1], Extrapolation.CLAMP),
+      };
+    }
+    return {
+      opacity: index === 0
+        ? interpolate(distance, [0, commitOffset * 0.72], [1, 0], Extrapolation.CLAMP)
+        : 0,
+    };
+  });
+  const preparedFrameStyle = useAnimatedStyle(() => ({
+    // The queued frame is hidden so it cannot become a visible edge above the
+    // fixed second-layer surface; active cards retain their normal frame.
+    borderColor: preparedBehind ? "transparent" : "rgba(66,73,101,0.12)",
+    // The prepared card keeps its side geometry, but its bottom frame must not
+    // create a settled-only separator between the navy and light-blue layers.
+    borderBottomWidth: 0,
+  }));
 
   // Bottom scrim color — navy → Huddle Blue → white (opacity unchanged from prior stack).
   //   Q1 (front-most): rgba(17,37,126,0.84)  navy / indigo
@@ -1498,18 +2033,21 @@ function DiscoveryProfileCard({
     if (index === 0 && mediaSources.length > 1) {
       const inLeft = tapX < cardWidth * 0.33;
       const inRight = tapX > cardWidth * 0.67;
-      if ((inLeft || inRight) && tapY < cardHeight * 0.70) return;
+      if ((inLeft || inRight) && tapY < renderedCardHeight * 0.70) return;
     }
+    const inHeroOrActions = tapY > Math.max(0, renderedPhotoHeight - 132);
+    const inNextButton = tapX > cardWidth - 72 && tapY < 82;
+    if (inHeroOrActions || inNextButton) return;
     onProfileTap(profile);
-  }, [busy, cardHeight, cardWidth, index, mediaSources.length, onProfileTap, profile]);
+  }, [busy, cardWidth, index, mediaSources.length, onProfileTap, profile, renderedCardHeight, renderedPhotoHeight]);
 
   const tapGesture = useMemo(() =>
     Gesture.Tap()
       .maxDuration(400)
       .maxDistance(10)
-      .enabled(index === 0)
+      .enabled(index === 0 && !paused)
       .onEnd((e) => { runOnJS(handleProfileTapGesture)(e.x, e.y); }),
-    [handleProfileTapGesture, index]
+    [handleProfileTapGesture, index, paused]
   );
 
   const composedGesture = useMemo(() =>
@@ -1517,126 +2055,149 @@ function DiscoveryProfileCard({
     [panGesture, tapGesture]
   );
 
-  const renderDiscoveryActions = (variant: "island" | "traffic") => {
-    const traffic = variant === "traffic";
-    return (
-      <View style={traffic ? styles.discoveryTrafficActions : styles.discoveryActionIsland}>
-        <Pressable
-          accessibilityLabel={`Star ${profile.displayName}`}
-          disabled={busy}
-          onPress={() => onStar(profile)}
-          onPressIn={() => {
-            pressScaleSV.value = withTiming(0.96, { duration: 80 });
-            runOnJS(haptic.selectTab)();
-          }}
-          onPressOut={() => {
-            pressScaleSV.value = withSpring(1, { damping: 14, stiffness: 260 });
-          }}
-          style={({ pressed }) => [traffic ? [styles.discoveryTrafficButton, styles.discoveryTrafficStar] : styles.discoveryActionStar, styles.discoveryStarButton, pressed && huddleButtons.pressed, busy && styles.actionDisabled]}
-        >
-          <FontAwesome5 color={huddleColors.onPrimary} name="star" size={traffic ? 22 : 20} />
-        </Pressable>
-        <Pressable accessibilityLabel={`Wave at ${profile.displayName}`} disabled={busy} onPress={() => void onWave(profile)} style={({ pressed }) => [traffic ? [styles.discoveryTrafficButton, styles.discoveryTrafficWave] : styles.discoveryActionPrimary, pressed && huddleButtons.pressed, busy && styles.actionDisabled]}>
-          {/* Filled hand-wave + idle micro-rotation. Animated only on top card (index === 0). */}
-          <Reanimated.View style={waveIconAnimatedStyle}>
-            <MaterialCommunityIcons color={huddleColors.onPrimary} name="hand-wave" size={traffic ? 28 : 32} style={styles.discoveryWaveIcon} />
-          </Reanimated.View>
-        </Pressable>
-        <Pressable accessibilityLabel={`Pass ${profile.displayName}`} disabled={busy} onPress={() => onPass(profile)} style={({ pressed }) => [traffic ? [styles.discoveryTrafficButton, styles.discoveryTrafficPass] : styles.discoveryActionSecondary, pressed && huddleButtons.pressed, busy && styles.actionDisabled]}>
-          <Feather color={huddleColors.subtext} name="x" size={traffic ? 26 : 22} />
-        </Pressable>
-      </View>
-    );
-  };
-
   return (
-    <Reanimated.View style={[
+    <Reanimated.View collapsable={false} style={[
       styles.discoveryCardUnit,
       index > 0 && styles.discoveryCardQueued,
       {
         width: cardWidth,
-        height: compactActions || index > 0 ? layerStackBottom : gluedStackHeight,
-        zIndex: index === 0 ? 20 : 16 - index,
-        elevation: index === 0 ? 20 : 16 - index,
+        height: layerStackBottom,
+        zIndex: index === 0 ? 20 : preparedBehind ? 19 : 16 - index,
+        elevation: index === 0 ? 20 : preparedBehind ? 19 : 16 - index,
       },
       queuedAnimatedStyle,
     ]}>
-      {isDeepestQueued ? <View pointerEvents="none" style={[styles.discoveryQueuedBottomShadow, { top: cardHeight + DISCOVERY_QUEUED_PEEK_DEPTH - 4, width: cardWidth * queuedScaleX }]} /> : null}
+      {isDeepestQueued ? <View pointerEvents="none" style={[styles.discoveryQueuedBottomShadow, { top: renderedCardHeight + DISCOVERY_QUEUED_PEEK_DEPTH - 4, width: cardWidth * queuedScaleX }]} /> : null}
       <GestureDetector gesture={composedGesture}>
-        <Reanimated.View style={[styles.discoveryProfileCard, { height: cardHeight }, cardAnimatedStyle]}>
-          <View style={styles.discoveryPhotoWrap}>
+        <Reanimated.View
+          collapsable={false}
+          ref={index === 0 ? cardRef : undefined}
+          style={[styles.discoveryProfileCard, { height: renderedCardHeight }, preparedFrameStyle, cardAnimatedStyle]}
+        >
+          <View style={[styles.discoveryPhotoWrap, !showLowerSurface && styles.discoveryPhotoWrapRoundedBottom, { height: renderedPhotoHeight }]}>
             <Pressable accessibilityLabel={`Open ${profile.displayName} profile`} accessibilityRole="button" style={styles.discoveryProfileTap}>
-              <ResilientAvatarImage fallback={<View style={styles.discoveryPhotoFallback}><Text style={styles.discoveryPhotoFallbackText}>{initials(profile.displayName)}</Text></View>} style={styles.discoveryPhoto} uri={activeImage} />
+              <ResilientAvatarImage fallback={<View style={styles.discoveryPhotoFallback}><Text style={styles.discoveryPhotoFallbackText}>{initials(profile.displayName)}</Text></View>} style={[styles.discoveryPhoto, !showLowerSurface && styles.discoveryPhotoRoundedBottom]} uri={activeImage} version={activeImage || profile.id} />
             </Pressable>
             {index === 0 && mediaSources.length > 1 ? (
               <>
-                <Pressable accessibilityLabel="Previous photo" onPress={(event) => { event.stopPropagation(); stepAlbum(-1); }} style={styles.discoveryAlbumLeftZone} />
-                <Pressable accessibilityLabel="Next photo" onPress={(event) => { event.stopPropagation(); stepAlbum(1); }} style={styles.discoveryAlbumRightZone} />
+                <Pressable accessibilityLabel="Previous photo" onPress={(event) => { event.stopPropagation(); stepAlbum(-1); }} style={[styles.discoveryAlbumLeftZone, { height: renderedPhotoHeight * 0.7 }]} />
+                <Pressable accessibilityLabel="Next photo" onPress={(event) => { event.stopPropagation(); stepAlbum(1); }} style={[styles.discoveryAlbumRightZone, { height: renderedPhotoHeight * 0.7 }]} />
                 <View pointerEvents="none" style={styles.discoveryAlbumDots}>
                   {mediaSources.map((source, dotIndex) => <View key={`${source}:${dotIndex}`} style={[styles.discoveryAlbumDot, dotIndex === activeImageIndex && styles.discoveryAlbumDotActive]} />)}
                 </View>
               </>
             ) : null}
-            <View style={styles.discoveryPhotoScrim} />
+            <LinearGradient colors={["rgba(255,255,255,0)", "rgba(255,255,255,0.58)", "rgba(255,255,255,0.96)"]} start={{ x: 0, y: 0.2 }} end={{ x: 0, y: 1 }} pointerEvents="none" style={styles.discoveryBottomGradient} />
             <View style={styles.discoveryTopBadgeRow}>
               <View style={styles.discoveryTopLeftBadges}>
-                {profile.hasCar ? <View style={styles.discoveryCarBadge}><FontAwesome5 color={huddleColors.onPrimary} name="car-side" size={13} /></View> : null}
                 {chips.map((chip) => (
                   <View key={chip} style={styles.discoveryChip}>
                     <Text style={styles.discoveryChipText}>{chip}</Text>
                   </View>
                 ))}
               </View>
-              {/* Actions stay mounted on the top card; buttonFadeStyle handles real swipe movement. */}
-              {compactActions && index === 0 ? (
-                <Reanimated.View style={buttonFadeStyle}>{renderDiscoveryActions("traffic")}</Reanimated.View>
-              ) : null}
             </View>
             <Reanimated.View pointerEvents="none" style={[styles.discoverySwipeTint, styles.discoveryWaveTint, waveTintStyle]} />
             <Reanimated.View pointerEvents="none" style={[styles.discoverySwipeTint, styles.discoveryPassTint, passTintStyle]} />
             {/* D1: gold lift halo overlay — clipped by parent card overflow:hidden so cannot bleed onto neighbors. */}
             {liftKind === "star" ? <Reanimated.View pointerEvents="none" style={[styles.discoveryLiftHalo, liftHaloStyle]} /> : null}
-            <Reanimated.View style={[styles.swipeStamp, styles.passStamp, passStampStyle]}><Text style={styles.passStampText}>SKIP</Text><Feather color="#E94C5C" name="x" size={18} /></Reanimated.View>
-            <Reanimated.View style={[styles.swipeStamp, styles.waveStamp, waveStampStyle]}><MaterialCommunityIcons color={huddleColors.blue} name="hand-wave" size={18} style={styles.discoveryWaveStampIcon} /><Text style={styles.waveStampText}>WAVE</Text></Reanimated.View>
-            <LinearGradient
-              colors={[huddleColors.profileHeroScrimStart, huddleColors.profileHeroScrimMid, huddleColors.profileHeroScrimEnd]}
-              end={{ x: 0, y: 0 }}
-              pointerEvents="none"
-              start={{ x: 0, y: 1 }}
-              style={styles.discoveryHeroScrim}
-            />
-            {/* Fix #4B: explicit info-strip scrim at the very bottom of the card so chips sit on a clear translucent band, not on the subject's body. */}
-            <LinearGradient
-              colors={["rgba(0,0,0,0.0)", "rgba(0,0,0,0.42)"]}
-              end={{ x: 0, y: 1 }}
-              pointerEvents="none"
-              start={{ x: 0, y: 0 }}
-              style={styles.discoveryChipInfoStrip}
-            />
-            <View style={styles.discoveryHeroCopy}>
-              <View style={styles.discoveryHeroNameRow}>
-                <Text adjustsFontSizeToFit minimumFontScale={0.58} numberOfLines={1} style={styles.discoveryHeroName}>
-                  {(profile.displayName || "User").toUpperCase()}
-                </Text>
-                {profile.isVerified ? <NativeVerifiedBadge compact scale={1.25} style={styles.discoveryVerifiedTighten} /> : null}
-              </View>
-              <View style={styles.discoveryHeroPills}>
+            <View pointerEvents="box-none" style={styles.discoveryHeroCopy}>
+              <View style={styles.discoveryKickerRow}>
                 {roleLabel ? (
-                  <View style={styles.discoveryHeroRolePill}>
-                    <View style={styles.discoveryHeroRoleDot} />
-                    <Text numberOfLines={1} style={styles.discoveryHeroRoleText}>{roleLabel}</Text>
-                  </View>
+                  <>
+                    {/* Only shown alongside the role kicker — if there's no role label, there's
+                        nothing for the sparkle to sit "before", so it doesn't render at all. */}
+                    <NativeEngagementSparkleInline engagement={profile.engagement} size={14} />
+                    <Text numberOfLines={1} style={styles.discoveryRoleKicker}>{roleLabel}</Text>
+                  </>
                 ) : null}
-                {tierLabel ? (
-                  <View style={[styles.discoveryHeroTierPill, tierLabel === "Gold" ? styles.discoveryHeroGoldPill : styles.discoveryHeroPlusPill]}>
-                    <Feather color={tierLabel === "Gold" ? huddleColors.premiumGold : huddleColors.onPrimary} name="star" size={14} />
-                    <Text numberOfLines={1} style={[styles.discoveryHeroTierText, tierLabel === "Gold" ? styles.discoveryHeroGoldText : styles.discoveryHeroPlusText]}>{tierLabel}</Text>
-                  </View>
-                ) : null}
+              </View>
+              <View style={styles.discoveryHeroNameRow}>
+                <Text adjustsFontSizeToFit minimumFontScale={0.58} numberOfLines={1} style={styles.discoveryHeroName}>{displayName}</Text>
+                {profile.isVerified ? <NativeVerifiedBadge compact scale={1.15} style={styles.discoveryHeroVerified} /> : null}
               </View>
             </View>
+            {index === 0 || preparedBehind ? (
+              <Reanimated.View pointerEvents={index === 0 ? "box-none" : "none"} style={[StyleSheet.absoluteFill, controlsHandoffStyle]}>
+                {/* Next — chrome-light, top-right "close" corner. Swipe-left also = next. */}
+                <Reanimated.View style={[styles.discoveryNextButton, nextReactStyle]}>
+                  <Pressable accessibilityLabel="Next" accessibilityRole="button" disabled={index !== 0 || busy} hitSlop={8} onPress={runPassExit} style={({ pressed }) => [pressed && huddleButtons.pressed, busy && styles.actionDisabled]}>
+                    <View style={styles.discoveryPassIcon}><NativeGlyph color={huddleColors.onPrimary} name="pass" size={20} /></View>
+                  </Pressable>
+                </Reanimated.View>
+                {/* Fixed action cluster: every card reserves the same name geometry. */}
+                <View style={styles.discoveryCornerActions}>
+                  <Pressable
+                    accessibilityLabel={`Star ${profile.displayName}`}
+                    collapsable={false}
+                    disabled={index !== 0 || busy}
+                    hitSlop={10}
+                    onPress={() => onStar(profile)}
+                    onPressIn={() => { pressScaleSV.value = withTiming(0.96, { duration: 80 }); haptic.selectTab(); }}
+                    onPressOut={() => { pressScaleSV.value = withSpring(1, { damping: 14, stiffness: 260 }); }}
+                    ref={index === 0 ? starRef : undefined}
+                    style={({ pressed }) => [styles.discoveryInlineStar, pressed && huddleButtons.pressed, busy && styles.actionDisabled]}
+                  >
+                    <DiscoveryStarControlVisual />
+                  </Pressable>
+                  <Reanimated.View style={waveReactStyle}>
+                    <Pressable accessibilityLabel={`Wave at ${profile.displayName}`} collapsable={false} disabled={index !== 0 || busy} onPress={runWaveExit} ref={index === 0 ? waveRef : undefined} style={({ pressed }) => [styles.discoveryGlassWave, pressed && huddleButtons.pressed, busy && styles.actionDisabled]}>
+                      <DiscoveryWaveControlVisual iconStyle={waveIconAnimatedStyle} />
+                    </Pressable>
+                  </Reanimated.View>
+                </View>
+              </Reanimated.View>
+            ) : null}
+          </View>
+          {showLowerSurface ? (
+            <View style={[styles.discoveryBioPanel, (lowerContentKind === "pack" || lowerContentKind === "journey") && styles.discoveryPackPanel, bioMode === "compact" && styles.discoveryBioPanelCompact, bioMode === "single" && styles.discoveryBioPanelSingle, lowerContentKind === "bio" && styles.discoveryBioPanelQuote, { height: renderedBioPanelHeight }]}>
+              {lowerContentKind === "bio" ? bioMode === "single" ? (
+                <Text ellipsizeMode="tail" numberOfLines={1} style={[styles.discoveryBioCopy, styles.discoveryBioCopySingle]}>{bioPreview}</Text>
+              ) : (
+                <>
+                  <Text pointerEvents="none" style={styles.discoveryBioQuoteOpen}>“</Text>
+                  <Text pointerEvents="none" style={styles.discoveryBioQuoteClose}>”</Text>
+                  <View style={styles.discoveryBioQuoteWrap}>
+                    <Text ellipsizeMode="tail" numberOfLines={bioLines} style={styles.discoveryBioCopy}>{bioPreview}</Text>
+                  </View>
+                </>
+              ) : lowerContentKind === "pack" || lowerContentKind === "journey" ? (
+                <View style={[styles.discoveryPackPreview, bioMode === "single" && styles.discoveryPackPreviewSingle]}>
+                  <View style={styles.discoveryPackCopy}>
+                    <View style={styles.discoveryPackLineRow}>
+                      <Text numberOfLines={1} style={styles.discoveryPackKicker}>{packLabel}</Text>
+                      <Text ellipsizeMode={lowerContentKind === "journey" ? "middle" : "tail"} numberOfLines={1} style={styles.discoveryPackLine}>{packLine}</Text>
+                    </View>
+                  </View>
+                  {bioMode !== "full" ? null : (
+                    <View style={styles.discoveryPackMiniCarousel}>
+                      {publicPets.filter((pet) => pet.photoUrl).slice(0, 2).map((pet, petIndex) => (
+                        <View key={pet.id || `${pet.photoUrl}:${petIndex}`} style={[styles.discoveryPackMiniPolaroid, petIndex === 1 && styles.discoveryPackMiniPolaroidBack]}>
+                          <ExpoImage
+                            accessibilityIgnoresInvertColors
+                            cachePolicy="memory-disk"
+                            contentFit="fill"
+                            key={nativeFreshImageKey(pet.photoUrl || "", pet.updatedAt || pet.photoUrl || "")}
+                            source={{ uri: nativeFreshImageUri(pet.photoUrl || "", pet.updatedAt || pet.photoUrl || "") }}
+                            style={[styles.discoveryPackMiniPhoto, nativePetPresentationImageStyle(pet.photoPosition, 4 / 5)]}
+                            transition={120}
+                          />
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                </View>
+              ) : null}
+            </View>
+          ) : null}
+            {preparedBehind ? (
+              <Reanimated.View
+                pointerEvents="none"
+                style={[styles.discoveryPreparedRevealWash, { height: renderedBioPanelHeight + 112 }, preparedRevealWashStyle]}
+              />
+            ) : null}
             {/* Queued cards keep their deck color at the bottom, while the privacy layer above masks profile details. */}
-            {index > 0 ? (
+            {index > 0 && !preparedBehind ? (
               <LinearGradient
                 colors={["rgba(33,71,201,0)", queuedBottomScrimColor]}
                 start={{ x: 0, y: 0.55 }}
@@ -1645,23 +2206,38 @@ function DiscoveryProfileCard({
                 pointerEvents="none"
               />
             ) : null}
-            {index > 0 ? <QueuedCardPrivacyLayer style={styles.discoveryQueuedPrivacyLayer} /> : null}
-          </View>
+            {index > 0 && !preparedBehind ? <QueuedCardPrivacyLayer style={styles.discoveryQueuedPrivacyLayer} /> : null}
+            {index === 0 && paused ? (
+              <View style={styles.discoveryPausedCover}>
+                <RNBlurView blurAmount={22} blurType="light" style={StyleSheet.absoluteFill} />
+                <View style={styles.discoveryQueuedPrivacyWash} />
+                <View style={styles.discoveryPausedContent}>
+                  <Text style={styles.discoveryPausedTitle}>Friends Matching is paused</Text>
+                  <Text style={styles.discoveryPausedBody}>Turn it back on to see other people&apos;s profiles — and let them discover you.</Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    disabled={enablingPaused}
+                    onPress={() => onEnablePaused?.()}
+                    style={({ pressed }) => [styles.discoveryPausedButton, pressed && huddleButtons.pressed, enablingPaused && styles.actionDisabled]}
+                  >
+                    <Text style={styles.discoveryPausedButtonText}>{enablingPaused ? "Enabling…" : "Open to Friends Matching"}</Text>
+                  </Pressable>
+                </View>
+              </View>
+            ) : null}
+            {index === 0 && locationPermissionCover ? <DiscoverLocationPermissionCover {...locationPermissionCover} /> : null}
         </Reanimated.View>
       </GestureDetector>
-      {!compactActions && index === 0 ? (
-        <Reanimated.View style={[styles.discoveryActionIslandSlot, { top: islandTop }, buttonFadeStyle]}>{renderDiscoveryActions("island")}</Reanimated.View>
-      ) : null}
     </Reanimated.View>
   );
 }
 
 // Card-shaped shimmer shell shown before the first profile lands.
 // `layer` mirrors the active queued-card geometry, including the bottom-card shadow.
-function DiscoveryCardShell({ layer = 0 }: { layer?: 0 | 1 | 2 | 3 }) {
-  const { width: viewportWidth } = useWindowDimensions();
-  const cardWidth = Math.max(300, Math.min(viewportWidth - huddleSpacing.x6, 360));
-  const cardHeight = cardWidth * 1.25;
+function DiscoveryCardShell({ layer = 0, locationPermissionCover, stackTopY }: { layer?: 0 | 1 | 2 | 3; locationPermissionCover?: DiscoverLocationPermissionCoverProps; stackTopY: number | null }) {
+  const { height: viewportHeight, width: viewportWidth } = useWindowDimensions();
+  const screenInsets = useSafeAreaInsets();
+  const { cardHeight, cardWidth } = discoveryCardMetrics(viewportWidth, viewportHeight, screenInsets.bottom, stackTopY);
   const isBelow = layer > 0;
   const scaleX = layer === 0 ? 1 : discoveryQueuedScaleX(layer, cardWidth);
   const translateY = layer === 0 ? 0 : discoveryQueuedTranslateY(layer);
@@ -1688,8 +2264,73 @@ function DiscoveryCardShell({ layer = 0 }: { layer?: 0 | 1 | 2 | 3 }) {
             </View>
           </View>
         ) : null}
+        {layer === 0 && locationPermissionCover ? <DiscoverLocationPermissionCover {...locationPermissionCover} /> : null}
       </View>
     </View>
+  );
+}
+
+function DiscoveryStaticDeckLayer({ cardHeight, cardWidth, layer, swipeXSV, transitionActive }: { cardHeight: number; cardWidth: number; layer: 2 | 3 | 4; swipeXSV: SharedValue<number>; transitionActive: boolean }) {
+  const baseScale = layer === 4 ? Math.max(0.62, (cardWidth - (DISCOVERY_QUEUED_SIDE_GAP_3 + 14.4) * 2) / cardWidth) : discoveryQueuedScaleX(layer, cardWidth);
+  const nextScale = layer === 2
+    ? discoverySettledNavyScaleX(cardWidth)
+    : discoveryQueuedScaleX(layer - 1, cardWidth);
+  const baseTranslateY = layer === 4 ? 18 : discoveryQueuedTranslateY(layer);
+  const nextTranslateY = discoveryQueuedTranslateY(layer - 1);
+  const baseColor = layer === 2 ? "#95B7FA" : layer === 3 ? "#DEE2EA" : "#F3F5F9";
+  const nextColor = layer === 2 ? "#8192D7" : layer === 3 ? "#95B7FA" : "#DEE2EA";
+  const animatedStyle = useAnimatedStyle(() => {
+    const progress = transitionActive ? Math.min(1, Math.abs(swipeXSV.value) / 150) : 0;
+    return {
+      backgroundColor: interpolateColor(progress, [0, 1], [baseColor, nextColor]),
+      // Layer 2's outer percentage already targets the settled navy paint
+      // width. Match the settled card's corner clipping at the same endpoint;
+      // otherwise its 12px corners expose a visibly wider bottom strip even
+      // when the bounding-box widths are equal.
+      borderRadius: layer === 2
+        ? interpolate(progress, [0, 1], [huddleRadii.card, huddleRadii.modal], Extrapolation.CLAMP)
+        : huddleRadii.card,
+      opacity: layer === 4 ? interpolate(progress, [0, 0.2, 1], [0, 0, 1], Extrapolation.CLAMP) : 1,
+      transform: [
+        { translateY: interpolate(progress, [0, 1], [baseTranslateY, nextTranslateY], Extrapolation.CLAMP) },
+        { scaleX: interpolate(progress, [0, 1], [baseScale, nextScale], Extrapolation.CLAMP) },
+        { scaleY: 1 },
+      ],
+    };
+  });
+  return (
+    <Reanimated.View
+      pointerEvents="none"
+      style={[
+        styles.discoveryStaticDeckCard,
+        {
+          height: cardHeight,
+          width: cardWidth,
+          zIndex: 18 - layer,
+          elevation: 18 - layer,
+        },
+        animatedStyle,
+      ]}
+    />
+  );
+}
+
+// The real prepared-next profile owns layer 1. These are the original
+// full-height cards for layers 2/3, plus hidden incoming layer 4.
+function DiscoveryStaticDeck({ count, stackTopY, swipeXSV, transitionActive }: { count: number; stackTopY: number | null; swipeXSV: SharedValue<number>; transitionActive: boolean }) {
+  const { height: viewportHeight, width: viewportWidth } = useWindowDimensions();
+  const screenInsets = useSafeAreaInsets();
+  const { cardWidth, maxCardHeight } = discoveryCardMetrics(viewportWidth, viewportHeight, screenInsets.bottom, stackTopY);
+  const visibleDeepestLayer = Math.min(3, Math.max(0, count - 1));
+  const layers: Array<2 | 3 | 4> = visibleDeepestLayer >= 2
+    ? Array.from({ length: visibleDeepestLayer - 1 }, (_, offset) => (offset + 2) as 2 | 3)
+    : [];
+  if (count >= 5) layers.push(4);
+  layers.reverse();
+  return (
+    <>
+      {layers.map((layer) => <DiscoveryStaticDeckLayer key={`static-deck-layer:${layer}`} cardHeight={maxCardHeight} cardWidth={cardWidth} layer={layer} swipeXSV={swipeXSV} transitionActive={transitionActive} />)}
+    </>
   );
 }
 
@@ -1713,6 +2354,11 @@ function NativeChatRow({
   const priorityStar = isPriorityStarRow(row, userId);
   const socialAvailability = row.roomType === "service" ? serviceSkillsLabel(row) : row.peerAvailabilityLabel;
   const automationId = row.roomType === "service" ? "native-chat-service-row" : row.roomType === "group" ? "native-chat-group-row" : "native-chat-direct-row";
+  const accessibilityLabel = row.roomType === "service"
+    ? `Open ${name} care conversation`
+    : row.roomType === "group"
+      ? `Open ${name} group chat`
+      : `Open chat with ${name}`;
   const statusBadge = row.roomType === "service" ? serviceStatusBadge(row.serviceStatus) : null;
   const translateX = useRef(new Animated.Value(0)).current;
   // Trash fades in proportionally during the drag — visible the moment the user starts swiping,
@@ -1750,7 +2396,7 @@ function NativeChatRow({
         </Pressable>
       </Animated.View>
       <Animated.View {...panResponder.panHandlers} style={{ transform: [{ translateX }] }}>
-        <Pressable accessibilityLabel={`${automationId}:${name}`} testID={automationId} disabled={disabled} onPress={() => onPress(row)} style={({ pressed }) => [styles.webChatRow, priorityStar && styles.priorityStarRow, unread && styles.rowUnread, disabled && styles.rowDisabled, pressed && styles.rowPressed]}>
+        <Pressable accessibilityLabel={accessibilityLabel} testID={automationId} disabled={disabled} onPress={() => onPress(row)} style={({ pressed }) => [styles.webChatRow, priorityStar && styles.priorityStarRow, unread && styles.rowUnread, disabled && styles.rowDisabled, pressed && styles.rowPressed]}>
           <Pressable
             accessibilityLabel={`Open ${name} profile`}
             disabled={!row.peerUserId || disabled || isTeamHuddle}
@@ -1760,7 +2406,7 @@ function NativeChatRow({
             }}
             style={styles.avatarPressTarget}
           >
-            <NativeUserAvatar avatarUrl={avatarUrl} isTeamHuddle={isTeamHuddle} isVerified={row.peerIsVerified || isTeamHuddle} name={name} size="lg" />
+            <NativeUserAvatar avatarUrl={avatarUrl} isTeamHuddle={isTeamHuddle} isVerified={row.peerIsVerified || isTeamHuddle} name={name} size="lg" version={row.activityTs || row.lastMessageAt || row.chatId} />
           </Pressable>
           <View style={styles.rowBody}>
             <View style={styles.rowTop}>
@@ -1795,65 +2441,254 @@ function NativeChatRow({
   );
 }
 
-function NativeGroupChatRow({ onOpenDetails, onPress, row }: { currentUserId: string | null; row: NativeChatInboxRow; onManage: (row: NativeChatInboxRow) => void; onOpenDetails: (row: NativeChatInboxRow) => void; onPress: (row: NativeChatInboxRow) => void }) {
+/// Small looping lime dot — the shared "live" signal (same language as Home's
+/// pulse and the Live Activity). The only looping motion allowed in lists.
+function NativeGroupLiveDot() {
+  const reduceMotion = useReducedMotion();
+  const beat = useSharedValue(0);
+  useEffect(() => {
+    if (reduceMotion) return;
+    beat.value = withRepeat(withTiming(1, { duration: 1100, easing: ReanimEasing.inOut(ReanimEasing.ease) }), -1, true);
+  }, [beat, reduceMotion]);
+  const animatedStyle = useAnimatedStyle(() => ({
+    opacity: 1 - beat.value * 0.45,
+    transform: [{ scale: 1 - beat.value * 0.16 }],
+  }));
+  return <Reanimated.View style={[styles.groupCardLiveDot, animatedStyle]} />;
+}
+
+// Media-forward group card: cover image (or deterministic aurora identity) with
+// name/location on a bottom scrim, message preview in a slim body strip below.
+// "Last event: Xd" badge: the group's event list is fetched (cached RPC,
+// in-flight deduped, 5min TTL — past events don't change) and reduced to the
+// most recent PAST event's recency, hidden entirely past a week or with none.
+function NativeGroupChatRow({ accessToken, friendIds, index = 0, onOpenDetails: _onOpenDetails, onPress, outIds, row }: { accessToken?: string | null; currentUserId: string | null; friendIds: Set<string>; index?: number; outIds: Set<string>; row: NativeChatInboxRow; onManage: (row: NativeChatInboxRow) => void; onOpenDetails: (row: NativeChatInboxRow) => void; onPress: (row: NativeChatInboxRow) => void }) {
+  const reduceMotion = useReducedMotion();
   const name = displayName(row);
   const unread = row.unreadCount > 0;
   const preview = row.lastMessageContent ? parseInboxPreview(row.lastMessageContent) : "Group chat";
+  const [groupEvents, setGroupEvents] = useState<NativeGroupChatEvent[] | null>(() => peekNativeGroupChatEvents(row.chatId));
+  const [previewMembers, setPreviewMembers] = useState<NativeGroupManagementSnapshot["members"] | null>(() => peekNativeGroupPreviewMembers(row.chatId));
+  useEffect(() => {
+    let cancelled = false;
+    // Stagger the warm-up so a long inbox doesn't burst-fire N RPCs at once;
+    // the fetch itself is cached + deduped, so repeat renders are free.
+    const timer = setTimeout(() => {
+      fetchNativeGroupChatEventsCached(row.chatId, { accessToken })
+        .catch(() => null)
+        .then((events) => {
+          if (!cancelled) setGroupEvents(events ?? peekNativeGroupChatEvents(row.chatId));
+        });
+      fetchNativeGroupPreviewMembers(row.chatId, { accessToken })
+        .catch(() => null)
+        .then((members) => {
+          if (!cancelled) setPreviewMembers(members ?? peekNativeGroupPreviewMembers(row.chatId));
+        });
+    }, Math.min(index, 8) * 120);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [accessToken, index, row.chatId]);
+  // Badge priority: happening now > upcoming countdown > most recent past event.
+  const activeOrNextEvent = pickActiveOrNextGroupEvent(groupEvents ?? []);
+  const eventCountdown = groupNextEventCountdownLabel(activeOrNextEvent?.startsAt, activeOrNextEvent?.endsAt);
+  const lastEventLabel = eventCountdown ? null : groupCardLastEventLabel(groupEvents);
+  const previewStackMembers = [...(previewMembers || [])].sort((left, right) => {
+    const leftRank = outIds.has(left.userId) ? (friendIds.has(left.userId) ? 0 : 1) : friendIds.has(left.userId) ? 2 : 3;
+    const rightRank = outIds.has(right.userId) ? (friendIds.has(right.userId) ? 0 : 1) : friendIds.has(right.userId) ? 2 : 3;
+    return leftRank - rightRank || left.userId.localeCompare(right.userId);
+  }).slice(0, 4);
+  const enter = useSharedValue(reduceMotion ? 1 : 0);
+  useEffect(() => {
+    if (reduceMotion) return;
+    enter.value = withDelay(Math.min(index, 6) * 60, withTiming(1, { duration: 260, easing: ReanimEasing.out(ReanimEasing.ease) }));
+  }, [enter, index, reduceMotion]);
+  const entranceStyle = useAnimatedStyle(() => ({
+    opacity: enter.value,
+    transform: [{ translateY: (1 - enter.value) * 10 }],
+  }));
   return (
-    <Pressable accessibilityLabel={`native-chat-group-row:${name}`} testID="native-chat-group-row" onPress={() => onPress(row)} style={({ pressed }) => [styles.webChatRow, unread && styles.rowUnread, pressed && styles.rowPressed]}>
-      <Pressable accessibilityLabel={`Open ${name} details`} onPress={(event) => { event.stopPropagation(); onOpenDetails(row); }} style={styles.groupListAvatar}>
-        <ResilientAvatarImage fallback={<Feather color={huddleColors.blue} name="users" size={24} />} style={styles.groupListAvatarImage} uri={row.avatarUrl} />
-      </Pressable>
-      <View style={styles.rowBody}>
-        <View style={styles.rowTop}>
-          <View style={styles.rowTitleWrap}>
-            <Text numberOfLines={1} style={styles.rowTitle}>{name}</Text>
+    <Reanimated.View style={[styles.groupCardShadowWrap, entranceStyle]}>
+      <Pressable
+        accessibilityLabel={`Open ${name} group chat`}
+        accessibilityRole="button"
+        testID={`native-chat-group-row-${row.chatId}`}
+        onPress={() => onPress(row)}
+        style={({ pressed }) => [styles.groupCard, pressed && styles.rowPressed]}
+      >
+        <View style={styles.groupCardCover}>
+          {row.avatarUrl ? (
+            <ResilientAvatarImage
+              fallback={<NativeAuroraCover initial={name} seed={row.chatId} style={StyleSheet.absoluteFill} />}
+              style={styles.groupCardCoverImage}
+              uri={row.avatarUrl}
+              version={row.activityTs || row.lastMessageAt || row.chatId}
+            />
+          ) : (
+            <NativeAuroraCover initial={name} seed={row.chatId} style={StyleSheet.absoluteFill} />
+          )}
+          <LinearGradient
+            colors={["rgba(10,16,40,0)", "rgba(10,16,40,0.78)"]}
+            end={{ x: 0, y: 1 }}
+            pointerEvents="none"
+            start={{ x: 0, y: 0.3 }}
+            style={StyleSheet.absoluteFill}
+          />
+          {/* Top scrim so the info button + time stay legible over light covers. */}
+          <LinearGradient
+            colors={["rgba(10,16,40,0.34)", "rgba(10,16,40,0)"]}
+            end={{ x: 0, y: 1 }}
+            pointerEvents="none"
+            start={{ x: 0, y: 0 }}
+            style={styles.groupCardTopScrim}
+          />
+          {previewStackMembers.length > 0 ? (
+            <View pointerEvents="none" style={[styles.exploreFaceStack, styles.groupCardFaceStack]}>
+              {previewStackMembers.map((member, memberIndex) => (
+                <View key={member.userId} style={[styles.exploreFaceStackItem, outIds.has(member.userId) ? styles.exploreFaceStackItemOut : null, memberIndex > 0 && styles.exploreFaceStackOverlap]}>
+                  <ResilientAvatarImage
+                    fallback={<View style={styles.exploreFaceStackFallback}><Feather color={huddleColors.blue} name="user" size={14} /></View>}
+                    style={styles.exploreFaceStackImage}
+                    uri={member.avatarUrl}
+                    version={member.userId}
+                  />
+                </View>
+              ))}
+              {row.memberCount > previewStackMembers.length ? (
+                <View style={[styles.exploreFaceStackItem, styles.exploreFaceStackOverlap, styles.exploreFaceStackMore]}>
+                  <Text style={styles.exploreFaceStackMoreText}>+{row.memberCount - previewStackMembers.length}</Text>
+                </View>
+              ) : null}
+            </View>
+          ) : null}
+          {eventCountdown ? (
+            <View style={styles.groupCardLiveBadge}>
+              {eventCountdown.active ? <NativeGroupLiveDot /> : <Feather color="rgba(255,255,255,0.85)" name="calendar" size={11} />}
+              <Text numberOfLines={1} style={styles.groupCardLiveBadgeText}>
+                {eventCountdown.active && (activeOrNextEvent?.rsvpCount ?? 0) > 3 ? `${eventCountdown.label} — ${activeOrNextEvent?.rsvpCount} going` : eventCountdown.label}
+              </Text>
+            </View>
+          ) : lastEventLabel ? (
+            <View style={styles.groupCardLiveBadge}>
+              <Feather color="rgba(255,255,255,0.85)" name="calendar" size={11} />
+              <Text numberOfLines={1} style={styles.groupCardLiveBadgeText}>{`Last event: ${lastEventLabel}`}</Text>
+            </View>
+          ) : null}
+          <View style={styles.groupCardScrimContent}>
+            <View style={styles.groupCardNameRow}>
+              <Text numberOfLines={1} style={styles.groupCardName}>{name}</Text>
+            </View>
+            {row.locationLabel ? (
+              <View style={styles.groupCardLocationRow}>
+                <Feather color="rgba(255,255,255,0.75)" name="map-pin" size={12} />
+                <Text numberOfLines={1} style={styles.groupCardLocationText}>{row.locationLabel}</Text>
+              </View>
+            ) : null}
           </View>
-          <Text style={styles.rowTime}>{compactTime(row.lastMessageAt || row.activityTs)}</Text>
         </View>
-        <View style={styles.rowBottom}>
-          <Text numberOfLines={1} style={[styles.rowSubtitle, unread && styles.rowSubtitleUnread]}>{preview}</Text>
+        <View style={styles.groupCardBody}>
+          <Text numberOfLines={1} style={[styles.rowSubtitle, styles.groupCardPreview, unread && styles.rowSubtitleUnread]}>{preview}</Text>
           {unread ? <View style={styles.unreadBadge}><Text style={styles.unreadText}>{row.unreadCount > 99 ? "9+" : row.unreadCount}</Text></View> : null}
         </View>
-        {row.locationLabel ? (
-          <View style={styles.groupMetaInlineRow}>
-            <View style={styles.groupLocationInline}>
-              <Feather color={huddleColors.iconSubtle} name="map-pin" size={13} />
-              <Text numberOfLines={1} style={styles.groupLocationText}>{row.locationLabel}</Text>
-            </View>
-          </View>
-        ) : null}
-      </View>
-    </Pressable>
+      </Pressable>
+    </Reanimated.View>
   );
 }
 
-function MatchedRail({ rows, onOpen }: { rows: NativeChatInboxRow[]; onOpen: (row: NativeChatInboxRow) => void }) {
+function GroupDescriptionTextArea({
+  error,
+  focused,
+  style,
+  ...props
+}: { error?: boolean; focused?: boolean } & TextInputProps) {
+  const [contentHeight, setContentHeight] = useState(GROUP_DESCRIPTION_FIELD_MIN_HEIGHT);
+  const fieldHeight = Math.min(GROUP_DESCRIPTION_FIELD_MAX_HEIGHT, Math.max(GROUP_DESCRIPTION_FIELD_MIN_HEIGHT, Math.ceil(contentHeight)));
+  const scrollEnabled = contentHeight > GROUP_DESCRIPTION_FIELD_MAX_HEIGHT;
+
+  return (
+    <TextInput
+      {...props}
+      multiline
+      numberOfLines={2}
+      onContentSizeChange={(event) => {
+        const nextHeight = event.nativeEvent.contentSize.height;
+        if (Number.isFinite(nextHeight)) setContentHeight(nextHeight);
+      }}
+      placeholderTextColor={huddleColors.mutedText}
+      scrollEnabled={scrollEnabled}
+      style={[
+        nativeModalStyles.appModalField,
+        styles.createDescriptionField,
+        focused ? nativeModalStyles.appModalFieldFocused : null,
+        error ? nativeModalStyles.appModalFieldError : null,
+        { height: fieldHeight },
+        style,
+      ]}
+      textAlignVertical="top"
+    />
+  );
+}
+
+function MatchedRail({ highlightPeerId, onHighlightComplete, rows, onOpen }: { highlightPeerId?: string | null; onHighlightComplete?: () => void; rows: NativeChatInboxRow[]; onOpen: (row: NativeChatInboxRow) => void }) {
+  const [expanded, setExpanded] = useState(false);
   if (rows.length === 0) return null;
+  const hiddenCount = rows.length - 10;
+  const visibleRows = expanded || hiddenCount <= 0 ? rows : rows.slice(0, 10);
   return (
     <ScrollView contentContainerStyle={styles.matchRailContent} horizontal showsHorizontalScrollIndicator={false}>
-      {rows.slice(0, 10).map((row) => {
+      {visibleRows.map((row) => {
         const name = displayName(row);
         const avatarUrl = row.peerAvatarUrl || row.avatarUrl;
         return (
-          <Pressable key={`match:${row.chatId}`} accessibilityLabel={`Open match with ${name}`} onPress={() => onOpen(row)} style={styles.matchRailItem}>
-            <NativeUserAvatar avatarUrl={avatarUrl} isVerified={row.peerIsVerified} name={name} size="lg" />
-          </Pressable>
+          <NewFriendRailAvatar key={`match:${row.peerUserId || row.chatId}`} highlighted={Boolean(highlightPeerId && row.peerUserId === highlightPeerId)} onHighlightComplete={onHighlightComplete}>
+            <Pressable accessibilityLabel={`Open match with ${name}`} onPress={() => onOpen(row)} style={[styles.matchRailItem, row.justAdded && styles.matchRailItemJustAdded]}>
+              <NativeUserAvatar avatarUrl={avatarUrl} isVerified={row.peerIsVerified} name={name} size="lg" version={row.activityTs || row.lastMessageAt || row.chatId} />
+            </Pressable>
+          </NewFriendRailAvatar>
         );
       })}
+      {!expanded && hiddenCount > 0 ? (
+        <Pressable accessibilityLabel={`Show ${hiddenCount} more matches`} accessibilityRole="button" onPress={() => setExpanded(true)} style={styles.matchRailItem}>
+          <View style={styles.matchRailMoreTile}>
+            <Text style={styles.matchRailMoreText}>+{hiddenCount}</Text>
+          </View>
+        </Pressable>
+      ) : null}
     </ScrollView>
   );
 }
 
+function NewFriendRailAvatar({ children, highlighted, onHighlightComplete }: { children: ReactNode; highlighted: boolean; onHighlightComplete?: () => void }) {
+  const reduceMotion = useReducedMotion();
+  const sweep = useSharedValue(-1);
+  useEffect(() => {
+    if (!highlighted || reduceMotion) {
+      if (highlighted) onHighlightComplete?.();
+      return;
+    }
+    sweep.value = 0;
+    sweep.value = withTiming(1, { duration: 1200, easing: ReanimEasing.inOut(ReanimEasing.ease) }, (finished) => {
+      if (finished && onHighlightComplete) runOnJS(onHighlightComplete)();
+    });
+  }, [highlighted, onHighlightComplete, reduceMotion, sweep]);
+  const sweepStyle = useAnimatedStyle(() => ({
+    opacity: sweep.value < 0 ? 0 : 1,
+    transform: [{ translateX: -46 + sweep.value * 112 }, { skewX: "-18deg" }],
+  }));
+  return <View style={styles.newFriendRailAvatar}>
+    {children}
+    {highlighted && !reduceMotion ? <Reanimated.View pointerEvents="none" style={[styles.newFriendRailShine, sweepStyle]}>
+      <LinearGradient colors={["rgba(255,255,255,0)", "rgba(255,255,255,0.72)", "rgba(255,255,255,0)"]} end={{ x: 1, y: 0 }} start={{ x: 0, y: 0 }} style={StyleSheet.absoluteFill} />
+    </Reanimated.View> : null}
+  </View>;
+}
+
 function DiscoveryEndState({
   passedCount,
-  quotaReached,
-  onResurface,
   onExpandSearch,
 }: {
   passedCount: number;
-  quotaReached: boolean;
-  onResurface: () => void;
   onExpandSearch: () => void;
 }) {
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -1870,16 +2705,10 @@ function DiscoveryEndState({
       <Text style={styles.discoveryEndHeadline}>You've met everyone nearby.</Text>
       {passedCount > 0 ? (
         <Text style={styles.discoveryEndSub}>
-          {passedCount} profile{passedCount === 1 ? "" : "s"} skipped this session
+          {passedCount} profile{passedCount === 1 ? "" : "s"} skipped today
         </Text>
       ) : null}
       <View style={styles.discoveryEndActions}>
-        {passedCount > 0 && !quotaReached ? (
-          <Pressable onPress={onResurface} style={({ pressed }) => [styles.discoveryEndPrimary, pressed && huddleButtons.pressed]}>
-            <MaterialCommunityIcons color={huddleColors.onPrimary} name="refresh" size={18} />
-            <Text style={styles.discoveryEndPrimaryText}>Resurface skipped</Text>
-          </Pressable>
-        ) : null}
         <Pressable onPress={onExpandSearch} style={({ pressed }) => [styles.discoveryEndSecondary, pressed && huddleButtons.pressed]}>
           <Feather color={huddleColors.blue} name="sliders" size={16} />
           <Text style={styles.discoveryEndSecondaryText}>Expand search</Text>
@@ -1907,41 +2736,37 @@ function NativeChatsEmptyState({
   const emptyImage = image || emptyChatImageFallback;
 
   return (
-    <View style={nativeModalStyles.appEmptyWrap}>
-      <View style={[styles.webEmptyCard, groupAligned ? styles.webEmptyCardGroupAligned : null]}>
-        <Image
-          accessibilityIgnoresInvertColors
-          resizeMode="contain"
-          source={emptyImage}
-          style={styles.webEmptyImage}
-        />
-        {title ? <Text style={styles.webEmptyTitle}>{title}</Text> : null}
-        {body ? <Text style={styles.webEmptyBody}>{body}</Text> : null}
-        {buttonLabel ? <Pressable onPress={onPress} style={styles.webEmptyButton}><Text style={styles.webEmptyButtonText}>{buttonLabel}</Text></Pressable> : null}
-      </View>
+    <View style={[styles.socialEmptyState, groupAligned ? styles.socialEmptyStateGroupAligned : null]}>
+      <Image
+        accessibilityIgnoresInvertColors
+        resizeMode="contain"
+        source={emptyImage}
+        style={styles.socialEmptyIllustration}
+      />
+      {title ? <Text style={styles.socialEmptyTitle}>{title}</Text> : null}
+      {body ? <Text style={styles.socialEmptyText}>{body}</Text> : null}
+      {buttonLabel ? <Pressable onPress={onPress} style={styles.webEmptyButton}><Text style={styles.webEmptyButtonText}>{buttonLabel}</Text></Pressable> : null}
     </View>
   );
 }
 
 function NativeServiceChatsEmptyState() {
   return (
-    <View style={nativeModalStyles.appEmptyWrap}>
-      <View style={styles.webEmptyCard}>
-        <Image
-          accessibilityIgnoresInvertColors
-          resizeMode="contain"
-          source={serviceImage}
-          style={styles.webEmptyImage}
-        />
-        <Text style={styles.webEmptyBody}>
-          Give a chance to our local pro and use <Text style={styles.webEmptyBodyStrong}>Care</Text>!
-        </Text>
-      </View>
+    <View style={styles.socialEmptyState}>
+      <Image
+        accessibilityIgnoresInvertColors
+        resizeMode="contain"
+        source={serviceImage}
+        style={styles.socialEmptyIllustration}
+      />
+      <Text style={styles.socialEmptyText}>
+        Give a chance to our local pro and use <Text style={styles.socialEmptyTextStrong}>Care</Text>!
+      </Text>
     </View>
   );
 }
 
-const MATCH_QUICK_REPLIES = ["Hey! Your pet is adorable 🐾", "Would love to meet up!", "Hey! How's your day?", "Your profile caught my eye!"];
+const MATCH_QUICK_REPLIES = ["Hey! Your pet is adorable 🐾", "Would love to meet up!", "How's your day?", "Your profile caught my eye!"];
 // matched.png native dims: 928 × 1376  →  aspect ratio
 const MATCH_IMG_W = 928;
 const MATCH_IMG_H = 1376;
@@ -2001,7 +2826,7 @@ function MatchBlob({
           y={0}
           width={120}
           height={130}
-          preserveAspectRatio="none"
+          preserveAspectRatio="xMidYMid slice"
           clipPath={`url(#${clipId})`}
         />
       ) : (
@@ -2088,8 +2913,9 @@ function MatchModal({
   const dockSlide = useSharedValue(80);
   const screenOpacity = useSharedValue(0);
   const screenTranslateY = useSharedValue(screenH);
+  const modalUserId = modal?.userId ?? null;
   useEffect(() => {
-    if (!modal) return;
+    if (!modalUserId) return;
     screenOpacity.value = 0;
     screenTranslateY.value = screenH;
     dockSlide.value = 80;
@@ -2100,7 +2926,7 @@ function MatchModal({
     avatarScale.value = withDelay(80, withSpring(1, { damping: 14, stiffness: 240, mass: 0.6 }));
     avatarOpacity.value = withDelay(80, withTiming(1, { duration: 220 }));
     dockSlide.value = withDelay(180, withSpring(0, { damping: 18, stiffness: 200, mass: 0.6 }));
-  }, [modal, avatarScale, avatarOpacity, dockSlide, screenH, screenOpacity, screenTranslateY]);
+  }, [modalUserId, avatarScale, avatarOpacity, dockSlide, screenH, screenOpacity, screenTranslateY]);
   const avatarAnimStyle = useAnimatedStyle(() => ({
     opacity: avatarOpacity.value,
     transform: [{ scale: avatarScale.value }],
@@ -2179,6 +3005,10 @@ function MatchModal({
               <RNBlurView blurAmount={24} blurType="light" pointerEvents="none" style={StyleSheet.absoluteFill} />
               <View pointerEvents="none" style={styles.matchGlassOverlay} />
               <TextInput
+                multiline={false}
+                scrollEnabled
+                numberOfLines={1} lineBreakModeIOS="tail" lineBreakStrategyIOS="none"
+                textBreakStrategy="simple"
                 editable={!sending}
                 maxLength={500}
                 onChangeText={setQuickHello}
@@ -2195,7 +3025,7 @@ function MatchModal({
                 onPress={onQuickHello}
                 style={({ pressed }) => [styles.matchInputSend, quickHelloDisabled && styles.matchInputSendDisabled, pressed && !quickHelloDisabled ? styles.matchInputSendPressed : null]}
               >
-                {sending ? <ActivityIndicator color={huddleColors.onPrimary} /> : <Feather color={huddleColors.onPrimary} name="send" size={16} />}
+                {sending ? <NativeSpinner tone="primary" /> : <Feather color={huddleColors.onPrimary} name="send" size={16} />}
               </Pressable>
             </View>
             {replyFocused ? null : (
@@ -2210,25 +3040,34 @@ function MatchModal({
   );
 }
 
-export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onBottomSheetOpenChange, onNavigate }: NativeChatsScreenProps) {
+export function NativeChatsScreen({ active = true, accessToken, careMarketIsActive = false, friendRequestUnread = false, userId, search, sessionKey, onBottomSheetOpenChange, onNavigate }: NativeChatsScreenProps) {
   const screenInsets = useSafeAreaInsets();
+  const { height: viewportHeight, width: viewportWidth } = useWindowDimensions();
+  const initialMainTab = parseInitialMainTab(search);
+  const initialRows = readNativeChatsInboxHandoff({ sessionKey, tab: initialMainTab, userId }) || [];
   const [topTab, setTopTab] = useState<NativeChatsTopTab>(() => parseInitialTopTab(search));
-  const [mainTab, setMainTab] = useState<Exclude<NativeChatsTab, "discover">>(() => parseInitialMainTab(search));
-  const [rows, setRows] = useState<NativeChatInboxRow[]>([]);
+  const [mainTab, setMainTab] = useState<Exclude<NativeChatsTab, "discover">>(() => initialMainTab);
+  const [rows, setRows] = useState<NativeChatInboxRow[]>(() => initialRows);
   // Cache hydration is source="cache" status="hydrating"; only DB validation can move status="fresh".
-  const [inboxSyncState, setInboxSyncState] = useState<"idle" | "hydrating" | "refreshing" | "fresh" | "error">("idle");
+  const [inboxSyncState, setInboxSyncState] = useState<"idle" | "hydrating" | "refreshing" | "fresh" | "error">(() => initialRows.length > 0 ? "hydrating" : "idle");
   const [serviceTabHasDialogues, setServiceTabHasDialogues] = useState<boolean | null>(null);
   const [unreadTotal, setUnreadTotal] = useState(0);
   const [discoverProfiles, setDiscoverProfiles] = useState<NativeChatDiscoveryProfile[]>([]);
   const [discoverLoadSettled, setDiscoverLoadSettled] = useState(false);
   const [discoverSettledKey, setDiscoverSettledKey] = useState<string | null>(null);
   const [discoverStorageHydrated, setDiscoverStorageHydrated] = useState(false);
+  const [discoverDeckHydrated, setDiscoverDeckHydrated] = useState(false);
   const [discoverEndStateReady, setDiscoverEndStateReady] = useState(false);
   const [discoverySwipeActive, setDiscoverySwipeActive] = useState(false);
+  const [discoveryStackTopY, setDiscoveryStackTopY] = useState<number | null>(null);
+  const [discoveryGeometryReady, setDiscoveryGeometryReady] = useState(false);
   const discoverySwipeXSV = useSharedValue(0);
   const [discoverStatus, setDiscoverStatus] = useState<NativeChatDiscoverStatus>("ready");
+  const [discoverAgeEligible, setDiscoverAgeEligible] = useState<boolean | null>(null);
   const [discoverLocationPermission, setDiscoverLocationPermission] = useState<NativeLocationPermissionDetail>({ canAskAgain: true, state: "unknown" });
+  const [discoverLocationPermissionResolved, setDiscoverLocationPermissionResolved] = useState(false);
   const [discoverySeenToday, setDiscoverySeenToday] = useState(0);
+  const [discoveryCycleStartedAt, setDiscoveryCycleStartedAt] = useState<string | null>(null);
   const [discoverLocationLabel, setDiscoverLocationLabel] = useState<string | null>(null);
   const [discoverBusyId, setDiscoverBusyId] = useState<string | null>(null);
   const [filters, setFilters] = useState<NativeChatDiscoveryFilters>({ ...DEFAULT_FILTERS });
@@ -2237,36 +3076,48 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
   const [viewerScopeResolved, setViewerScopeResolved] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
   const [premiumTier, setPremiumTier] = useState<StarUpgradeTier | null>(null);
+  const [starsExhaustedOpen, setStarsExhaustedOpen] = useState(false);
   const [filterRow, setFilterRow] = useState<keyof NativeChatDiscoveryFilters | null>(null);
   const [effectiveTier, setEffectiveTier] = useState<"free" | "plus" | "gold">("free");
   const [selfVerified, setSelfVerified] = useState(false);
+  // Friends Matching paused = the viewer's `non_social` flag is on (Account Settings →
+  // "Open to Friends Matching" turned off). When paused, the Discover deck is frozen
+  // behind a blur until they re-enable it inline.
+  const [friendsMatchingPaused, setFriendsMatchingPaused] = useState(false);
+  const [enablingFriendsMatching, setEnablingFriendsMatching] = useState(false);
+  const [resumeMatchingHintOpen, setResumeMatchingHintOpen] = useState(false);
+  // Discover manual refresh — bare refresh-cw icon top-right (mirrors Map MapControlButton icon contract).
+  const [discoverRefreshing, setDiscoverRefreshing] = useState(false);
+  const [liftingProfile, setLiftingProfile] = useState<{ id: string; kind: DiscoverySendCueKind } | null>(null); // D1: card lift sync after backend success
+  const [discoverySendCue, setDiscoverySendCue] = useState<{ kind: DiscoverySendCueKind; id: number; originX: number | null; originY: number | null } | null>(null);
   const [confirmStarTarget, setConfirmStarTarget] = useState<StarConfirmTarget | null>(null);
   const [starActionLoading, setStarActionLoading] = useState(false);
   const [starConfirmMessage, setStarConfirmMessage] = useState<string | null>(null);
-  // Discover manual refresh — bare refresh-cw icon top-right (mirrors Map MapControlButton icon contract).
-  const [discoverRefreshing, setDiscoverRefreshing] = useState(false);
-  // D1: Star premium flow — guards and origin measurement
-  const starBusyRef = useRef(false); // D1 guard: single-shot block against double-confirm
-  const starAbortRef = useRef<AbortController | null>(null); // D1 guard: cancel/timeout
-  const starMountedRef = useRef(true); // D1 guard: ignore post-await writes after unmount
-  useEffect(() => () => { starMountedRef.current = false; if (starAbortRef.current) starAbortRef.current.abort(); }, []);
-  const [confirmStarPending, setConfirmStarPending] = useState(false); // D1: drives modal charge visual
-  const [confirmStarButtonRect, setConfirmStarButtonRect] = useState<{ x: number; y: number } | null>(null); // D1: measured Send-Star button anchor; null fallback uses default cue origin
-  const [liftingProfile, setLiftingProfile] = useState<{ id: string; kind: DiscoverySendCueKind } | null>(null); // D1: card lift sync after backend success
-  const [discoverySendCue, setDiscoverySendCue] = useState<{ kind: DiscoverySendCueKind; id: number; originX: number | null; originY: number | null } | null>(null);
+  const [confirmStarPending, setConfirmStarPending] = useState(false);
+  const [confirmStarButtonRect, setConfirmStarButtonRect] = useState<{ x: number; y: number } | null>(null);
   const [passedDiscoveryIds, setPassedDiscoveryIds] = useState<Set<string>>(new Set());
   const [handledDiscoveryIds, setHandledDiscoveryIds] = useState<Set<string>>(new Set());
   const [matchModal, setMatchModal] = useState<MatchModalState | null>(null);
   const [matchQuickHello, setMatchQuickHello] = useState("");
   const [matchSending, setMatchSending] = useState(false);
   const [activeMatchedPeerIds, setActiveMatchedPeerIds] = useState<Set<string>>(new Set());
+  const [visibleOutIds, setVisibleOutIds] = useState<Set<string>>(() => peekVisibleUserPinIds());
+  useEffect(() => subscribeVisibleUserPinIds((ids) => {
+    setVisibleOutIds((current) => {
+      const currentKey = Array.from(current).sort().join("|");
+      const nextKey = Array.from(ids).sort().join("|");
+      return currentKey === nextKey ? current : ids;
+    });
+  }), []);
   const [selfMatchProfile, setSelfMatchProfile] = useState<SelfMatchProfile>({ name: "You", avatarUrl: null });
   const [profileSheetUserId, setProfileSheetUserId] = useState<string | null>(null);
+  const [profileSheetFallbackData, setProfileSheetFallbackData] = useState<ProfileSheetFallbackData | null>(null);
   const [profileSheetSource, setProfileSheetSource] = useState<"discover" | "other">("other");
   const [carerProfileOpen, setCarerProfileOpen] = useState(false);
   const [carerProfile, setCarerProfile] = useState<NativeServiceProvider | null>(null);
   const [carerProfileLoading, setCarerProfileLoading] = useState(false);
   const [carerProfileError, setCarerProfileError] = useState("");
+  const [communityNextEventByGroupId, setCommunityNextEventByGroupId] = useState<Map<string, GroupCoverNextEvent>>(new Map());
   const [exploreGroups, setExploreGroups] = useState<NativeExploreGroup[]>([]);
   const [invitedExploreGroups, setInvitedExploreGroups] = useState<NativeExploreGroup[]>([]);
   const [groupExploreSort, setGroupExploreSort] = useState<NativeGroupExploreSort>("relevance");
@@ -2280,11 +3131,14 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
   const [groupInviteBannerExpanded, setGroupInviteBannerExpanded] = useState(false);
   const [inviteInboxOpen, setInviteInboxOpen] = useState(false);
   const [groupDetails, setGroupDetails] = useState<NativeExploreGroup | NativeChatInboxRow | null>(null);
+  const [eventCountdownNow, setEventCountdownNow] = useState(() => Date.now());
   const [routeGroupDetailId, setRouteGroupDetailId] = useState<string | null>(() => parseInitialGroupDetailId(search));
+  const [routeServiceRoomId, setRouteServiceRoomId] = useState<string | null>(() => parseInitialServiceRoomId(search));
   const [groupManagement, setGroupManagement] = useState<NativeGroupManagementSnapshot | null>(null);
   const [groupManagementLoading, setGroupManagementLoading] = useState(false);
   const [groupManagementError, setGroupManagementError] = useState(false);
   const [matchedInviteCandidates, setMatchedInviteCandidates] = useState<Array<{ id: string; name: string; avatarUrl: string | null; isVerified: boolean; socialId: string | null }>>([]);
+  const [matchedRailSummaries, setMatchedRailSummaries] = useState<NativeMatchedRailSummary[]>([]);
   const [groupNameEdit, setGroupNameEdit] = useState("");
   const [groupLocationEdit, setGroupLocationEdit] = useState("");
   const [groupPetFocusEdit, setGroupPetFocusEdit] = useState<string[]>([]);
@@ -2292,6 +3146,7 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
   const [groupEditCoverDraft, setGroupEditCoverDraft] = useState<PendingGroupCover | null>(null);
   const [groupDetailsErrors, setGroupDetailsErrors] = useState<GroupDetailsErrors>({});
   const [groupMemberReportTarget, setGroupMemberReportTarget] = useState<NativeGroupManagementSnapshot["members"][number] | null>(null);
+  const [groupMemberReportChatId, setGroupMemberReportChatId] = useState<string | null>(null);
   const [pendingDeleteRow, setPendingDeleteRow] = useState<NativeChatInboxRow | null>(null);
   const [createGroupOpen, setCreateGroupOpen] = useState(false);
   const [joinCodeOpen, setJoinCodeOpen] = useState(false);
@@ -2315,32 +3170,121 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
   const [searchResultRows, setSearchResultRows] = useState<NativeChatInboxRow[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [contactFriendRequestsRefreshKey, setContactFriendRequestsRefreshKey] = useState(0);
+  const [newlyAcceptedPeerId, setNewlyAcceptedPeerId] = useState<string | null>(null);
+  const [matchedRailRefreshKey, setMatchedRailRefreshKey] = useState(0);
+  const handleNewFriendHighlightComplete = useCallback(() => setNewlyAcceptedPeerId(null), []);
   const [status, setStatus] = useState<string | null>(null);
+  const transitionNativeModal = useNativeModalTransition();
+  const wasActiveRef = useRef(active);
 
   useEffect(() => {
-    const open = filterOpen || groupExploreSortOpen || premiumTier !== null || confirmStarTarget !== null || matchModal !== null || profileSheetUserId !== null || carerProfileOpen || inviteInboxOpen || pendingGroupInvitePrompt !== null || groupDetails !== null || groupManagement !== null || groupMemberReportTarget !== null || pendingDeleteRow !== null || createGroupOpen || joinCodeOpen;
+    const open = filterOpen || groupExploreSortOpen || premiumTier !== null || starsExhaustedOpen || matchModal !== null || profileSheetUserId !== null || confirmStarTarget !== null || carerProfileOpen || inviteInboxOpen || pendingGroupInvitePrompt !== null || groupDetails !== null || groupManagement !== null || groupMemberReportTarget !== null || pendingDeleteRow !== null || createGroupOpen || joinCodeOpen;
     onBottomSheetOpenChange?.(open);
     return () => onBottomSheetOpenChange?.(false);
-  }, [carerProfileOpen, confirmStarTarget, createGroupOpen, filterOpen, groupDetails, groupExploreSortOpen, groupManagement, groupMemberReportTarget, inviteInboxOpen, joinCodeOpen, matchModal, onBottomSheetOpenChange, pendingDeleteRow, pendingGroupInvitePrompt, premiumTier, profileSheetUserId]);
+  }, [carerProfileOpen, confirmStarTarget, createGroupOpen, filterOpen, groupDetails, groupExploreSortOpen, groupManagement, groupMemberReportTarget, inviteInboxOpen, joinCodeOpen, matchModal, onBottomSheetOpenChange, pendingDeleteRow, pendingGroupInvitePrompt, premiumTier, profileSheetUserId, starsExhaustedOpen]);
+  useEffect(() => {
+    if (topTab !== "community" && !groupDetails) return undefined;
+    setEventCountdownNow(Date.now());
+    const timer = setInterval(() => setEventCountdownNow(Date.now()), 30000);
+    return () => clearInterval(timer);
+  }, [groupDetails, topTab]);
   const discoverySendCueTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const discoveryStackRef = useRef<View | null>(null);
+  const discoverPageRef = useRef<View | null>(null);
+  const discoverCardRef = useRef<View | null>(null);
+  const discoverStarRef = useRef<View | null>(null);
+  const discoverWaveRef = useRef<View | null>(null);
+  const [discoverCoachMarkArmed, setDiscoverCoachMarkArmed] = useState(false);
+  const [showDiscoverCoachMarks, setShowDiscoverCoachMarks] = useState(false);
+  // Seen-once is persisted per user, but the AsyncStorage write races the arming effect
+  // right after the last mark is dismissed. This ref closes that window so the sequence
+  // cannot re-arm and fire a second time in the same session.
+  const discoverCoachMarksCompletedRef = useRef(false);
+  const discoveryMeasureSeqRef = useRef(0);
+  const starBusyRef = useRef(false);
+  const waveActionRef = useRef<{ profileId: string; actionId: string } | null>(null);
+  const starPreflightRef = useRef<string | null>(null);
+  const presentedMatchIdsRef = useRef<Set<string>>(new Set());
+  const starMountedRef = useRef(true);
   const discoveryFiltersSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const passedDiscoveryIdsRef = useRef(passedDiscoveryIds);
   const handledDiscoveryIdsRef = useRef(handledDiscoveryIds);
+  const discoveryDetailHydratedRef = useRef<Set<string>>(new Set());
+  const discoveryDetailHydrationAttemptsRef = useRef<Map<string, number>>(new Map());
   const activeMatchedPeerIdsRef = useRef(activeMatchedPeerIds);
   const viewerCountryRef = useRef(viewerCountry);
   const rowsRef = useRef(rows);
+  const discoverProfilesRef = useRef(discoverProfiles);
+  const mainTabRef = useRef(mainTab);
+  const topTabRef = useRef(topTab);
+  const stableDiscoverTopCardRef = useRef<{ profile: NativeChatDiscoveryProfile; deckKey: string } | null>(null);
+  const discoverLocationPermissionStateRef = useRef<NativeLocationPermissionDetail["state"]>("unknown");
+
+  const setDiscoverySwipePhase = useCallback((active: boolean) => {
+    setDiscoverySwipeActive(active);
+  }, []);
+  const inboxRowsByTabRef = useRef<Partial<Record<Exclude<NativeChatsTab, "discover">, NativeChatInboxRow[]>>>(initialRows.length > 0 ? { [initialMainTab]: initialRows } : {});
   const chatSessionKeyRef = useRef(sessionKey || (userId ? `${userId}:0` : "anon:0"));
   const inboxRequestSeqRef = useRef(0);
-  const hasDbConfirmedInboxRef = useRef(false);
   const readOverlayRef = useRef<Map<string, number>>(new Map());
   const unreadTotalVersionRef = useRef(0);
-  const matchProbeRef = useRef<{ userId: string | null; inFlight: boolean }>({ userId: null, inFlight: false });
   const loadRowsGateRef = useRef<{ key: string | null; inFlight: boolean; lastStartedAt: number }>({ key: null, inFlight: false, lastStartedAt: 0 });
+  const committedLoadKeysRef = useRef(new Set<string>());
   const loadMoreRowsRef = useRef(false);
   const exploreLoadGateRef = useRef<{ key: string | null; inFlight: boolean; lastStartedAt: number }>({ key: null, inFlight: false, lastStartedAt: 0 });
+  const communityScrollRef = useRef<ScrollView | null>(null);
   const seenGroupInvitePromptsRef = useRef<Set<string>>(new Set());
   const realtimeRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasHydratedRowsRef = useRef(false);
+
+  const measureDiscoveryStackTop = useCallback(() => {
+    const seq = ++discoveryMeasureSeqRef.current;
+    const navBottomOffset = Math.max(huddleSpacing.x2, screenInsets.bottom + 8);
+    const navTopY = viewportHeight - navBottomOffset - huddleLayout.navHeight;
+    const minimumStackTopY = screenInsets.top + 96;
+    const isValid = (y: number) => Number.isFinite(y)
+      && y >= minimumStackTopY
+      && navTopY - y - DISCOVERY_NAV_TIGHT_GAP - DISCOVERY_QUEUED_PEEK_DEPTH >= 280;
+
+    const measureStable = (attempt: number) => {
+      requestAnimationFrame(() => {
+        discoveryStackRef.current?.measureInWindow((_firstX, firstY) => {
+          if (seq !== discoveryMeasureSeqRef.current) return;
+          if (!isValid(firstY)) {
+            if (attempt < 4) measureStable(attempt + 1);
+            return;
+          }
+          requestAnimationFrame(() => {
+            discoveryStackRef.current?.measureInWindow((_secondX, secondY) => {
+              if (seq !== discoveryMeasureSeqRef.current) return;
+              if (!isValid(secondY) || Math.abs(firstY - secondY) >= 1.5) {
+                if (attempt < 4) measureStable(attempt + 1);
+                return;
+              }
+              setDiscoveryStackTopY((current) => current !== null && Math.abs(current - secondY) < 1 ? current : secondY);
+              setDiscoveryGeometryReady(true);
+            });
+          });
+        });
+      });
+    };
+    measureStable(0);
+  }, [screenInsets.bottom, screenInsets.top, viewportHeight]);
+
+  useLayoutEffect(() => {
+    if (!active || topTab !== "discover") return;
+    discoveryMeasureSeqRef.current += 1;
+    setDiscoveryGeometryReady(false);
+    setDiscoveryStackTopY(null);
+  }, [active, screenInsets.bottom, screenInsets.top, topTab, viewportHeight, viewportWidth]);
+
+  useEffect(() => {
+    starMountedRef.current = true;
+    return () => {
+      starMountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     passedDiscoveryIdsRef.current = passedDiscoveryIds;
@@ -2363,21 +3307,61 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
   }, [rows]);
 
   useEffect(() => {
+    discoverProfilesRef.current = discoverProfiles;
+  }, [discoverProfiles]);
+
+  useEffect(() => {
+    mainTabRef.current = mainTab;
+  }, [mainTab]);
+
+  useEffect(() => {
+    topTabRef.current = topTab;
+  }, [topTab]);
+
+  const commitInboxRows = useCallback((tab: Exclude<NativeChatsTab, "discover">, nextRows: NativeChatInboxRow[]) => {
+    inboxRowsByTabRef.current[tab] = nextRows;
+    writeNativeChatsInboxHandoff({ rows: nextRows, sessionKey, tab, userId });
+    setRows(nextRows);
+  }, [sessionKey, userId]);
+
+  useEffect(() => subscribeNativeChatUnmatchCommitted((event) => {
+    if (!userId || event.actorUserId !== userId) return;
+    const keep = (row: NativeChatInboxRow) => row.peerUserId !== event.peerUserId && (!event.chatId || row.chatId !== event.chatId);
+    for (const tab of ["friends", "groups", "service"] as const) {
+      const current = inboxRowsByTabRef.current[tab];
+      if (current) inboxRowsByTabRef.current[tab] = current.filter(keep);
+    }
+    const nextRows = rowsRef.current.filter(keep);
+    rowsRef.current = nextRows;
+    setRows(nextRows);
+    setSearchResultRows((current) => current ? current.filter(keep) : null);
+    setMatchedRailSummaries((current) => current.filter((row) => row.peerUserId !== event.peerUserId && (!event.chatId || row.chatId !== event.chatId)));
+    setMatchedInviteCandidates((current) => current.filter((row) => row.id !== event.peerUserId));
+    setActiveMatchedPeerIds((current) => {
+      const next = new Set(current);
+      next.delete(event.peerUserId);
+      return next;
+    });
+    writeNativeChatsInboxHandoff({ rows: nextRows, sessionKey, tab: "friends", userId });
+  }), [sessionKey, userId]);
+
+  useEffect(() => {
     chatSessionKeyRef.current = sessionKey || (userId ? `${userId}:0` : "anon:0");
   }, [sessionKey, userId]);
 
   useEffect(() => {
-    setTopTab(parseInitialTopTab(search));
-    setMainTab(parseInitialMainTab(search));
-    setRouteGroupDetailId(parseInitialGroupDetailId(search));
-  }, [search]);
+    if (!routeServiceRoomId) return;
+    const roomId = routeServiceRoomId;
+    setRouteServiceRoomId(null);
+    onNavigate(`/service-chat?room=${encodeURIComponent(roomId)}&returnTo=${encodeURIComponent("/chats?tab=service")}`);
+  }, [onNavigate, routeServiceRoomId]);
 
   useEffect(() => {
     if (!userId) {
       seenGroupInvitePromptsRef.current = new Set();
       return;
     }
-    void AsyncStorage.getItem(`native_group_invite_prompt_seen_${userId}`)
+    void readNativeDisplayCacheItem(`native_group_invite_prompt_seen_${userId}`)
       .then((raw) => {
         const parsed = raw ? JSON.parse(raw) : [];
         seenGroupInvitePromptsRef.current = new Set(Array.isArray(parsed) ? parsed.filter((item) => typeof item === "string" && item.trim()) : []);
@@ -2415,32 +3399,50 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
   }, []);
 
   useEffect(() => {
-    if (!userId) {
+    if (!userId || discoverAgeEligible !== true) {
       setPassedDiscoveryIds(new Set());
       setHandledDiscoveryIds(new Set());
       setDiscoverStorageHydrated(false);
+      setDiscoverDeckHydrated(false);
       return;
     }
     setDiscoverStorageHydrated(false);
     let cancelled = false;
     void (async () => {
-      const today = new Date().toISOString().slice(0, 10);
-      const [passedRaw, passedSessionRaw, handledRaw, matchedRaw, filtersRaw, seenRaw] = await Promise.all([
-        AsyncStorage.getItem(discoveryPassedKey(userId)),
-        AsyncStorage.getItem(discoveryPassedSessionKey(userId)),
-        AsyncStorage.getItem(discoveryHandledKey(userId)),
-        AsyncStorage.getItem(matchedDiscoveryKey(userId)),
-        AsyncStorage.getItem(discoveryFiltersKey(userId)),
-        AsyncStorage.getItem(discoverySeenTodayKey(userId, today)),
+      const discoveryStorageKeys = [
+        nativeDiscoveryCycleStartedAtStorageKey(userId),
+        nativeDiscoveryPassedCycleStorageKey(userId),
+        discoveryHandledKey(userId),
+        matchedDiscoveryKey(userId),
+        discoveryFiltersKey(userId),
+      ];
+      const [cycleResult, discoveryStorageRows] = await Promise.all([
+        nativeExactTokenRpc("get_discovery_cycle_state", {}, accessToken),
+        readNativeDisplayCacheItems(discoveryStorageKeys),
       ]);
+      const [localCycleStartedAt, passedSessionRaw, handledRaw, matchedRaw, filtersRaw] = discoveryStorageRows.map((row) => row[1]);
       if (cancelled) return;
+      const cycleState = cycleResult.data && typeof cycleResult.data === "object"
+        ? cycleResult.data as { cycle_started_at?: unknown; waves_used?: unknown }
+        : {};
+      const serverCycleStartedAt = typeof cycleState.cycle_started_at === "string" && nativeDiscoveryCycleIsActive(cycleState.cycle_started_at)
+        ? cycleState.cycle_started_at
+        : null;
+      // A transient cycle-state request must never erase an active local deck.
+      const fallbackCycleStartedAt = nativeDiscoveryCycleIsActive(localCycleStartedAt) ? localCycleStartedAt : null;
+      const resolvedCycleStartedAt = cycleResult.error ? fallbackCycleStartedAt : serverCycleStartedAt;
+      setDiscoveryCycleStartedAt(resolvedCycleStartedAt);
+      if (resolvedCycleStartedAt) {
+        void AsyncStorage.setItem(nativeDiscoveryCycleStartedAtStorageKey(userId), resolvedCycleStartedAt);
+      } else if (!cycleResult.error) {
+        void AsyncStorage.removeItem(nativeDiscoveryCycleStartedAtStorageKey(userId));
+      }
       try {
-        const parsed = JSON.parse(String(passedRaw || "[]")) as unknown;
         const parsedSession = JSON.parse(String(passedSessionRaw || "[]")) as unknown;
         const ids = new Set<string>();
-        if (Array.isArray(parsed)) parsed.map(String).filter(Boolean).forEach((id) => ids.add(id));
-        if (Array.isArray(parsedSession)) parsedSession.map(String).filter(Boolean).forEach((id) => ids.add(id));
+        if (resolvedCycleStartedAt && Array.isArray(parsedSession)) parsedSession.map(String).filter(Boolean).forEach((id) => ids.add(id));
         setPassedDiscoveryIds(ids);
+        if (!resolvedCycleStartedAt) void AsyncStorage.removeItem(nativeDiscoveryPassedCycleStorageKey(userId));
       } catch {
         setPassedDiscoveryIds(new Set());
       }
@@ -2462,13 +3464,41 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
       } catch {
         // Ignore corrupt persisted filters.
       }
-      setDiscoverySeenToday(Math.max(0, Number(seenRaw || 0) || 0));
+      setDiscoverySeenToday(resolvedCycleStartedAt ? Math.max(0, Number(cycleState.waves_used || 0) || 0) : 0);
       setDiscoverStorageHydrated(true);
     })().catch(() => {
       if (!cancelled) setDiscoverStorageHydrated(true);
     });
     return () => { cancelled = true; };
-  }, [userId]);
+  }, [accessToken, discoverAgeEligible, userId]);
+
+  useEffect(() => {
+    if (!userId || !discoverStorageHydrated || discoverDeckHydrated) return;
+    let cancelled = false;
+    void readChatsCache<{ profiles: NativeChatDiscoveryProfile[] }>(nativeDiscoveryStableDeckStorageKey(userId))
+      .then((cached) => {
+        if (cancelled) return;
+        const stableProfiles = (cached?.profiles || []).filter((profile) => (
+          profile?.id && !passedDiscoveryIds.has(profile.id) && !handledDiscoveryIds.has(profile.id)
+        ));
+        if (stableProfiles.length > 0) {
+          setDiscoverProfiles((current) => current.length > 0 ? current : stableProfiles.slice(0, CHATS_DISCOVER_CACHE_LIMIT));
+          stableDiscoverTopCardRef.current = { profile: stableProfiles[0], deckKey: `${userId}|discover|${sessionKey || `${userId}:0`}` };
+          setDiscoverStatus("ready");
+          setLoading(false);
+        }
+        setDiscoverDeckHydrated(true);
+      })
+      .catch(() => { if (!cancelled) setDiscoverDeckHydrated(true); });
+    return () => { cancelled = true; };
+  }, [discoverDeckHydrated, discoverStorageHydrated, handledDiscoveryIds, passedDiscoveryIds, sessionKey, userId]);
+
+  useEffect(() => {
+    if (!userId || !discoverDeckHydrated || discoverProfiles.length === 0) return;
+    void writeChatsCache(nativeDiscoveryStableDeckStorageKey(userId), {
+      profiles: discoverProfiles.slice(0, CHATS_DISCOVER_CACHE_LIMIT),
+    });
+  }, [discoverDeckHydrated, discoverProfiles, userId]);
 
   useEffect(() => {
     if (!userId) return;
@@ -2479,11 +3509,32 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
     }, 220);
   }, [filters, userId]);
 
+  const applyResolvedViewerScope = useCallback((scope: NativeViewerScope | null) => {
+    if (!scope) {
+      setViewerScope(null);
+      return;
+    }
+    const viewerExploreCountry = resolveGroupExploreCountryFromScope(scope);
+    const viewerExploreDistrict = scope.district || scope.profileDistrict || null;
+    const viewerExplorePoint = scope.primaryPoint ?? scope.profilePoint ?? null;
+    const scopeLocationText = [viewerExploreDistrict, viewerExploreCountry].filter(Boolean).join(" ");
+    setViewerScope(scope);
+    setViewerGroupAnchor(viewerExplorePoint);
+    setViewerLocationWords(scopeLocationText
+      .toLowerCase()
+      .split(/[\s,./-]+/)
+      .filter((word) => word.length > 2));
+    setViewerCountry(viewerExploreCountry);
+    setGroupCountryDraft(viewerExploreCountry || null);
+  }, []);
+
   useEffect(() => {
     if (!userId) {
       setEffectiveTier("free");
       setViewerScope(null);
       setViewerScopeResolved(false);
+      setDiscoverLocationPermission({ canAskAgain: true, state: "unknown" });
+      setDiscoverLocationPermissionResolved(false);
       setViewerGroupAnchor(null);
       setViewerPetSignals([]);
       setViewerLocationWords([]);
@@ -2491,36 +3542,34 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
     }
     let cancelled = false;
     setViewerScopeResolved(false);
+    discoverLocationPermissionStateRef.current = "unknown";
+    setDiscoverLocationPermission({ canAskAgain: true, state: "unknown" });
+    setDiscoverLocationPermissionResolved(false);
     void (async () => {
-      const [snapshot, scope, groupContext] = await Promise.all([
-        fetchNativeProfileSummary(userId, { force: false, accessToken }).catch(() => null),
-        resolveNativeViewerScope({ userId, accessToken }).catch(() => null),
+      const [snapshot, scope, groupContext, permission] = await Promise.all([
+        fetchNativeProfileSummary(userId, { accessToken, sessionKey }).catch(() => null),
+        resolveNativeViewerScope({ userId, accessToken, sessionKey }).catch(() => null),
         fetchNativeViewerGroupContext({ accessToken }).catch(() => null),
+        getNativeForegroundLocationPermissionDetail().catch(() => ({ canAskAgain: true, state: "unknown" as const })),
       ]);
       if (cancelled) return;
       if (snapshot) {
+        setDiscoverAgeEligible(isNativeProfileAtLeastAge(snapshot.profile?.dob, 16));
         setEffectiveTier(normalizeTier(snapshot.profile?.effective_tier ?? snapshot.quota?.effective_tier ?? snapshot.profile?.tier ?? snapshot.quota?.tier));
         setSelfVerified(isNativeVerifiedProfile(snapshot.profile));
+        setFriendsMatchingPaused(snapshot.profile?.discovery_opt_out === true);
         setSelfMatchProfile({
           name: String(snapshot.profile?.display_name || "You"),
           avatarUrl: resolveNativeAvatarUrl(snapshot.profile?.avatar_url),
         });
       } else {
+        setDiscoverAgeEligible(null);
         setEffectiveTier("free");
       }
-      if (scope) {
-        const scopeLocationText = [scope.district, scope.country].filter(Boolean).join(" ");
-        setViewerScope(scope);
-        setViewerGroupAnchor(scope.primaryPoint);
-        setViewerLocationWords(scopeLocationText
-          .toLowerCase()
-          .split(/[\s,./-]+/)
-          .filter((word) => word.length > 2));
-        setViewerCountry(scope.country);
-        setGroupCountryDraft(scope.country || null);
-      } else {
-        setViewerScope(null);
-      }
+      applyResolvedViewerScope(scope);
+      discoverLocationPermissionStateRef.current = permission.state;
+      setDiscoverLocationPermission(permission);
+      setDiscoverLocationPermissionResolved(true);
       setViewerScopeResolved(true);
       if (groupContext) {
         setViewerPetSignals(groupContext.pets.map((pet) => ({
@@ -2530,7 +3579,34 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
       }
     })();
     return () => { cancelled = true; };
-  }, [accessToken, userId]);
+  }, [accessToken, applyResolvedViewerScope, sessionKey, userId]);
+
+  useEffect(() => {
+    if (!userId) return undefined;
+    return subscribeNativeViewerScope(userId, (scope) => {
+      applyResolvedViewerScope(scope);
+      setViewerScopeResolved(true);
+    }, { sessionKey });
+  }, [applyResolvedViewerScope, sessionKey, userId]);
+
+  useEffect(() => {
+    if (!userId) return undefined;
+    return subscribeNativeProfileSummary(userId, ({ profile, quota }) => {
+      const ageEligible = isNativeProfileAtLeastAge(profile?.dob, 16);
+      setDiscoverAgeEligible(ageEligible);
+      if (ageEligible === false && topTabRef.current === "discover") {
+        topTabRef.current = "chats";
+        setTopTab("chats");
+      }
+      setSelfVerified(isNativeVerifiedProfile(profile));
+      setFriendsMatchingPaused(profile?.discovery_opt_out === true);
+      setEffectiveTier(normalizeTier(profile?.effective_tier ?? quota?.effective_tier ?? profile?.tier ?? quota?.tier));
+      setSelfMatchProfile((current) => ({
+        name: String(profile?.display_name || current.name || "You"),
+        avatarUrl: resolveNativeAvatarUrl(profile?.avatar_url),
+      }));
+    }, { sessionKey });
+  }, [sessionKey, userId]);
 
   const friendsSourceRows = searchResultRows ?? rows;
   const friendsWithConversationPeerIds = useMemo(() => new Set(
@@ -2546,8 +3622,15 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
       if (!peerId || friendsWithConversationPeerIds.has(peerId) || !isMatchedRailRow(row, activeMatchedPeerIdsRef.current)) return;
       if (!byPeer.has(peerId)) byPeer.set(peerId, row);
     });
-    return Array.from(byPeer.values());
-  }, [friendsSourceRows, friendsWithConversationPeerIds, mainTab, topTab]);
+    matchedRailSummaries.forEach((match) => {
+      const peerId = String(match.peerUserId || "");
+      if (!peerId || friendsWithConversationPeerIds.has(peerId) || byPeer.has(peerId)) return;
+      byPeer.set(peerId, matchedSummaryToInboxRow(match));
+    });
+    const ordered = Array.from(byPeer.values());
+    if (!newlyAcceptedPeerId) return ordered;
+    return ordered.sort((left, right) => Number(right.peerUserId === newlyAcceptedPeerId) - Number(left.peerUserId === newlyAcceptedPeerId));
+  }, [friendsSourceRows, friendsWithConversationPeerIds, mainTab, matchedRailSummaries, newlyAcceptedPeerId, topTab]);
   const selectableMembers = useMemo(() => (
     [
       ...matchedInviteCandidates,
@@ -2561,13 +3644,15 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
   useEffect(() => {
     if (!userId) {
       setMatchedInviteCandidates([]);
+      setMatchedRailSummaries([]);
       setActiveMatchedPeerIds(new Set());
       return;
     }
     let cancelled = false;
     void (async () => {
       try {
-        const matches = await fetchNativeMatchedRailSummary({ accessToken, limit: 500 });
+        const matches = await fetchNativeMatchedRailSummary({ accessToken, limit: 500, userId });
+        if (!cancelled) setMatchedRailSummaries(matches);
         const candidateIds = matches.map((match) => match.peerUserId).filter(Boolean);
         if (!cancelled) setActiveMatchedPeerIds(new Set(candidateIds));
         if (!candidateIds.length) {
@@ -2585,16 +3670,17 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
       } catch {
         if (!cancelled) {
           setMatchedInviteCandidates([]);
+          setMatchedRailSummaries([]);
           setActiveMatchedPeerIds(new Set());
         }
       }
     })();
     return () => { cancelled = true; };
-  }, [accessToken, userId]);
+  }, [accessToken, matchedRailRefreshKey, userId]);
 
   const visibleRows = useMemo(() => {
     if (topTab !== "chats") return [];
-    const sourceRows = searchResultRows ?? rows;
+    const sourceRows = searchResultRows ?? inboxRowsByTabRef.current[mainTab] ?? rows;
     const railPeerIds = new Set(avatarOnlyMatches.map((row) => String(row.peerUserId || "")).filter(Boolean));
 
     if (mainTab === "groups") {
@@ -2615,16 +3701,8 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
     return [...priority, ...regular].slice(0, visibleCount);
   }, [avatarOnlyMatches, mainTab, rows, searchResultRows, topTab, userId, visibleCount]);
   const visibleMainTabs = useMemo(() => (
-    MAIN_TABS.filter((tab) => tab.key !== "service" || serviceTabHasDialogues === true || mainTab === "service" || rows.some(isCareInboxRow))
-  ), [mainTab, rows, serviceTabHasDialogues]);
-  const realtimeVisibleChatIds = useMemo(() => (
-    Array.from(new Set(visibleRows.map((row) => row.chatId).filter(Boolean)))
-  ), [visibleRows]);
-  const realtimeVisibleGroupIds = useMemo(() => (
-    Array.from(new Set(visibleRows.filter((row) => row.roomType === "group").map((row) => row.chatId).filter(Boolean)))
-  ), [visibleRows]);
-  const realtimeVisibleChatIdsKey = useMemo(() => realtimeVisibleChatIds.join(","), [realtimeVisibleChatIds]);
-  const realtimeVisibleGroupIdsKey = useMemo(() => realtimeVisibleGroupIds.join(","), [realtimeVisibleGroupIds]);
+    MAIN_TABS.filter((tab) => tab.key !== "service" || (careMarketIsActive && (serviceTabHasDialogues === true || mainTab === "service" || rows.some(isCareInboxRow))))
+  ), [careMarketIsActive, mainTab, rows, serviceTabHasDialogues]);
 
   useEffect(() => {
     if (!userId || topTab !== "chats") {
@@ -2648,7 +3726,7 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
       }
       if (cached) setServiceTabHasDialogues(cached.hasDialogues);
       try {
-        const serviceRows = await fetchNativeChatInbox({ userId, accessToken, sessionKey, scope: "all", onlyWithActivity: null, limit: 80, force: true, forceDb: true });
+        const serviceRows = await fetchNativeChatInbox({ userId, accessToken, sessionKey, scope: "all", onlyWithActivity: null, limit: 80 });
         const hasDialogues = serviceRows.some(isCareInboxRow);
         if (cancelled) return;
         setServiceTabHasDialogues(hasDialogues);
@@ -2670,18 +3748,33 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
     void AsyncStorage.setItem(key, JSON.stringify(Array.from(values)));
   }, []);
 
+  const ensureDiscoveryCycleStarted = useCallback(() => {
+    setDiscoveryCycleStartedAt((current) => {
+      const next = current && nativeDiscoveryCycleIsActive(current) ? current : new Date().toISOString();
+      if (userId) void AsyncStorage.setItem(nativeDiscoveryCycleStartedAtStorageKey(userId), next);
+      return next;
+    });
+    void nativeExactTokenRpc("touch_discovery_cycle", {}, accessToken).then(({ data, error }) => {
+      if (!error && typeof data === "string") {
+        setDiscoveryCycleStartedAt(data);
+        if (userId) void AsyncStorage.setItem(nativeDiscoveryCycleStartedAtStorageKey(userId), data);
+      }
+    });
+  }, [accessToken, userId]);
+
   const commitDiscoveryAction = useCallback((profileId: string, action: "pass" | "wave" | "star") => {
     if (!userId) return;
     const cleanId = String(profileId || "").trim();
     if (!cleanId) return;
+    if (action !== "wave") ensureDiscoveryCycleStarted();
     invalidateNativeDiscoveryRelationshipCache(userId);
+    if (stableDiscoverTopCardRef.current?.profile.id === cleanId) stableDiscoverTopCardRef.current = null;
     if (action === "pass") {
       setDiscoverProfiles((current) => current.filter((profile) => profile.id !== cleanId));
       setPassedDiscoveryIds((current) => {
         const next = new Set(current);
         next.add(cleanId);
-        persistDiscoverySet(discoveryPassedKey(userId), next);
-        persistDiscoverySet(discoveryPassedSessionKey(userId), next);
+        persistDiscoverySet(nativeDiscoveryPassedCycleStorageKey(userId), next);
         return next;
       });
       return;
@@ -2693,7 +3786,7 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
       persistDiscoverySet(discoveryHandledKey(userId), next);
       return next;
     });
-  }, [persistDiscoverySet, userId]);
+  }, [ensureDiscoveryCycleStarted, persistDiscoverySet, userId]);
 
   const rollbackDiscoveryAction = useCallback((profile: NativeChatDiscoveryProfile, action: "wave" | "star") => {
     if (!userId) return;
@@ -2710,43 +3803,6 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
     });
   }, [persistDiscoverySet, userId]);
 
-  const bumpNativeDiscoverySeen = useCallback(async () => {
-    try {
-      const { data, error } = await nativeExactTokenRpc("check_and_increment_quota", { action_type: "discovery_view" }, accessToken);
-      if (error || data !== true) return false;
-      if (userId) {
-        const today = new Date().toISOString().slice(0, 10);
-        setDiscoverySeenToday((current) => {
-          const next = current + 1;
-          void AsyncStorage.setItem(discoverySeenTodayKey(userId, today), String(next));
-          return next;
-        });
-      }
-      return true;
-    } catch {
-      return false;
-    }
-  }, [accessToken, userId]);
-
-  const enqueueNativeChatNotification = useCallback(async (args: { userId: string; kind: string; title: string; body: string; href: string; data?: Record<string, unknown> }) => {
-    try {
-      let href = args.href;
-      if (href === "/chats") href = "/chats?tab=discover";
-      if (!href.startsWith("/")) href = "/chats?tab=discover";
-      await nativeExactTokenRpc("enqueue_notification", {
-        p_user_id: args.userId,
-        p_category: "chats",
-        p_kind: args.kind,
-        p_title: args.title,
-        p_body: args.body,
-        p_href: href,
-        p_data: args.data ?? {},
-      }, accessToken);
-    } catch {
-      // Notification parity is best-effort and must not block the primary action.
-    }
-  }, [accessToken]);
-
   const launchNativeDiscoverySendCue = useCallback((kind: DiscoverySendCueKind, options?: { onCommit?: () => void; originX?: number | null; originY?: number | null }) => new Promise<void>((resolve) => {
     if (discoverySendCueTimerRef.current) {
       clearTimeout(discoverySendCueTimerRef.current);
@@ -2755,9 +3811,12 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
     // D1: pass through optional origin coords for spatial-continuity with the modal Send button.
     // Falls back to default screen-bottom origin when null (e.g., when measureInWindow failed).
     setDiscoverySendCue({ kind, id: Date.now(), originX: options?.originX ?? null, originY: options?.originY ?? null });
-    const commitDelay = kind === "star" ? 320 : 220;
-    // Animation runway — wave bubble rises ~700ms, star travels bottom→top ~1300ms.
-    const completeDelay = kind === "star" ? 1400 : 760;
+    const commitDelay = 200;
+    // Runway is set by the deck, not by taste: the card exit is 170–260ms
+    // (velocity-scaled), so a cue that outlives it desyncs from the next card.
+    // DiscoverySendCue animates to exactly these values — it must never be
+    // unmounted mid-flight, which is what produced the visible pop.
+    const completeDelay = NATIVE_STAR_CUE_MS;
     let committed = false;
     discoverySendCueTimerRef.current = setTimeout(() => {
       committed = true;
@@ -2779,7 +3838,9 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
   const viewerScopeKey = useMemo(() => {
     const point = viewerScope?.primaryPoint;
     return JSON.stringify({
+      city: viewerScope?.city ?? viewerScope?.profileLocationName ?? null,
       country: viewerScope?.country ?? null,
+      district: viewerScope?.district ?? viewerScope?.profileDistrict ?? null,
       lat: typeof point?.lat === "number" ? Number(point.lat.toFixed(4)) : null,
       lng: typeof point?.lng === "number" ? Number(point.lng.toFixed(4)) : null,
       resolved: viewerScopeResolved,
@@ -2790,76 +3851,116 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
     () => `${userId || "anon"}|discover|${effectiveTier}|${viewerCountry || "global"}|${viewerScopeKey}|${filterKey}`,
     [effectiveTier, filterKey, userId, viewerCountry, viewerScopeKey],
   );
+  const activeDiscoverDeckKey = useMemo(
+    () => `${userId || "anon"}|discover|${sessionKey || `${userId || "anon"}:0`}`,
+    [sessionKey, userId],
+  );
+  const activeChatsLoadKey = useMemo(() => (
+    topTab === "discover"
+      ? activeDiscoverRequestKey
+      : topTab === "community"
+        ? `${userId}|community|${effectiveTier}|${viewerScopeKey}`
+        : `${userId}|${sessionKey || `${userId}:0`}|${topTab}|${mainTab}|${effectiveTier}`
+  ), [activeDiscoverRequestKey, effectiveTier, mainTab, sessionKey, topTab, userId, viewerScopeKey]);
 
   const applyReadOverlay = useCallback((sourceRows: NativeChatInboxRow[]) => {
     const overlay = readOverlayRef.current;
     return sourceRows.map((row) => overlay.has(row.chatId) ? { ...row, unreadCount: 0 } : row);
   }, []);
 
-  const syncUnreadTotalFromRows = useCallback((sourceRows: NativeChatInboxRow[]) => {
-    setUnreadTotal(unreadTotalWithReadOverlay(sourceRows, readOverlayRef.current));
-  }, []);
+  const refreshUnreadTotal = useCallback(async (force = true) => {
+    if (!userId) {
+      setUnreadTotal(0);
+      return;
+    }
+    const requestVersion = unreadTotalVersionRef.current;
+    try {
+      const total = await fetchNativeChatUnreadTotal(userId, { accessToken, sessionKey, force });
+      const overlayTotal = Array.from(readOverlayRef.current.values()).reduce((sum, count) => sum + Math.max(0, count), 0);
+      if (unreadTotalVersionRef.current === requestVersion) setUnreadTotal(Math.max(0, total - overlayTotal));
+    } catch (error) {
+      logNativeProtectedActionFailure("[native.chats] unread_total_failed", error);
+    }
+  }, [accessToken, sessionKey, userId]);
+
+  // The switcher's "Chats" badge reflects unread across every chat scope (friends+groups+service).
+  // It's kept correct by the realtime subscription below (chat_messages/message_reads events call
+  // refreshUnreadTotal directly) plus this mount-time fetch — tab switches don't need to trigger it.
+  useEffect(() => {
+    // The root boot warm owns the first authoritative read. This cache-aware
+    // call joins/reuses it instead of forcing a second unread RPC on entry.
+    void refreshUnreadTotal(false);
+  }, [refreshUnreadTotal]);
 
   const loadRows = useCallback(async ({ force, silent }: { force?: boolean; silent?: boolean } = {}) => {
     if (!userId) {
       setRows([]);
+      inboxRowsByTabRef.current = {};
+      committedLoadKeysRef.current.clear();
       setUnreadTotal(0);
       setInboxSyncState("idle");
-      hasDbConfirmedInboxRef.current = false;
       setDiscoverLoadSettled(false);
       setDiscoverSettledKey(null);
       setLoading(false);
       setRefreshing(false);
       return;
     }
-    const loadKey = topTab === "discover"
-      ? activeDiscoverRequestKey
-      : topTab === "community"
-        ? `${userId}|community|${effectiveTier}`
-        : `${userId}|${sessionKey || `${userId}:0`}|${topTab}|${mainTab}|${effectiveTier}`;
-    const requestSeq = ++inboxRequestSeqRef.current;
-    if (topTab === "discover" && !viewerScopeResolved) {
+    const loadKey = activeChatsLoadKey;
+    if (topTab === "discover" && discoverAgeEligible !== true) {
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
+    if ((topTab === "discover" || topTab === "community") && !viewerScopeResolved) {
       if (!silent) setLoading(true);
       setRefreshing(false);
       return;
     }
     const now = Date.now();
     const gate = loadRowsGateRef.current;
-    if (!force && gate.key === loadKey && (gate.inFlight || now - gate.lastStartedAt < 1200)) {
+    if (gate.key === loadKey && gate.inFlight) {
+      setRefreshing(false);
+      return;
+    }
+    if (!force && gate.key === loadKey && now - gate.lastStartedAt < 1200) {
       setRefreshing(false);
       return;
     }
     loadRowsGateRef.current = { key: loadKey, inFlight: true, lastStartedAt: now };
+    // Allocate ownership only after dedupe. A duplicate render/effect call must
+    // not invalidate the request it just joined and leave the surface unsettled.
+    const requestSeq = ++inboxRequestSeqRef.current;
     if (topTab === "discover") {
+      // A silent validation must never hide a deck the user already committed to.
+      // The request key can change when viewer scope/session data settles, so keep
+      // the visible deck's settled boundary aligned with this background request
+      // until the authoritative response arrives. Cold entry still owns the shell.
+      const preserveVisibleDiscoverDeck = silent && discoverProfilesRef.current.length > 0;
       setStatus(null);
-      setDiscoverLoadSettled(false);
-      setDiscoverSettledKey(null);
-      const discoverCacheKey = chatsDiscoverProfilesCacheKey(userId, filterKey, effectiveTier, viewerCountryRef.current);
-      const cachedDiscover = !force ? await readChatsCache<{
-        profiles: NativeChatDiscoveryProfile[];
-        status: NativeChatDiscoverStatus;
-        locationLabel: string | null;
-      }>(discoverCacheKey) : null;
-
-      if (cachedDiscover?.profiles?.length) {
-        setDiscoverProfiles(cachedDiscover.profiles);
-        setDiscoverStatus(cachedDiscover.status);
-        setDiscoverLocationLabel(cachedDiscover.locationLabel);
+      if (preserveVisibleDiscoverDeck) {
         setDiscoverLoadSettled(true);
         setDiscoverSettledKey(loadKey);
-        if (!silent) setLoading(false);
-      } else if (!silent) {
-        setLoading(true);
+        committedLoadKeysRef.current.add(loadKey);
+      } else {
+        setDiscoverLoadSettled(false);
+        setDiscoverSettledKey(null);
       }
+      // Discover previews depend on the canonical public-profile snapshot for Bio > Pet Journey > Pack.
+      // Do not paint cached deck rows first; it creates a visible late swap and can briefly expose stale
+      // lower-card content before canonical hydration finishes. Cold-entry paint is owned by the stable
+      // deck cache (nativeDiscoveryStableDeckStorageKey), which restores the last committed deck instead.
+      if (!silent) setLoading(true);
 
       try {
         const result = await fetchNativeChatDiscoveryProfiles(userId, filters, {
           accessToken,
+          countryOnly: discoverLocationPermissionResolved && discoverLocationPermission.state !== "granted",
           effectiveTier,
           viewerScope,
           force,
-          cacheWriteGuard: () => loadRowsGateRef.current.key === loadKey,
+          cacheWriteGuard: () => loadRowsGateRef.current.key === loadKey && inboxRequestSeqRef.current === requestSeq,
         });
+        if (loadRowsGateRef.current.key !== loadKey || inboxRequestSeqRef.current !== requestSeq) return;
         const passedIds = passedDiscoveryIdsRef.current;
         const handledIds = handledDiscoveryIdsRef.current;
         let clientFilteredProfiles = applyDiscoveryFilters(result.profiles, filters, {
@@ -2892,24 +3993,65 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
             droppedByRelationshipGuardCount: clientFilteredProfiles.length - eligibleProfiles.length,
           });
         }
-        let nextProfiles = eligibleProfiles
-          .filter((profile) => !passedIds.has(profile.id))
-          .slice(0, CHATS_DISCOVER_CACHE_LIMIT);
+        let nextProfiles = selectNativeDailyUnpassedProfiles(eligibleProfiles, passedIds, CHATS_DISCOVER_CACHE_LIMIT);
 
-        if (nextProfiles.length === 0 && passedIds.size > 0 && eligibleProfiles.length > 0) {
-          const clearedPassedIds = new Set<string>();
-          passedDiscoveryIdsRef.current = clearedPassedIds;
-          setPassedDiscoveryIds(clearedPassedIds);
-          void AsyncStorage.removeItem(discoveryPassedKey(userId));
-          void AsyncStorage.removeItem(discoveryPassedSessionKey(userId));
-          nextProfiles = eligibleProfiles.slice(0, CHATS_DISCOVER_CACHE_LIMIT);
+        discoveryDetailHydratedRef.current = new Set();
+        discoveryDetailHydrationAttemptsRef.current = new Map();
+        nextProfiles = resetDiscoveryCanonicalPreviewState(nextProfiles);
+        if (nextProfiles.length > 0) {
+          // Canonical-hydrate only the visible top card before first paint so the
+          // first card no longer waits on the entire deck's canonical fetches. The
+          // queued (privacy-masked) cards stay unhydrated here and are filled in by
+          // the lazy per-card hydration effect once committed — which skips this top
+          // card because applyCanonical… marks it canonicalProfileLoaded. This keeps
+          // the top card swap-free while letting the deck paint immediately.
+          const topProfile = nextProfiles[0];
+          const topDetail = await fetchNativePublicProfile({
+            accessToken,
+            fallbackData: discoveryProfileToPublicProfileFallback(topProfile),
+            force: true,
+            profileUserId: topProfile.id,
+            requireCanonical: true,
+            sessionKey,
+            viewerId: userId,
+          }).catch(() => null);
+          if (loadRowsGateRef.current.key !== loadKey || inboxRequestSeqRef.current !== requestSeq) return;
+          if (topDetail) {
+            nextProfiles = [applyCanonicalProfilePreviewToDiscoveryProfile(topProfile, topDetail), ...nextProfiles.slice(1)];
+            discoveryDetailHydratedRef.current.add(topProfile.id);
+          }
         }
-
-        setDiscoverProfiles(nextProfiles);
+        const existingStableTop = stableDiscoverTopCardRef.current;
+        let finalProfiles = nextProfiles;
+        if (!force && existingStableTop && existingStableTop.deckKey === activeDiscoverDeckKey && !handledIds.has(existingStableTop.profile.id) && !passedIds.has(existingStableTop.profile.id)) {
+          const updatedStableTop = nextProfiles.find((profile) => profile.id === existingStableTop.profile.id) ?? existingStableTop.profile;
+          finalProfiles = [updatedStableTop, ...nextProfiles.filter((profile) => profile.id !== updatedStableTop.id)]
+            .slice(0, CHATS_DISCOVER_CACHE_LIMIT);
+        }
+        setDiscoverProfiles((current) => {
+          // Network ranking is advisory once a deck is visible. Preserve the full
+          // committed order and only append newcomers behind it. This also prevents
+          // an in-flight refresh from replacing the card underneath an active swipe.
+          const countryOnly = discoverLocationPermissionResolved && discoverLocationPermission.state !== "granted";
+          const protectedPreview = countryOnly ? current.slice(0, 4) : [];
+          const committedProfiles = countryOnly && protectedPreview.length > 0
+            ? mergeNativeDiscoveryPermissionDeck(
+              protectedPreview,
+              finalProfiles,
+              viewerScope?.profileCountryName ?? viewerScope?.profileCountry,
+            )
+              .slice(0, CHATS_DISCOVER_CACHE_LIMIT)
+            : current.length > 0
+              ? mergeNativeStableDiscoveryDeck(current, finalProfiles, CHATS_DISCOVER_CACHE_LIMIT)
+              : finalProfiles;
+          const committedTopProfile = committedProfiles[0] ?? null;
+          stableDiscoverTopCardRef.current = committedTopProfile ? { profile: committedTopProfile, deckKey: activeDiscoverDeckKey } : null;
+          return committedProfiles;
+        });
         if (__DEV__) {
           console.log("NATIVE_DISCOVER_FINAL_PROFILES", {
-            discoverProfilesLength: nextProfiles.length,
-            lostFromRpcToFinalCount: result.profiles.length - nextProfiles.length,
+            discoverProfilesLength: finalProfiles.length,
+            lostFromRpcToFinalCount: result.profiles.length - finalProfiles.length,
             passedIdsCount: passedIds.size,
           });
         }
@@ -2917,86 +4059,136 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
         setDiscoverLocationLabel(result.locationLabel);
         setDiscoverLoadSettled(true);
         setDiscoverSettledKey(loadKey);
-        void writeChatsCache(discoverCacheKey, {
-          profiles: nextProfiles,
-          status: result.status,
-          locationLabel: result.locationLabel,
-        });
-      } catch {
-        if (!cachedDiscover?.profiles?.length) {
-          setDiscoverStatus("error");
-          setDiscoverLoadSettled(true);
-          setDiscoverSettledKey(loadKey);
+      } catch (error) {
+        // A superseded request may reject after the replacement request has
+        // already started. It must never paint a failure over that loading UI.
+        if (loadRowsGateRef.current.key !== loadKey || inboxRequestSeqRef.current !== requestSeq) return;
+		        // Keep the last confirmed deck actionable when a background
+		        // validation fails. Explicit/cold loads still surface the error
+		        // state and its retry affordance.
+		        if (!preserveVisibleDiscoverDeck) {
+		          setDiscoverStatus("error");
+		          setDiscoverLoadSettled(true);
+		          setDiscoverSettledKey(loadKey);
+		        }
+        logNativeProtectedActionFailure("[native.chats] discover_load_failed", error);
+	      } finally {
+        if (loadRowsGateRef.current.key === loadKey && inboxRequestSeqRef.current === requestSeq) {
+          loadRowsGateRef.current.inFlight = false;
+          if (!silent) setLoading(false);
+          setRefreshing(false);
         }
-        setStatus("Discover could not load. Pull to retry.");
-      } finally {
-        if (loadRowsGateRef.current.key === loadKey) loadRowsGateRef.current.inFlight = false;
-        if (!silent) setLoading(false);
-        setRefreshing(false);
       }
       return;
     }
     if (topTab === "community") {
       // Community = group exploration only. No inbox load; no mainTab/groupSubTab dependency.
       try {
-        if (!silent) setLoading(true);
-        const joinedGroupIds = rowsRef.current.filter((row) => row.roomType === "group").map((row) => row.chatId);
-        const exploreKey = `${userId}|${joinedGroupIds.slice().sort().join(",")}`;
+        const groupsCacheKey = chatsExploreGroupsCacheKey(userId, viewerScopeKey);
+        const cachedExplore = !force ? await readChatsCache<{ invited: NativeExploreGroup[]; groups: NativeExploreGroup[] }>(groupsCacheKey) : null;
+        if (cachedExplore) {
+          committedLoadKeysRef.current.add(loadKey);
+          setExploreGroups(cachedExplore.groups.slice(0, CHATS_GROUP_EXPLORE_CACHE_LIMIT));
+          setInvitedExploreGroups(cachedExplore.invited);
+          if (!silent) setLoading(false);
+        } else if (!silent) {
+          setLoading(true);
+        }
+        const cachedJoinedGroupRows = rowsRef.current.filter((row) => row.roomType === "group");
+        const cachedJoinedGroupIds = cachedJoinedGroupRows.map((row) => row.chatId);
+        const exploreKey = `${userId}|${viewerScopeKey}|${cachedJoinedGroupIds.slice().sort().join(",")}`;
         const exploreGate = exploreLoadGateRef.current;
         if (force || exploreGate.key !== exploreKey || (!exploreGate.inFlight && Date.now() - exploreGate.lastStartedAt >= 5000)) {
-          exploreLoadGateRef.current = { key: exploreKey, inFlight: true, lastStartedAt: Date.now() };
-          const groupsCacheKey = chatsExploreGroupsCacheKey(userId);
-          void readChatsCache<{ invited: NativeExploreGroup[]; groups: NativeExploreGroup[] }>(groupsCacheKey).then((cached) => {
-            if (!force && cached) {
-              setExploreGroups(cached.groups.slice(0, CHATS_GROUP_EXPLORE_CACHE_LIMIT));
-              setInvitedExploreGroups(cached.invited);
-            }
+          const exploreStartedAt = Date.now();
+          exploreLoadGateRef.current = { key: exploreKey, inFlight: true, lastStartedAt: exploreStartedAt };
+          const joinedGroupRowsPromise = fetchNativeChatInbox({
+            userId,
+            accessToken,
+            sessionKey,
+            scope: "groups",
+            onlyWithActivity: null,
+            limit: 80,
+            force,
+            forceDb: force,
+          }).catch((error) => {
+            logNativeProtectedActionFailure("[native.chats] community_inbox_enrichment_failed", error);
+            return rowsRef.current.filter((row) => row.roomType === "group");
           });
+          const joinedUpcomingEventsPromise = fetchNativeViewerUpcomingGroupEvents({ accessToken, limit: 80 }).catch(() => []);
           const explore = await fetchNativeExploreGroups({
             userId,
             accessToken,
-            joinedGroupIds,
+            joinedGroupIds: cachedJoinedGroupIds,
             viewerScope,
             force,
-            cacheWriteGuard: () => exploreLoadGateRef.current.key === exploreKey,
+            cacheWriteGuard: () => inboxRequestSeqRef.current === requestSeq && exploreLoadGateRef.current.key === exploreKey && exploreLoadGateRef.current.lastStartedAt === exploreStartedAt,
           });
+          const joinedNextEventByChatId = new Map<string, GroupCoverNextEvent>();
           const allGroups = [...explore.invited, ...explore.groups].slice(0, CHATS_GROUP_EXPLORE_CACHE_LIMIT + explore.invited.length);
           const creatorIds = new Set(allGroups.map((group) => group.createdBy).filter((id): id is string => Boolean(id)));
           const distanceByCreator = new Map<string, number>();
+          const withDistance = (group: NativeExploreGroup) => ({
+            ...group,
+            distanceKm: group.createdBy ? distanceByCreator.get(group.createdBy) ?? null : null,
+          });
+          const viewerExploreCountry = resolveGroupExploreCountryFromScope(viewerScope);
+          let latestJoinedGroupRows = cachedJoinedGroupRows;
+          const commitCommunityGroups = (joinedGroupRows: NativeChatInboxRow[]) => {
+            if (inboxRequestSeqRef.current !== requestSeq || exploreLoadGateRef.current.key !== exploreKey || exploreLoadGateRef.current.lastStartedAt !== exploreStartedAt) return;
+            latestJoinedGroupRows = joinedGroupRows;
+            const nextGroups = mergeExploreGroups(joinedGroupRows, explore.groups, joinedNextEventByChatId)
+              .map(withDistance)
+              .filter((group) => groupMatchesViewerCountry(group, viewerExploreCountry))
+              .slice(0, CHATS_GROUP_EXPLORE_CACHE_LIMIT);
+            const nextInvited = explore.invited.map(withDistance);
+            setExploreGroups(nextGroups);
+            setInvitedExploreGroups(nextInvited);
+            void writeChatsCache(groupsCacheKey, { invited: nextInvited, groups: nextGroups });
+          };
+          // Public groups paint without waiting for the joined-group inbox. A
+          // successful inbox read enriches the same list when it arrives.
+          commitCommunityGroups(cachedJoinedGroupRows);
+          committedLoadKeysRef.current.add(loadKey);
+          if (!silent) setLoading(false);
+          void joinedGroupRowsPromise.then(commitCommunityGroups);
+          void joinedUpcomingEventsPromise.then((events) => {
+            for (const event of events) {
+              joinedNextEventByChatId.set(event.chatId, { title: event.title, startsAt: event.startsAt, endsAt: event.endsAt, rsvpCount: event.rsvpCount });
+            }
+            setCommunityNextEventByGroupId(new Map(joinedNextEventByChatId));
+            commitCommunityGroups(latestJoinedGroupRows);
+          });
           if (viewerGroupAnchor && creatorIds.size > 0) {
-            const { data, error } = await nativeExactTokenRpc(
+            void nativeExactTokenRpc(
               "get_service_provider_distances",
               { p_lat: viewerGroupAnchor.lat, p_lng: viewerGroupAnchor.lng },
               accessToken,
-            );
-            if (error) {
-              console.warn("[native.chats] group_distance_failed", error);
-            } else {
+            ).then(({ data, error }) => {
+              if (error) {
+                logNativeProtectedActionFailure("[native.chats] group_distance_failed", error);
+                return;
+              }
               for (const row of (Array.isArray(data) ? data : []) as Array<{ user_id?: string; distance_km?: number | null }>) {
                 const id = String(row.user_id || "");
                 if (!creatorIds.has(id) || typeof row.distance_km !== "number" || !Number.isFinite(row.distance_km)) continue;
                 distanceByCreator.set(id, row.distance_km);
               }
-            }
+              commitCommunityGroups(latestJoinedGroupRows);
+            });
           }
-          const withDistance = (group: NativeExploreGroup) => ({
-            ...group,
-            distanceKm: group.createdBy ? distanceByCreator.get(group.createdBy) ?? null : null,
-          });
-          const nextGroups = explore.groups.map(withDistance).slice(0, CHATS_GROUP_EXPLORE_CACHE_LIMIT);
-          const nextInvited = explore.invited.map(withDistance);
-          setExploreGroups(nextGroups);
-          setInvitedExploreGroups(nextInvited);
-          void writeChatsCache(groupsCacheKey, { invited: nextInvited, groups: nextGroups });
-          if (exploreLoadGateRef.current.key === exploreKey) exploreLoadGateRef.current.inFlight = false;
+          if (inboxRequestSeqRef.current === requestSeq && exploreLoadGateRef.current.key === exploreKey && exploreLoadGateRef.current.lastStartedAt === exploreStartedAt) exploreLoadGateRef.current.inFlight = false;
         }
       } catch (error) {
-        console.warn("[native.chats] community_load_failed", error);
-        if (!silent) setStatus("Community could not load. Pull to refresh.");
+        logNativeProtectedActionFailure("[native.chats] community_load_failed", error);
+        if (loadRowsGateRef.current.key === loadKey && inboxRequestSeqRef.current === requestSeq && !silent) {
+          setStatus("Community could not load. Pull to refresh.");
+        }
       } finally {
-        if (loadRowsGateRef.current.key === loadKey) loadRowsGateRef.current.inFlight = false;
-        if (!silent) setLoading(false);
-        setRefreshing(false);
+        if (loadRowsGateRef.current.key === loadKey && inboxRequestSeqRef.current === requestSeq) {
+          loadRowsGateRef.current.inFlight = false;
+          if (!silent) setLoading(false);
+          setRefreshing(false);
+        }
       }
       return;
     }
@@ -3006,25 +4198,25 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
     const cachedInbox = !force ? await readChatsInboxMirrorCache(inboxCacheKey, { sessionKey: cacheSessionKey, surface: cacheSurface, userId }) : null;
 
     if (loadRowsGateRef.current.key !== loadKey || inboxRequestSeqRef.current !== requestSeq) return;
-    if (!hasDbConfirmedInboxRef.current && cachedInbox?.rows?.length) {
+    if (cachedInbox) {
+      committedLoadKeysRef.current.add(loadKey);
       const hydratedRows = applyReadOverlay(cachedInbox.rows);
-      setRows(hydratedRows);
-      syncUnreadTotalFromRows(hydratedRows);
+      commitInboxRows(mainTab, hydratedRows);
       setInboxSyncState("hydrating");
       setHasMoreRows(cachedInbox.hasMoreRows);
       setRowCursor(cachedInbox.rowCursor);
       setVisibleCount(INBOX_FIRST_PAGE);
-    } else if (!silent) {
+    } else if (!silent && !hasVisibleRowsForInboxTab(mainTab, [...(inboxRowsByTabRef.current[mainTab] || []), ...rowsRef.current])) {
       setLoading(true);
     }
 
     setStatus(null);
-    setInboxSyncState((current) => current === "hydrating" ? current : "refreshing");
+    setInboxSyncState((current) => current === "fresh" || current === "error" ? "refreshing" : current);
     try {
       setVisibleCount(INBOX_FIRST_PAGE);
       const [baseRows, activeFriendRows] = await Promise.all([
-        fetchNativeChatInbox({ userId, accessToken, sessionKey, scope: scopeForTab(mainTab), onlyWithActivity: mainTab === "friends" ? false : null, limit: 80, force: true, forceDb: true }),
-        mainTab === "friends" ? fetchNativeChatInbox({ userId, accessToken, sessionKey, scope: "friends", onlyWithActivity: true, limit: INBOX_FIRST_PAGE, force: true, forceDb: true }) : Promise.resolve([] as NativeChatInboxRow[]),
+        fetchNativeChatInbox({ userId, accessToken, sessionKey, scope: scopeForTab(mainTab), onlyWithActivity: mainTab === "friends" ? false : null, limit: 80, force: force === true, forceDb: force === true }),
+        mainTab === "friends" ? fetchNativeChatInbox({ userId, accessToken, sessionKey, scope: "friends", onlyWithActivity: true, limit: INBOX_FIRST_PAGE, force: force === true, forceDb: force === true }) : Promise.resolve([] as NativeChatInboxRow[]),
       ]);
       const nextRows = mainTab === "friends"
         ? applyReadOverlay(dedupeDirectRowsByPeer([...baseRows, ...activeFriendRows]))
@@ -3041,9 +4233,8 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
         void writeChatsCache(chatsServiceTabProbeCacheKey(userId, sessionKey), { hasDialogues });
         if (hasDialogues) void markNativeServiceTabHasDialogues(userId);
       }
-      setRows(dbRows);
-      hasDbConfirmedInboxRef.current = true;
-      syncUnreadTotalFromRows(dbRows);
+      commitInboxRows(mainTab, dbRows);
+      committedLoadKeysRef.current.add(loadKey);
       setInboxSyncState("fresh");
       const conversationRows = mainTab === "friends" ? dbRows.filter((row) => !isMatchedRailRow(row, activeMatchedPeerIdsRef.current)) : dbRows;
       const cursorSource = activeFriendRows.length > 0 ? activeFriendRows : conversationRows;
@@ -3057,111 +4248,332 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
         rowCursor: nextRowCursor,
       }, { dbConfirmedAt: Date.now(), sessionKey: cacheSessionKey, surface: cacheSurface, userId });
     } catch (error) {
-      console.warn("[native.chats] load_rows_failed", error);
-      if (inboxRequestSeqRef.current === requestSeq) setInboxSyncState("error");
-      if (!silent) setStatus("Failed to load conversations. Pull to refresh.");
+        logNativeProtectedActionFailure("[native.chats] load_rows_failed", error);
+      if (loadRowsGateRef.current.key === loadKey && inboxRequestSeqRef.current === requestSeq) {
+        setInboxSyncState("error");
+        if (!silent) setStatus("Failed to load conversations. Pull to refresh.");
+      }
     } finally {
-      if (loadRowsGateRef.current.key === loadKey) loadRowsGateRef.current.inFlight = false;
-      if (!silent) setLoading(false);
-      setRefreshing(false);
+      if (loadRowsGateRef.current.key === loadKey && inboxRequestSeqRef.current === requestSeq) {
+        loadRowsGateRef.current.inFlight = false;
+        if (!silent) setLoading(false);
+        setRefreshing(false);
+      }
     }
-  }, [accessToken, activeDiscoverRequestKey, applyReadOverlay, effectiveTier, filterKey, filters, mainTab, sessionKey, syncUnreadTotalFromRows, topTab, userId, viewerGroupAnchor, viewerScope, viewerScopeResolved]);
+  }, [accessToken, activeChatsLoadKey, activeDiscoverDeckKey, applyReadOverlay, commitInboxRows, discoverAgeEligible, discoverLocationPermission.state, discoverLocationPermissionResolved, effectiveTier, filters, mainTab, sessionKey, topTab, userId, viewerGroupAnchor, viewerScope, viewerScopeKey, viewerScopeResolved]);
+
+  const handleEnableFriendsMatching = useCallback(async () => {
+    if (!userId || enablingFriendsMatching) return;
+    setEnablingFriendsMatching(true);
+    const previousPaused = friendsMatchingPaused;
+    setFriendsMatchingPaused(false); // optimistic — overlay clears immediately
+    try {
+      await setNativeFriendsMatchingEnabled(userId, true, accessToken);
+      haptic.success();
+      void loadRows({ force: true }); // refresh the deck now that the viewer is discoverable
+      const hintKey = `native-friends-matching-resume-hint:v1:${userId}`;
+      const shown = await readNativeDisplayCacheItem(hintKey);
+      if (!shown) {
+        setResumeMatchingHintOpen(true);
+        void AsyncStorage.setItem(hintKey, "1").catch(() => undefined);
+      }
+    } catch {
+      setFriendsMatchingPaused(previousPaused); // revert on failure
+      setStatus("Couldn't enable Friends Matching. Please try again.");
+    } finally {
+      setEnablingFriendsMatching(false);
+    }
+  }, [accessToken, enablingFriendsMatching, friendsMatchingPaused, loadRows, userId]);
 
   useEffect(() => {
+    if (!active || !userId) return;
+    if (committedLoadKeysRef.current.has(activeChatsLoadKey)) return;
+    void loadRows();
+  }, [active, activeChatsLoadKey, loadRows, userId]);
+
+  const resetExpiredDiscoveryCycle = useCallback(() => {
     if (!userId) return;
-    void loadRows({ silent: false });
+    const emptyPassedIds = new Set<string>();
+    passedDiscoveryIdsRef.current = emptyPassedIds;
+    setPassedDiscoveryIds(emptyPassedIds);
+    setDiscoveryCycleStartedAt(null);
+    setDiscoverySeenToday(0);
+    void AsyncStorage.removeItem(nativeDiscoveryPassedCycleStorageKey(userId));
+    void AsyncStorage.removeItem(nativeDiscoveryCycleStartedAtStorageKey(userId));
+    void loadRows({ force: true, silent: true });
   }, [loadRows, userId]);
 
   useEffect(() => {
-    if (topTab !== "discover") return;
+    if (!active || !userId || discoverAgeEligible !== true || !discoveryCycleStartedAt) return;
+    const startedAtMs = Date.parse(discoveryCycleStartedAt);
+    if (!Number.isFinite(startedAtMs)) {
+      resetExpiredDiscoveryCycle();
+      return;
+    }
+    const remainingMs = startedAtMs + 24 * 60 * 60 * 1000 - Date.now();
+    if (remainingMs <= 0) {
+      resetExpiredDiscoveryCycle();
+      return;
+    }
+    const timer = setTimeout(resetExpiredDiscoveryCycle, remainingMs);
+    return () => clearTimeout(timer);
+  }, [active, discoverAgeEligible, discoveryCycleStartedAt, resetExpiredDiscoveryCycle, userId]);
+
+  useEffect(() => {
+    if (!active || !userId || discoverAgeEligible !== true) return;
+    const refreshCycleState = () => {
+      void nativeExactTokenRpc("get_discovery_cycle_state", {}, accessToken).then(({ data, error }) => {
+        if (error) return;
+        const state = data && typeof data === "object" ? data as { cycle_started_at?: unknown; waves_used?: unknown } : {};
+        if (typeof state.cycle_started_at !== "string" || !nativeDiscoveryCycleIsActive(state.cycle_started_at)) {
+          if (discoveryCycleStartedAt) resetExpiredDiscoveryCycle();
+          return;
+        }
+        setDiscoveryCycleStartedAt(state.cycle_started_at);
+        void AsyncStorage.setItem(nativeDiscoveryCycleStartedAtStorageKey(userId), state.cycle_started_at);
+        setDiscoverySeenToday(Math.max(0, Number(state.waves_used || 0) || 0));
+      });
+    };
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") refreshCycleState();
+    });
+    return () => subscription.remove();
+  }, [accessToken, active, discoverAgeEligible, discoveryCycleStartedAt, resetExpiredDiscoveryCycle, userId]);
+
+  useEffect(() => {
+    const becameActive = active && !wasActiveRef.current;
+    wasActiveRef.current = active;
+    if (!active) {
+      Keyboard.dismiss();
+      setFilterOpen(false);
+      setGroupExploreSortOpen(false);
+      setPremiumTier(null);
+      setStarsExhaustedOpen(false);
+      setResumeMatchingHintOpen(false);
+      setConfirmStarTarget(null);
+      setMatchModal(null);
+      setProfileSheetUserId(null);
+      setCarerProfileOpen(false);
+      setInviteInboxOpen(false);
+      setPendingGroupInvitePrompt(null);
+      setGroupDetails(null);
+      setGroupManagement(null);
+      setGroupMemberReportTarget(null);
+      setPendingDeleteRow(null);
+      setCreateGroupOpen(false);
+      setJoinCodeOpen(false);
+      return;
+    }
+    if (!becameActive || !userId) return;
+    // Keep all three mounted panes exactly as the user left them. Realtime
+    // updates, mutations and explicit refresh own reconciliation.
+  }, [active, userId]);
+
+  useEffect(() => {
+    if (topTab !== "discover" && topTab !== "community") return;
     let active = true;
-    void getNativeForegroundLocationPermissionDetail().then((detail) => {
-      if (active) setDiscoverLocationPermission(detail);
-    }).catch(() => undefined);
+    let scopeRefreshInFlight = false;
+    const refreshScope = async (detail: NativeLocationPermissionDetail) => {
+      if (!userId || scopeRefreshInFlight) return;
+      scopeRefreshInFlight = true;
+      try {
+        // A transient failure here (RPC timeout, token mid-refresh right as the app
+        // foregrounds — both routine on an AppState "active" event) must not blank a
+        // scope that already resolved successfully. Losing it changes viewerScopeKey,
+        // which re-fires the Discover load with no lat/lng and no country and reads
+        // as "location_required" -- even though the OS permission is still granted --
+        // and the deck silently vanishes with no explanation and no cover shown, since
+        // the cover only renders for an actually denied permission. So: apply the new
+        // scope only on success; on failure, keep whatever scope is already resolved.
+        let scope: NativeViewerScope | null = null;
+        let resolved = true;
+        try {
+          scope = await resolveNativeViewerScope({ userId, accessToken, sessionKey, force: true });
+        } catch {
+          resolved = false;
+        }
+        if (active) {
+          const gainedLocation = discoverLocationPermissionResolved
+            && discoverLocationPermissionStateRef.current !== "granted"
+            && detail.state === "granted";
+          discoverLocationPermissionStateRef.current = detail.state;
+          if (resolved) {
+            if (gainedLocation) {
+              stableDiscoverTopCardRef.current = null;
+              setDiscoverProfiles([]);
+              setDiscoverLoadSettled(false);
+              setDiscoverSettledKey(null);
+            }
+            applyResolvedViewerScope(scope);
+          }
+          setDiscoverLocationPermission(detail);
+          setDiscoverLocationPermissionResolved(true);
+          setViewerScopeResolved((current) => current || resolved);
+        }
+      } finally {
+        scopeRefreshInFlight = false;
+      }
+    };
+    const applyPermission = (detail: NativeLocationPermissionDetail) => {
+      if (!active) return;
+      setDiscoverLocationPermission(detail);
+    };
+    const unsubscribePermission = subscribeNativeLocationPermissionDetail(applyPermission);
+    void getNativeForegroundLocationPermissionDetail().then((detail) => refreshScope(detail)).catch(() => undefined);
     const subscription = AppState.addEventListener("change", (state) => {
       if (state !== "active") return;
-      void getNativeForegroundLocationPermissionDetail().then((detail) => {
-        setDiscoverLocationPermission(detail);
-      }).catch(() => undefined);
+      void getNativeForegroundLocationPermissionDetail().then((detail) => refreshScope(detail)).catch(() => undefined);
     });
     return () => {
       active = false;
+      unsubscribePermission();
       subscription.remove();
     };
-  }, [loadRows, topTab]);
+  }, [accessToken, applyResolvedViewerScope, discoverLocationPermissionResolved, sessionKey, topTab, userId]);
+
+  // Refill only the unseen tail. The committed prefix remains immutable, so this
+  // cannot repaint the visible card or disturb an active swipe.
+  const discoverTailRefillKeyRef = useRef("");
+  useEffect(() => {
+    if (topTab !== "discover" || discoverAgeEligible !== true) {
+      discoverTailRefillKeyRef.current = "";
+      return;
+    }
+    if (!shouldRefillNativeDiscoveryTail({ deckLength: discoverProfiles.length, loadSettled: discoverLoadSettled, loading, visible: true })) return;
+    const refillKey = nativeDiscoveryTailRefillAttemptKey(discoveryCycleStartedAt, discoverProfiles.map((profile) => profile.id));
+    if (discoverTailRefillKeyRef.current === refillKey) return;
+    discoverTailRefillKeyRef.current = refillKey;
+    void loadRows({ force: true, silent: true });
+  }, [discoverAgeEligible, discoverLoadSettled, discoverProfiles, discoveryCycleStartedAt, loadRows, loading, topTab]);
 
   const handleDiscoverEnableLocation = useCallback(async () => {
     if (discoverLocationPermission.canAskAgain) {
       const detail = await requestNativeForegroundLocationPermissionDetail();
+      const gainedLocation = discoverLocationPermissionResolved
+        && discoverLocationPermissionStateRef.current !== "granted"
+        && detail.state === "granted";
+      discoverLocationPermissionStateRef.current = detail.state;
+      if (gainedLocation) {
+        stableDiscoverTopCardRef.current = null;
+        setDiscoverProfiles([]);
+        setDiscoverLoadSettled(false);
+        setDiscoverSettledKey(null);
+      }
       setDiscoverLocationPermission(detail);
-      if (detail.state === "granted") {
-        await loadRows({ force: true, silent: true });
-        return;
+      setDiscoverLocationPermissionResolved(true);
+      // Same rule as the AppState refresh above: a resolve failure must not blank an
+      // already-good scope, or the deck goes dark with the permission still granted.
+      try {
+        const scope = await resolveNativeViewerScope({ userId, accessToken, sessionKey, force: true });
+        applyResolvedViewerScope(scope);
+        setViewerScopeResolved(true);
+      } catch {
+        // Leave any already-resolved scope in place; a bare permission grant with no
+        // prior scope still lets the effect above retry rather than hanging silently.
       }
       return;
     }
-    await openNativeLocationSettings();
-  }, [discoverLocationPermission.canAskAgain, loadRows]);
+    await openNativeAppSettings();
+  }, [accessToken, applyResolvedViewerScope, discoverLocationPermission.canAskAgain, discoverLocationPermissionResolved, sessionKey, userId]);
 
-	  const refreshUnreadTotal = useCallback(async () => {
-	    if (!userId) {
-	      setUnreadTotal(0);
-	      return;
-	    }
-    const requestVersion = unreadTotalVersionRef.current;
-	    try {
-	      const total = await fetchNativeChatUnreadTotal(userId, { accessToken, sessionKey, force: true });
-      const overlayTotal = Array.from(readOverlayRef.current.values()).reduce((sum, count) => sum + Math.max(0, count), 0);
-	      if (unreadTotalVersionRef.current === requestVersion) setUnreadTotal(Math.max(0, total - overlayTotal));
+  const refreshInboxRowsByChatIds = useCallback(async (chatIds: string[]) => {
+    if (!userId || chatIds.length === 0) return false;
+    const uniqueChatIds = Array.from(new Set(chatIds.map((id) => String(id || "").trim()).filter(Boolean)));
+    if (uniqueChatIds.length === 0) return false;
+    try {
+      const freshRows = await fetchNativeChatInbox({
+        userId,
+        accessToken,
+        sessionKey,
+        scope: "all",
+        onlyWithActivity: null,
+        limit: Math.max(uniqueChatIds.length, INBOX_FIRST_PAGE),
+        chatIds: uniqueChatIds,
+        force: true,
+        forceDb: true,
+      });
+      if (freshRows.length === 0) return false;
+      const touchedTabs = new Set<Exclude<NativeChatsTab, "discover">>();
+      for (const row of freshRows) {
+        const tab: Exclude<NativeChatsTab, "discover"> = isCareInboxRow(row)
+          ? "service"
+          : row.roomType === "group"
+            ? "groups"
+            : "friends";
+        touchedTabs.add(tab);
+        const existing = inboxRowsByTabRef.current[tab] || [];
+        const byId = new Map(existing.map((item) => [item.chatId, item]));
+        byId.set(row.chatId, row);
+        const nextRows = Array.from(byId.values()).sort((a, b) => {
+          const bTime = Date.parse(b.activityTs || b.lastMessageAt || "");
+          const aTime = Date.parse(a.activityTs || a.lastMessageAt || "");
+          return (Number.isFinite(bTime) ? bTime : 0) - (Number.isFinite(aTime) ? aTime : 0);
+        });
+        inboxRowsByTabRef.current[tab] = nextRows;
+        const cacheSessionKey = sessionKey || `${userId}:0`;
+        void writeChatsInboxMirrorCache(
+          chatsInboxRowsCacheKey(userId, sessionKey, tab),
+          { rows: nextRows.slice(0, 40), hasMoreRows: tab === "friends" && nextRows.length > INBOX_FIRST_PAGE, rowCursor: nextRows[nextRows.length - 1]?.activityTs || nextRows[nextRows.length - 1]?.lastMessageAt || null },
+          { dbConfirmedAt: Date.now(), sessionKey: cacheSessionKey, surface: `native_chats:${tab}`, userId },
+        );
+      }
+      if (touchedTabs.has("service")) {
+        const serviceRows = inboxRowsByTabRef.current.service || [];
+        const hasDialogues = serviceRows.some(isCareInboxRow);
+        setServiceTabHasDialogues(hasDialogues);
+        void writeChatsCache(chatsServiceTabProbeCacheKey(userId, sessionKey), { hasDialogues });
+        if (hasDialogues) void markNativeServiceTabHasDialogues(userId);
+      }
+      const activeTab = mainTabRef.current;
+      if (topTabRef.current === "chats" && touchedTabs.has(activeTab)) {
+        const nextRows = applyReadOverlay(inboxRowsByTabRef.current[activeTab] || []);
+        commitInboxRows(activeTab, nextRows);
+        setInboxSyncState("fresh");
+        setLoading(false);
+      }
+      return true;
     } catch (error) {
-      console.warn("[native.chats] unread_total_failed", error);
+        logNativeProtectedActionFailure("[native.chats] targeted_inbox_refresh_failed", error);
+      return false;
     }
-  }, [accessToken, sessionKey, userId]);
-
-  useEffect(() => {
-    void refreshUnreadTotal();
-  }, [refreshUnreadTotal]);
+  }, [accessToken, applyReadOverlay, commitInboxRows, sessionKey, userId]);
 
   useEffect(() => {
     if (!userId) return;
-    const refresh = () => {
+    const refresh = (payload?: unknown, options?: { fullFallback?: boolean }) => {
       if (realtimeRefreshTimerRef.current) clearTimeout(realtimeRefreshTimerRef.current);
       realtimeRefreshTimerRef.current = setTimeout(() => {
         realtimeRefreshTimerRef.current = null;
         void invalidateNativeChatReadCaches(userId);
         void refreshUnreadTotal();
-        void loadRows({ force: true, silent: true });
+        if (options?.fullFallback) void loadRows({ force: true, silent: true });
       }, 450);
     };
     const channelName = `native-chats-realtime-${userId}`;
-    const handle = createSingleRealtimeChannel(channelName, (baseChannel) => {
-      let channel = baseChannel
+    const handle = createSinglePrivateBroadcastChannel(
+      channelName,
+      `user:${userId}:inbox`,
+      (payload) => refresh(payload, { fullFallback: true }),
+      (status) => { if (status === "SUBSCRIBED") refresh(undefined, { fullFallback: true }); },
+    );
+    const filteredHandle = createSingleRealtimeChannel(`${channelName}:filtered`, (channel) => channel
         .on("postgres_changes", { event: "*", schema: "public", table: "message_reads", filter: `user_id=eq.${userId}` }, refresh)
-        .on("postgres_changes", { event: "*", schema: "public", table: "service_chats", filter: `requester_id=eq.${userId}` }, refresh)
-        .on("postgres_changes", { event: "*", schema: "public", table: "service_chats", filter: `provider_id=eq.${userId}` }, refresh)
-        .on("postgres_changes", { event: "*", schema: "public", table: "group_chat_invites", filter: `invitee_user_id=eq.${userId}` }, refresh)
-        .on("postgres_changes", { event: "*", schema: "public", table: "group_join_requests", filter: `user_id=eq.${userId}` }, refresh)
-        .on("postgres_changes", { event: "*", schema: "public", table: "chat_room_members", filter: `user_id=eq.${userId}` }, refresh);
-
-      for (const chatId of realtimeVisibleChatIds) {
-        channel = channel.on("postgres_changes", { event: "*", schema: "public", table: "chat_messages", filter: `chat_id=eq.${chatId}` }, refresh);
-      }
-      for (const groupId of realtimeVisibleGroupIds) {
-        channel = channel.on("postgres_changes", { event: "*", schema: "public", table: "group_join_requests", filter: `chat_id=eq.${groupId}` }, refresh);
-      }
-      return channel;
-    });
+        .on("postgres_changes", { event: "*", schema: "public", table: "service_chats", filter: `requester_id=eq.${userId}` }, (payload) => refresh(payload, { fullFallback: true }))
+        .on("postgres_changes", { event: "*", schema: "public", table: "service_chats", filter: `provider_id=eq.${userId}` }, (payload) => refresh(payload, { fullFallback: true }))
+        .on("postgres_changes", { event: "*", schema: "public", table: "group_chat_invites", filter: `invitee_user_id=eq.${userId}` }, (payload) => refresh(payload, { fullFallback: true })));
     return () => {
       if (realtimeRefreshTimerRef.current) {
         clearTimeout(realtimeRefreshTimerRef.current);
         realtimeRefreshTimerRef.current = null;
       }
       void handle.dispose();
+      void filteredHandle.dispose();
     };
-  }, [loadRows, realtimeVisibleChatIds, realtimeVisibleChatIdsKey, realtimeVisibleGroupIds, realtimeVisibleGroupIdsKey, refreshUnreadTotal, userId]);
+  }, [loadRows, refreshUnreadTotal, userId]);
 
   const handleRefresh = useCallback(() => {
     setRefreshing(true);
+    setContactFriendRequestsRefreshKey((current) => current + 1);
     void loadRows({ force: true, silent: true });
   }, [loadRows]);
 
@@ -3169,12 +4581,12 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
     if (!userId || topTab !== "chats") return;
     const subscription = AppState.addEventListener("change", (state) => {
       if (state === "active") {
-        void invalidateNativeChatReadCaches(userId);
-        void loadRows({ force: true, silent: true });
+        // Resubscription/realtime events will patch changed rows. Foregrounding
+        // alone must not discard or reload a committed inbox.
       }
     });
     return () => subscription.remove();
-  }, [loadRows, topTab, userId]);
+  }, [topTab, userId]);
 
   const handleTopTabPress = useCallback((tab: NativeChatsTopTab) => {
     haptic.selectTab();
@@ -3185,14 +4597,14 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
   // Bottom edge-swipe: flick left/right on the lower screen strip to cycle Discover → Community → Chats.
   // Stops at the ends (no wrap). Vertical motion and taps pass through unchanged.
   const cycleTopTab = useCallback((direction: 1 | -1) => {
-    const order: NativeChatsTopTab[] = ["discover", "community", "chats"];
+    const order: NativeChatsTopTab[] = discoverAgeEligible === false ? ["community", "chats"] : ["discover", "community", "chats"];
     const currentIndex = order.indexOf(topTab);
     const nextIndex = currentIndex + direction;
     if (nextIndex < 0 || nextIndex >= order.length) return;
     haptic.selectTab();
     setTopTab(order[nextIndex]);
     setStatus(null);
-  }, [topTab]);
+  }, [discoverAgeEligible, topTab]);
   const cycleTopTabRef = useRef(cycleTopTab);
   useEffect(() => { cycleTopTabRef.current = cycleTopTab; }, [cycleTopTab]);
   // JS-side bridge so the gesture worklet can dispatch via runOnJS without recreating each render.
@@ -3222,57 +4634,95 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
   const communityTabOpacity = useSharedValue(topTab === "community" ? 1 : 0);
   const chatsTabOpacity = useSharedValue(topTab === "chats" ? 1 : 0);
   useEffect(() => {
-    discoverTabOpacity.value = withTiming(topTab === "discover" ? 1 : 0, { duration: 100 });
-    communityTabOpacity.value = withTiming(topTab === "community" ? 1 : 0, { duration: 100 });
-    chatsTabOpacity.value = withTiming(topTab === "chats" ? 1 : 0, { duration: 100 });
+    // Only the incoming tab fades in; outgoing tabs hide instantly. A cross-fade left
+    // two full-screen tab contents visible at once mid-transition (e.g. the chats empty
+    // state ghosting over the Discover deck).
+    discoverTabOpacity.value = topTab === "discover" ? withTiming(1, { duration: 140 }) : 0;
+    communityTabOpacity.value = topTab === "community" ? withTiming(1, { duration: 140 }) : 0;
+    chatsTabOpacity.value = topTab === "chats" ? withTiming(1, { duration: 140 }) : 0;
   }, [topTab, discoverTabOpacity, communityTabOpacity, chatsTabOpacity]);
   const discoverTabStyle = useAnimatedStyle(() => ({ opacity: discoverTabOpacity.value }));
   const communityTabStyle = useAnimatedStyle(() => ({ opacity: communityTabOpacity.value }));
   const chatsTabStyle = useAnimatedStyle(() => ({ opacity: chatsTabOpacity.value }));
 
-  const handleMainTabPress = useCallback((tab: Exclude<NativeChatsTab, "discover">) => {
-    haptic.selectTab();
-    setMainTab(tab);
+  const hydrateMainTabFromPersistentCache = useCallback(async (tab: Exclude<NativeChatsTab, "discover">) => {
+    if (!userId) return;
+    const cacheSessionKey = sessionKey || `${userId}:0`;
+    const cachedInbox = await readChatsInboxMirrorCache(
+      chatsInboxRowsCacheKey(userId, sessionKey, tab),
+      { sessionKey: cacheSessionKey, surface: `native_chats:${tab}`, userId },
+    );
+    if (!cachedInbox) return;
+    if (topTabRef.current !== "chats" || mainTabRef.current !== tab) return;
+    const hydratedRows = applyReadOverlay(cachedInbox.rows);
+    commitInboxRows(tab, hydratedRows);
+    setHasMoreRows(cachedInbox.hasMoreRows);
+    setRowCursor(cachedInbox.rowCursor);
+    setVisibleCount(INBOX_FIRST_PAGE);
+    setInboxSyncState("hydrating");
+    setLoading(false);
+  }, [applyReadOverlay, commitInboxRows, sessionKey, userId]);
+
+  const activateMainTab = useCallback((tab: Exclude<NativeChatsTab, "discover">, options?: { haptic?: boolean }) => {
+    const resolvedTab = tab === "service" && !careMarketIsActive ? "friends" : tab;
+    if (options?.haptic) haptic.selectTab();
+    mainTabRef.current = resolvedTab;
+    writeNativeChatsLastTabHandoff({ sessionKey, tab: resolvedTab, userId });
+    setSearchQuery("");
+    setSearchResultRows(null);
+    const hasMemoryRowsForTab = Object.prototype.hasOwnProperty.call(inboxRowsByTabRef.current, resolvedTab);
+    const memoryRows = inboxRowsByTabRef.current[resolvedTab] || [];
+    if (hasMemoryRowsForTab) {
+      const hydratedRows = applyReadOverlay(memoryRows);
+      setRows(hydratedRows);
+      setInboxSyncState("fresh");
+      setLoading(false);
+    } else {
+      // No cached rows for this tab yet (e.g. route-driven return from a Care chat
+      // on a fresh mount). Do not leave the previous tab's rows mounted under the
+      // new tab filter: that renders as a blank pane until the DB read returns.
+      setInboxSyncState((current) => (current === "fresh" || current === "error" || current === "idle" ? "hydrating" : current));
+      setLoading(true);
+      void hydrateMainTabFromPersistentCache(resolvedTab);
+    }
+    setMainTab(resolvedTab);
     setStatus(null);
-  }, []);
+  }, [applyReadOverlay, careMarketIsActive, hydrateMainTabFromPersistentCache, sessionKey, userId]);
+
+  useEffect(() => {
+    const requestedTopTab = parseInitialTopTab(search);
+    const nextTopTab = requestedTopTab === "discover" && discoverAgeEligible === false ? "chats" : requestedTopTab;
+    topTabRef.current = nextTopTab;
+    setTopTab(nextTopTab);
+    activateMainTab(parseInitialMainTab(search));
+    setRouteGroupDetailId(parseInitialGroupDetailId(search));
+    setRouteServiceRoomId(parseInitialServiceRoomId(search));
+    const joinCode = parseInitialJoinCode(search);
+    if (joinCode) {
+      setGroupCodeDraft(joinCode);
+      setJoinCodeOpen(true);
+    }
+  }, [activateMainTab, discoverAgeEligible, search]);
+
+  const handleMainTabPress = useCallback((tab: Exclude<NativeChatsTab, "discover">) => {
+    activateMainTab(tab, { haptic: true });
+  }, [activateMainTab]);
 
   const handleOpenRow = useCallback((row: NativeChatInboxRow) => {
     haptic.toggleControl();
 
     const roomId = String(row.chatId || "").trim();
-    if (!roomId) {
-      setStatus("Unable to open conversation right now.");
-      return;
-    }
-
-    if (row.unreadCount > 0) readOverlayRef.current.set(roomId, Math.max(row.unreadCount, readOverlayRef.current.get(roomId) || 0));
-    setRows((current) => current.map((item) => item.chatId === roomId ? { ...item, unreadCount: 0 } : item));
-    unreadTotalVersionRef.current += 1;
-    setUnreadTotal((current) => Math.max(0, current - Math.max(0, row.unreadCount)));
-    if (userId) {
-      void invalidateNativeChatReadCaches(userId);
-      void markNativeChatRoomRead({ roomId, userId, accessToken })
-        .then(() => {
-          void refreshUnreadTotal();
-        })
-        .catch((error) => {
-          console.warn("[native.chats] mark_read_open_failed", error);
-          void refreshUnreadTotal();
-        });
-    }
-
+    writeNativeChatsInboxHandoff({ rows: visibleRows.length > 0 ? visibleRows : rowsRef.current, sessionKey, tab: mainTab, userId });
+    writeNativeChatSelectedRowHandoff({ row, sessionKey, userId });
     const name = displayName(row);
     const unreadParam = `&unread=${Math.max(0, row.unreadCount)}`;
 
     if (row.roomType === "group") {
+      if (!roomId) {
+        setStatus("Unable to open conversation right now.");
+        return;
+      }
       onNavigate(appendReturnTo(`/chat-dialogue?room=${encodeURIComponent(roomId)}&name=${encodeURIComponent(name)}&joined=1${unreadParam}`, "/chats?tab=groups"));
-      return;
-    }
-
-    if (isTeamHuddleRow(row)) {
-      const avatarParam = row.peerAvatarUrl ? `&avatar=${encodeURIComponent(row.peerAvatarUrl)}` : "";
-      const peerParam = row.peerUserId ? `&with=${encodeURIComponent(row.peerUserId)}` : "";
-      onNavigate(appendReturnTo(`/chat-dialogue?room=${encodeURIComponent(roomId)}&name=${encodeURIComponent(name)}${peerParam}${unreadParam}${avatarParam}`, "/chats?tab=service"));
       return;
     }
 
@@ -3282,12 +4732,9 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
       const detail = error && typeof error === "object" && "message" in error
         ? String((error as { message?: unknown }).message || "")
         : "";
-      readOverlayRef.current.delete(roomId);
-      setRows((current) => current.map((item) => item.chatId === roomId ? { ...item, unreadCount: row.unreadCount } : item));
-      setUnreadTotal((current) => current + Math.max(0, row.unreadCount));
       setStatus(detail ? `Unable to open conversation right now: ${detail}` : "Unable to open conversation right now.");
     });
-  }, [accessToken, onNavigate, refreshUnreadTotal, userId]);
+  }, [accessToken, mainTab, onNavigate, sessionKey, userId, visibleRows]);
 
   const openCarerProfile = useCallback(async (providerUserId: string) => {
     if (!userId) return;
@@ -3299,7 +4746,7 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
     try {
       const provider = await fetchNativeServiceProviderDetail({ userId, accessToken, sessionKey, providerUserId, force: true });
       setCarerProfile(provider);
-      void incrementNativeServiceProviderView(providerUserId, userId, accessToken).catch(() => undefined);
+      void incrementNativeServiceProviderView(providerUserId, userId, { accessToken, sessionKey }).catch(() => undefined);
     } catch {
       setCarerProfileError("Unable to load provider profile.");
     } finally {
@@ -3311,6 +4758,16 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
     if (!row.peerUserId) return;
     if (isNativeTeamHuddleIdentity(displayName(row), row.peerSocialId)) return;
     haptic.toggleControl();
+    setProfileSheetFallbackData({
+      id: row.peerUserId,
+      display_name: displayName(row),
+      avatar_url: row.peerAvatarUrl || row.avatarUrl,
+      is_verified: row.peerIsVerified,
+      social_id: row.peerSocialId,
+      availability_status: row.peerAvailabilityLabel ? [row.peerAvailabilityLabel] : [],
+      updated_at: row.activityTs || row.lastMessageAt,
+      last_active_at: row.activityTs || row.lastMessageAt,
+    });
     setProfileSheetSource("other");
     setProfileSheetUserId(row.peerUserId);
   }, []);
@@ -3380,6 +4837,29 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
   }, [friendsConversationRowCount, handleLoadMore, hasMoreRows, mainTab, rows.length, searchResultRows, visibleRows.length]);
 
   const openExploreGroup = useCallback((group: NativeExploreGroup) => {
+    if (group.joined) {
+      const row = buildCreatedGroupInboxRow({
+        avatarUrl: group.avatarUrl,
+        chatId: group.id,
+        createdAt: group.createdAt || new Date().toISOString(),
+        createdBy: group.createdBy || "",
+        description: group.description,
+        joinMethod: group.joinMethod === "instant" ? "instant" : "request",
+        locationCountry: group.locationCountry,
+        locationLabel: group.locationLabel,
+        memberCount: group.memberCount,
+        name: group.name,
+        petFocus: group.petFocus,
+        visibility: group.visibility === "private" ? "private" : "public",
+      });
+      setGroupDetails(row);
+      setGroupNameEdit(row.chatName || "Group");
+      setGroupLocationEdit(row.locationLabel || "");
+      setGroupPetFocusEdit(row.petFocus || []);
+      setGroupDescriptionEdit(row.description || "");
+      setGroupDetailsErrors({});
+      return;
+    }
     setGroupDetails(group);
     setGroupNameEdit(group.name || "");
     setGroupLocationEdit(group.locationLabel || "");
@@ -3424,6 +4904,13 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
     const target = rows.find((row) => row.chatId === routeGroupDetailId && row.roomType === "group");
     if (target) {
       openManagedGroup(target);
+      setRouteGroupDetailId(null);
+      return;
+    }
+    const exploreTarget = [...invitedExploreGroups, ...exploreGroups].find((group) => group.id === routeGroupDetailId);
+    if (exploreTarget) {
+      communityScrollRef.current?.scrollTo({ y: 0, animated: false });
+      openExploreGroupOrInvitePrompt(exploreTarget);
       setRouteGroupDetailId(null);
       return;
     }
@@ -3477,7 +4964,7 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
     return () => {
       cancelled = true;
     };
-  }, [accessToken, loading, openManagedGroup, routeGroupDetailId, rows]);
+  }, [accessToken, exploreGroups, invitedExploreGroups, loading, openExploreGroupOrInvitePrompt, openManagedGroup, routeGroupDetailId, rows]);
 
   const openGroupMemberProfile = useCallback((memberId: string) => {
     if (groupDetails && "invitePending" in groupDetails) {
@@ -3485,6 +4972,7 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
       setTopTab("community");
     }
     setGroupDetails(null);
+    setProfileSheetFallbackData(null);
     setProfileSheetSource("other");
     setProfileSheetUserId(memberId);
   }, [groupDetails]);
@@ -3511,7 +4999,6 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
         setGroupManagement(cached);
         setGroupManagementLoading(false);
         setGroupManagementError(false);
-        return;
       }
 
       setGroupManagementLoading(true);
@@ -3526,7 +5013,7 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
       if (cacheKey) void writeChatsCache(cacheKey, snapshot);
       setGroupManagementLoading(false);
     })().catch((error) => {
-      console.warn("[native.chats] group_details_members_failed", error);
+        logNativeProtectedActionFailure("[native.chats] group_details_members_failed", error);
       if (!cancelled) {
         setGroupManagement(null);
         setGroupManagementError(true);
@@ -3539,15 +5026,22 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
 
   const refreshGroupManagement = useCallback(async (chatId: string) => {
     try {
-      setGroupManagement(await fetchNativeGroupManagementSnapshot(chatId, { accessToken }));
+      const snapshot = await fetchNativeGroupManagementSnapshot(chatId, { accessToken });
+      setGroupManagement(snapshot);
+      if (userId) void writeChatsCache(chatsGroupDetailsCacheKey(userId, chatId, false), snapshot);
     } catch {
       setStatus("Unable to refresh group management.");
     }
-  }, [accessToken]);
+  }, [accessToken, userId]);
 
   const handleJoinExploreGroup = useCallback(async (group: NativeExploreGroup) => {
     if (!userId) return;
     try {
+      if (group.joined) {
+        setGroupDetails(null);
+        onNavigate(appendReturnTo(`/chat-dialogue?room=${encodeURIComponent(group.id)}&name=${encodeURIComponent(group.name)}&joined=1`, "/chats?tab=groups"));
+        return;
+      }
       if (group.invitePending) {
         await acceptNativeGroupInvite({ chatId: group.id, inviteId: group.inviteId, accessToken });
         setInvitedExploreGroups((current) => current.filter((item) => item.id !== group.id));
@@ -3559,26 +5053,15 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
         onNavigate(appendReturnTo(`/chat-dialogue?room=${encodeURIComponent(group.id)}&name=${encodeURIComponent(group.name)}&joined=1`, "/chats?tab=groups"));
         return;
       } else if (group.joinMethod === "instant") {
-        await joinNativePublicGroup({ userId, chatId: group.id, accessToken });
+        await joinNativePublicGroup({ userId, chatId: group.id, accessToken, sessionKey });
         if (group.createdBy && group.createdBy !== userId) {
-          const joinerName = selfMatchProfile.name || "Someone";
-          void enqueueNativeChatNotification({
-            userId: group.createdBy,
-            kind: "group_joined",
-            title: group.name,
-            body: `${joinerName} just joined your group! 👋 Say Hello!`,
-            href: `/chat-dialogue?room=${encodeURIComponent(group.id)}&name=${encodeURIComponent(group.name)}`,
-            data: {
-              kind: "group_joined",
-              chat_id: group.id,
-              group_name: group.name,
-              joined_user_id: userId,
-            },
-          });
+          void nativeExactTokenRpc("enqueue_native_group_joined_notification", {
+            p_chat_id: group.id,
+          }, accessToken).catch(() => undefined);
         }
         haptic.success(); // CD5: confirm instant join
       } else {
-        await requestNativeGroupJoin({ userId, chatId: group.id, accessToken });
+        await requestNativeGroupJoin({ userId, chatId: group.id, accessToken, sessionKey });
         setExploreGroups((current) => current.map((item) => item.id === group.id ? { ...item, requested: true } : item));
         setGroupDetails((current) => current && "invitePending" in current && current.id === group.id ? { ...current, requested: true } : current);
         setStatus("Request sent.");
@@ -3592,19 +5075,19 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
       haptic.error();
       setStatus("Unable to join group right now.");
     }
-  }, [accessToken, enqueueNativeChatNotification, loadRows, onNavigate, selfMatchProfile.name, userId]);
+  }, [accessToken, loadRows, onNavigate, sessionKey, userId]);
 
   const handleDeclineExploreInvite = useCallback(async (group: NativeExploreGroup) => {
     if (!userId) return;
     try {
-      await declineNativeGroupInvite({ chatId: group.id, inviteId: group.inviteId, userId, accessToken });
+      await declineNativeGroupInvite({ chatId: group.id, inviteId: group.inviteId, userId, accessToken, sessionKey });
       setInvitedExploreGroups((current) => current.filter((item) => item.id !== group.id));
       setGroupDetails(null);
       await loadRows({ force: true, silent: true });
     } catch {
       setStatus("Unable to decline invite right now.");
     }
-  }, [accessToken, loadRows, userId]);
+  }, [accessToken, loadRows, sessionKey, userId]);
 
   const confirmInviteInboxDecisions = useCallback(async (decisions: Record<string, "accept" | "decline">) => {
     if (!userId) return;
@@ -3615,18 +5098,18 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
       if (decision === "accept") {
         await acceptNativeGroupInvite({ chatId: group.id, inviteId: group.inviteId, accessToken });
       } else {
-        await declineNativeGroupInvite({ chatId: group.id, inviteId: group.inviteId, userId, accessToken });
+        await declineNativeGroupInvite({ chatId: group.id, inviteId: group.inviteId, userId, accessToken, sessionKey });
       }
     }
     setInviteInboxOpen(false);
     setGroupDetails(null);
     await loadRows({ force: true, silent: true });
-  }, [accessToken, invitedExploreGroups, loadRows, userId]);
+  }, [accessToken, invitedExploreGroups, loadRows, sessionKey, userId]);
 
   const handleJoinCode = useCallback(async () => {
     if (!userId) return;
     try {
-      const joined = await joinNativeGroupByCode({ userId, code: groupCodeDraft, accessToken });
+      const joined = await joinNativeGroupByCode({ userId, code: groupCodeDraft, accessToken, sessionKey });
       setJoinCodeOpen(false);
       setGroupCodeDraft("");
       await loadRows({ force: true, silent: true });
@@ -3634,7 +5117,7 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
     } catch {
       setStatus("Code not found or group could not be joined.");
     }
-  }, [accessToken, groupCodeDraft, loadRows, onNavigate, userId]);
+  }, [accessToken, groupCodeDraft, loadRows, onNavigate, sessionKey, userId]);
 
   const resetCreateGroupDrafts = useCallback(() => {
     setGroupNameDraft("");
@@ -3692,6 +5175,7 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
         petFocus: groupPetFocusDraft,
 	        inviteUserIds: groupInviteIds,
 	        accessToken,
+	        sessionKey,
 	      });
       let avatarUrl: string | null = null;
       if (groupCoverDraft) {
@@ -3714,11 +5198,47 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
             cleanupResult,
           });
         }
+	      }
+	      setCreateGroupOpen(false);
+	      resetCreateGroupDrafts();
+      const createdAt = new Date().toISOString();
+      const createdRow = buildCreatedGroupInboxRow({
+        avatarUrl,
+        chatId: created.chatId,
+        createdAt,
+        createdBy: userId,
+        description: groupDescriptionDraft.trim() || null,
+        joinMethod: groupJoinMethodDraft,
+        locationCountry: groupCountryDraft,
+        locationLabel: groupLocationDraft.trim() || null,
+        name: created.name,
+        petFocus: groupPetFocusDraft,
+        visibility: groupVisibilityDraft,
+      });
+      setRows((current) => [createdRow, ...current.filter((row) => row.chatId !== created.chatId)]);
+      if (groupVisibilityDraft === "public") {
+        const joinedExploreGroup = nativeInboxGroupToExploreGroup(createdRow);
+        setExploreGroups((current) => [joinedExploreGroup, ...current.filter((group) => group.id !== created.chatId)]);
       }
-      setCreateGroupOpen(false);
-      resetCreateGroupDrafts();
-      void loadRows({ force: true, silent: true }).catch((error) => console.warn("[native.chats] post_create_group_refresh_failed", error));
-      onNavigate(appendReturnTo(`/chat-dialogue?room=${encodeURIComponent(created.chatId)}&name=${encodeURIComponent(created.name)}`, "/chats?tab=groups"));
+      void patchCachedNativeChatInboxGroupRows({
+        chatId: created.chatId,
+        fallbackRow: createdRow,
+        patch: {
+          avatarUrl,
+          chatName: created.name,
+        },
+        sessionKey,
+        userId,
+      });
+      void patchNativeChatsGroupCaches(userId, created.chatId, { avatarUrl, chatName: created.name, name: created.name }, groupVisibilityDraft === "public" ? nativeInboxGroupToExploreGroup(createdRow) : null);
+      void fetchNativeChatInbox({ userId, accessToken, sessionKey, scope: "groups", onlyWithActivity: null, limit: 80, force: true, forceDb: true })
+        .then((nextRows) => setRows((current) => {
+          const byId = new Map<string, NativeChatInboxRow>();
+          [...nextRows, ...current].forEach((row) => byId.set(row.chatId, row));
+          return Array.from(byId.values()).sort((left, right) => chatRowActivityValue(right) - chatRowActivityValue(left));
+        }))
+        .catch((error) => logNativeProtectedActionFailure("[native.chats] post_create_group_inbox_refresh_failed", error));
+      onNavigate(appendReturnTo(`/chat-dialogue?room=${encodeURIComponent(created.chatId)}&name=${encodeURIComponent(created.name)}&joined=1`, "/chats?tab=groups"));
     } catch (error) {
       logNativeProtectedActionFailure("[native.chats] create_group_failed", error);
       const message = error instanceof Error ? error.message : String(error || "");
@@ -3727,49 +5247,43 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
     } finally {
       setGroupCreating(false);
     }
-  }, [accessToken, groupCountryDraft, groupCoverDraft, groupCreating, groupDescriptionDraft, groupInviteIds, groupJoinMethodDraft, groupLocationDraft, groupNameDraft, groupPetFocusDraft, groupVisibilityDraft, loadRows, onNavigate, resetCreateGroupDrafts, selfVerified, userId]);
+  }, [accessToken, groupCountryDraft, groupCoverDraft, groupCreating, groupDescriptionDraft, groupInviteIds, groupJoinMethodDraft, groupLocationDraft, groupNameDraft, groupPetFocusDraft, groupVisibilityDraft, onNavigate, resetCreateGroupDrafts, selfVerified, sessionKey, userId]);
 
+  // Pick → crop in one tap, using the shared non-blocking picker (PHPicker needs
+  // no permission grant), then hand straight to the 16:9 cover cropper.
   const pickGroupCover = useCallback(async () => {
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) return;
-    const result = await ImagePicker.launchImageLibraryAsync({
-      allowsMultipleSelection: false,
-      mediaTypes: ["images"],
-      preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
-      quality: 0.86,
-    });
-    if (result.canceled || !result.assets[0]) return;
-    const asset = result.assets[0];
-    setGroupCoverDraft({
-      uri: asset.uri,
-      name: asset.fileName || `group-cover-${Date.now()}.jpg`,
-      mime: asset.mimeType || "image/jpeg",
-      size: asset.fileSize ?? null,
-      height: asset.height ?? null,
-      width: asset.width ?? null,
+    const picked = await pickNativeProfilePhoto({ soloAspect: "16:9" });
+    const asset = picked?.asset;
+    if (!asset?.uri || !asset.width || !asset.height) return;
+    setGroupCoverCropTarget({
+      asset: {
+        uri: asset.uri,
+        fileName: asset.fileName ?? null,
+        fileSize: asset.fileSize ?? null,
+        mimeType: asset.mimeType ?? null,
+        height: asset.height,
+        width: asset.width,
+      },
+      target: "create",
     });
   }, []);
 
   const pickGroupEditCover = useCallback(async () => {
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) return;
-    const result = await ImagePicker.launchImageLibraryAsync({
-      allowsMultipleSelection: false,
-      mediaTypes: ["images"],
-      preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
-      quality: 0.86,
-    });
-    if (result.canceled || !result.assets[0]) return;
-    const asset = result.assets[0];
-    setGroupEditCoverDraft({
-      uri: asset.uri,
-      name: asset.fileName || `group-cover-${Date.now()}.jpg`,
-      mime: asset.mimeType || "image/jpeg",
-      size: asset.fileSize ?? null,
-      height: asset.height ?? null,
-      width: asset.width ?? null,
-    });
+    const picked = await pickNativeProfilePhoto({ soloAspect: "16:9" });
+    const asset = picked?.asset;
+    if (!asset?.uri || !asset.width || !asset.height) return;
     setGroupDetailsErrors((current) => ({ ...current, cover: false }));
+    setGroupCoverCropTarget({
+      asset: {
+        uri: asset.uri,
+        fileName: asset.fileName ?? null,
+        fileSize: asset.fileSize ?? null,
+        mimeType: asset.mimeType ?? null,
+        height: asset.height,
+        width: asset.width,
+      },
+      target: "edit",
+    });
   }, []);
 
   const editPendingGroupCover = useCallback((target: "create" | "edit", cover: PendingGroupCover | null) => {
@@ -3812,7 +5326,7 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
   const requestFilterTier = useCallback((tier: StarUpgradeTier) => {
     setFilterOpen(false);
     setFilterRow(null);
-    setStatus(tier === "gold" ? "Gold unlocks every Discover filter." : "Huddle+ unlocks advanced filters.");
+    setStatus(tier === "gold" ? "huddle＊ unlocks every Discover filter." : "huddle+ unlocks advanced filters.");
     setPremiumTier(tier);
   }, []);
 
@@ -3820,10 +5334,10 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
     const normalized = String(targetUserId || "").trim();
     if (!userId || !normalized) return;
     try {
-      const [seenRaw, matchedRaw] = await Promise.all([
-        AsyncStorage.getItem(seenMatchesKey(userId)),
-        AsyncStorage.getItem(matchedDiscoveryKey(userId)),
-      ]);
+      const [seenRaw, matchedRaw] = (await readNativeDisplayCacheItems([
+        seenMatchesKey(userId),
+        matchedDiscoveryKey(userId),
+      ])).map((row) => row[1]);
       const seen = new Set(Array.isArray(JSON.parse(seenRaw || "[]")) ? JSON.parse(seenRaw || "[]") as string[] : []);
       const matched = new Set(Array.isArray(JSON.parse(matchedRaw || "[]")) ? JSON.parse(matchedRaw || "[]") as string[] : []);
       seen.add(normalized);
@@ -3839,47 +5353,6 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
       p_matched_user_id: normalized,
     }, accessToken);
   }, [accessToken, userId]);
-
-  const openFirstUnseenMatchModal = useCallback(async () => {
-    if (!userId || matchModal || matchProbeRef.current.inFlight || matchProbeRef.current.userId === userId) return;
-    matchProbeRef.current = { userId, inFlight: true };
-    try {
-      const [seen, matchesRows] = await Promise.all([
-        readSeenMatchSet(userId, accessToken),
-        fetchNativeMatchedRailSummary({ accessToken, limit: 500 }),
-      ]);
-      if (!matchesRows.length) return;
-      const blocked = new Set(rowsRef.current.filter((row) => row.blockedByMe || row.blockedByThem || row.unmatchedByMe || row.unmatchedByThem).map((row) => row.peerUserId).filter(Boolean) as string[]);
-      const candidates = [];
-      for (const row of matchesRows) {
-        if (!row.peerUserId || row.peerUserId === userId) continue;
-        if (seen.has(row.peerUserId) || blocked.has(row.peerUserId)) continue;
-        candidates.push(row);
-      }
-      if (!candidates.length) return;
-      const target = candidates[0];
-      const targetUserId = target.peerUserId;
-      if (!targetUserId) return;
-      const name = String(target.displayName || "Conversation");
-      setMatchModal({ userId: targetUserId, name, avatarUrl: target.avatarUrl, roomId: null });
-      void markMatchSeenPersisted(targetUserId);
-      try {
-	      const roomId = await ensureNativeDirectChatRoom(targetUserId, name, { accessToken, actorId: userId });
-        setMatchModal((current) => current?.userId === targetUserId ? { ...current, roomId } : current);
-      } catch {
-        // Keep modal visible; the quick hello action can retry the canonical RPC.
-      }
-    } catch {
-      // Passive match surfacing is non-blocking.
-    } finally {
-      matchProbeRef.current = { userId, inFlight: false };
-    }
-  }, [accessToken, markMatchSeenPersisted, matchModal, userId]);
-
-  useEffect(() => {
-    if (!userId) return;
-    void openFirstUnseenMatchModal();
-  }, [openFirstUnseenMatchModal, userId]);
 
   const confirmDeleteConversation = useCallback(() => {
     if (!pendingDeleteRow) return;
@@ -3917,14 +5390,14 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
       setMatchQuickHello("");
       setMatchSending(false);
       void markMatchSeenPersisted(targetUserId);
-      void markNativeChatRoomRead({ roomId, userId, accessToken }).catch((error) => console.warn("[native.chats] match_quick_hello_mark_read_failed", error));
+      void markNativeChatRoomRead({ roomId, userId, accessToken, sessionKey }).catch((error) => logNativeProtectedActionFailure("[native.chats] match_quick_hello_mark_read_failed", error));
       void loadRows({ force: true, silent: true });
       onNavigate(appendReturnTo(`/chat-dialogue?room=${encodeURIComponent(roomId)}&name=${encodeURIComponent(targetName)}&with=${encodeURIComponent(targetUserId)}`, "/chats?tab=friends"));
     } catch {
       setStatus("Unable to send hello right now.");
       setMatchSending(false);
     }
-  }, [accessToken, loadRows, markMatchSeenPersisted, matchModal, matchQuickHello, matchSending, onNavigate, userId]);
+  }, [accessToken, loadRows, markMatchSeenPersisted, matchModal, matchQuickHello, matchSending, onNavigate, sessionKey, userId]);
 
   const closeMatchModal = useCallback(() => {
     if (matchModal?.userId) {
@@ -3937,19 +5410,115 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
 
   const discoveryDailyCap = getQuotaCapsForTier(effectiveTier).discoveryViewsPerDay;
   const discoveryQuotaReached = discoveryDailyCap !== null && discoverySeenToday >= discoveryDailyCap;
-  const discoveryQuotaLocked = topTab === "discover" && discoverStatus === "ready" && discoveryQuotaReached && normalizeQuotaTier(effectiveTier) !== "gold";
   const discoveryQuotaCopy = quotaConfig.copy.discovery.exhausted[normalizeQuotaTier(effectiveTier)];
+  const discoverLocationPermissionRequired = discoverLocationPermissionResolved && discoverLocationPermission.state === "denied";
+  const discoverLocationPrivacyCoverVisible = discoverLocationPermissionRequired;
   // Top card + up to 3 queued cards below (4 total). When fewer profiles remain, the pile shrinks
   // naturally — no ghost/placeholder cards are inserted to pad the visual.
   const discoveryDeckProfiles = discoverProfiles.slice(0, 4);
   const currentDiscoveryProfile = discoveryDeckProfiles[0] ?? null;
+  const nextDiscoveryProfile = discoveryDeckProfiles[1] ?? null;
+  // Key the arming effect on the top card's id, not the profile object. Lazy canonical
+  // hydration replaces that object a second or two after first paint without changing
+  // which card is on top, and an object-identity dep re-ran this effect on every swap.
+  const currentDiscoveryProfileId = currentDiscoveryProfile?.id ?? null;
+  useEffect(() => {
+    if (!active || discoverAgeEligible !== true || topTab !== "discover" || !currentDiscoveryProfileId || !discoveryGeometryReady || discoverLocationPrivacyCoverVisible || discoverStatus !== "ready") {
+      setShowDiscoverCoachMarks(false);
+      setDiscoverCoachMarkArmed(false);
+      return undefined;
+    }
+    let cancelled = false;
+    void isNativeCoachMarkSeen(userId, "discover_star_wave_swipe").then((seen) => {
+      if (cancelled || discoverCoachMarksCompletedRef.current) return;
+      // Arm only -- never force-hide from here. This effect re-runs whenever the top
+      // card changes (including the user swiping to the next one), and hiding on
+      // re-run dismissed an open sequence mid-read.
+      setDiscoverCoachMarkArmed((armed) => armed || !seen);
+    });
+    return () => { cancelled = true; };
+  }, [active, currentDiscoveryProfileId, discoverAgeEligible, discoverLocationPrivacyCoverVisible, discoverStatus, discoveryGeometryReady, topTab, userId]);
+
+  const startDiscoverCoachMarks = useCallback(() => {
+    if (!discoverCoachMarkArmed || showDiscoverCoachMarks) return false;
+    setDiscoverCoachMarkArmed(false);
+    setShowDiscoverCoachMarks(true);
+    return true;
+  }, [discoverCoachMarkArmed, showDiscoverCoachMarks]);
+  // Keep the ScrollView's deck slot invariant while keyed cards exchange roles.
+  // Without an explicit stage height, the final queued-to-top promotion can
+  // briefly collapse the flow-owned child and let iOS adjust the scroll offset.
+  const discoveryDeckStageHeight = discoveryCardMetrics(
+    viewportWidth,
+    viewportHeight,
+    screenInsets.bottom,
+    discoveryStackTopY,
+  ).maxCardHeight + DISCOVERY_QUEUED_PEEK_DEPTH;
+  useLayoutEffect(() => {
+    // Normalize every promoted slot during React's commit phase, before the new
+    // deck is painted. A normal effect runs after paint and exposes one frame of
+    // the previous swipe geometry (wide card, then shrink), across every layer.
+    discoverySwipeXSV.value = 0;
+  }, [currentDiscoveryProfile?.id, discoverySwipeXSV]);
+  useEffect(() => {
+    // Only warm the cover + avatar for upcoming cards, not the full social album —
+    // a card the user swipes past shouldn't have downloaded its whole photo set.
+    const nextImageUris = discoverProfiles
+      .slice(1, 4)
+      .flatMap((profile) => [profile.coverUrl, profile.avatarUrl])
+      .filter((uri): uri is string => Boolean(uri));
+    Array.from(new Set(nextImageUris)).forEach((uri) => {
+      void ExpoImage.prefetch(nativeFreshImageUri(uri, uri));
+    });
+  }, [discoverProfiles]);
+  useEffect(() => {
+    // Canonical-hydrate the queued cards the loader deliberately left masked, so a card
+    // already carries its Bio / Pet Journey / Pack panel by the time a swipe promotes it
+    // to the top. Hydrating while the card is still queued keeps the panel swap off-screen
+    // — the exact reason the loader hydrates only the visible top card before first paint.
+    if (!userId || discoverProfiles.length < 2) return;
+    let cancelled = false;
+    const queued = discoverProfiles.slice(1, 1 + DISCOVERY_QUEUED_HYDRATION_DEPTH).filter((profile) => (
+      profile?.id &&
+      !profile.canonicalProfileLoaded &&
+      !discoveryDetailHydratedRef.current.has(profile.id) &&
+      (discoveryDetailHydrationAttemptsRef.current.get(profile.id) ?? 0) < DISCOVERY_QUEUED_HYDRATION_MAX_ATTEMPTS
+    ));
+    queued.forEach((profile) => {
+      discoveryDetailHydrationAttemptsRef.current.set(
+        profile.id,
+        (discoveryDetailHydrationAttemptsRef.current.get(profile.id) ?? 0) + 1,
+      );
+      void fetchNativePublicProfile({
+        accessToken,
+        fallbackData: discoveryProfileToPublicProfileFallback(profile),
+        profileUserId: profile.id,
+        requireCanonical: true,
+        sessionKey,
+        viewerId: userId,
+      })
+        .then((detail) => {
+          if (cancelled || !detail) return;
+          discoveryDetailHydratedRef.current.add(profile.id);
+          // Deliberately not applyPublicProfileToDiscoveryCards: that writer is reserved for
+          // explicit profile-sheet opens. Passive deck hydration must never refresh a card
+          // the user is actively looking at, so this only patches the still-queued row.
+          setDiscoverProfiles((current) => current.map((item, index) => (
+            index > 0 && item.id === profile.id && !item.canonicalProfileLoaded
+              ? applyCanonicalProfilePreviewToDiscoveryProfile(item, detail)
+              : item
+          )));
+        })
+        .catch(() => {});
+    });
+    return () => { cancelled = true; };
+  }, [accessToken, discoverProfiles, sessionKey, userId]);
   const discoverRequestSettled = topTab === "discover" && discoverLoadSettled && discoverSettledKey === activeDiscoverRequestKey;
   const discoverBooting = topTab === "discover" && !discoverRequestSettled;
   const discoverEndStateCandidate =
     discoverRequestSettled &&
     !loading &&
     discoverStatus === "ready" &&
-    !discoveryQuotaReached &&
     discoverProfiles.length === 0;
   const renderDiscoverEndState = discoverEndStateCandidate && discoverEndStateReady;
 
@@ -3969,28 +5538,38 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
   }, [handleSearchRecent, searchOpen]);
 
   const handlePassDiscovery = useCallback((profile: NativeChatDiscoveryProfile) => {
-    haptic.toggleControl();
     commitDiscoveryAction(profile.id, "pass");
   }, [commitDiscoveryAction]);
 
+  const handleWaveDiscoveryIntent = useCallback((profile: NativeChatDiscoveryProfile) => {
+    if (!userId || discoverBusyId || discoveryQuotaReached) return;
+    waveActionRef.current = {
+      profileId: profile.id,
+      actionId: nativeDiscoveryActionId("wave", profile.id),
+    };
+    setDiscoverBusyId(profile.id);
+  }, [discoverBusyId, discoveryQuotaReached, userId]);
+
   const handleWaveDiscovery = useCallback(async (profile: NativeChatDiscoveryProfile) => {
-    if (!userId || discoverBusyId) return false;
+    if (!userId || (discoverBusyId && discoverBusyId !== profile.id)) return false;
     if (discoveryQuotaReached) {
       setStatus(discoveryQuotaCopy);
       return false;
     }
-    haptic.toggleControl();
+    const currentAction = waveActionRef.current?.profileId === profile.id
+      ? waveActionRef.current
+      : { profileId: profile.id, actionId: nativeDiscoveryActionId("wave", profile.id) };
+    waveActionRef.current = currentAction;
     setDiscoverBusyId(profile.id);
     setStatus(null);
     commitDiscoveryAction(profile.id, "wave");
     try {
-      const quotaAccepted = await bumpNativeDiscoverySeen();
-      if (!quotaAccepted) {
+      const result = await sendNativePublicProfileWave(userId, profile.id, currentAction.actionId, accessToken);
+      if (result.status === "quota_exhausted") {
         rollbackDiscoveryAction(profile, "wave");
         setStatus(discoveryQuotaCopy);
         return false;
       }
-      const result = await sendNativePublicProfileWave(userId, profile.id, accessToken);
       if (result.status === "blocked") {
         rollbackDiscoveryAction(profile, "wave");
         setStatus("Cannot wave this user.");
@@ -4001,28 +5580,18 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
         setStatus("Wave could not send. Try again.");
         return false;
       }
+      setDiscoveryCycleStartedAt((current) => {
+        const next = current && nativeDiscoveryCycleIsActive(current) ? current : new Date().toISOString();
+        void AsyncStorage.setItem(nativeDiscoveryCycleStartedAtStorageKey(userId), next);
+        return next;
+      });
+      setDiscoverySeenToday((current) => current + 1);
       markNativeDiscoveryRelationshipHandled(userId, profile.id);
-      await launchNativeDiscoverySendCue("wave");
-      if (result.status === "sent" && !result.mutual) {
-        void enqueueNativeChatNotification({
-          userId: profile.id,
-          kind: "wave",
-          title: "New wave",
-          body: "Someone just waved at you 👋",
-          href: "/chats?tab=discover",
-          data: { from_user_id: userId, type: "wave" },
-        });
-      }
       if (result.mutual || await hasReciprocalWave(userId, profile.id, accessToken)) {
-        setMatchModal({ userId: profile.id, name: profile.displayName, avatarUrl: resolveNativeAvatarUrl(profile.avatarUrl), roomId: null });
-        void markMatchSeenPersisted(profile.id);
-        try {
-	          const roomId = await ensureNativeDirectChatRoom(profile.id, profile.displayName, { accessToken, actorId: userId });
-          setMatchModal((current) => current?.userId === profile.id ? { ...current, roomId } : current);
-        } catch {
-          // Keep match modal visible; quick hello can retry via the match RPC.
+        if (active && topTabRef.current === "discover" && !presentedMatchIdsRef.current.has(profile.id)) {
+          presentedMatchIdsRef.current.add(profile.id);
+          setMatchModal({ userId: profile.id, name: profile.displayName, avatarUrl: resolveNativeAvatarUrl(profile.avatarUrl) });
         }
-        setStatus("It's a match.");
       } else if (result.status === "duplicate") {
         // Keep the duplicate notice (information user can't infer from cue alone). Drop the "Wave sent." banner — the send cue is the confirmation.
         setStatus("You already waved. Open chats when the match is ready.");
@@ -4033,45 +5602,84 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
       setStatus("Wave could not send. Try again.");
       return false;
     } finally {
+      if (waveActionRef.current?.profileId === profile.id) waveActionRef.current = null;
       setDiscoverBusyId(null);
     }
-  }, [accessToken, bumpNativeDiscoverySeen, commitDiscoveryAction, discoverBusyId, discoveryQuotaCopy, discoveryQuotaReached, enqueueNativeChatNotification, launchNativeDiscoverySendCue, markMatchSeenPersisted, rollbackDiscoveryAction, userId]);
+  }, [accessToken, active, commitDiscoveryAction, discoverBusyId, discoveryQuotaCopy, discoveryQuotaReached, rollbackDiscoveryAction, userId]);
 
   const handleStarDiscovery = useCallback((profile: NativeChatDiscoveryProfile) => {
-    if (!userId || discoverBusyId) return;
-    if (discoveryQuotaReached) {
-      setStatus(discoveryQuotaCopy);
+    if (!userId || discoverBusyId || starPreflightRef.current) return;
+    if (!accessToken || normalizeQuotaTier(effectiveTier) === "free") {
+      setPremiumTier("plus");
       return;
     }
-    haptic.toggleControl();
-    setStarConfirmMessage(null);
-    setConfirmStarTarget({ id: profile.id, displayName: profile.displayName });
-  }, [discoverBusyId, discoveryQuotaCopy, discoveryQuotaReached, userId]);
+    const preflightId = nativeDiscoveryActionId("star", profile.id);
+    starPreflightRef.current = preflightId;
+    void (async () => {
+      const localTier = normalizeQuotaTier(effectiveTier);
+      let authoritativeTier = localTier;
+      const snapshot = await fetchNativeProfileSummary(userId, { force: true, accessToken, sessionKey }).catch(() => null);
+      authoritativeTier = normalizeQuotaTier(snapshot?.profile?.effective_tier ?? snapshot?.quota?.effective_tier ?? snapshot?.profile?.tier ?? snapshot?.quota?.tier ?? localTier);
+      if (snapshot) setEffectiveTier(authoritativeTier);
+      if (authoritativeTier === "free") {
+        setPremiumTier("plus");
+        return;
+      }
+      const quotaSnapshot = await nativeExactTokenRpc("get_quota_snapshot", {}, accessToken);
+      if (!quotaSnapshot.error) {
+        const quota = Array.isArray(quotaSnapshot.data) ? quotaSnapshot.data[0] : quotaSnapshot.data;
+        const typedQuota = quota && typeof quota === "object" ? quota as Record<string, unknown> : {};
+        const used = safeQuotaNumber(typedQuota.stars_used_cycle ?? typedQuota.stars_month_used);
+        const extra = safeQuotaNumber(typedQuota.extra_stars ?? typedQuota.extras_stars);
+        const includedStars = getQuotaCapsForTier(authoritativeTier).starsPerMonth;
+        if (Math.max(0, includedStars - used) + Math.max(0, extra) <= 0) {
+          if (authoritativeTier === "plus") setPremiumTier("gold");
+          else setStarsExhaustedOpen(true);
+          return;
+        }
+      }
+      setStarConfirmMessage(null);
+      if (starPreflightRef.current !== preflightId) return;
+      setConfirmStarTarget({ id: profile.id, displayName: profile.displayName, actionId: preflightId });
+    })().finally(() => {
+      if (starPreflightRef.current === preflightId) starPreflightRef.current = null;
+    });
+  }, [accessToken, discoverBusyId, effectiveTier, sessionKey, userId]);
 
   const handleDiscoveryProfileTap = useCallback((profile: NativeChatDiscoveryProfile) => {
     if (discoverBusyId) return;
     haptic.toggleControl();
+    setProfileSheetFallbackData(discoveryProfileToPublicProfileFallback(profile));
     setProfileSheetSource("discover");
     setProfileSheetUserId(profile.id);
   }, [discoverBusyId]);
+
+  // Explicit profile-sheet opens may refresh that same card after the user has
+  // inspected it; passive deck/background hydration never uses this writer.
+  const applyPublicProfileToDiscoveryCards = useCallback((targetId: string, detail: NativePublicProfile | null) => {
+    if (!detail) return;
+    setDiscoverProfiles((current) => current.map((item) => (
+      item.id === targetId ? applyCanonicalProfilePreviewToDiscoveryProfile(item, detail) : item
+    )));
+  }, []);
+
+  const handleProfileSheetResolved = useCallback((detail: NativePublicProfile) => {
+    const targetId = detail.userId || profileSheetUserId;
+    if (!targetId) return;
+    discoveryDetailHydratedRef.current.add(targetId);
+    applyPublicProfileToDiscoveryCards(targetId, detail);
+  }, [applyPublicProfileToDiscoveryCards, profileSheetUserId]);
 
   const handleProfileSheetWave = useCallback(async () => {
     if (!profileSheetUserId) return;
     const profile = discoverProfiles.find((p) => p.id === profileSheetUserId);
     if (!profile) return;
     const sent = await handleWaveDiscovery(profile);
-    if (sent) setProfileSheetUserId(null);
+    if (sent) {
+      setProfileSheetUserId(null);
+      setProfileSheetFallbackData(null);
+    }
   }, [discoverProfiles, handleWaveDiscovery, profileSheetUserId]);
-
-  // Star from profile preview opened in Discover. Closes the profile sheet first, then routes through
-  // the existing handleStarDiscovery (which opens ConfirmStarModal). Single backend path preserved.
-  const handleProfileSheetStar = useCallback(() => {
-    if (!profileSheetUserId) return;
-    const profile = discoverProfiles.find((p) => p.id === profileSheetUserId);
-    if (!profile) return;
-    setProfileSheetUserId(null);
-    handleStarDiscovery(profile);
-  }, [discoverProfiles, handleStarDiscovery, profileSheetUserId]);
 
   const executeConfirmedStar = useCallback(async () => {
     // D1 guard: double-confirm block. starBusyRef is the single-shot ref;
@@ -4086,47 +5694,24 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
     setStarConfirmMessage(null);
     setStatus(null);
 
-    // D1: abort + 8s timeout guard. Backend signature unchanged; race wins ignore late settles.
-    const controller = new AbortController();
-    starAbortRef.current = controller;
-    const timeoutMs = 8000;
-    let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
-    const abortPromise = new Promise<never>((_, reject) => {
-      controller.signal.addEventListener("abort", () => reject(new Error(controller.signal.reason === "timeout" ? "star_timeout" : "star_aborted")), { once: true });
-    });
-    timeoutHandle = setTimeout(() => { if (!controller.signal.aborted) controller.abort("timeout"); }, timeoutMs);
-
     const targetId = confirmStarTarget.id;
     const targetName = confirmStarTarget.displayName;
+    const actionId = confirmStarTarget.actionId;
 
     try {
-      if (discoveryQuotaReached) {
-        setStarConfirmMessage(discoveryQuotaCopy);
-        setStatus(discoveryQuotaCopy);
-        return;
-      }
-      const quotaAccepted = await Promise.race([bumpNativeDiscoverySeen(), abortPromise]);
-      if (!starMountedRef.current) return;
-      if (!quotaAccepted) {
-        setStarConfirmMessage(discoveryQuotaCopy);
-        setStatus(discoveryQuotaCopy);
-        return;
-      }
-      if (!accessToken) {
+      const freshAccessToken = await getFreshNativeAccessToken(accessToken);
+      if (!freshAccessToken) {
         const message = "Please sign in again to send a Star.";
         setStarConfirmMessage(message);
         setStatus(message);
         return;
       }
-      const result = await Promise.race([
-        sendNativePublicProfileStarChat(userId, targetId, targetName, accessToken),
-        abortPromise,
-      ]);
+      const result = await sendNativePublicProfileStarChat(userId, targetId, targetName, actionId, freshAccessToken);
       if (!starMountedRef.current) return;
       if (result.status === "free_tier") {
         setConfirmStarTarget(null);
         setStarConfirmMessage(null);
-        onNavigate("/premium");
+        setPremiumTier("plus");
         return;
       }
       if (result.status === "exhausted") {
@@ -4135,8 +5720,9 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
           setStarConfirmMessage(null);
           setPremiumTier("gold");
         } else {
-          setStarConfirmMessage("You're out of Stars for now.");
-          setStatus("You're out of Stars for now.");
+          setConfirmStarTarget(null);
+          setStarConfirmMessage(null);
+          setStarsExhaustedOpen(true);
         }
         return;
       }
@@ -4171,23 +5757,19 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
       });
       if (!starMountedRef.current) return;
       setLiftingProfile(null);
-      // Drop the "Star sent." banner — cue + navigation to chat IS the confirmation.
-      onNavigate(appendReturnTo(`/chat-dialogue?room=${encodeURIComponent(result.roomId)}&name=${encodeURIComponent(targetName)}&with=${encodeURIComponent(targetId)}`, "/chats?tab=friends"));
+      // Confirmation is the gold dot on the Chats tab, not a redirect. Yanking the
+      // person out of the deck mid-browse to a chat they have not written in yet
+      // is the disruption; the dot lets them finish and come back.
+      void markNativeNewChatSignal(userId);
     } catch (error) {
       // D1: FAILURE path — card stays in deck. No cue. No lift. Modal stays open with error.
       if (!starMountedRef.current) return;
-      const message = error instanceof Error && error.message === "star_timeout"
-        ? "That took too long. Try again."
-        : error instanceof Error && error.message === "star_aborted"
-          ? null
-          : "Unable to send Star right now. Try again in a moment.";
+      const message = "Unable to send Star right now. Try again in a moment.";
       if (message) {
         setStarConfirmMessage(message);
         setStatus(message);
       }
     } finally {
-      if (timeoutHandle) clearTimeout(timeoutHandle);
-      if (starAbortRef.current === controller) starAbortRef.current = null;
       if (starMountedRef.current) {
         setStarActionLoading(false);
         setDiscoverBusyId(null);
@@ -4195,7 +5777,7 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
       }
       starBusyRef.current = false;
     }
-  }, [accessToken, bumpNativeDiscoverySeen, commitDiscoveryAction, confirmStarButtonRect, confirmStarTarget, discoveryQuotaCopy, discoveryQuotaReached, launchNativeDiscoverySendCue, onNavigate, starActionLoading, userId]);
+  }, [accessToken, commitDiscoveryAction, confirmStarButtonRect, confirmStarTarget, launchNativeDiscoverySendCue, starActionLoading, userId]);
 
   // Discover refresh: bare refresh-cw icon top-right. Mirrors Map's MapControlButton icon contract
   // (Feather "refresh-cw", subtext color, ActivityIndicator on loading, toggleControl haptic).
@@ -4204,20 +5786,18 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
     if (discoverRefreshing) return; // single-shot guard
     if (!userId) return;
     haptic.toggleControl();
+    stableDiscoverTopCardRef.current = null;
     setDiscoverRefreshing(true);
-    try {
-      await loadRows({ force: true });
-    } finally {
+    // (A) Reshuffle the current unpassed deck order in place — instant, no refetch — so
+    // the pull visibly reorders the stack rather than re-rendering the same order.
+    setDiscoverProfiles((current) => (current.length > 1 ? shuffleDiscoveryDeck(current) : current));
+    requestAnimationFrame(() => {
       if (starMountedRef.current) setDiscoverRefreshing(false);
-    }
-  }, [discoverRefreshing, loadRows, userId]);
+    });
+  }, [discoverRefreshing, userId]);
 
 
-  // D1: cancel during pending aborts backend race + reverts modal.
   const cancelConfirmStar = useCallback(() => {
-    if (starAbortRef.current && !starAbortRef.current.signal.aborted) {
-      starAbortRef.current.abort("user_cancel");
-    }
     setConfirmStarTarget(null);
     setStarConfirmMessage(null);
     setConfirmStarPending(false);
@@ -4225,17 +5805,34 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
   }, []);
 
 
-  const handleResurfacePassedProfiles = useCallback(() => {
-    if (!userId) return;
-    const clearedPassedIds = new Set<string>();
-    passedDiscoveryIdsRef.current = clearedPassedIds;
-    setPassedDiscoveryIds(clearedPassedIds);
-    void AsyncStorage.removeItem(discoveryPassedKey(userId));
-    void AsyncStorage.removeItem(discoveryPassedSessionKey(userId));
-    void loadRows({ force: true, silent: false });
-  }, [loadRows, userId]);
+  // Backstop: if `loading` is still true past the deadline something upstream is
+  // stuck (an unbounded network call that never settled). Surface the same
+  // retryable error state a real failure produces rather than spinning forever.
+  const loadingDeadlineTripped = useNativeLoadingDeadline(loading, {
+    onTrip: () => {
+      if (__DEV__) console.warn("[native.chats] load_deadline_tripped", { mainTab, topTab });
+      setLoading(false);
+      setRefreshing(false);
+      // Clear the gate so the very next pull-to-refresh actually re-issues the
+      // request instead of being swallowed by the in-flight guard.
+      inboxRequestSeqRef.current += 1;
+      loadRowsGateRef.current.inFlight = false;
+      exploreLoadGateRef.current.inFlight = false;
+      if (topTab === "discover") {
+        // Discover's shell is driven by its own settled flags, not `loading`.
+        // Settle them too or the skeleton simply keeps rendering.
+        setDiscoverStatus("error");
+        setDiscoverLoadSettled(true);
+        setDiscoverSettledKey(activeDiscoverRequestKey);
+        return;
+      }
+      setStatus(topTab === "community"
+        ? "Community could not load. Pull to refresh."
+        : "Failed to load conversations. Pull to refresh.");
+    },
+  });
 
-  const hasLoadError = /failed to load/i.test(status || "") || inboxSyncState === "error";
+  const hasLoadError = /failed to load/i.test(status || "") || inboxSyncState === "error" || loadingDeadlineTripped;
 
   const patchGroupEverywhere = useCallback((chatId: string, patch: Partial<NativeChatInboxRow> & Partial<NativeExploreGroup>) => {
     setRows((current) => current.map((row) => row.chatId === chatId ? { ...row, ...patch } : row));
@@ -4247,7 +5844,8 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
       if (currentChatId !== chatId) return current;
       return { ...current, ...patch };
     });
-  }, []);
+    void patchNativeChatsGroupCaches(userId, chatId, patch);
+  }, [userId]);
 
   const commitGroupDetailsDraft = useCallback(async (options?: { close?: boolean; open?: boolean }) => {
     if (!groupDetails || !userId) {
@@ -4255,7 +5853,7 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
       return;
     }
     if ("invitePending" in groupDetails) {
-      if (options?.open) onNavigate(appendReturnTo(`/chat-dialogue?room=${encodeURIComponent(groupDetails.id)}&name=${encodeURIComponent(groupDetails.name)}`, "/chats?tab=groups"));
+      if (options?.open) onNavigate(appendReturnTo(`/chat-dialogue?room=${encodeURIComponent(groupDetails.id)}&name=${encodeURIComponent(groupDetails.name)}&joined=1`, "/chats?tab=groups"));
       if (options?.close) closeGroupDetails();
       return;
     }
@@ -4263,7 +5861,7 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
     const currentMemberRole = groupManagement?.members.find((member) => member.userId === userId)?.role?.toLowerCase() || "";
     const canManageGroup = groupDetails.createdBy === userId || currentMemberRole === "admin" || currentMemberRole === "creator";
     if (!canManageGroup) {
-      if (options?.open) onNavigate(appendReturnTo(`/chat-dialogue?room=${encodeURIComponent(chatId)}&name=${encodeURIComponent(groupDetails.chatName || "Group")}`, "/chats?tab=groups"));
+      if (options?.open) onNavigate(appendReturnTo(`/chat-dialogue?room=${encodeURIComponent(chatId)}&name=${encodeURIComponent(groupDetails.chatName || "Group")}&joined=1`, "/chats?tab=groups"));
       if (options?.close) closeGroupDetails();
       return;
     }
@@ -4296,9 +5894,10 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
     let uploadedCoverObjectName: string | null = null;
     try {
 	      if (groupEditCoverDraft) {
-	        if (!accessToken) throw new Error("missing_access_token");
+	        const freshAccessToken = await getFreshNativeAccessToken(accessToken);
+	        if (!freshAccessToken) throw new Error("missing_access_token");
 	        if (groupDetails.createdBy && userId !== groupDetails.createdBy) throw new Error("not_authorized");
-	        const uploadedCover = await uploadNativeGroupCover({ accessToken, asset: groupEditCoverDraft, chatId, userId });
+	        const uploadedCover = await uploadNativeGroupCover({ accessToken: freshAccessToken, asset: groupEditCoverDraft, chatId, userId });
 	        avatarUrl = uploadedCover.url;
 	        uploadedCoverObjectName = uploadedCover.objectName;
 	      }
@@ -4319,6 +5918,19 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
       const savedName = saved?.name || nextName;
       const savedLocation = saved?.locationLabel || groupLocationEdit.trim();
       const savedPetFocus = saved?.petFocus || groupPetFocusEdit;
+      const previousCoverObjectName = groupEditCoverDraft ? extractNativeAvatarStorageObjectPath(existingAvatarUrl) : null;
+      if (previousCoverObjectName && previousCoverObjectName !== uploadedCoverObjectName) {
+        const cleanupResult = await requestNativeStorageCleanupResult("avatars", previousCoverObjectName, "replace_group_cover", accessToken);
+        if (cleanupResult === "failed") {
+          logNativeProtectedActionFailure("[native.chats] replace_group_cover_cleanup_failed", createNativeProtectedActionError({
+            ok: false,
+            stage: "cleanup",
+            originalError: new Error("replace_group_cover_cleanup_failed"),
+            cleanupAttempted: true,
+            cleanupResult,
+          }));
+        }
+      }
       const patch = {
         avatarUrl,
         chatName: savedName,
@@ -4332,7 +5944,8 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
       setGroupLocationEdit(savedLocation);
       setGroupPetFocusEdit(savedPetFocus);
       patchGroupEverywhere(chatId, patch);
-      if (options?.open) onNavigate(appendReturnTo(`/chat-dialogue?room=${encodeURIComponent(chatId)}&name=${encodeURIComponent(savedName)}`, "/chats?tab=groups"));
+      void patchCachedNativeChatInboxGroupRows({ chatId, patch, sessionKey, userId });
+      if (options?.open) onNavigate(appendReturnTo(`/chat-dialogue?room=${encodeURIComponent(chatId)}&name=${encodeURIComponent(savedName)}&joined=1`, "/chats?tab=groups"));
       if (options?.close) setGroupDetails(null);
       setGroupDetailsErrors({});
       setStatus(null);
@@ -4354,7 +5967,7 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
       else if (/not_authorized|permission|denied|policy|rls/i.test(message)) setStatus("Only the group's creator can change the cover.");
       else setStatus("Unable to update group right now.");
     }
-  }, [accessToken, closeGroupDetails, groupDescriptionEdit, groupDetails, groupEditCoverDraft, groupLocationEdit, groupManagement?.members, groupNameEdit, groupPetFocusEdit, onNavigate, patchGroupEverywhere, userId]);
+  }, [accessToken, closeGroupDetails, groupDescriptionEdit, groupDetails, groupEditCoverDraft, groupLocationEdit, groupManagement?.members, groupNameEdit, groupPetFocusEdit, onNavigate, patchGroupEverywhere, sessionKey, userId]);
 
   const bannerInviteGroups = invitedExploreGroups.filter((group) => !dismissedInviteBannerIds.has(group.inviteId || group.id));
   const firstPendingGroupInvite = bannerInviteGroups[0] ?? null;
@@ -4363,10 +5976,15 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
     groupExploreSort,
     viewerPetSignals,
     viewerLocationWords,
-  );
+  ).sort((left, right) => {
+    if (!routeGroupDetailId) return 0;
+    if (left.id === routeGroupDetailId) return -1;
+    if (right.id === routeGroupDetailId) return 1;
+    return 0;
+  });
 
   return (
-    <View style={styles.screen}>
+    <View collapsable={false} style={styles.screen}>
       <View style={styles.controlsStack}>
         <View style={styles.topToggleRow}>
           {/* Left: refresh icon. Discover refreshes the deck; Community refreshes explore groups. */}
@@ -4381,7 +5999,7 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
               style={styles.discoverRefreshButton}
             >
               {discoverRefreshing
-                ? <ActivityIndicator color={huddleColors.subtext} size="small" />
+                ? <NativeSpinner tone="muted" />
                 : <Feather color={huddleColors.subtext} name="refresh-cw" size={18} />}
             </Pressable>
           ) : topTab === "community" ? (
@@ -4393,19 +6011,27 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
           )}
           <View style={styles.topToggleCenter}>
             <View style={styles.topToggle}>
-              <Pressable accessibilityLabel="Discover" accessibilityRole="button" onPress={() => handleTopTabPress("discover")} style={[nativeModalStyles.appTopSegmentButton, styles.topToggleSegment, topTab === "discover" && styles.topToggleSegmentActive]}>
+              {discoverAgeEligible === false ? null : <Pressable accessibilityLabel="Discover" accessibilityRole="button" onPress={() => handleTopTabPress("discover")} style={[nativeModalStyles.appTopSegmentButton, styles.topToggleSegment, topTab === "discover" && styles.topToggleSegmentActive]}>
                 <TopSegmentGlassLayer visible={topTab === "discover"} />
-                <DiscoverPillIcon color={topTab === "discover" ? huddleColors.onPrimary : huddleColors.mutedText} size={20} />
-              </Pressable>
+                {friendsMatchingPaused ? (
+                  <View style={styles.discoverIconSlashWrap}>
+                    <NativeGlyph color={topTab === "discover" ? huddleColors.onPrimary : huddleColors.mutedText} name="chatsUser" size={20} />
+                    <View style={[styles.discoverIconSlash, { backgroundColor: topTab === "discover" ? huddleColors.onPrimary : huddleColors.mutedText }]} />
+                  </View>
+                ) : (
+                  <NativeGlyph color={topTab === "discover" ? huddleColors.onPrimary : huddleColors.mutedText} name="chatsUser" size={20} />
+                )}
+              </Pressable>}
               <Pressable accessibilityLabel="Community" accessibilityRole="button" onPress={() => handleTopTabPress("community")} style={[nativeModalStyles.appTopSegmentButton, styles.topToggleSegment, topTab === "community" && styles.topToggleSegmentActive]}>
                 <TopSegmentGlassLayer visible={topTab === "community"} />
-                <CommunityPillIcon color={topTab === "community" ? huddleColors.onPrimary : huddleColors.mutedText} size={20} />
+                <NativeGlyph color={topTab === "community" ? huddleColors.onPrimary : huddleColors.mutedText} name="chatsGroup" size={20} />
               </Pressable>
               <Pressable accessibilityLabel="Chats" accessibilityRole="button" onPress={() => handleTopTabPress("chats")} style={[nativeModalStyles.appTopSegmentButton, styles.topToggleSegment, topTab === "chats" && styles.topToggleSegmentActive]}>
                 <TopSegmentGlassLayer visible={topTab === "chats"} />
-                <Feather color={topTab === "chats" ? huddleColors.onPrimary : huddleColors.mutedText} name="message-circle" size={20} />
-                {topTab !== "chats" && unreadTotal > 0 ? <View style={styles.toggleUnreadBadge}><Text style={styles.toggleUnreadText}>{unreadTotal > 99 ? "99+" : unreadTotal}</Text></View> : null}
-                {topTab === "chats" && unreadTotal > 0 ? <View style={styles.toggleUnreadDot} /> : null}
+                <View style={styles.toggleIconWrap}>
+                  <NativeGlyph color={topTab === "chats" ? huddleColors.onPrimary : huddleColors.mutedText} name="chatsChat" size={20} />
+                  {unreadTotal > 0 || friendRequestUnread ? <View accessibilityLabel="Unread chats" style={styles.toggleUnreadBadge} /> : null}
+                </View>
               </Pressable>
             </View>
           </View>
@@ -4428,6 +6054,10 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
                 <View style={styles.searchField}>
                   <Feather color={huddleColors.iconSubtle} name="search" size={18} />
                   <TextInput
+                multiline={false}
+                scrollEnabled
+                numberOfLines={1} lineBreakModeIOS="tail" lineBreakStrategyIOS="none"
+                textBreakStrategy="simple"
                     accessibilityLabel="Search chats"
                     autoCapitalize="none"
                     autoCorrect={false}
@@ -4438,12 +6068,12 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
                     style={styles.searchInput}
                     value={searchQuery}
                   />
+                  {searchQuery ? (
+                    <Pressable accessibilityLabel="Clear search" onPress={() => setSearchQuery("")} style={styles.searchClear}>
+                      <Feather color={huddleColors.iconMuted} name="x" size={16} />
+                    </Pressable>
+                  ) : null}
                 </View>
-                {searchQuery ? (
-                  <Pressable accessibilityLabel="Clear search" onPress={() => setSearchQuery("")} style={styles.searchClear}>
-                    <Feather color={huddleColors.iconMuted} name="x" size={16} />
-                  </Pressable>
-                ) : null}
               </View>
             ) : null}
             <View style={styles.chatTabsRow}>
@@ -4452,7 +6082,9 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
                   const active = tab.key === mainTab;
                   return (
                     <Pressable key={tab.key} onPress={() => handleMainTabPress(tab.key)} style={nativeModalStyles.appUnderlineTab}>
-                      <Text style={[styles.mainTabText, active && styles.mainTabTextActive]}>{tab.label}</Text>
+                      <View style={styles.mainTabLabelRow}>
+                        <Text style={[styles.mainTabText, active && styles.mainTabTextActive]}>{tab.label}</Text>
+                      </View>
                       {active ? <View style={styles.mainTabIndicator} /> : null}
                     </Pressable>
                   );
@@ -4484,66 +6116,80 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
       <View style={styles.tabContainer}>
 
         {/* ── DISCOVER ── */}
-        <Reanimated.View pointerEvents={topTab === "discover" ? "auto" : "none"} style={[StyleSheet.absoluteFill, discoverTabStyle]}>
+        {discoverAgeEligible === false ? null : <Reanimated.View collapsable={false} pointerEvents={topTab === "discover" ? "auto" : "none"} ref={discoverPageRef} style={[StyleSheet.absoluteFill, discoverTabStyle]}>
           <ScrollView
             alwaysBounceVertical
             contentContainerStyle={[styles.content, styles.discoverContent, { paddingBottom: screenInsets.bottom + huddleSpacing.x10 + huddleSpacing.x8 }]}
+            refreshControl={<RefreshControl refreshing={refreshing || discoverRefreshing} tintColor={huddleColors.blue} colors={[huddleColors.blue]} onRefresh={handleDiscoverRefresh} />}
             scrollEnabled={!discoverySwipeActive}
             showsVerticalScrollIndicator={false}
           >
-            {status ? <DiscoverToast message={status} onDismiss={() => setStatus(null)} /> : null}
             {discoverRequestSettled && !loading && discoverStatus === "age_blocked" ? <NativeChatsEmptyState body={DISCOVER_AGE_GATE_COPY} image={discoverAgeGateImage} /> : null}
-            {discoverRequestSettled && !loading && discoverStatus === "location_required" ? (
-              <NativeChatsEmptyState
-                body={discoverLocationPermission.canAskAgain
-                  ? "Huddle uses your location to show nearby people, groups, and map pins."
-                  : "Location is off for Huddle. Open Settings, tap Location, then choose While Using the App."}
-                buttonLabel={discoverLocationPermission.canAskAgain ? "Enable Location" : "Open Huddle Settings"}
-                onPress={() => { void handleDiscoverEnableLocation(); }}
-              />
-            ) : null}
-            {discoverRequestSettled && !loading && discoverStatus === "error" ? (
+            {discoverRequestSettled && !loading && !discoverLocationPrivacyCoverVisible && discoverStatus === "error" ? (
               <NativeChatsEmptyState body="Discover could not load. Pull to retry." />
             ) : null}
-            {discoverRequestSettled && !loading && discoveryQuotaLocked ? <NativeChatsEmptyState body={discoveryQuotaCopy} buttonLabel={effectiveTier === "free" ? "Upgrade to Huddle+" : "Upgrade to Gold"} onPress={() => onNavigate("/premium")} title="Discover limit reached" /> : null}
-            {renderDiscoverEndState ? <DiscoveryEndState passedCount={passedDiscoveryIds.size} quotaReached={discoveryQuotaReached} onResurface={handleResurfacePassedProfiles} onExpandSearch={() => setFilterOpen(true)} /> : null}
+            {renderDiscoverEndState && !discoverLocationPrivacyCoverVisible ? <DiscoveryEndState passedCount={passedDiscoveryIds.size} onExpandSearch={() => setFilterOpen(true)} /> : null}
             {/* Loading-shell: card+deck placeholder before the first profile lands. Suppressed once any other terminal state owns the surface. */}
             {discoverStatus !== "age_blocked"
-              && discoverStatus !== "location_required"
-              && discoverStatus !== "error"
-              && !discoveryQuotaLocked
-              && !renderDiscoverEndState
-              && !currentDiscoveryProfile
-              && (loading || !discoverRequestSettled || discoverRefreshing) ? (
-                <View style={styles.discoveryStack}>
-                  <DiscoveryCardShell layer={3} />
-                  <DiscoveryCardShell layer={2} />
-                  <DiscoveryCardShell layer={1} />
-                  <DiscoveryCardShell layer={0} />
+              && (discoverLocationPrivacyCoverVisible || discoverStatus !== "error")
+              && (discoverLocationPrivacyCoverVisible || !renderDiscoverEndState)
+              && (!currentDiscoveryProfile || !discoveryGeometryReady)
+              && (!discoveryGeometryReady || loading || !discoverRequestSettled || discoverRefreshing || discoverLocationPrivacyCoverVisible || (discoverLocationPermissionRequired && discoverStatus === "location_required")) ? (
+                <View ref={discoveryStackRef} onLayout={measureDiscoveryStackTop} style={[styles.discoveryStack, { minHeight: discoveryDeckStageHeight + huddleSpacing.x4 }]}>
+                  <DiscoveryCardShell
+                    layer={0}
+                    locationPermissionCover={discoverLocationPrivacyCoverVisible ? { canAskAgain: discoverLocationPermission.canAskAgain, onPress: () => { void handleDiscoverEnableLocation(); } } : undefined}
+                    stackTopY={discoveryStackTopY}
+                  />
                 </View>
               ) : null}
-            {discoverStatus === "ready" && !discoveryQuotaReached && currentDiscoveryProfile ? (
-              <View style={styles.discoveryStack}>
-                {discoveryDeckProfiles.map((profile, index) => {
-                  const profileChips: string[] = [];
-                  if (effectiveTier === "gold" && filters.activeOnly) profileChips.push("Active today");
-                  if (effectiveTier === "gold" && filters.whoWavedAtMe) profileChips.push("Waved at you");
-                  const isLastCard = discoverProfiles.length === 1;
-                  return <DiscoveryProfileCard key={profile.id} busy={discoverBusyId === profile.id} chips={profileChips} index={index} isDeepestQueued={index > 0 && index === discoveryDeckProfiles.length - 1} isLast={isLastCard} liftKind={liftingProfile?.id === profile.id ? liftingProfile.kind : null} profile={profile} swipeXSV={discoverySwipeXSV} onPass={handlePassDiscovery} onProfileTap={handleDiscoveryProfileTap} onStar={handleStarDiscovery} onSwipePhaseChange={setDiscoverySwipeActive} onWave={handleWaveDiscovery} />;
-                })}
+            {(discoverStatus === "ready" || (discoverLocationPrivacyCoverVisible && discoverStatus !== "age_blocked")) && currentDiscoveryProfile && discoveryGeometryReady ? (
+              <View collapsable={false} ref={discoveryStackRef} onLayout={measureDiscoveryStackTop} style={[styles.discoveryStack, { minHeight: discoveryDeckStageHeight + huddleSpacing.x4 }]}>
+                <DiscoveryStaticDeck count={discoverProfiles.length} stackTopY={discoveryStackTopY} swipeXSV={discoverySwipeXSV} transitionActive={discoverySwipeActive} />
+                {nextDiscoveryProfile ? (
+                  <DiscoveryProfileCard key={nextDiscoveryProfile.id} busy={false} chips={[]} deckTransitionActive={discoverySwipeActive} index={1} isDeepestQueued={false} isLast={false} liftKind={null} preparedBehind profile={nextDiscoveryProfile} stackTopY={discoveryStackTopY} swipeXSV={discoverySwipeXSV} onPass={handlePassDiscovery} onProfileTap={handleDiscoveryProfileTap} onStar={handleStarDiscovery} onSwipePhaseChange={setDiscoverySwipePhase} onWave={handleWaveDiscovery} onWaveIntent={handleWaveDiscoveryIntent} />
+                ) : null}
+                <DiscoveryProfileCard key={currentDiscoveryProfile.id} busy={discoverBusyId === currentDiscoveryProfile.id} chips={[
+                  ...(effectiveTier === "gold" && filters.activeOnly ? ["Active today"] : []),
+                  ...(effectiveTier === "gold" && filters.whoWavedAtMe ? ["Waved at you"] : []),
+                ]} cardRef={discoverCardRef} index={0} isDeepestQueued={false} isLast={discoverProfiles.length === 1} liftKind={liftingProfile?.id === currentDiscoveryProfile.id ? liftingProfile.kind : null} paused={friendsMatchingPaused} locationPermissionCover={discoverLocationPrivacyCoverVisible ? { canAskAgain: discoverLocationPermission.canAskAgain, onPress: () => { void handleDiscoverEnableLocation(); } } : undefined} enablingPaused={enablingFriendsMatching} profile={currentDiscoveryProfile} stackTopY={discoveryStackTopY} swipeXSV={discoverySwipeXSV} starRef={discoverStarRef} waveRef={discoverWaveRef} onPass={handlePassDiscovery} onProfileTap={handleDiscoveryProfileTap} onStar={handleStarDiscovery} onSwipePhaseChange={setDiscoverySwipePhase} onWave={handleWaveDiscovery} onWaveIntent={handleWaveDiscoveryIntent} onEnablePaused={() => void handleEnableFriendsMatching()} />
               </View>
             ) : null}
           </ScrollView>
-        </Reanimated.View>
+          {discoverCoachMarkArmed && !showDiscoverCoachMarks ? (
+            <Pressable
+              accessibilityLabel="Show Discover guide"
+              accessibilityRole="button"
+              onPressIn={startDiscoverCoachMarks}
+              style={StyleSheet.absoluteFill}
+            />
+          ) : null}
+          <NativeDiscoverCoachMarks
+            cardRef={discoverCardRef}
+            onFinish={() => {
+              discoverCoachMarksCompletedRef.current = true;
+              setDiscoverCoachMarkArmed(false);
+              setShowDiscoverCoachMarks(false);
+            }}
+            pageRef={discoverPageRef}
+            starFocusVisual={<DiscoveryStarControlVisual standalone />}
+            starRef={discoverStarRef}
+            userId={userId}
+            visible={showDiscoverCoachMarks}
+            waveFocusVisual={<DiscoveryWaveControlVisual standalone />}
+            waveRef={discoverWaveRef}
+          />
+        </Reanimated.View>}
 
         {/* ── COMMUNITY ── */}
         <Reanimated.View pointerEvents={topTab === "community" ? "auto" : "none"} style={[StyleSheet.absoluteFill, communityTabStyle]}>
           <ScrollView
             alwaysBounceVertical
             contentContainerStyle={[styles.content, { paddingBottom: screenInsets.bottom + huddleSpacing.x10 + huddleSpacing.x8 }]}
+            ref={communityScrollRef}
+            refreshControl={<RefreshControl refreshing={refreshing} tintColor={huddleColors.blue} colors={[huddleColors.blue]} onRefresh={handleRefresh} />}
             showsVerticalScrollIndicator={false}
           >
-            {status ? <View style={styles.statusBanner}><Feather color={huddleColors.blue} name="info" size={16} /><Text style={styles.statusText}>{status}</Text></View> : null}
             {loading ? <View style={styles.skeletonList}><NativeGroupCardSkeleton /><NativeGroupCardSkeleton /><NativeGroupCardSkeleton /></View> : null}
             {!loading && firstPendingGroupInvite ? (
               <View style={styles.groupInviteBanner}>
@@ -4587,7 +6233,7 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
             ) : null}
             {!loading && visibleExploreGroups.length > 0 ? (
               <View style={styles.exploreList}>
-                {visibleExploreGroups.map((group) => <ExploreGroupCard key={group.id} group={group} onHide={(groupId) => setHiddenExploreGroupIds((current) => new Set(current).add(groupId))} onOpen={openExploreGroupOrInvitePrompt} />)}
+                {visibleExploreGroups.map((group, index) => <ExploreGroupCard key={group.id} accessToken={accessToken} countdownNow={eventCountdownNow} friendIds={activeMatchedPeerIds} group={group} index={index} nextEvent={communityNextEventByGroupId.get(group.id) ?? null} outIds={visibleOutIds} onHide={(groupId) => setHiddenExploreGroupIds((current) => new Set(current).add(groupId))} onOpen={openExploreGroupOrInvitePrompt} onPrimaryAction={handleJoinExploreGroup} />)}
               </View>
             ) : null}
             {!loading && !hasLoadError && visibleExploreGroups.length === 0 ? <NativeChatsEmptyState body="No public groups nearby yet. Be the first to start a local pack!" groupAligned image={emptyChatImage} /> : null}
@@ -4600,27 +6246,32 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
             alwaysBounceVertical
             contentContainerStyle={[styles.content, { paddingBottom: screenInsets.bottom + huddleSpacing.x10 + huddleSpacing.x8 }]}
             onScroll={handleChatsScroll}
-            refreshControl={<RefreshControl refreshing={refreshing} tintColor={huddleColors.blue} onRefresh={handleRefresh} />}
+            refreshControl={<RefreshControl refreshing={refreshing} tintColor={huddleColors.blue} colors={[huddleColors.blue]} onRefresh={handleRefresh} />}
             scrollEventThrottle={120}
             showsVerticalScrollIndicator={false}
           >
-            {status ? <View style={styles.statusBanner}><Feather color={huddleColors.blue} name="info" size={16} /><Text style={styles.statusText}>{status}</Text></View> : null}
-            {loading ? <View style={styles.skeletonList}><NativeChatRowSkeleton /><NativeChatRowSkeleton /><NativeChatRowSkeleton /><NativeChatRowSkeleton /><NativeChatRowSkeleton /></View> : null}
-            {!loading && mainTab === "friends" ? <MatchedRail rows={avatarOnlyMatches} onOpen={handleOpenRow} /> : null}
-            {!loading && !hasLoadError && mainTab === "service" && visibleRows.length === 0 ? <NativeServiceChatsEmptyState /> : null}
-            {!loading && !hasLoadError && mainTab !== "service" && visibleRows.length === 0 && !(mainTab === "friends" && avatarOnlyMatches.length > 0) && !(mainTab === "groups" && invitedExploreGroups.length > 0) ? <NativeChatsEmptyState body={mainTab === "groups" ? "Better in a pack! Create or join a group to start coordinating local meetups." : "Meet your friends on the Social and send a star to start a chat!"} groupAligned={mainTab === "groups"} image={emptyChatImage} /> : null}
-            {!loading && visibleRows.length > 0 ? <View style={styles.list}>{visibleRows.map((row) => mainTab === "groups" ? <NativeGroupChatRow key={`${row.roomType}:${row.chatId}`} currentUserId={userId} row={row} onManage={openManagedGroup} onOpenDetails={openManagedGroup} onPress={handleOpenRow} /> : <NativeChatRow key={`${row.roomType}:${row.chatId}`} row={row} userId={userId} onAvatarPress={handleAvatarProfilePress} onDelete={setPendingDeleteRow} onPress={handleOpenRow} />)}</View> : null}
+            {loading && visibleRows.length === 0 ? <View style={styles.skeletonList}><NativeChatRowSkeleton /><NativeChatRowSkeleton /><NativeChatRowSkeleton /><NativeChatRowSkeleton /><NativeChatRowSkeleton /></View> : null}
+            <NativeContactFriendRequests accessToken={accessToken} active={active} visible={topTab === "chats" && mainTab === "friends"} refreshKey={contactFriendRequestsRefreshKey} userId={userId} onError={setStatus} onAccepted={(result) => {
+              setNewlyAcceptedPeerId(result.targetUserId);
+              setMatchedRailRefreshKey((value) => value + 1);
+              void loadRows({ force: true, silent: true });
+            }} />
+            {!loading && mainTab === "friends" ? <MatchedRail highlightPeerId={newlyAcceptedPeerId} onHighlightComplete={handleNewFriendHighlightComplete} rows={avatarOnlyMatches} onOpen={handleOpenRow} /> : null}
+            {!loading && !hasLoadError && mainTab === "service" && visibleRows.length === 0 && inboxSyncState === "fresh" ? <NativeServiceChatsEmptyState /> : null}
+            {!loading && !hasLoadError && inboxSyncState === "fresh" && mainTab !== "service" && visibleRows.length === 0 && !(mainTab === "friends" && avatarOnlyMatches.length > 0) ? <NativeChatsEmptyState body={mainTab === "groups" ? "Better in a pack! Create or join a group to start coordinating local meetups." : "Meet friends on Social, then start a chat here."} groupAligned={mainTab === "groups"} image={emptyChatImage} /> : null}
+            {!loading && visibleRows.length > 0 ? <View style={styles.list}>{visibleRows.map((row, rowIndex) => mainTab === "groups" ? <NativeGroupChatRow key={`${row.roomType}:${row.chatId}`} accessToken={accessToken} currentUserId={userId} friendIds={activeMatchedPeerIds} index={rowIndex} outIds={visibleOutIds} row={row} onManage={openManagedGroup} onOpenDetails={openManagedGroup} onPress={handleOpenRow} /> : <NativeChatRow key={`${row.roomType}:${row.chatId}`} row={row} userId={userId} onAvatarPress={handleAvatarProfilePress} onDelete={setPendingDeleteRow} onPress={handleOpenRow} />)}</View> : null}
           </ScrollView>
         </Reanimated.View>
 
       </View>
+      {status ? <ChatsToast message={status} onDismiss={() => setStatus(null)} /> : null}
       {/* Invisible bottom-area swipe catcher — sits ABOVE the global NativeBottomNav (which itself
           floats at insets.bottom+8 with height navHeight=64). Captures committed horizontal flicks
           and cycles the top segment. Vertical motion fails the gesture so ScrollView still scrolls;
           taps in the strip are inert (no committed horizontal motion → no claim → no tab change). */}
       <GestureDetector gesture={bottomSwipeGesture}>
         <View
-          pointerEvents="box-only"
+          pointerEvents={topTab === "discover" ? "none" : "box-only"}
           style={[styles.bottomSwipeStrip, { bottom: Math.max(huddleSpacing.x2, screenInsets.bottom + huddleSpacing.x2) + huddleLayout.navHeight + huddleSpacing.x2 }]}
         />
       </GestureDetector>
@@ -4642,9 +6293,21 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
           </Pressable>
         </Pressable>
       </Modal>
-	      <DiscoveryFilterModal effectiveTier={effectiveTier} filters={filters} filterRow={filterRow} open={filterOpen} onApply={(nextFilters) => { setFilters(nextFilters); setFilterOpen(false); setFilterRow(null); }} onClose={() => { setFilterOpen(false); setFilterRow(null); }} onLockedFilter={requestFilterTier} onSetFilterRow={setFilterRow} />
-      <NativeDiscoverUpgradeModal onClose={() => setPremiumTier(null)} onUpgrade={() => onNavigate("/premium")} tier={premiumTier} />
+      <DiscoveryFilterModal effectiveTier={effectiveTier} filters={filters} filterRow={filterRow} open={filterOpen} onApply={(nextFilters) => { stableDiscoverTopCardRef.current = null; setDiscoverProfiles([]); setFilters(nextFilters); setFilterOpen(false); setFilterRow(null); }} onClose={() => { setFilterOpen(false); setFilterRow(null); }} onLockedFilter={requestFilterTier} onSetFilterRow={setFilterRow} />
+      <ProfileUpgradeModal onClose={() => setPremiumTier(null)} onUpgrade={() => onNavigate("/premium")} tier={premiumTier} />
+      <StarsExhaustedModal open={starsExhaustedOpen} onClose={() => setStarsExhaustedOpen(false)} />
+      <AppConfirmModal
+        open={resumeMatchingHintOpen}
+        title="You're back in Friends Matching"
+        body="If you ever want to take a break, simply turn off Open to Friends Matching in your Account Settings."
+        confirmLabel="OK"
+        cancelLabel={null}
+        onConfirm={() => setResumeMatchingHintOpen(false)}
+        onCancel={() => setResumeMatchingHintOpen(false)}
+      />
       <GroupDetailsModal
+        accessToken={accessToken}
+        countdownNow={eventCountdownNow}
         currentUserId={userId}
         detailsErrors={groupDetailsErrors}
         descriptionEdit={groupDescriptionEdit}
@@ -4654,6 +6317,7 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
         managementError={groupManagementError}
         managementLoading={groupManagementLoading}
         countryLabel={groupCountryDraft}
+        locationBiasPoint={viewerScope?.primaryPoint ?? null}
         locationEdit={groupLocationEdit}
         nameEdit={groupNameEdit}
         petFocusEdit={groupPetFocusEdit}
@@ -4662,6 +6326,7 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
           setGroupLocationEdit(value);
           if (groupDetailsErrors.location && value.trim()) setGroupDetailsErrors((current) => ({ ...current, location: false }));
         }}
+        onChangeCountryEdit={setGroupCountryDraft}
         onChangeNameEdit={(value) => {
           setGroupNameEdit(value);
           if (groupDetailsErrors.name && value.trim()) setGroupDetailsErrors((current) => ({ ...current, name: false }));
@@ -4672,13 +6337,16 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
           if (groupDetailsErrors.description && countWords(value) <= GROUP_DESCRIPTION_WORD_LIMIT) setGroupDetailsErrors((current) => ({ ...current, description: false }));
         }}
         onClose={() => { void commitGroupDetailsDraft({ close: true }); }}
+        coverCropAsset={groupCoverCropTarget?.target === "edit" ? groupCoverCropTarget.asset : null}
+        onCancelCoverCrop={() => setGroupCoverCropTarget(null)}
+        onSaveCoverCrop={saveGroupCoverCrop}
         onPickCover={pickGroupEditCover}
         onBlockMember={(member) => {
           if (!userId) return;
 	          void nativeExactTokenRpc("block_user", { p_blocked_id: member.userId }, accessToken)
             .then(({ error }) => {
               if (error) throw error;
-              invalidateNativeDiscoveryRelationshipCache(userId);
+              void invalidateNativeBlockCascade({ userId });
               setStatus(`${member.name || "Member"} blocked.`);
             })
             .catch(() => setStatus("Unable to block member right now."));
@@ -4687,13 +6355,17 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
           if (!userId) return;
           const chatId = "chatId" in group ? group.chatId : group.id;
           const name = ("chatName" in group ? group.chatName : group.name) || "Group";
-	          void inviteNativeGroupMembers({ chatId, chatName: name, inviterUserId: userId, inviteUserIds: ids, accessToken }).then(() => refreshGroupManagement(chatId)).catch(() => setStatus("Unable to invite members right now."));
+	          void inviteNativeGroupMembers({ chatId, chatName: name, inviterUserId: userId, inviteUserIds: ids, accessToken, sessionKey }).then(() => refreshGroupManagement(chatId)).catch(() => setStatus("Unable to invite members right now."));
         }}
         onCancelInvite={(group, invite) => {
           const chatId = "chatId" in group ? group.chatId : group.id;
-	          void cancelNativeGroupInvite({ chatId, inviteId: invite.id, accessToken })
+		          void cancelNativeGroupInvite({ chatId, inviteId: invite.id, accessToken })
             .then(() => {
-              setGroupManagement((current) => current ? { ...current, pendingInvites: current.pendingInvites.filter((item) => item.id !== invite.id) } : current);
+              setGroupManagement((current) => {
+                const next = current ? { ...current, pendingInvites: current.pendingInvites.filter((item) => item.id !== invite.id) } : current;
+                if (next && userId) void writeChatsCache(chatsGroupDetailsCacheKey(userId, chatId, false), next);
+                return next;
+              });
               setStatus("Invite canceled.");
             })
             .catch(() => setStatus("Unable to cancel invite right now."));
@@ -4702,8 +6374,8 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
           try {
             if (!userId) return;
             const chatId = "chatId" in group ? group.chatId : group.id;
-	            await sendNativeChatMessage({ roomId: chatId, senderId: userId, content: `${selfMatchProfile.name || "Someone"} left the group.`, accessToken });
-	            await removeNativeGroupMember({ chatId, userId, accessToken });
+	            await sendNativeChatMessage({ roomId: chatId, senderId: userId, content: `${selfMatchProfile.name || "Someone"} left the group.`, accessToken, sessionKey });
+	            await removeNativeGroupMember({ chatId, userId, accessToken, sessionKey });
             setGroupDetails(null);
             void loadRows({ force: true, silent: true });
             haptic.selectTab(); // CD5: lighter tick on voluntary leave
@@ -4717,15 +6389,31 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
         onDeclineInvite={(group) => void handleDeclineExploreInvite(group)}
         onJoin={(group) => void handleJoinExploreGroup(group)}
         onOpenChat={() => { void commitGroupDetailsDraft({ open: true }); }}
-        onOpenMemberProfile={openGroupMemberProfile}
-        onReportMember={(member) => setGroupMemberReportTarget(member)}
+        onOpenMemberProfile={(memberId) => {
+          transitionNativeModal(
+            () => setGroupDetails(null),
+            () => openGroupMemberProfile(memberId),
+          );
+        }}
+        onReportMember={(member) => {
+          const activeGroup = groupDetails;
+          if (!activeGroup) return;
+          const chatId = "chatId" in activeGroup ? activeGroup.chatId : activeGroup.id;
+          transitionNativeModal(
+            () => setGroupDetails(null),
+            () => {
+              setGroupMemberReportChatId(chatId);
+              setGroupMemberReportTarget(member);
+            },
+          );
+        }}
         onRemoveMember={(group, memberId) => {
           const chatId = "chatId" in group ? group.chatId : group.id;
-	          void removeNativeGroupMember({ chatId, userId: memberId, accessToken }).then(() => refreshGroupManagement(chatId)).catch(() => setStatus("Unable to remove member right now."));
+	          void removeNativeGroupMember({ chatId, userId: memberId, actorUserId: userId, accessToken, sessionKey }).then(() => refreshGroupManagement(chatId)).catch(() => setStatus("Unable to remove member right now."));
         }}
         onRequestAction={(group, request, action) => {
           const chatId = "chatId" in group ? group.chatId : group.id;
-	          return updateNativeGroupJoinRequest({ chatId, requestId: request.id, userId: request.userId, action, accessToken }).then(() => refreshGroupManagement(chatId)).catch((error) => {
+	          return updateNativeGroupJoinRequest({ chatId, requestId: request.id, userId: request.userId, actorUserId: userId, action, accessToken, sessionKey }).then(() => refreshGroupManagement(chatId)).catch((error) => {
             setStatus("Unable to update join request right now.");
             throw error;
           });
@@ -4744,13 +6432,17 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
         }}
         onSaveDetails={() => { void commitGroupDetailsDraft({ close: true }); }}
         onToggleMute={async (group, muted) => {
-          try {
-            const chatId = "chatId" in group ? group.chatId : group.id;
-	            await setNativeGroupMuteState({ chatId, muted, accessToken });
-            setGroupManagement((current) => current ? {
-              ...current,
-              members: current.members.map((member) => member.userId === userId ? { ...member, isMuted: muted } : member),
-            } : current);
+	          try {
+	            const chatId = "chatId" in group ? group.chatId : group.id;
+		            await setNativeGroupMuteState({ chatId, muted, accessToken });
+            setGroupManagement((current) => {
+              const next = current ? {
+                ...current,
+                members: current.members.map((member) => member.userId === userId ? { ...member, isMuted: muted } : member),
+              } : current;
+              if (next && userId) void writeChatsCache(chatsGroupDetailsCacheKey(userId, chatId, false), next);
+              return next;
+            });
             setStatus(muted ? "Group muted." : "Notifications on.");
           } catch (error) {
             setStatus("Unable to update notifications right now.");
@@ -4761,25 +6453,23 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
 		      <NativeJoinWithCodeSheet open={joinCodeOpen} value={groupCodeDraft} onChange={setGroupCodeDraft} onClose={() => setJoinCodeOpen(false)} onSubmit={handleJoinCode} />
       <GroupInviteInboxSheet groups={invitedExploreGroups} open={inviteInboxOpen} onClose={() => setInviteInboxOpen(false)} onConfirm={confirmInviteInboxDecisions} onOpenGroup={openExploreGroupOrInvitePrompt} />
 	      <GroupInvitePromptModal group={pendingGroupInvitePrompt} onClose={() => setPendingGroupInvitePrompt(null)} onJoin={(group) => { setPendingGroupInvitePrompt(null); void handleJoinExploreGroup(group); }} />
-		      <CreateGroupModal countryLabel={groupCountryDraft} cover={groupCoverDraft} coverCropAsset={groupCoverCropTarget?.target === "create" ? groupCoverCropTarget.asset : null} creating={groupCreating} description={groupDescriptionDraft} joinMethod={groupJoinMethodDraft} location={groupLocationDraft} name={groupNameDraft} open={createGroupOpen} petFocus={groupPetFocusDraft} visibility={groupVisibilityDraft} onCancelCoverCrop={() => setGroupCoverCropTarget(null)} onChangeDescription={setGroupDescriptionDraft} onChangeJoinMethod={setGroupJoinMethodDraft} onChangeLocation={setGroupLocationDraft} onChangeName={setGroupNameDraft} onChangePetFocus={setGroupPetFocusDraft} onChangeVisibility={setGroupVisibilityDraft} onClose={closeCreateGroupModal} onEditCover={() => editPendingGroupCover("create", groupCoverDraft)} onPickCover={pickGroupCover} onRemoveCover={() => setGroupCoverDraft(null)} onSaveCoverCrop={saveGroupCoverCrop} onSubmit={handleCreateGroup} />
+		      <CreateGroupModal countryLabel={groupCountryDraft} locationBiasPoint={viewerScope?.primaryPoint ?? null} cover={groupCoverDraft} coverCropAsset={groupCoverCropTarget?.target === "create" ? groupCoverCropTarget.asset : null} creating={groupCreating} description={groupDescriptionDraft} joinMethod={groupJoinMethodDraft} location={groupLocationDraft} name={groupNameDraft} open={createGroupOpen} petFocus={groupPetFocusDraft} visibility={groupVisibilityDraft} onCancelCoverCrop={() => setGroupCoverCropTarget(null)} onChangeCountry={setGroupCountryDraft} onChangeDescription={setGroupDescriptionDraft} onChangeJoinMethod={setGroupJoinMethodDraft} onChangeLocation={setGroupLocationDraft} onChangeName={setGroupNameDraft} onChangePetFocus={setGroupPetFocusDraft} onChangeVisibility={setGroupVisibilityDraft} onClose={closeCreateGroupModal} onEditCover={() => editPendingGroupCover("create", groupCoverDraft)} onPickCover={pickGroupCover} onRemoveCover={() => setGroupCoverDraft(null)} onSaveCoverCrop={saveGroupCoverCrop} onSubmit={handleCreateGroup} />
       <ConfirmDeleteModal row={pendingDeleteRow} onCancel={() => setPendingDeleteRow(null)} onConfirm={confirmDeleteConversation} />
       <MatchModal modal={matchModal} onClose={closeMatchModal} onQuickHello={() => void sendMatchQuickHello()} quickHello={matchQuickHello} self={selfMatchProfile} sending={matchSending} setQuickHello={setMatchQuickHello} />
-      <NativePublicProfileModal accessToken={accessToken ?? null} currentUserId={userId} hideActions={profileSheetSource === "discover"} hideMatchedActions={profileSheetSource !== "discover"} sessionKey={sessionKey} showStar={profileSheetSource === "discover"} showWave={profileSheetSource === "discover"} onStar={handleProfileSheetStar} onWave={handleProfileSheetWave} onClose={() => setProfileSheetUserId(null)} onNavigate={onNavigate} open={Boolean(profileSheetUserId)} userId={profileSheetUserId} />
+      <NativePublicProfileModal accessToken={accessToken ?? null} viewerUserId={userId} fallbackData={profileSheetFallbackData} heroPresentation="full-bleed" hideActions={profileSheetSource === "discover"} hideMatchedActions={profileSheetSource !== "discover"} sessionKey={sessionKey} showStar={profileSheetSource === "discover"} showWave={profileSheetSource === "discover"} onProfileResolved={profileSheetSource === "discover" ? handleProfileSheetResolved : undefined} onWave={handleProfileSheetWave} onClose={() => { setProfileSheetUserId(null); setProfileSheetFallbackData(null); }} onNavigate={onNavigate} open={Boolean(profileSheetUserId)} profileUserId={profileSheetUserId} />
       <Modal animationType="slide" presentationStyle="overFullScreen" transparent visible={carerProfileOpen} onRequestClose={() => setCarerProfileOpen(false)}>
         <View style={[nativeModalStyles.appModalBackdrop, nativeModalStyles.appModalSafeArea]}>
           <Pressable accessibilityLabel="Close carer profile" accessibilityRole="button" onPress={() => setCarerProfileOpen(false)} style={StyleSheet.absoluteFill} />
           <AppModalCard fullHeight>
-            <View style={styles.carerProfileHeader}>
+            <AppBottomSheetHeader>
               <Text numberOfLines={1} style={nativeModalStyles.appModalSheetTitle}>Pet Carer Profile</Text>
-              <AppModalIconButton accessibilityLabel="Close carer profile" onPress={() => setCarerProfileOpen(false)}>
-                <Feather color={huddleColors.text} name="x" size={24} />
-              </AppModalIconButton>
-            </View>
+              <AppModalCloseButton onPress={() => setCarerProfileOpen(false)} />
+            </AppBottomSheetHeader>
             <AppModalScroll>
               {carerProfileError ? (
                 <View style={styles.carerProfileState}><Text style={styles.carerProfileStateText}>{carerProfileError}</Text></View>
               ) : carerProfile ? (
-                <NativeCarerProfileContent provider={carerProfile} />
+                <NativeCarerProfileContent provider={carerProfile} accessToken={accessToken} />
               ) : carerProfileLoading ? (
                 <View style={styles.carerProfileState}><NativeLoadingState variant="inline" /></View>
               ) : null}
@@ -4788,12 +6478,19 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
         </View>
       </Modal>
       <NativeSocialReportModal
+        accessToken={accessToken}
+        chatRoomId={groupMemberReportChatId}
         currentUserId={userId}
-        onClose={() => setGroupMemberReportTarget(null)}
+        onClose={() => {
+          setGroupMemberReportTarget(null);
+          setGroupMemberReportChatId(null);
+        }}
         onNotice={setStatus}
         open={Boolean(groupMemberReportTarget)}
+        sessionKey={sessionKey}
         source="Group Chat"
         sourceOrigin="friends chats"
+        subject={groupMemberReportChatId ? { type: "group_chat", id: groupMemberReportChatId, label: "Group Chat" } : null}
         target={groupMemberReportTarget ? {
           userId: groupMemberReportTarget.userId,
           author: {
@@ -4821,27 +6518,108 @@ export function NativeChatsScreen({ accessToken, userId, search, sessionKey, onB
   );
 }
 
-function ExploreGroupCard({ group, onHide, onOpen }: { group: NativeExploreGroup; onHide: (groupId: string) => void; onOpen: (group: NativeExploreGroup) => void }) {
+// Countdown chip for upcoming events; while an event is in progress it
+// switches to a live badge — green pulse dot + "Event happening — N going"
+// (going count shown only when more than 3, so small events don't read empty).
+function GroupEventCountdownBadge({ countdown, goingCount = 0 }: { countdown: GroupEventCountdown | null; goingCount?: number }) {
+  if (!countdown) return null;
+  const label = countdown.active && goingCount > 3 ? `${countdown.label} — ${goingCount} going` : countdown.label;
+  return (
+    <NativeGlassSurface glassFillStyle={styles.exploreEventCountdownGlassFill} intensity="clear" style={styles.exploreEventCountdown}>
+      <View pointerEvents="none" style={styles.exploreEventCountdownGreenTint} />
+      {countdown.active ? <View style={styles.exploreEventCountdownDotWrap}><NativeGroupLiveDot /></View> : null}
+      <Text numberOfLines={1} style={[nativeModalStyles.appGroupHeroChip, styles.exploreEventCountdownText]}>{label}</Text>
+    </NativeGlassSurface>
+  );
+}
+
+const sentenceCaseTag = (value: string) => {
+  const clean = String(value || "").trim();
+  if (!clean) return clean;
+  return clean.charAt(0).toUpperCase() + clean.slice(1).toLowerCase();
+};
+
+function ExploreGroupCard({ accessToken, countdownNow, friendIds, group, index, nextEvent, onHide, onOpen, onPrimaryAction, outIds }: { accessToken?: string | null; countdownNow: number; friendIds: Set<string>; group: NativeExploreGroup; index: number; nextEvent?: GroupCoverNextEvent | null; onHide: (groupId: string) => void; onOpen: (group: NativeExploreGroup) => void; onPrimaryAction: (group: NativeExploreGroup) => void; outIds: Set<string> }) {
   const memberLabel = `${group.memberCount} member${group.memberCount === 1 ? "" : "s"}`;
-  const ctaLabel = group.invitePending ? "You're invited" : group.requested ? "Requested" : group.joinMethod === "instant" ? "Join" : "Request to join";
+  const ctaLabel = group.joined ? "Open Group" : group.invitePending ? "You're invited" : group.requested ? "Requested" : group.joinMethod === "instant" ? "Join" : "Request to join";
+  const eventCountdown = groupNextEventCountdownLabel(group.nextEventStartsAt || nextEvent?.startsAt, group.nextEventEndsAt || nextEvent?.endsAt, countdownNow);
+  const [previewMembers, setPreviewMembers] = useState<NativeGroupManagementSnapshot["members"] | null>(() => peekNativeGroupPreviewMembers(group.id));
+  useEffect(() => {
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      fetchNativeGroupPreviewMembers(group.id, { accessToken })
+        .catch(() => null)
+        .then((members) => {
+          if (cancelled || !members) return;
+          setPreviewMembers((current) => {
+            const currentKey = (current || []).map((member) => `${member.userId}:${member.avatarUrl || ""}`).join("|");
+            const nextKey = members.map((member) => `${member.userId}:${member.avatarUrl || ""}`).join("|");
+            return currentKey === nextKey ? current : members;
+          });
+        });
+    }, Math.min(index, 8) * 100);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [accessToken, group.id, index]);
+  const outNowCount = useMemo(() => {
+    if (!previewMembers || previewMembers.length === 0) return 0;
+    if (outIds.size === 0) return 0;
+    return previewMembers.filter((member) => outIds.has(member.userId)).length;
+  }, [outIds, previewMembers]);
+  const stackMembers = [...(previewMembers || [])]
+    .sort((left, right) => {
+      const leftRank = outIds.has(left.userId) ? (friendIds.has(left.userId) ? 0 : 1) : friendIds.has(left.userId) ? 2 : 3;
+      const rightRank = outIds.has(right.userId) ? (friendIds.has(right.userId) ? 0 : 1) : friendIds.has(right.userId) ? 2 : 3;
+      return leftRank - rightRank || left.userId.localeCompare(right.userId);
+    })
+    .slice(0, 4);
   return (
     <View style={nativeModalStyles.appContentCard}>
       <Pressable accessibilityLabel={`Open ${group.name} details`} onPress={() => onOpen(group)} style={styles.exploreCover}>
-        <ResilientAvatarImage fallback={<View style={styles.exploreCoverFallback} />} style={styles.exploreCoverImage} uri={group.avatarUrl} />
+        <ResilientAvatarImage fallback={<NativeAuroraCover initial={group.name} seed={group.id} style={StyleSheet.absoluteFill} />} style={styles.exploreCoverImage} uri={group.avatarUrl} version={group.lastMessageAt || group.createdAt || group.id} />
         <View style={styles.exploreScrim} />
-        <Text style={styles.exploreMembers}>{memberLabel}</Text>
+        {stackMembers.length === 0 ? <Text style={styles.exploreMembers}>{memberLabel}</Text> : null}
         <Pressable accessibilityLabel={`Hide ${group.name}`} onPress={(event) => { event.stopPropagation(); onHide(group.id); }} hitSlop={8} style={styles.exploreHideButton}>
           <Feather color={huddleColors.blue} name="x" size={18} />
         </Pressable>
         <View style={styles.exploreOverlay}>
+          <GroupEventCountdownBadge countdown={eventCountdown} goingCount={nextEvent?.rsvpCount ?? 0} />
           <Text numberOfLines={1} style={styles.exploreTitle}>{group.name}</Text>
           {group.locationLabel ? <View style={styles.exploreMetaRow}><Feather color={huddleColors.profileCaptionPlaceholder} name="map-pin" size={12} /><Text numberOfLines={1} style={styles.exploreMeta}>{group.locationLabel}</Text></View> : null}
-          {group.petFocus.length > 0 ? <View style={styles.exploreChips}>{group.petFocus.slice(0, 4).map((tag) => <Text key={tag} style={styles.exploreChip}>{tag}</Text>)}</View> : null}
+          {group.petFocus.length > 0 ? (
+            <View style={[nativeModalStyles.appGroupHeroChips, stackMembers.length > 0 ? styles.exploreChipRowWithFaces : null]}>
+              {group.petFocus.slice(0, 4).map((tag) => <Text key={tag} style={[nativeModalStyles.appGroupHeroChip, styles.exploreChipSentence]}>{sentenceCaseTag(tag)}</Text>)}
+            </View>
+          ) : null}
         </View>
+        {stackMembers.length > 0 ? (
+          <View style={styles.exploreFaceStack}>
+            {stackMembers.map((member, memberIndex) => (
+              <View key={member.userId} style={[styles.exploreFaceStackItem, outIds.has(member.userId) ? styles.exploreFaceStackItemOut : null, memberIndex > 0 && styles.exploreFaceStackOverlap]}>
+                <ResilientAvatarImage
+                  fallback={<View style={styles.exploreFaceStackFallback}><Feather color={huddleColors.blue} name="user" size={14} /></View>}
+                  style={styles.exploreFaceStackImage}
+                  uri={member.avatarUrl}
+                  version={member.userId}
+                />
+              </View>
+            ))}
+            {group.memberCount > stackMembers.length ? (
+              <View style={[styles.exploreFaceStackItem, styles.exploreFaceStackOverlap, styles.exploreFaceStackMore]}>
+                <Text style={styles.exploreFaceStackMoreText}>+{group.memberCount - stackMembers.length}</Text>
+              </View>
+            ) : null}
+          </View>
+        ) : null}
       </Pressable>
-      <View style={styles.exploreBody}>
+      <View style={[styles.exploreBody, stackMembers.length > 0 && styles.exploreBodyWithStack]}>
+        {outNowCount > 0 ? (
+          <View style={styles.exploreOutNowRow}>
+            <NativeGroupLiveDot />
+            <Text style={styles.exploreOutNowText}>{outNowCount} member{outNowCount === 1 ? " is" : "s are"} out now</Text>
+          </View>
+        ) : null}
         {group.description ? <Text numberOfLines={2} style={styles.exploreDescription}>{group.description}</Text> : null}
-        <Pressable disabled={group.requested} onPress={() => onOpen(group)} style={[nativeModalStyles.appPrimaryPillButton, group.invitePending && styles.exploreCtaInvite, group.requested && styles.exploreCtaDisabled]}>
+        <Pressable disabled={!group.joined && group.requested} onPress={() => onPrimaryAction(group)} style={[nativeModalStyles.appPrimaryPillButton, group.invitePending && styles.exploreCtaInvite, !group.joined && group.requested && styles.exploreCtaDisabled]}>
           <Text style={[styles.exploreCtaText, group.requested && styles.exploreCtaDisabledText]}>{ctaLabel}</Text>
         </Pressable>
       </View>
@@ -4872,13 +6650,11 @@ function GroupInviteInboxSheet({
   return (
     <Modal presentationStyle="overFullScreen" animationType="slide" transparent visible={open} onRequestClose={onClose}>
       <Pressable style={[nativeModalStyles.appModalBackdrop, nativeModalStyles.appModalBottomSafeArea]} onPress={onClose}>
-          <Pressable onPress={(event) => event.stopPropagation()} style={styles.groupDetailsEventBoundary}>
+          <Pressable onPress={(event) => event.stopPropagation()} style={nativeModalStyles.appBottomSheetEventBoundary}>
         <AppBottomSheet onClose={onClose}>
           <AppBottomSheetHeader>
             <Text style={nativeModalStyles.appModalSheetTitle}>Group invites</Text>
-            <AppModalIconButton accessibilityLabel="Close group invites" onPress={onClose}>
-              <Feather color={huddleColors.text} name="x" size={22} />
-            </AppModalIconButton>
+            <AppModalCloseButton onPress={onClose} />
           </AppBottomSheetHeader>
 		          <AppBottomSheetScroll>
             <View style={styles.inviteInboxList}>
@@ -4888,7 +6664,7 @@ function GroupInviteInboxSheet({
                   <View key={group.id} style={styles.inviteInboxRow}>
                     <Pressable accessibilityLabel={`Open ${group.name} invite`} onPress={() => onOpenGroup(group)} style={styles.inviteInboxIdentity}>
                       <View style={styles.inviteInboxAvatar}>
-                        <ResilientAvatarImage fallback={<Feather color={huddleColors.blue} name="users" size={22} />} style={styles.inviteInboxAvatarImage} uri={group.avatarUrl} />
+                        <ResilientAvatarImage fallback={<Feather color={huddleColors.blue} name="users" size={22} />} style={styles.inviteInboxAvatarImage} uri={group.avatarUrl} version={group.lastMessageAt || group.createdAt || group.id} />
                       </View>
                       <View style={styles.inviteInboxCopy}>
                         <Text numberOfLines={1} style={styles.inviteInboxName}>{group.name}</Text>
@@ -5027,9 +6803,7 @@ function DiscoveryFilterModal({
           <AppBottomSheet onClose={onClose}>
 	            <AppBottomSheetHeader>
 	            <Text style={nativeModalStyles.appModalSheetTitle}>Filters</Text>
-	            <AppModalIconButton accessibilityLabel="Close filters" onPress={onClose}>
-	              <Feather color={huddleColors.text} name="x" size={22} />
-	            </AppModalIconButton>
+            <AppModalCloseButton onPress={onClose} />
 		          </AppBottomSheetHeader>
 		          <ScrollView
                 ref={filterScrollRef}
@@ -5135,81 +6909,8 @@ function TierAccessPill({ tier }: { tier: StarUpgradeTier }) {
   const isGold = tier === "gold";
   return (
     <View style={[styles.filterTierPill, isGold ? styles.filterTierPillGold : styles.filterTierPillPlus]}>
-      <Text style={styles.filterTierPillText}>{isGold ? "Gold" : "Huddle+"}</Text>
+      <Text style={styles.filterTierPillText}>{isGold ? "huddle＊" : "huddle+"}</Text>
     </View>
-  );
-}
-
-function NativeDiscoverUpgradeModal({ onClose, onUpgrade, tier }: { onClose: () => void; onUpgrade: () => void; tier: StarUpgradeTier | null }) {
-  const insets = useSafeAreaInsets();
-  const [billing, setBilling] = useState<"monthly" | "annual">("monthly");
-  if (!tier) return null;
-  const isGold = tier === "gold";
-  const plan = quotaConfig.stripePlans[tier];
-  const caps = quotaConfig.capsByTier[tier];
-  const themeColor = isGold ? huddleColors.membershipUpgradeGold : huddleColors.membershipUpgradePlus;
-  const monthly = plan.monthly.amount;
-  const annual = plan.annual.amount;
-  const annualPerMonth = annual / 12;
-  const displayPrice = billing === "annual" ? annualPerMonth : monthly;
-  const discountPct = Math.round((1 - annualPerMonth / monthly) * 100);
-  const features: Array<{ icon: keyof typeof Feather.glyphMap; title: string; subtitle: string }> = isGold ? [
-    { icon: "globe", title: "Max Discovery", subtitle: "Keep discovering without the usual limits." },
-    { icon: "trending-up", title: "Top Profile Boost", subtitle: "Priority placement in Discover and Care." },
-    { icon: "star", title: `${caps.starsPerMonth} Stars / month`, subtitle: "Your fastest way to connect." },
-    { icon: "radio", title: `Broadcasts · ${caps.broadcastRadiusKm}km · ${caps.broadcastDurationHours}h`, subtitle: "Your widest reach, for even longer." },
-    { icon: "sliders", title: "All Filters", subtitle: "Every filter unlocked. Less noise, better matches." },
-    { icon: "video", title: "Video Uploads", subtitle: "Gold exclusive." },
-    { icon: "users", title: "Family Sharing", subtitle: "Extend your plan benefits to one other account (except Stars)." },
-  ] : [
-    { icon: "users", title: "Open Discovery", subtitle: "Double the chances. Better matches." },
-    { icon: "trending-up", title: "Profile Boost", subtitle: "Get seen earlier in Discover and Care." },
-    { icon: "star", title: `${caps.starsPerMonth} Stars / month`, subtitle: "Reach out without waiting." },
-    { icon: "radio", title: `Broadcasts · ${caps.broadcastRadiusKm}km · ${caps.broadcastDurationHours}h`, subtitle: "Reach more nearby members for longer." },
-    { icon: "globe", title: "Advanced Filters", subtitle: "Sharper search. Better fit." },
-    { icon: "users", title: "Family Sharing", subtitle: "Extend your plan benefits to one other account (except Stars)." },
-  ];
-  return (
-    <Modal presentationStyle="overFullScreen" animationType="fade" transparent visible={Boolean(tier)} onRequestClose={onClose}>
-      <View style={[nativeModalStyles.appModalBackdrop, nativeModalStyles.appModalSafeArea, { paddingTop: insets.top + huddleSpacing.x6, paddingBottom: insets.bottom }]}>
-        <Pressable accessibilityLabel="Close membership" accessibilityRole="button" onPress={onClose} style={StyleSheet.absoluteFill} />
-        <Pressable style={[styles.upgradeCard, { backgroundColor: themeColor }]} onPress={(event) => event.stopPropagation()}>
-          <View style={styles.upgradeBillingRow}>
-            <Pressable accessibilityRole="button" accessibilityState={{ selected: billing === "monthly" }} onPress={() => setBilling("monthly")} style={[styles.upgradeBillingTab, billing !== "monthly" && styles.upgradeBillingTabInactive]}>
-              <Text style={[styles.upgradeBillingText, billing !== "monthly" && { color: themeColor }]}>Monthly</Text>
-            </Pressable>
-            <Pressable accessibilityRole="button" accessibilityState={{ selected: billing === "annual" }} onPress={() => setBilling("annual")} style={[styles.upgradeBillingTab, billing !== "annual" && styles.upgradeBillingTabInactive]}>
-              <Text style={[styles.upgradeBillingText, billing !== "annual" && { color: themeColor }]}>Annually</Text>
-              {billing !== "annual" ? <Text style={[styles.upgradeDiscountBadge, { backgroundColor: themeColor }]}>-{discountPct}%</Text> : null}
-            </Pressable>
-          </View>
-          <ScrollView bounces={false} contentContainerStyle={styles.upgradeBody} showsVerticalScrollIndicator={false}>
-            <Text style={styles.upgradeHeadline}>{isGold ? "Upgrade to Huddle Gold" : "Upgrade to Huddle+"}</Text>
-            <Text style={styles.upgradeSubheadline}>{isGold ? "Activate now to send stars and become a top profile in your area and find more connections!" : "Activate now to send stars and find 2x more connections!"}</Text>
-            <Text style={styles.upgradePrice}>USD${displayPrice.toFixed(2)}<Text style={styles.upgradePriceUnit}> /mo</Text></Text>
-            {billing === "annual" ? <Text style={styles.upgradeAnnualNote}>USD${annual.toFixed(2)} billed yearly</Text> : null}
-            <View style={styles.upgradeDivider} />
-            <View style={styles.upgradeFeatureList}>
-              {features.map((feature) => (
-                <View key={feature.title} style={styles.upgradeFeatureRow}>
-                  <Feather color={huddleColors.onPrimary} name={feature.icon} size={22} />
-                  <View style={styles.upgradeFeatureCopy}>
-                    <Text style={styles.upgradeFeatureTitle}>{feature.title}</Text>
-                    <Text style={styles.upgradeFeatureSubtitle}>{feature.subtitle}</Text>
-                  </View>
-                </View>
-              ))}
-            </View>
-            <Pressable accessibilityRole="button" onPress={onUpgrade} style={styles.upgradeCta}>
-              <Text style={[styles.upgradeCtaText, { color: themeColor }]}>{isGold ? "Upgrade to Huddle Gold" : "Upgrade to Huddle+"}</Text>
-            </Pressable>
-            <Pressable accessibilityRole="button" onPress={onClose} style={styles.upgradeLaterButton}>
-              <Text style={styles.upgradeLaterText}>Maybe later</Text>
-            </Pressable>
-          </ScrollView>
-        </Pressable>
-      </View>
-    </Modal>
   );
 }
 
@@ -5280,6 +6981,8 @@ function InlineMultiSelect({ onChange, options, values }: { onChange: (values: s
 }
 
 export function GroupDetailsModal({
+  accessToken,
+  countdownNow,
   currentUserId,
   detailsErrors,
   descriptionEdit,
@@ -5287,13 +6990,16 @@ export function GroupDetailsModal({
   group,
   hideOpenChatButton = false,
   countryLabel,
+  locationBiasPoint,
   locationEdit,
   management,
   managementError,
   managementLoading,
+  muted,
   nameEdit,
   petFocusEdit,
   onChangeDescriptionEdit,
+  onChangeCountryEdit,
   onChangeLocationEdit,
   onChangeNameEdit,
   onChangePetFocusEdit,
@@ -5307,6 +7013,9 @@ export function GroupDetailsModal({
   onOpenChat,
   onOpenMemberProfile,
   onPickCover,
+  coverCropAsset,
+  onCancelCoverCrop,
+  onSaveCoverCrop,
   onReportMember,
   onRemoveMember,
   onRequestAction,
@@ -5315,6 +7024,8 @@ export function GroupDetailsModal({
   onToggleMute,
   selectableMembers,
 }: {
+  accessToken?: string | null;
+  countdownNow: number;
   currentUserId: string | null;
   countryLabel: string | null;
   detailsErrors: GroupDetailsErrors;
@@ -5322,14 +7033,17 @@ export function GroupDetailsModal({
   editCover: PendingGroupCover | null;
   group: NativeExploreGroup | NativeChatInboxRow | null;
   hideOpenChatButton?: boolean;
+  locationBiasPoint?: { lat: number; lng: number } | null;
   management: NativeGroupManagementSnapshot | null;
   managementError: boolean;
   managementLoading: boolean;
+  muted?: boolean;
   nameEdit: string;
   locationEdit: string;
   petFocusEdit: string[];
   selectableMembers: Array<{ id: string; name: string; avatarUrl: string | null; isVerified: boolean; socialId?: string | null }>;
   onChangeDescriptionEdit: (value: string) => void;
+  onChangeCountryEdit?: (value: string | null) => void;
   onChangeLocationEdit: (value: string) => void;
   onChangeNameEdit: (value: string) => void;
   onChangePetFocusEdit: (value: string[]) => void;
@@ -5343,6 +7057,9 @@ export function GroupDetailsModal({
   onOpenChat: (group: NativeExploreGroup | NativeChatInboxRow) => void;
   onOpenMemberProfile: (userId: string) => void;
   onPickCover: () => void;
+  coverCropAsset: (NativeProfileUploadAsset & { height?: number | null; width?: number | null }) | null;
+  onCancelCoverCrop: () => void;
+  onSaveCoverCrop: (asset: NativeProfileUploadAsset) => Promise<void>;
   onReportMember: (member: NativeGroupManagementSnapshot["members"][number]) => void;
   onRemoveMember: (group: NativeExploreGroup | NativeChatInboxRow, memberId: string) => void | Promise<void>;
   onRequestAction: (group: NativeExploreGroup | NativeChatInboxRow, request: NativeGroupManagementSnapshot["joinRequests"][number], action: "approve" | "decline") => Promise<void>;
@@ -5358,6 +7075,10 @@ export function GroupDetailsModal({
   const [locationSuggestions, setLocationSuggestions] = useState<NativeLocationSuggestion[]>([]);
   const [locationSearchOpen, setLocationSearchOpen] = useState(false);
   const [locationSearching, setLocationSearching] = useState(false);
+  const [manualLocationAllowedQuery, setManualLocationAllowedQuery] = useState<string | null>(null);
+  const [locationPinError, setLocationPinError] = useState("");
+  const [locationSelectionError, setLocationSelectionError] = useState(false);
+  const acceptedLocationRef = useRef<string | null>(null);
   const [groupNameFocused, setGroupNameFocused] = useState(false);
   const [groupDescriptionFocused, setGroupDescriptionFocused] = useState(false);
   const [groupLocationFocused, setGroupLocationFocused] = useState(false);
@@ -5376,11 +7097,21 @@ export function GroupDetailsModal({
   const [requestConfirming, setRequestConfirming] = useState(false);
   const [groupActionConfirm, setGroupActionConfirm] = useState<"leave" | "remove" | null>(null);
   const [groupActionBusy, setGroupActionBusy] = useState<"mute" | "leave" | "remove" | null>(null);
+  const [detailGroupEvents, setDetailGroupEvents] = useState<NativeGroupChatEvent[]>([]);
   const groupDetailsScrollRef = useRef<ScrollView | null>(null);
   const groupDetailsFieldLayoutsRef = useRef<Record<string, { height: number; y: number }>>({});
   const [groupDetailsKeyboardHeight, setGroupDetailsKeyboardHeight] = useState(0);
   const [groupDetailsFooterHeight, setGroupDetailsFooterHeight] = useState(0);
   const activeGroupId = group ? "chatId" in group ? group.chatId : group.id : null;
+  const activeGroupIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (activeGroupIdRef.current === activeGroupId) return;
+    activeGroupIdRef.current = activeGroupId;
+    acceptedLocationRef.current = locationEdit.trim() || null;
+    setManualLocationAllowedQuery(null);
+    setLocationSelectionError(false);
+    setLocationPinError("");
+  }, [activeGroupId, locationEdit]);
   useEffect(() => {
     setInviteDraft([]);
     setInviteSearch("");
@@ -5437,14 +7168,18 @@ export function GroupDetailsModal({
     let active = true;
     const timer = setTimeout(() => {
       setLocationSearching(true);
-      void fetchNativeLocationSuggestions(trimmed, countryLabel)
+      void fetchNativePrioritizedLocationSuggestions(trimmed, { biasPoint: locationBiasPoint ?? null, selectedCountry: countryLabel })
         .then((results) => {
           if (!active) return;
           setLocationSuggestions(results);
+          setManualLocationAllowedQuery(results.length === 0 ? trimmed : null);
           setLocationSearchOpen(results.length > 0);
         })
         .catch(() => {
-          if (active) setLocationSuggestions([]);
+          if (active) {
+            setLocationSuggestions([]);
+            setManualLocationAllowedQuery(null);
+          }
         })
         .finally(() => {
           if (active) setLocationSearching(false);
@@ -5454,7 +7189,7 @@ export function GroupDetailsModal({
       active = false;
       clearTimeout(timer);
     };
-  }, [countryLabel, locationEdit]);
+  }, [countryLabel, locationBiasPoint, locationEdit]);
   useEffect(() => {
     if (inviteEditorOpen) scrollGroupDetailsFieldIntoView("invite", huddleSpacing.x9);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -5463,13 +7198,49 @@ export function GroupDetailsModal({
     if (locationSearchOpen) scrollGroupDetailsFieldIntoView("location", huddleSpacing.x9);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [locationSearchOpen, locationSuggestions.length, locationSearching]);
+  useEffect(() => {
+    if (!activeGroupId) {
+      setDetailGroupEvents([]);
+      return;
+    }
+    let active = true;
+    void fetchNativeGroupChatEvents(activeGroupId, { accessToken })
+      .then((events) => {
+        if (active) setDetailGroupEvents(events);
+      })
+      .catch(() => {
+        if (active) setDetailGroupEvents([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [accessToken, activeGroupId]);
   if (!group) return null;
   const isExplore = "invitePending" in group;
-  const isJoinedGroup = !isExplore;
+  const isJoinedGroup = !isExplore || group.joined === true;
   const currentMemberRole = management?.members.find((member) => member.userId === currentUserId)?.role?.toLowerCase() || "";
-  const currentMemberMuted = management?.members.find((member) => member.userId === currentUserId)?.isMuted === true;
+  const currentMemberMuted = muted ?? (management?.members.find((member) => member.userId === currentUserId)?.isMuted === true);
   const canManage = Boolean(isJoinedGroup && currentUserId && (("createdBy" in group && group.createdBy === currentUserId) || currentMemberRole === "admin" || currentMemberRole === "creator"));
   const groupDetailsEditingActive = groupDetailsKeyboardHeight > 0 || groupNameFocused || groupDescriptionFocused || groupLocationFocused || groupInviteFocused || groupPetOtherFocused;
+  const handleSaveDetails = () => {
+    const trimmed = locationEdit.trim();
+    if (trimmed && acceptedLocationRef.current !== trimmed && manualLocationAllowedQuery !== trimmed) {
+      setLocationSelectionError(true);
+      setLocationSearchOpen(true);
+      scrollGroupDetailsFieldIntoView("location", huddleSpacing.x8);
+      return;
+    }
+    onSaveDetails();
+  };
+  const applyCurrentLocationEdit = (loc: NativeResolvedLocation) => {
+    const selectedLocation = loc.district || loc.label;
+    acceptedLocationRef.current = selectedLocation;
+    setManualLocationAllowedQuery(null);
+    setLocationPinError("");
+    setLocationSuggestions([]);
+    setLocationSearchOpen(false);
+    onChangeLocationEdit(selectedLocation);
+  };
   const name = "chatName" in group ? group.chatName || "Group" : group.name;
   const avatarUrl = "avatarUrl" in group ? group.avatarUrl : null;
   const memberCount = "memberCount" in group ? group.memberCount : 0;
@@ -5480,6 +7251,8 @@ export function GroupDetailsModal({
   const petFocusSpecies = petFocusEdit.map((item) => splitNativePetFocusLabel(item).species);
   const previewPetFocus = petFocusEdit.length > 0 ? petFocusEdit : petFocus;
   const memberLabel = `${memberCount} member${memberCount === 1 ? "" : "s"}`;
+  const detailNextEvent = pickActiveOrNextGroupEvent(detailGroupEvents, countdownNow);
+  const eventCountdown = "nextEventStartsAt" in group ? groupNextEventCountdownLabel(group.nextEventStartsAt || detailNextEvent?.startsAt, group.nextEventEndsAt || detailNextEvent?.endsAt, countdownNow) : groupNextEventCountdownLabel(detailNextEvent?.startsAt, detailNextEvent?.endsAt, countdownNow);
   const sortedMembers = management?.members ? sortGroupMembers(management.members, group, currentUserId) : [];
   const excludedInviteIds = new Set([
     ...(management?.members ?? []).map((member) => member.userId),
@@ -5527,7 +7300,8 @@ export function GroupDetailsModal({
   const registerGroupDetailsField = (key: string) => (event: { nativeEvent: { layout: { height: number; y: number } } }) => {
     groupDetailsFieldLayoutsRef.current[key] = event.nativeEvent.layout;
   };
-  const scrollGroupDetailsFieldIntoView = (target: string, extraOffset = 0) => {
+  function scrollGroupDetailsFieldIntoView(target: string, extraOffset = 0) {
+    if (!group) return;
     const scrollToTarget = () => {
       const fieldLayout = groupDetailsFieldLayoutsRef.current[target];
       if (!fieldLayout) return;
@@ -5543,7 +7317,7 @@ export function GroupDetailsModal({
     requestAnimationFrame(scrollToTarget);
     setTimeout(scrollToTarget, 180);
     setTimeout(scrollToTarget, 360);
-  };
+  }
   const confirmMemberAction = async () => {
     if (!memberActionConfirm || memberActionBusy || !group) return;
     const { member, mode } = memberActionConfirm;
@@ -5611,15 +7385,15 @@ export function GroupDetailsModal({
   };
   return (
     <Modal presentationStyle="overFullScreen" animationType="slide" transparent visible onRequestClose={onClose}>
-      <RNKeyboardAvoidingView behavior="padding" keyboardVerticalOffset={0} style={[nativeModalStyles.appModalBackdrop, nativeModalStyles.appModalBottomSafeArea]}>
+      <KeyboardAvoidingView behavior="padding" keyboardVerticalOffset={0} style={[nativeModalStyles.appModalBackdrop, nativeModalStyles.appModalBottomSafeArea]}>
         <Pressable accessibilityLabel="Close group details" onPress={onClose} style={StyleSheet.absoluteFill} />
-	        <View style={styles.groupDetailsEventBoundary}>
+        <View style={nativeModalStyles.appBottomSheetEventBoundary}>
 			        <AppBottomSheet onClose={onClose} style={styles.groupDetailsSheet}>
 	          <AppBottomSheetHeader>
             {isJoinedGroup ? (
               <View style={styles.groupHeaderActionCluster}>
                 <Pressable disabled={groupActionBusy === "mute"} onPress={() => { void toggleGroupMute(); }} style={({ pressed }) => [styles.groupHeaderActionButton, pressed && styles.pressed, groupActionBusy === "mute" && styles.actionDisabled]}>
-                  <Feather color={huddleColors.text} name={currentMemberMuted ? "bell" : "bell-off"} size={17} />
+                  <Feather color={huddleColors.text} name={currentMemberMuted ? "bell-off" : "bell"} size={17} />
                 </Pressable>
 	                <Pressable onPress={() => setGroupActionConfirm(canManage ? "remove" : "leave")} style={({ pressed }) => [styles.groupHeaderActionButton, styles.groupHeaderDangerButton, pressed && styles.pressed]}>
 	                  <Feather color={huddleColors.validationRed} name="log-out" size={17} />
@@ -5627,9 +7401,7 @@ export function GroupDetailsModal({
 	              </View>
             ) : null}
             <View style={styles.groupDetailsHeaderSpacer} />
-            <AppModalIconButton accessibilityLabel="Close" onPress={onClose}>
-              <Feather color={huddleColors.text} name="x" size={24} />
-            </AppModalIconButton>
+            <AppModalCloseButton onPress={onClose} />
 	          </AppBottomSheetHeader>
 		          <ScrollView
                 ref={groupDetailsScrollRef}
@@ -5648,9 +7420,9 @@ export function GroupDetailsModal({
 	                  <View style={styles.createNameRow}>
 	                    <Pressable accessibilityLabel="Change group avatar" onPress={onPickCover} style={[styles.createAvatarButton, detailsErrors.cover ? styles.createAvatarButtonError : null]}>
                       {editCover?.uri ? (
-                        <ExpoImage cachePolicy="memory-disk" contentFit="cover" source={{ uri: editCover.uri }} style={styles.createAvatarImage} transition={120} />
+                        <ExpoImage cachePolicy="memory-disk" contentFit="cover" key={nativeFreshImageKey(editCover.uri, editCover.uri)} source={{ uri: nativeFreshImageUri(editCover.uri, editCover.uri) }} style={styles.createAvatarImage} transition={120} />
                       ) : avatarUrl ? (
-                        <ResilientAvatarImage fallback={<Feather color={huddleColors.blue} name="users" size={26} />} style={styles.createAvatarImage} uri={avatarUrl} />
+                        <ResilientAvatarImage fallback={<Feather color={huddleColors.blue} name="users" size={26} />} style={styles.createAvatarImage} uri={avatarUrl} version={groupImageVersion(group, avatarUrl)} />
                       ) : (
                         <Feather color={huddleColors.blue} name="users" size={26} />
                       )}
@@ -5677,9 +7449,9 @@ export function GroupDetailsModal({
 	                    <View style={[styles.createPreviewCard, detailsErrors.cover ? styles.createPreviewCardError : null]}>
 	                      <View style={nativeModalStyles.appGroupHero}>
 	                        {editCover?.uri ? (
-	                          <ExpoImage cachePolicy="memory-disk" contentFit="cover" source={{ uri: editCover.uri }} style={nativeModalStyles.appGroupHeroImage} transition={120} />
+	                          <ExpoImage cachePolicy="memory-disk" contentFit="cover" key={nativeFreshImageKey(editCover.uri, editCover.uri)} source={{ uri: nativeFreshImageUri(editCover.uri, editCover.uri) }} style={nativeModalStyles.appGroupHeroImage} transition={120} />
                         ) : avatarUrl ? (
-                          <ResilientAvatarImage fallback={<View style={nativeModalStyles.appGroupHeroFallback} />} style={nativeModalStyles.appGroupHeroImage} uri={avatarUrl} />
+                          <ResilientAvatarImage fallback={<NativeAuroraCover initial={name} seed={"id" in group ? group.id : group.chatId} style={StyleSheet.absoluteFill} />} style={nativeModalStyles.appGroupHeroImage} uri={avatarUrl} version={groupImageVersion(group, avatarUrl)} />
                         ) : (
                           <LinearGradient colors={[huddleColors.blueSoft, huddleColors.blue]} start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }} style={StyleSheet.absoluteFill} />
                         )}
@@ -5690,6 +7462,7 @@ export function GroupDetailsModal({
                           <Feather color={huddleColors.onPrimary} name="camera" size={22} />
                         </Pressable>
                         <View style={nativeModalStyles.appGroupHeroCopy}>
+                          <GroupEventCountdownBadge countdown={eventCountdown} goingCount={detailNextEvent?.rsvpCount ?? 0} />
                           <Text numberOfLines={1} style={nativeModalStyles.appGroupHeroTitle}>{nameEdit.trim() || name}</Text>
                           {locationEdit.trim() ? <View style={nativeModalStyles.appGroupHeroMetaRow}><Feather color={huddleColors.profileCaptionPlaceholder} name="map-pin" size={12} /><Text numberOfLines={1} style={nativeModalStyles.appGroupHeroMeta}>{locationEdit.trim()}</Text></View> : null}
                           {petFocusEdit.length > 0 ? (
@@ -5700,16 +7473,14 @@ export function GroupDetailsModal({
                         </View>
                       </View>
                       <View onLayout={registerGroupDetailsField("description")} style={styles.createDescriptionWrap}>
-	                        <AppModalField
+	                        <GroupDescriptionTextArea
 	                          accessibilityLabel="Group description"
 	                          error={detailsErrors.description}
                             focused={groupDescriptionFocused}
-                          multiline
                           onBlur={() => setGroupDescriptionFocused(false)}
                           onChangeText={onChangeDescriptionEdit}
                           onFocus={() => { setGroupDescriptionFocused(true); scrollGroupDetailsFieldIntoView("description", huddleSpacing.x8); }}
                           placeholder="Tell people what this group is about and how you usually meet."
-                          style={styles.createDescriptionField}
                           value={descriptionEdit}
                         />
 	                    </View>
@@ -5729,25 +7500,40 @@ export function GroupDetailsModal({
                   {expandedMetaEditor === "location" ? (
                   <View onLayout={registerGroupDetailsField("location")}>
                     <Text style={styles.createLabel}>Location</Text>
-	                    <AppModalField
-	                      accessibilityLabel="Group location"
-	                      error={detailsErrors.location}
-                      focused={groupLocationFocused}
-                      onBlur={() => setGroupLocationFocused(false)}
-                      onChangeText={(value) => {
-                        onChangeLocationEdit(value);
-                        setLocationSearchOpen(value.trim().length >= 2);
-                      }}
-                      onFocus={() => {
-                        setGroupLocationFocused(true);
-                        if (locationSuggestions.length > 0) setLocationSearchOpen(true);
-                        scrollGroupDetailsFieldIntoView("location", huddleSpacing.x8);
-                      }}
-                      placeholder="Search district or neighbourhood"
-                      style={styles.createLocationField}
-                      value={locationEdit}
-	                    />
-	                    {detailsErrors.location ? <Text style={styles.createErrorText}>Add a group location to continue.</Text> : null}
+                    <View style={[styles.locationFieldRow, groupLocationFocused ? nativeModalStyles.appModalFieldFocused : null, detailsErrors.location ? nativeModalStyles.appModalFieldError : null]}>
+                      <NativeLocationPinButton
+                        onError={setLocationPinError}
+                        onResolved={applyCurrentLocationEdit}
+                        style={styles.locationFieldPin}
+                      />
+                      <TextInput
+                multiline={false}
+                scrollEnabled
+                numberOfLines={1} lineBreakModeIOS="tail" lineBreakStrategyIOS="none"
+                textBreakStrategy="simple"
+                        accessibilityLabel="Group location"
+                        onBlur={() => setGroupLocationFocused(false)}
+                        onChangeText={(value) => {
+                          acceptedLocationRef.current = null;
+                          setManualLocationAllowedQuery(null);
+                          setLocationPinError("");
+                          setLocationSelectionError(false);
+                          onChangeLocationEdit(value);
+                          setLocationSearchOpen(value.trim().length >= 2);
+                        }}
+                        onFocus={() => {
+                          setGroupLocationFocused(true);
+                          if (locationSuggestions.length > 0) setLocationSearchOpen(true);
+                          scrollGroupDetailsFieldIntoView("location", huddleSpacing.x8);
+                        }}
+                        placeholder="Where do you usually meet?"
+                        placeholderTextColor={huddleColors.mutedText}
+                        style={styles.locationFieldInput}
+                        value={locationEdit}
+                      />
+                    </View>
+                    {locationPinError ? <Text style={styles.createErrorText}>{locationPinError}</Text> : null}
+                    {detailsErrors.location || locationSelectionError ? <Text style={styles.createErrorText}>{locationSelectionError ? "Choose a search result, or use this exact text only when no result exists." : "Add a group location to continue."}</Text> : null}
                     {locationSearchOpen && (locationSuggestions.length > 0 || locationSearching) ? (
                       <View style={styles.locationSuggestionCard}>
                         {locationSearching && locationSuggestions.length === 0 ? <Text style={styles.locationSuggestionMeta}>Searching...</Text> : null}
@@ -5755,13 +7541,17 @@ export function GroupDetailsModal({
                           <Pressable
                             key={`${suggestion.label}:${suggestion.lat}:${suggestion.lng}`}
                             onPress={() => {
-                              const selectedLocation = suggestion.district || suggestion.label;
-                              onChangeLocationEdit(selectedLocation);
+	                              const selectedLocation = suggestion.district || suggestion.label;
+	                              acceptedLocationRef.current = selectedLocation;
+	                              setManualLocationAllowedQuery(null);
+	                              setLocationSelectionError(false);
+	                              onChangeLocationEdit(selectedLocation);
+                              onChangeCountryEdit?.(suggestion.country || extractNativeCountryFromPlaceLabel(suggestion.label) || null);
                               setLocationSearchOpen(false);
                             }}
                             style={styles.locationSuggestionRow}
                           >
-                            <Text style={styles.locationSuggestionPrimary}>{suggestion.district || suggestion.label}</Text>
+                            <Text ellipsizeMode="tail" numberOfLines={1} style={styles.locationSuggestionPrimary}>{suggestion.district || suggestion.label}</Text>
                             {suggestion.label ? <Text numberOfLines={1} style={styles.locationSuggestionMeta}>{suggestion.label}</Text> : null}
                           </Pressable>
                         ))}
@@ -5856,7 +7646,7 @@ export function GroupDetailsModal({
               ) : null}
 	          {!canManage ? <View style={styles.groupHeroDescriptionBlock}>
 	            <View style={nativeModalStyles.appGroupHero}>
-	              {editCover?.uri ? <ExpoImage cachePolicy="memory-disk" contentFit="cover" source={{ uri: editCover.uri }} style={nativeModalStyles.appGroupHeroImage} transition={120} /> : <ResilientAvatarImage fallback={<View style={nativeModalStyles.appGroupHeroFallback} />} style={nativeModalStyles.appGroupHeroImage} uri={avatarUrl} />}
+	              {editCover?.uri ? <ExpoImage cachePolicy="memory-disk" contentFit="cover" key={nativeFreshImageKey(editCover.uri, editCover.uri)} source={{ uri: nativeFreshImageUri(editCover.uri, editCover.uri) }} style={nativeModalStyles.appGroupHeroImage} transition={120} /> : <ResilientAvatarImage fallback={<NativeAuroraCover initial={name} seed={"id" in group ? group.id : group.chatId} style={StyleSheet.absoluteFill} />} style={nativeModalStyles.appGroupHeroImage} uri={avatarUrl} version={groupImageVersion(group, avatarUrl)} />}
               <View style={nativeModalStyles.appGroupHeroTopScrim} />
               <View style={nativeModalStyles.appGroupHeroBottomScrim} />
 	              <Text style={nativeModalStyles.appGroupHeroMembers}>{memberLabel}</Text>
@@ -5866,11 +7656,12 @@ export function GroupDetailsModal({
                 </Pressable>
               ) : null}
               <View style={nativeModalStyles.appGroupHeroCopy}>
+                <GroupEventCountdownBadge countdown={eventCountdown} goingCount={detailNextEvent?.rsvpCount ?? 0} />
                 <Text numberOfLines={1} style={nativeModalStyles.appGroupHeroTitle}>{name}</Text>
                 {(canManage ? locationEdit : locationLabel) ? <View style={nativeModalStyles.appGroupHeroMetaRow}><Feather color={huddleColors.profileCaptionPlaceholder} name="map-pin" size={12} /><Text numberOfLines={1} style={nativeModalStyles.appGroupHeroMeta}>{canManage ? locationEdit : locationLabel}</Text></View> : null}
                 {previewPetFocus.length > 0 ? (
                   <View style={nativeModalStyles.appGroupHeroChips}>
-                    {previewPetFocus.slice(0, 4).map((tag) => <Text key={tag} style={nativeModalStyles.appGroupHeroChip}>{tag}</Text>)}
+                    {previewPetFocus.slice(0, 4).map((tag) => <Text key={tag} style={[nativeModalStyles.appGroupHeroChip, styles.exploreChipSentence]}>{sentenceCaseTag(tag)}</Text>)}
                   </View>
                 ) : null}
               </View>
@@ -5942,6 +7733,10 @@ export function GroupDetailsModal({
                           <View style={[styles.searchField, groupInviteFocused ? nativeModalStyles.appModalFieldFocused : null]}>
                             <Feather color={huddleColors.iconSubtle} name="search" size={18} />
                             <TextInput
+                multiline={false}
+                scrollEnabled
+                numberOfLines={1} lineBreakModeIOS="tail" lineBreakStrategyIOS="none"
+                textBreakStrategy="simple"
                               accessibilityLabel="Search friends to invite"
                               autoCapitalize="none"
                               autoCorrect={false}
@@ -5954,12 +7749,12 @@ export function GroupDetailsModal({
                               style={styles.searchInput}
                               value={inviteSearch}
                             />
+                            {inviteSearch ? (
+                              <Pressable accessibilityLabel="Clear invite search" onPress={() => setInviteSearch("")} style={styles.searchClear}>
+                                <Feather color={huddleColors.iconMuted} name="x" size={16} />
+                              </Pressable>
+                            ) : null}
                           </View>
-                          {inviteSearch ? (
-                            <Pressable accessibilityLabel="Clear invite search" onPress={() => setInviteSearch("")} style={styles.searchClear}>
-                              <Feather color={huddleColors.iconMuted} name="x" size={16} />
-                            </Pressable>
-                          ) : null}
                         </View>
                         {inviteSearching ? <Text style={nativeModalStyles.appModalMutedBody}>Searching...</Text> : null}
 		                        {visibleInviteSuggestions.map((member) => {
@@ -6043,7 +7838,7 @@ export function GroupDetailsModal({
                     <View style={styles.mediaSection}>
                       <Text style={styles.sectionLabel}>Media</Text>
 	                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={nativeModalStyles.appGroupMediaRail}>
-	                      {management.mediaUrls.map((url) => <ExpoImage key={url} cachePolicy="memory-disk" contentFit="cover" source={{ uri: url }} style={nativeModalStyles.appGroupMediaThumb} transition={120} />)}
+	                      {management.mediaUrls.map((url) => <ExpoImage key={nativeFreshImageKey(url, url)} cachePolicy="memory-disk" contentFit="cover" source={{ uri: nativeFreshImageUri(url, url) }} style={nativeModalStyles.appGroupMediaThumb} transition={120} />)}
 	                    </ScrollView>
                     </View>
 	                ) : null}
@@ -6052,7 +7847,7 @@ export function GroupDetailsModal({
             {isExplore ? (
               <View style={styles.exploreMembersSection}>
                 <Text style={styles.sectionLabel}>Members</Text>
-                {managementLoading ? <Text style={nativeModalStyles.appModalMutedBody}>Loading members...</Text> : managementError ? <Text style={nativeModalStyles.appModalMutedBody}>Couldn't load members. Pull to refresh and try again.</Text> : sortedMembers.length ? sortedMembers.map((member) => {
+                {managementLoading ? <NativeSpinner tone="accent" /> : managementError ? <Text style={nativeModalStyles.appModalMutedBody}>Couldn't load members. Pull to refresh and try again.</Text> : sortedMembers.length ? sortedMembers.map((member) => {
                   const memberRole = groupMemberRoleFor(group, member);
                   return (
                     <View key={member.userId} style={[nativeModalStyles.appMemberSelectRow, styles.groupMemberCompactRow]}>
@@ -6070,7 +7865,7 @@ export function GroupDetailsModal({
 		          </ScrollView>
             {!groupDetailsEditingActive && (isExplore || !hideOpenChatButton || canManage) ? (
 	            <AppBottomSheetFooter onLayout={(event) => setGroupDetailsFooterHeight(event.nativeEvent.layout.height)}>
-	              {isExplore ? (
+		              {isExplore && !group.joined ? (
                 group.invitePending ? (
                   <AppModalActionRow>
                     <AppModalButton variant="secondary" onPress={() => onDeclineInvite(group)}>
@@ -6086,24 +7881,24 @@ export function GroupDetailsModal({
                   </AppModalButton>
                 )
               ) : (
-	                canManage ? (
+		                canManage ? (
                     hideOpenChatButton ? (
-                      <AppModalButton onPress={onSaveDetails}><Text style={styles.modalPrimaryLabel}>Save</Text></AppModalButton>
+	                      <AppModalButton onPress={handleSaveDetails}><GroupDetailsFooterButtonLabel action="save" /></AppModalButton>
                     ) : (
                       <AppModalActionRow>
-                        <AppModalButton variant="secondary" onPress={() => onOpenChat(group)}><Text style={styles.modalSecondaryLabel}>Open Group Chat</Text></AppModalButton>
-                        <AppModalButton onPress={onSaveDetails}><Text style={styles.modalPrimaryLabel}>Save</Text></AppModalButton>
+                        <AppModalButton accessibilityLabel="Open Group Chat" variant="secondary" onPress={() => onOpenChat(group)}><GroupDetailsFooterButtonLabel action="chat" iconOnly variant="secondary" /></AppModalButton>
+	                        <AppModalButton accessibilityLabel="Save group details" onPress={handleSaveDetails}><GroupDetailsFooterButtonLabel action="save" iconOnly /></AppModalButton>
                       </AppModalActionRow>
                     )
 	                ) : (
-	                  <AppModalButton onPress={() => onOpenChat(group)}><Text style={styles.modalPrimaryLabel}>Open Group Chat</Text></AppModalButton>
+	                  <AppModalButton onPress={() => onOpenChat(group)}><GroupDetailsFooterButtonLabel action="chat" /></AppModalButton>
 	                )
 	              )}
 		            </AppBottomSheetFooter>
             ) : null}
 			        </AppBottomSheet>
 	        </View>
-      </RNKeyboardAvoidingView>
+      </KeyboardAvoidingView>
         <ConfirmGroupActionModal
           busy={groupActionBusy === groupActionConfirm}
           mode={groupActionConfirm}
@@ -6116,7 +7911,26 @@ export function GroupDetailsModal({
           onCancel={() => setMemberActionConfirm(null)}
           onConfirm={() => { void confirmMemberAction(); }}
         />
+        <NativeMediaImageCropper
+          asset={coverCropAsset}
+          aspect="16:9"
+          onCancel={onCancelCoverCrop}
+          onError={() => undefined}
+          onSave={onSaveCoverCrop}
+          presentation="inline"
+          title="Edit group photo"
+        />
 	    </Modal>
+  );
+}
+
+function GroupDetailsFooterButtonLabel({ action, iconOnly = false, variant = "primary" }: { action: "chat" | "save"; iconOnly?: boolean; variant?: "primary" | "secondary" }) {
+  const color = variant === "secondary" ? huddleColors.text : huddleColors.onPrimary;
+  return (
+    <View style={styles.groupDetailsFooterButtonLabel}>
+      <Feather color={color} name={action === "chat" ? "message-circle" : "save"} size={18} />
+      {!iconOnly ? <Text style={variant === "secondary" ? styles.modalSecondaryLabel : styles.modalPrimaryLabel}>{action === "chat" ? "Open Group Chat" : "Save"}</Text> : null}
+    </View>
   );
 }
 
@@ -6131,6 +7945,7 @@ function ConfirmMemberActionModal({ busy, target, onCancel, onConfirm }: { busy:
       onClose={onCancel}
       onConfirm={onConfirm}
       open
+      presentation="inline"
       slideLabel={remove ? "Slide to Remove" : "Slide to Block"}
       title={remove ? "Remove member?" : "Block user?"}
     />
@@ -6147,6 +7962,7 @@ function ConfirmGroupActionModal({ busy, mode, onCancel, onConfirm }: { busy: bo
       onClose={onCancel}
       onConfirm={onConfirm}
       open
+      presentation="inline"
       slideLabel={remove ? "Slide to Remove" : "Slide to Leave"}
       title={remove ? "Remove group?" : "Leave group?"}
     />
@@ -6158,13 +7974,11 @@ function NativeJoinWithCodeSheet({ onChange, onClose, onSubmit, open, value }: {
   return (
     <Modal presentationStyle="overFullScreen" animationType="slide" transparent visible={open} onRequestClose={onClose}>
       <Pressable style={[nativeModalStyles.appModalBackdrop, nativeModalStyles.appModalBottomSafeArea]} onPress={onClose}>
-        <Pressable onPress={(event) => event.stopPropagation()} style={nativeModalStyles.appBottomSheetEventBoundary}>
+        <View pointerEvents="box-none" style={nativeModalStyles.appBottomSheetEventBoundary}>
         <AppBottomSheet onClose={onClose}>
           <AppBottomSheetHeader>
             <Text style={nativeModalStyles.appModalSheetTitle}>Join with code</Text>
-            <AppModalIconButton accessibilityLabel="Close" onPress={onClose}>
-              <Feather color={huddleColors.text} name="x" size={22} />
-            </AppModalIconButton>
+            <AppModalCloseButton onPress={onClose} />
           </AppBottomSheetHeader>
           <AppBottomSheetScroll>
             <View style={styles.joinCodeContent}>
@@ -6188,7 +8002,7 @@ function NativeJoinWithCodeSheet({ onChange, onClose, onSubmit, open, value }: {
             <AppModalButton disabled={normalized.length !== 6} onPress={onSubmit}><Text style={styles.modalPrimaryLabel}>Join</Text></AppModalButton>
           </AppBottomSheetFooter>
 	          </AppBottomSheet>
-        </Pressable>
+        </View>
       </Pressable>
     </Modal>
   );
@@ -6196,6 +8010,7 @@ function NativeJoinWithCodeSheet({ onChange, onClose, onSubmit, open, value }: {
 
 function CreateGroupModal({
   countryLabel,
+  locationBiasPoint,
   cover,
   coverCropAsset,
   creating,
@@ -6203,6 +8018,7 @@ function CreateGroupModal({
   joinMethod,
   location,
   name,
+  onChangeCountry,
   onChangeDescription,
   onChangeJoinMethod,
   onChangeLocation,
@@ -6221,6 +8037,7 @@ function CreateGroupModal({
   visibility,
 }: {
   countryLabel: string | null;
+  locationBiasPoint?: { lat: number; lng: number } | null;
   cover: PendingGroupCover | null;
   coverCropAsset: (NativeProfileUploadAsset & { height?: number | null; width?: number | null }) | null;
   creating: boolean;
@@ -6231,6 +8048,7 @@ function CreateGroupModal({
   open: boolean;
   petFocus: string[];
   visibility: "public" | "private";
+  onChangeCountry?: (value: string | null) => void;
   onChangeDescription: (value: string) => void;
   onChangeJoinMethod: (value: "instant" | "request") => void;
   onChangeLocation: (value: string) => void;
@@ -6248,6 +8066,8 @@ function CreateGroupModal({
   const [locationSuggestions, setLocationSuggestions] = useState<NativeLocationSuggestion[]>([]);
   const [locationSearchOpen, setLocationSearchOpen] = useState(false);
   const [locationSearching, setLocationSearching] = useState(false);
+  const [manualLocationAllowedQuery, setManualLocationAllowedQuery] = useState<string | null>(null);
+  const [locationPinError, setLocationPinError] = useState("");
   const [petFocusOpen, setPetFocusOpen] = useState(false);
   const [petFocusOther, setPetFocusOther] = useState("");
   const [petFocusBreedOpen, setPetFocusBreedOpen] = useState<string | null>(null);
@@ -6255,7 +8075,7 @@ function CreateGroupModal({
   const [locationFocused, setLocationFocused] = useState(false);
   const [descriptionFocused, setDescriptionFocused] = useState(false);
   const [createErrors, setCreateErrors] = useState<{ cover?: boolean; description?: boolean; location?: boolean; name?: boolean }>({});
-  const [createShakeAnim, triggerCreateShake] = useShakeAnimation();
+  const { shake: triggerCreateShake, shakeStyle: createShakeStyle } = useErrorShake("warning");
   const createGroupScrollRef = useRef<ScrollView | null>(null);
   const createFieldLayoutsRef = useRef<Record<string, { height: number; y: number }>>({});
   const [createKeyboardHeight, setCreateKeyboardHeight] = useState(0);
@@ -6266,6 +8086,7 @@ function CreateGroupModal({
   const previewPetFocus = shouldCollapsePetFocusChips(fullPreviewPetFocus)
     ? Array.from(new Set(petFocus.map((item) => splitNativePetFocusLabel(item).species).filter(Boolean))).slice(0, GROUP_PET_FOCUS_MAX)
     : fullPreviewPetFocus;
+  const showFreeTextLocationScopeHint = visibility === "public" && Boolean(location.trim()) && acceptedLocationRef.current !== location.trim();
   const setPetFocusBreed = (species: string, breed: string) => {
     onChangePetFocus(petFocus.map((item) => {
       const parsed = splitNativePetFocusLabel(item);
@@ -6299,6 +8120,18 @@ function CreateGroupModal({
     if (countWords(value) > GROUP_DESCRIPTION_WORD_LIMIT) return;
     onChangeDescription(value);
   };
+
+  const applyCurrentLocation = (loc: NativeResolvedLocation) => {
+    const selectedLocation = loc.district || loc.label;
+    acceptedLocationRef.current = selectedLocation;
+    setManualLocationAllowedQuery(null);
+    setLocationPinError("");
+    setLocationSuggestions([]);
+    setLocationSearchOpen(false);
+    onChangeLocation(selectedLocation);
+    onChangeCountry?.(loc.countryName || loc.country || null);
+    if (createErrors.location && selectedLocation.trim()) setCreateErrors((current) => ({ ...current, location: false }));
+  };
   const registerCreateField = (key: string) => (event: { nativeEvent: { layout: { height: number; y: number } } }) => {
     createFieldLayoutsRef.current[key] = event.nativeEvent.layout;
   };
@@ -6321,6 +8154,7 @@ function CreateGroupModal({
     if (!open) return;
     Keyboard.dismiss();
     setLocationSearchOpen(false);
+    setLocationPinError("");
     setPetFocusOpen(false);
     setPetFocusBreedOpen(null);
   }, [open]);
@@ -6337,15 +8171,15 @@ function CreateGroupModal({
     if (cover && createErrors.cover) setCreateErrors((current) => ({ ...current, cover: false }));
   }, [cover, createErrors.cover]);
   const submitCreateGroup = () => {
+    const trimmedLocation = location.trim();
     const nextErrors = {
       name: !name.trim(),
-      location: !location.trim(),
+      location: !trimmedLocation,
       cover: !cover,
       description: !description.trim() || countWords(description) > GROUP_DESCRIPTION_WORD_LIMIT,
     };
     setCreateErrors(nextErrors);
     if (nextErrors.name || nextErrors.location || nextErrors.cover || nextErrors.description) {
-      haptic.warning();
       triggerCreateShake();
     }
     if (nextErrors.name) {
@@ -6379,14 +8213,18 @@ function CreateGroupModal({
     let active = true;
     const timer = setTimeout(() => {
       setLocationSearching(true);
-      void fetchNativeLocationSuggestions(trimmed, countryLabel)
+      void fetchNativePrioritizedLocationSuggestions(trimmed, { biasPoint: locationBiasPoint ?? null, selectedCountry: countryLabel })
         .then((results) => {
           if (!active) return;
           setLocationSuggestions(results);
+          setManualLocationAllowedQuery(results.length === 0 ? trimmed : null);
           setLocationSearchOpen(results.length > 0);
         })
         .catch(() => {
-          if (active) setLocationSuggestions([]);
+          if (active) {
+            setLocationSuggestions([]);
+            setManualLocationAllowedQuery(null);
+          }
         })
         .finally(() => {
           if (active) setLocationSearching(false);
@@ -6396,18 +8234,16 @@ function CreateGroupModal({
       active = false;
       clearTimeout(timer);
     };
-	  }, [countryLabel, location]);
+	  }, [countryLabel, locationBiasPoint, location]);
 	  return (
     <Modal presentationStyle="overFullScreen" animationType="slide" transparent visible={open} onRequestClose={onClose}>
-      <RNKeyboardAvoidingView behavior="padding" keyboardVerticalOffset={0} style={[nativeModalStyles.appModalBackdrop, nativeModalStyles.appModalBottomSafeArea]}>
+      <KeyboardAvoidingView behavior="padding" keyboardVerticalOffset={0} style={[nativeModalStyles.appModalBackdrop, nativeModalStyles.appModalBottomSafeArea]}>
         <Pressable accessibilityLabel="Close create group" style={StyleSheet.absoluteFillObject} onPress={onClose} />
-        <View style={styles.createGroupEventBoundary}>
+        <View style={nativeModalStyles.appBottomSheetEventBoundary}>
 			        <AppBottomSheet onClose={onClose} style={styles.createGroupSheet}>
 		          <AppBottomSheetHeader>
             <Text style={nativeModalStyles.appModalSheetTitle}>Create a group</Text>
-            <AppModalIconButton accessibilityLabel="Close" onPress={onClose}>
-              <Feather color={huddleColors.text} name="x" size={22} />
-            </AppModalIconButton>
+            <AppModalCloseButton onPress={onClose} />
 	          </AppBottomSheetHeader>
 	          <ScrollView
 	            ref={createGroupScrollRef}
@@ -6421,14 +8257,10 @@ function CreateGroupModal({
 	            style={styles.createGroupScroll}
 	          >
 	            <View style={styles.createSheetContent}>
+	            {/* No separate circular avatar preview: the cover card below IS the
+	                group's identity (cover and avatar are the same stored field), so
+	                a second thumbnail was duplicate chrome. Name field takes the row. */}
 	            <View onLayout={registerCreateField("name")} style={styles.createNameRow}>
-	              <Pressable accessibilityLabel="Upload group avatar" onPress={onPickCover} style={styles.createAvatarButton}>
-	                {cover ? (
-	                  <ExpoImage cachePolicy="memory-disk" contentFit="cover" source={{ uri: cover.uri }} style={styles.createAvatarImage} transition={120} />
-	                ) : (
-	                  <Feather color={huddleColors.blue} name="users" size={26} />
-	                )}
-	              </Pressable>
 		              <View style={styles.createNameField}>
 		                <AppModalField blurOnSubmit error={createErrors.name} focused={nameFocused} onBlur={() => setNameFocused(false)} onChangeText={(value) => { onChangeName(value); if (createErrors.name && value.trim()) setCreateErrors((current) => ({ ...current, name: false })); }} onFocus={() => { setNameFocused(true); centerCreateField("name"); }} onSubmitEditing={Keyboard.dismiss} placeholder="Group name" returnKeyType="done" style={[styles.createTextField, styles.groupDetailsNameField]} value={name} />
 		              </View>
@@ -6438,9 +8270,13 @@ function CreateGroupModal({
               <View onLayout={registerCreateField("cover")} style={[styles.createPreviewCard, createErrors.cover ? styles.createPreviewCardError : null]}>
 	                <View style={nativeModalStyles.appGroupHero}>
 	                  {cover ? (
-	                    <ExpoImage cachePolicy="memory-disk" contentFit="cover" source={{ uri: cover.uri }} style={nativeModalStyles.appGroupHeroImage} transition={120} />
+	                    <ExpoImage cachePolicy="memory-disk" contentFit="cover" key={nativeFreshImageKey(cover.uri, cover.uri)} source={{ uri: nativeFreshImageUri(cover.uri, cover.uri) }} style={nativeModalStyles.appGroupHeroImage} transition={120} />
 	                  ) : (
-	                    <LinearGradient colors={[huddleColors.blueSoft, huddleColors.blue]} start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }} style={StyleSheet.absoluteFill} />
+	                    // Live identity preview: the aurora reseeds off the name as
+	                    // the user types, so the group visibly "becomes itself"
+	                    // during creation — and matches exactly what the list and
+	                    // detail cards render if no photo is ever uploaded.
+	                    <NativeAuroraCover seed={name.trim() || "huddle"} style={StyleSheet.absoluteFill} />
 	                  )}
 	                  {cover ? <LinearGradient colors={["rgba(9,12,25,0.32)", "rgba(9,12,25,0)"]} pointerEvents="none" style={styles.createHeroTopScrim} /> : null}
 	                  {cover ? <LinearGradient colors={["rgba(9,12,25,0)", "rgba(9,12,25,0.34)", "rgba(9,12,25,0.72)"]} pointerEvents="none" style={styles.createHeroBottomScrim} /> : null}
@@ -6450,7 +8286,10 @@ function CreateGroupModal({
                     {location.trim() ? <View style={nativeModalStyles.appGroupHeroMetaRow}><Feather color={huddleColors.profileCaptionPlaceholder} name="map-pin" size={12} /><Text numberOfLines={1} style={nativeModalStyles.appGroupHeroMeta}>{location.trim()}</Text></View> : null}
                     {petFocus.length > 0 ? (
                       <View style={styles.createHeroChips}>
-                        {previewPetFocus.map((tag) => <Text key={tag} numberOfLines={1} style={styles.createHeroChip}>{tag}</Text>)}
+                        {previewPetFocus.map((tag) => {
+                          const species = splitNativePetFocusLabel(tag).species;
+                          return <Text key={tag} numberOfLines={1} style={styles.createHeroChip}>{nativePetSpeciesEmojiOrText(species === "All" ? "Others" : species)}</Text>;
+                        })}
 	                      </View>
 	                    ) : null}
 	                  </View>
@@ -6469,32 +8308,48 @@ function CreateGroupModal({
                   )}
                 </View>
                 <View onLayout={registerCreateField("description")} style={styles.createDescriptionWrap}>
-	                  <AppModalField error={createErrors.description} focused={descriptionFocused} multiline onBlur={() => setDescriptionFocused(false)} onChangeText={(value) => { changeDescription(value); if (createErrors.description && value.trim() && countWords(value) <= GROUP_DESCRIPTION_WORD_LIMIT) setCreateErrors((current) => ({ ...current, description: false })); }} onFocus={() => { setDescriptionFocused(true); centerCreateField("description"); }} placeholder="Tell people what this group is about and how you usually meet." returnKeyType="done" style={styles.createDescriptionField} value={description} />
+	                  <GroupDescriptionTextArea error={createErrors.description} focused={descriptionFocused} onBlur={() => setDescriptionFocused(false)} onChangeText={(value) => { changeDescription(value); if (createErrors.description && value.trim() && countWords(value) <= GROUP_DESCRIPTION_WORD_LIMIT) setCreateErrors((current) => ({ ...current, description: false })); }} onFocus={() => { setDescriptionFocused(true); centerCreateField("description"); }} placeholder="Tell people what this group is about and how you usually meet." returnKeyType="done" value={description} />
                 </View>
               </View>
             </View>
 	            <View onLayout={registerCreateField("location")}>
 	              <Text style={styles.createLabel}>Location</Text>
-	              <AppModalField
-	                focused={locationFocused}
-	                onBlur={() => setLocationFocused(false)}
-	                error={createErrors.location}
-	                onChangeText={(value) => {
-	                  acceptedLocationRef.current = null;
-	                  onChangeLocation(value);
-	                  if (createErrors.location && value.trim()) setCreateErrors((current) => ({ ...current, location: false }));
-	                }}
-	                onFocus={() => {
-	                  setLocationFocused(true);
-	                  centerCreateField("location");
-	                  if (locationSuggestions.length > 0) setLocationSearchOpen(true);
-	                }}
-	                onSubmitEditing={Keyboard.dismiss}
-	                placeholder="Search district or neighbourhood"
-	                returnKeyType="search"
-	                style={styles.createLocationField}
-	                value={location}
-              />
+              <View style={[styles.locationFieldRow, locationFocused ? nativeModalStyles.appModalFieldFocused : null, createErrors.location ? nativeModalStyles.appModalFieldError : null]}>
+                <NativeLocationPinButton
+                  onError={setLocationPinError}
+                  onResolved={applyCurrentLocation}
+                  style={styles.locationFieldPin}
+                />
+                <TextInput
+                multiline={false}
+                scrollEnabled
+                numberOfLines={1} lineBreakModeIOS="tail" lineBreakStrategyIOS="none"
+                textBreakStrategy="simple"
+                  onBlur={() => setLocationFocused(false)}
+                  onChangeText={(value) => {
+                    acceptedLocationRef.current = null;
+                    setManualLocationAllowedQuery(null);
+                    setLocationPinError("");
+                    onChangeLocation(value);
+                    if (createErrors.location && value.trim()) setCreateErrors((current) => ({ ...current, location: false }));
+                  }}
+                  onFocus={() => {
+                    setLocationFocused(true);
+                    centerCreateField("location");
+                    if (locationSuggestions.length > 0) setLocationSearchOpen(true);
+                  }}
+                  onSubmitEditing={Keyboard.dismiss}
+                  placeholder="Where do you usually meet?"
+                  placeholderTextColor={huddleColors.mutedText}
+                  returnKeyType="search"
+                  style={styles.locationFieldInput}
+                  value={location}
+                />
+              </View>
+              {locationPinError ? <Text style={styles.createErrorText}>{locationPinError}</Text> : null}
+              {!locationPinError && showFreeTextLocationScopeHint ? (
+                <Text style={styles.createHelperText}>We'll show this group to people in your current city or country.</Text>
+              ) : null}
               {locationSearchOpen && (locationSuggestions.length > 0 || locationSearching) ? (
                 <View style={styles.locationSuggestionCard}>
                   {locationSearching && locationSuggestions.length === 0 ? <Text style={styles.locationSuggestionMeta}>Searching...</Text> : null}
@@ -6503,14 +8358,17 @@ function CreateGroupModal({
                       key={`${suggestion.label}:${suggestion.lat}:${suggestion.lng}`}
                       onPress={() => {
                         const selectedLocation = suggestion.district || suggestion.label;
-	                        acceptedLocationRef.current = selectedLocation;
-	                        onChangeLocation(selectedLocation);
+		                        acceptedLocationRef.current = selectedLocation;
+		                        setManualLocationAllowedQuery(null);
+                        setLocationPinError("");
+		                        onChangeLocation(selectedLocation);
+                        onChangeCountry?.(suggestion.country || extractNativeCountryFromPlaceLabel(suggestion.label) || null);
 	                        setLocationSearchOpen(false);
 	                        Keyboard.dismiss();
 	                      }}
                       style={styles.locationSuggestionRow}
                     >
-                      <Text style={styles.locationSuggestionPrimary}>{suggestion.district || suggestion.label}</Text>
+                      <Text ellipsizeMode="tail" numberOfLines={1} style={styles.locationSuggestionPrimary}>{suggestion.district || suggestion.label}</Text>
                       {suggestion.label ? <Text numberOfLines={1} style={styles.locationSuggestionMeta}>{suggestion.label}</Text> : null}
                     </Pressable>
                   ))}
@@ -6521,7 +8379,12 @@ function CreateGroupModal({
               <Text style={[nativeModalStyles.appModalFieldLabel, styles.createSelectLabel]}>Pet focus</Text>
               <Pressable accessibilityRole="button" onPress={() => { Keyboard.dismiss(); setLocationSearchOpen(false); setPetFocusOpen((current) => { const next = !current; if (next) centerCreateField("petFocus"); return next; }); }} style={[nativeModalStyles.appModalSelectTrigger, styles.createSelectTrigger, petFocusOpen ? nativeModalStyles.appModalFieldFocused : null]}>
                 <Text numberOfLines={1} style={[nativeModalStyles.appModalSelectText, styles.createSelectText, petFocus.length === 0 ? nativeModalStyles.appModalSelectPlaceholder : null]}>
-                  {petFocus.length > 0 ? petFocus.join(", ") : "Choose a focus"}
+                  {petFocus.length > 0
+                    ? petFocus.map((item) => {
+                      const species = splitNativePetFocusLabel(item).species;
+                      return nativePetSpeciesEmojiOrText(species === "All" ? "Others" : species);
+                    }).filter((value, index, values) => values.indexOf(value) === index).join(" ")
+                    : "Choose a focus"}
                 </Text>
                 <Feather color={huddleColors.mutedText} name={petFocusOpen ? "chevron-up" : "chevron-down"} size={16} />
               </Pressable>
@@ -6541,7 +8404,7 @@ function CreateGroupModal({
                         onPress={() => togglePetFocusSpecies(option)}
                         style={[styles.petFocusOption, active ? styles.petFocusOptionActive : null, disabled ? nativeModalStyles.disabled : null]}
                       >
-                        <Text style={[styles.petFocusOptionText, active ? styles.petFocusOptionTextActive : null]}>{option}</Text>
+                        <Text style={[styles.petFocusOptionText, active ? styles.petFocusOptionTextActive : null]}>{nativePetSpeciesEmojiOrText(option === "All" ? "Others" : option)}  {option}</Text>
                         {active ? <Feather color={huddleColors.blue} name="check" size={16} /> : <View style={styles.selectCheckSlot} />}
                       </Pressable>
                     );
@@ -6602,14 +8465,14 @@ function CreateGroupModal({
                   <View style={[styles.optionRadio, visibility === "public" && styles.optionRadioActive]} />
                   <View style={styles.optionCardCopy}>
                     <Text style={[styles.optionCardTitle, visibility === "public" && styles.optionCardTitleActive]}>Public</Text>
-                    <Text style={[styles.optionCardBody, visibility === "public" && styles.optionCardBodyActive]}>Visible in Explore. Pet lovers nearby can find it.</Text>
+                    <Text style={[styles.optionCardBody, visibility === "public" && styles.optionCardBodyActive]}>Open to all nearby pet lovers</Text>
                   </View>
                 </Pressable>
                 <Pressable onPress={() => { onChangeVisibility("private"); onChangeJoinMethod("request"); }} style={[nativeModalStyles.appOptionCard, visibility === "private" && nativeModalStyles.appOptionCardActive]}>
                   <View style={[styles.optionRadio, visibility === "private" && styles.optionRadioActive]} />
                   <View style={styles.optionCardCopy}>
                     <Text style={[styles.optionCardTitle, visibility === "private" && styles.optionCardTitleActive]}>Private</Text>
-                    <Text style={[styles.optionCardBody, visibility === "private" && styles.optionCardBodyActive]}>Hidden. People join with a code.</Text>
+                    <Text style={[styles.optionCardBody, visibility === "private" && styles.optionCardBodyActive]}>Invite-only. Requires a join code.</Text>
                   </View>
                 </Pressable>
               </View>
@@ -6638,7 +8501,7 @@ function CreateGroupModal({
             </View>
           </ScrollView>
 	          <AppBottomSheetFooter onLayout={(event) => setCreateFooterHeight(event.nativeEvent.layout.height)}>
-              <Animated.View style={{ transform: [{ translateX: createShakeAnim }] }}>
+              <Animated.View style={createShakeStyle}>
 	              <AppModalButton disabled={creating} loading={creating} onPress={submitCreateGroup}>
 	                <Text style={styles.modalPrimaryLabel}>Create group</Text>
 	              </AppModalButton>
@@ -6655,7 +8518,7 @@ function CreateGroupModal({
 	          presentation="inline"
 	          title="Edit group photo"
 	        />
-	      </RNKeyboardAvoidingView>
+	      </KeyboardAvoidingView>
 	    </Modal>
 	  );
 }
@@ -6784,15 +8647,9 @@ function DiscoverySendCue({ cue }: { cue: { kind: DiscoverySendCueKind; id: numb
   const ringOpacity = useSharedValue(0);
   const trail1 = useSharedValue(0);
   const trail2 = useSharedValue(0);
-  const trail3 = useSharedValue(0);
-  const apexHapticTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const completeHapticTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (apexHapticTimerRef.current) {
-      clearTimeout(apexHapticTimerRef.current);
-      apexHapticTimerRef.current = null;
-    }
     if (completeHapticTimerRef.current) {
       clearTimeout(completeHapticTimerRef.current);
       completeHapticTimerRef.current = null;
@@ -6803,54 +8660,30 @@ function DiscoverySendCue({ cue }: { cue: { kind: DiscoverySendCueKind; id: numb
       ringOpacity.value = 0;
       trail1.value = 0;
       trail2.value = 0;
-      trail3.value = 0;
       return;
     }
-    const isStarKind = cue.kind === "star";
-    // Liftoff haptic
-    haptic.selectTab();
     // Reset
     progress.value = 0;
     ringScale.value = 0;
     ringOpacity.value = 0;
     trail1.value = 0;
     trail2.value = 0;
-    trail3.value = 0;
-    if (isStarKind) {
-      // Bottom → center (rise) → hold → top (exit). Total ~1300ms.
-      progress.value = withTiming(1, { duration: 1300, easing: ReanimEasing.bezier(0.22, 1, 0.36, 1) });
-      // Apex sparkle ring
-      ringOpacity.value = withDelay(420, withTiming(1, { duration: 100 }));
-      ringScale.value = withDelay(420, withTiming(2.6, { duration: 520, easing: ReanimEasing.out(ReanimEasing.cubic) }));
-      ringOpacity.value = withDelay(560, withTiming(0, { duration: 380 }));
-      // Particle trails (staggered)
-      trail1.value = withDelay(80, withTiming(1, { duration: 900, easing: ReanimEasing.out(ReanimEasing.cubic) }));
-      trail2.value = withDelay(160, withTiming(1, { duration: 900, easing: ReanimEasing.out(ReanimEasing.cubic) }));
-      trail3.value = withDelay(240, withTiming(1, { duration: 900, easing: ReanimEasing.out(ReanimEasing.cubic) }));
-      // Apex confirm haptic, completion success haptic
-      apexHapticTimerRef.current = setTimeout(() => { haptic.primaryConfirm(); }, 460);
-      completeHapticTimerRef.current = setTimeout(() => { haptic.success(); }, 980);
-    } else {
-      // Wave bubble: rise from bottom-center, peak, fade up. ~700ms.
-      progress.value = withTiming(1, { duration: 700, easing: ReanimEasing.out(ReanimEasing.cubic) });
-      ringOpacity.value = withDelay(180, withTiming(1, { duration: 80 }));
-      ringScale.value = withDelay(180, withTiming(1.9, { duration: 380, easing: ReanimEasing.out(ReanimEasing.cubic) }));
-      ringOpacity.value = withDelay(280, withTiming(0, { duration: 320 }));
-      trail1.value = withDelay(40, withTiming(1, { duration: 560, easing: ReanimEasing.out(ReanimEasing.cubic) }));
-      trail2.value = withDelay(120, withTiming(1, { duration: 560, easing: ReanimEasing.out(ReanimEasing.cubic) }));
-      apexHapticTimerRef.current = setTimeout(() => { haptic.success(); }, 240);
-    }
+    progress.value = withTiming(1, { duration: NATIVE_STAR_CUE_MS, easing: ReanimEasing.bezier(0.22, 1, 0.36, 1) });
+    ringOpacity.value = withSequence(
+      withDelay(60, withTiming(0.85, { duration: 90 })),
+      withTiming(0, { duration: 210 }),
+    );
+    ringScale.value = withDelay(60, withTiming(2.2, { duration: 300, easing: ReanimEasing.out(ReanimEasing.cubic) }));
+    trail1.value = withDelay(40, withTiming(1, { duration: 320, easing: ReanimEasing.out(ReanimEasing.cubic) }));
+    trail2.value = withDelay(90, withTiming(1, { duration: 320, easing: ReanimEasing.out(ReanimEasing.cubic) }));
+    completeHapticTimerRef.current = setTimeout(() => { haptic.success(); }, 320);
     return () => {
-      if (apexHapticTimerRef.current) {
-        clearTimeout(apexHapticTimerRef.current);
-        apexHapticTimerRef.current = null;
-      }
       if (completeHapticTimerRef.current) {
         clearTimeout(completeHapticTimerRef.current);
         completeHapticTimerRef.current = null;
       }
     };
-  }, [cue, progress, ringScale, ringOpacity, trail1, trail2, trail3]);
+  }, [cue, progress, ringScale, ringOpacity, trail1, trail2]);
 
   const isStar = cue?.kind === "star";
 
@@ -6862,19 +8695,21 @@ function DiscoverySendCue({ cue }: { cue: { kind: DiscoverySendCueKind; id: numb
     const p = progress.value;
     const startY = hasOrigin ? originDY : screenH * 0.55 + 80;
     const startX = hasOrigin ? originDX : 0;
-    const ty = interpolate(p, [0, 0.36, 0.55, 1], [startY, 0, 0, -screenH * 0.55 - 120], Extrapolation.CLAMP);
-    const tx = interpolate(p, [0, 0.36, 1], [startX, 0, 0], Extrapolation.CLAMP);
-    const sc = interpolate(p, [0, 0.36, 0.55, 1], [0.35, 1.45, 1.45, 0.55], Extrapolation.CLAMP);
-    const op = interpolate(p, [0, 0.06, 0.85, 1], [0, 1, 1, 0], Extrapolation.CLAMP);
+    const ty = interpolate(p, [0, 0.55, 1], [startY, 0, -26], Extrapolation.CLAMP);
+    const tx = interpolate(p, [0, 0.55, 1], [startX, 0, 0], Extrapolation.CLAMP);
+    // One direction of scale. The old 0.35→1.45→0.55 grew then shrank while
+    // flying away, so the motion fought itself.
+    const sc = interpolate(p, [0, 0.55, 1], [0.4, 1.18, 1.06], Extrapolation.CLAMP);
+    const op = interpolate(p, [0, 0.12, 0.6, 1], [0, 1, 1, 0], Extrapolation.CLAMP);
     return { transform: [{ translateX: tx }, { translateY: ty }, { scale: sc }], opacity: op };
   });
 
   // Wave: rises from below into center, mild scale pulse, fades upward.
   const waveStyle = useAnimatedStyle(() => {
     const p = progress.value;
-    const ty = interpolate(p, [0, 0.5, 1], [220, 0, -56], Extrapolation.CLAMP);
-    const sc = interpolate(p, [0, 0.5, 0.85, 1], [0.55, 1.18, 1.0, 0.85], Extrapolation.CLAMP);
-    const op = interpolate(p, [0, 0.15, 0.75, 1], [0, 1, 1, 0], Extrapolation.CLAMP);
+    const ty = interpolate(p, [0, 1], [18, 0], Extrapolation.CLAMP);
+    const sc = interpolate(p, [0, 0.45, 1], [0.7, 1.06, 1.0], Extrapolation.CLAMP);
+    const op = interpolate(p, [0, 0.18, 0.55, 1], [0, 1, 0.9, 0], Extrapolation.CLAMP);
     return { transform: [{ translateY: ty }, { scale: sc }], opacity: op };
   });
 
@@ -6900,13 +8735,6 @@ function DiscoverySendCue({ cue }: { cue: { kind: DiscoverySendCueKind; id: numb
     const sc = interpolate(p, [0, 0.5, 1], [0.5, 1, 0.4], Extrapolation.CLAMP);
     return { transform: [{ translateX: 18 }, { translateY: ty }, { scale: sc }], opacity: op };
   });
-  const trailStyle3 = useAnimatedStyle(() => {
-    const p = trail3.value;
-    const ty = interpolate(p, [0, 1], [100, 100 - 225], Extrapolation.CLAMP);
-    const op = interpolate(p, [0, 0.15, 0.85, 1], [0, 0.9, 0.6, 0], Extrapolation.CLAMP);
-    const sc = interpolate(p, [0, 0.5, 1], [0.5, 1, 0.4], Extrapolation.CLAMP);
-    return { transform: [{ translateX: -4 }, { translateY: ty }, { scale: sc }], opacity: op };
-  });
 
   if (!cue) return null;
 
@@ -6915,79 +8743,119 @@ function DiscoverySendCue({ cue }: { cue: { kind: DiscoverySendCueKind; id: numb
       {/* Apex ring — soft halo expanding outward */}
       <Reanimated.View style={[styles.sendCueRing, isStar ? styles.sendCueRingStar : styles.sendCueRingWave, ringStyle]} />
       {/* Trailing particles */}
-      <Reanimated.View style={[styles.sendCueTrailDot, isStar ? styles.sendCueTrailDotStar : styles.sendCueTrailDotWave, trailStyle1]} />
-      <Reanimated.View style={[styles.sendCueTrailDot, styles.sendCueTrailDotSm, isStar ? styles.sendCueTrailDotStar : styles.sendCueTrailDotWave, trailStyle2]} />
       {isStar ? (
-        <Reanimated.View style={[styles.sendCueTrailDot, styles.sendCueTrailDotXs, styles.sendCueTrailDotStar, trailStyle3]} />
+        <>
+          <Reanimated.View style={[styles.sendCueTrailDot, styles.sendCueTrailDotStar, trailStyle1]} />
+          <Reanimated.View style={[styles.sendCueTrailDot, styles.sendCueTrailDotSm, styles.sendCueTrailDotStar, trailStyle2]} />
+        </>
       ) : null}
       {/* Hero orb */}
       <Reanimated.View style={[styles.sendCueOrb, isStar ? styles.sendCueOrbStar : styles.sendCueOrbWave, isStar ? starStyle : waveStyle]}>
-        <Feather color={isStar ? huddleColors.text : huddleColors.onPrimary} name={isStar ? "star" : "send"} size={isStar ? 42 : 38} />
+        {isStar ? (
+          <View style={styles.sendCueStarIcon}>
+            <FontAwesome5 color={huddleColors.coral} name="star" size={42} />
+            <FontAwesome5 color={huddleColors.subscriptionAddonLime} name="star" size={36} solid style={styles.sendCueStarIconFill} />
+          </View>
+        ) : (
+          <MaterialCommunityIcons color={huddleColors.onPrimary} name="paw" size={38} />
+        )}
       </Reanimated.View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { ...StyleSheet.absoluteFillObject, paddingTop: huddleLayout.headerHeight + huddleSpacing.x8, backgroundColor: huddleColors.canvas },
-  controlsStack: { flexShrink: 0, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: huddleColors.divider, backgroundColor: huddleColors.canvas },
+  screen: { flex: 1, backgroundColor: huddleColors.canvas },
+  controlsStack: { flexShrink: 0, backgroundColor: huddleColors.canvas },
   // flex:1 is critical — without it, absoluteFill children have no measured height and
   // ScrollViews render at zero height or lose bottom safe-area spacing.
   tabContainer: { flex: 1 },
   skeletonList: { gap: huddleSpacing.x3 },
   content: { paddingHorizontal: huddleSpacing.x5, paddingTop: huddleSpacing.x2, paddingBottom: huddleSpacing.x10 + huddleSpacing.x8, gap: huddleSpacing.x3 },
   discoverContent: { flexGrow: 1 },
-  topToggleRow: { minHeight: huddleSpacing.x9 - huddleSpacing.x2, flexDirection: "row", alignItems: "center", paddingHorizontal: huddleSpacing.x4, paddingTop: huddleSpacing.x5, paddingBottom: huddleSpacing.x3 },
+  topToggleRow: { minHeight: huddleSpacing.x9 - huddleSpacing.x2, flexDirection: "row", alignItems: "center", paddingHorizontal: huddleSpacing.x4, paddingTop: huddleSpacing.x2, paddingBottom: huddleSpacing.x2 },
   sideActionSlot: { width: 36, height: 36 },
   topToggleCenter: { flex: 1, alignItems: "center", justifyContent: "center" },
-  topToggle: { width: "100%", maxWidth: 220, flexDirection: "row", alignItems: "center", justifyContent: "center", padding: 0, borderRadius: huddleRadii.pill, backgroundColor: huddleColors.mutedCanvas },
-  topToggleSegment: { paddingHorizontal: huddleSpacing.x1 + 2 },
+  topToggle: { width: "100%", maxWidth: 220, flexDirection: "row", alignItems: "center", justifyContent: "center", padding: 0, borderRadius: huddleRadii.pill, backgroundColor: "rgba(243,244,246,0.82)", borderWidth: 1, borderColor: huddleColors.cardBorderSoft },
+  topToggleSegment: { overflow: "visible", paddingHorizontal: huddleSpacing.x1 + 2 },
   // Invisible swipe catcher in the empty padding zone above the global NativeBottomNav.
   // `bottom` is set inline at render so we can use the live safe-area inset + nav height.
   bottomSwipeStrip: { position: "absolute", left: 0, right: 0, height: 72 },
-  // Active pill lifts ~4px above the inactive segments and carries its own soft drop-shadow.
-  // The glass body itself renders inside (BlurView + tint + highlight + inner border) — see TopSegmentGlassLayer.
-  topToggleSegmentActive: { minHeight: 36, ...huddleShadows.photoControl },
+  // Active pill = blue glass (TopSegmentGlassLayer: BlurView + blue tint + top highlight
+  // + inner rim) + neu: a soft brand-blue colored lift so it reads as a raised glass pill.
+  topToggleSegmentActive: {
+    minHeight: 36,
+    shadowColor: huddleColors.blue,
+    shadowOpacity: 0.28,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 5,
+  },
   topToggleText: { fontFamily: "Urbanist-700", fontSize: huddleType.label, lineHeight: huddleType.labelLine, color: huddleColors.mutedText },
   topToggleTextActive: { color: huddleColors.onPrimary },
-  toggleUnreadBadge: { position: "absolute", right: -4, top: -4, minWidth: 18, height: 18, alignItems: "center", justifyContent: "center", borderRadius: huddleRadii.pill, paddingHorizontal: huddleSpacing.x1 + 2, backgroundColor: huddleColors.primarySoftFill, borderWidth: 2, borderColor: huddleColors.canvas },
-  toggleUnreadText: { fontFamily: "Urbanist-800", fontSize: huddleType.meta, lineHeight: huddleType.metaLine, color: huddleColors.blue },
+  // Anchored to the icon (not the variable-height segment) so the badge sits in the
+  // same spot whether the tab is active or not; red + white reads clearly on both the
+  // white rail and the active blue pill.
+  toggleIconWrap: { width: 20, height: 20, alignItems: "center", justifyContent: "center" },
+  toggleUnreadBadge: { position: "absolute", right: -5, top: -4, width: 8, height: 8, borderRadius: huddleRadii.pill, backgroundColor: huddleColors.validationRed, borderWidth: 1.5, borderColor: huddleColors.canvas, zIndex: 5, elevation: 5 },
   toggleUnreadDot: { position: "absolute", right: 2, top: 2, width: 10, height: 10, borderRadius: huddleRadii.pill, backgroundColor: huddleColors.validationRed, borderWidth: 2, borderColor: huddleColors.canvas },
   confirmStarError: { fontFamily: "Urbanist-700", fontSize: huddleType.helper, lineHeight: huddleType.helperLine, color: huddleColors.validationRed, textAlign: "center" },
-  carerProfileHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: huddleSpacing.x3, paddingBottom: huddleSpacing.x3 },
   carerProfileState: { minHeight: 220, alignItems: "center", justifyContent: "center", padding: huddleSpacing.x4 },
   carerProfileStateText: { fontFamily: "Urbanist-600", fontSize: huddleType.body, lineHeight: huddleType.lineNormal, color: huddleColors.mutedText, textAlign: "center" },
   iconButton: { width: 36, height: 36, alignItems: "center", justifyContent: "center", borderRadius: huddleRadii.pill },
   // Verified Create-Group treatment: same shape/size as the # and Search circle buttons, just blue-tinted.
   // Reads as "available" without the visual clash of an outlined border.
-  iconButtonSmallVerified: { backgroundColor: huddleColors.blueSoft },
+  iconButtonSmallVerified: { ...huddleGlassControls.surface },
   dropdownBackdrop: { flex: 1, backgroundColor: "transparent" },
-  floatingDropdown: { position: "absolute", top: huddleLayout.headerHeight + 220, borderRadius: huddleFormControls.select.menuRadius, borderWidth: 1, borderColor: huddleColors.fieldBorderSoft, backgroundColor: huddleColors.canvas, overflow: "hidden", ...huddleShadows.glassElevation1 },
-  groupSortDropdown: { right: huddleSpacing.x5 + huddleSpacing.x6 * 2 + huddleSpacing.x2, width: 208 },
+  floatingDropdown: { position: "absolute", top: huddleLayout.headerHeight + 118, borderRadius: huddleFormControls.select.menuRadius, borderWidth: 1, borderColor: huddleColors.fieldBorderSoft, backgroundColor: huddleColors.canvas, overflow: "hidden", ...huddleShadows.glassElevation1 },
+  groupSortDropdown: { right: huddleSpacing.x4, width: 208 },
   dropdownContent: { padding: huddleFormControls.select.menuPadding },
   dropdownOption: { minHeight: huddleFormControls.select.optionMinHeight, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: huddleSpacing.x2, paddingHorizontal: huddleFormControls.select.optionPaddingHorizontal, paddingVertical: huddleFormControls.select.optionPaddingVertical, borderRadius: huddleFormControls.select.optionRadius },
-  dropdownOptionActive: { backgroundColor: huddleColors.primarySoftFill },
+  dropdownOptionActive: { backgroundColor: huddleColors.glassControl },
   dropdownText: { flex: 1, fontFamily: "Urbanist-700", fontSize: huddleType.label, lineHeight: huddleType.labelLine, color: huddleColors.text },
   checkSlot: { width: huddleFormControls.select.checkSlot },
   searchWrap: { minHeight: 44, justifyContent: "center", paddingHorizontal: huddleSpacing.x4, paddingVertical: huddleSpacing.x2 },
   searchField: { height: 44, flexDirection: "row", alignItems: "center", gap: huddleSpacing.x2, borderRadius: 22, borderWidth: 1, borderColor: huddleColors.cardBorderSoft, backgroundColor: huddleColors.canvas, paddingHorizontal: huddleSpacing.x3, ...huddleShadows.glassElevation1 },
-  searchInput: { flex: 1, minWidth: 0, height: 42, padding: 0, fontFamily: "Urbanist-500", fontSize: huddleType.label, lineHeight: huddleType.labelLine, color: huddleColors.text },
-  searchClear: { position: "absolute", right: huddleSpacing.x3, width: 28, height: 28, alignItems: "center", justifyContent: "center", borderRadius: huddleRadii.pill },
+  searchInput: { flex: 1, minWidth: 0, flexShrink: 1, height: 42, padding: 0, fontFamily: "Urbanist-500", fontSize: huddleType.label, lineHeight: huddleType.labelLine, color: huddleColors.text, overflow: "hidden" },
+  searchClear: { width: 28, height: 28, flexShrink: 0, alignItems: "center", justifyContent: "center", borderRadius: huddleRadii.pill },
   chatTabsRow: { minHeight: huddleSpacing.x8, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: huddleSpacing.x2, paddingHorizontal: huddleSpacing.x4, paddingVertical: huddleSpacing.x2 },
   mainTabRail: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "flex-start", gap: huddleSpacing.x2 },
   mainTabText: { fontFamily: "Urbanist-600", fontSize: huddleType.helper, lineHeight: huddleType.helperLine, color: huddleColors.mutedText },
   mainTabTextActive: { color: huddleColors.blue },
+  mainTabLabelRow: { alignItems: "center", flexDirection: "row", gap: huddleSpacing.x1 },
+  newFriendRailAvatar: { overflow: "hidden", position: "relative" },
+  newFriendRailShine: { bottom: 0, position: "absolute", top: 0, width: 34 },
   mainTabIndicator: { position: "absolute", left: huddleSpacing.x2, right: huddleSpacing.x2, bottom: 0, height: 2, borderTopLeftRadius: huddleRadii.pill, borderTopRightRadius: huddleRadii.pill, backgroundColor: huddleColors.blue },
   chatActions: { flexDirection: "row", alignItems: "center", gap: huddleSpacing.x1 + 2 },
   iconButtonSmall: { width: huddleSpacing.x6, height: huddleSpacing.x6, alignItems: "center", justifyContent: "center", borderRadius: huddleRadii.pill, backgroundColor: huddleColors.mutedCanvas },
-  statusBanner: { minHeight: 40, flexDirection: "row", alignItems: "center", gap: huddleSpacing.x2, paddingHorizontal: huddleSpacing.x3, paddingVertical: huddleSpacing.x2, borderRadius: huddleRadii.card, borderWidth: 1, borderColor: huddleColors.glassBorder, backgroundColor: huddleColors.glassChrome, ...huddleShadows.glassElevation1 },
-  statusText: { flex: 1, fontFamily: "Urbanist-600", fontSize: huddleType.helper, lineHeight: huddleType.helperLine, color: huddleColors.text },
   list: { gap: 0 },
   swipeRowWrap: { overflow: "visible", borderRadius: huddleRadii.card },
   rowDeleteAction: { position: "absolute", top: 0, right: 0, bottom: 0, width: 80, borderRadius: huddleRadii.card, backgroundColor: huddleColors.validationRed, overflow: "hidden" },
   rowDeleteActionPressable: { flex: 1, alignItems: "center", justifyContent: "center" },
   webChatRow: { minHeight: 96, flexDirection: "row", alignItems: "center", gap: huddleSpacing.x3, padding: huddleSpacing.x3, borderRadius: huddleRadii.card, backgroundColor: huddleColors.canvas, borderWidth: 1, borderColor: huddleColors.cardBorderSoft, ...huddleShadows.glassElevation1 },
-  priorityStarRow: { borderColor: huddleColors.premiumGold, shadowColor: huddleColors.premiumGold, shadowOpacity: 0.22, shadowRadius: 20, shadowOffset: { width: 0, height: 8 }, elevation: 3 },
+  // Shadow lives on the OUTER wrapper — RN clips shadowOpacity/shadowRadius
+  // wherever overflow:"hidden" is set, so it can never sit on the same view
+  // that clips the cover image to its rounded corners.
+  groupCardShadowWrap: { marginBottom: huddleSpacing.x3, borderRadius: 18, backgroundColor: huddleColors.canvas, shadowColor: "#0B1440", shadowOpacity: 0.18, shadowRadius: 20, shadowOffset: { width: 0, height: 10 }, elevation: 8 },
+  groupCard: { borderRadius: 18, overflow: "hidden", backgroundColor: huddleColors.canvas, borderWidth: 1, borderColor: "rgba(9,15,40,0.10)" },
+  groupCardCover: { height: 118, overflow: "hidden", backgroundColor: "#0B1C52" },
+  groupCardCoverImage: { ...StyleSheet.absoluteFillObject, width: undefined, height: undefined },
+  groupCardTopScrim: { position: "absolute", top: 0, left: 0, right: 0, height: 46 },
+  groupCardLiveBadge: { position: "absolute", top: 10, right: 10, maxWidth: "70%", flexDirection: "row", alignItems: "center", gap: 5, borderRadius: huddleRadii.pill, backgroundColor: "rgba(9,15,40,0.42)", paddingHorizontal: 9, paddingVertical: 5 },
+  groupCardLiveBadgeText: { fontFamily: "Urbanist-700", fontSize: 11, lineHeight: 14, color: "#FFFFFF" },
+  groupCardScrimContent: { position: "absolute", left: 14, right: 14, bottom: 10 },
+  groupCardNameRow: { flexDirection: "row", alignItems: "center", gap: 7 },
+  groupCardName: { flexShrink: 1, fontFamily: "Urbanist-800", fontSize: 17, lineHeight: 22, letterSpacing: -0.2, color: huddleColors.onPrimary },
+  groupCardLocationRow: { marginTop: 2, flexDirection: "row", alignItems: "center", gap: 4 },
+  groupCardLocationText: { flexShrink: 1, fontFamily: "Urbanist-600", fontSize: 12, lineHeight: 15, color: "rgba(255,255,255,0.75)" },
+  groupCardLiveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: "#BFFF00" },
+  groupCardBody: { flexDirection: "row", alignItems: "center", gap: huddleSpacing.x2, paddingHorizontal: huddleSpacing.x3 + 2, paddingVertical: huddleSpacing.x2 + 2 },
+  groupCardPreview: { fontSize: 13.5, lineHeight: 17 },
+  chatActionPill: { flexDirection: "row", alignItems: "center", gap: 5, minHeight: 30, paddingHorizontal: huddleSpacing.x3 - 2, borderRadius: huddleRadii.pill, borderWidth: 1, borderColor: huddleColors.fieldBorderSoft, backgroundColor: huddleColors.canvas },
+  chatActionPillVerified: { borderColor: "rgba(33,69,207,0.35)", backgroundColor: "rgba(33,69,207,0.06)" },
+  chatActionPillText: { fontFamily: "Urbanist-700", fontSize: 12, lineHeight: 15, color: huddleColors.iconMuted },
+  chatActionPillTextVerified: { color: huddleColors.blue },
+  priorityStarRow: { borderColor: huddleColors.coral, shadowColor: huddleColors.coral, shadowOpacity: 0.22, shadowRadius: 20, shadowOffset: { width: 0, height: 8 }, elevation: 3 },
   webGroupRow: { minHeight: 104, flexDirection: "row", alignItems: "center", gap: huddleSpacing.x4, paddingVertical: huddleSpacing.x4, paddingHorizontal: huddleSpacing.x2, borderRadius: huddleRadii.card, backgroundColor: huddleColors.canvas, borderBottomWidth: 1, borderBottomColor: huddleColors.divider },
   rowUnread: { backgroundColor: huddleColors.canvas },
   rowDisabled: { opacity: 0.58 },
@@ -6998,10 +8866,9 @@ const styles = StyleSheet.create({
   groupAvatar: { backgroundColor: huddleColors.coral },
   serviceAvatar: { backgroundColor: huddleColors.premiumGold },
   avatarText: { fontFamily: "Urbanist-800", fontSize: 14, lineHeight: 18, color: huddleColors.onPrimary },
-  userAvatarLg: { width: 64, height: 64, borderRadius: huddleRadii.pill, borderWidth: 1, backgroundColor: huddleColors.mutedCanvas },
-  userAvatarMd: { width: 48, height: 48, borderRadius: huddleRadii.pill, borderWidth: 1, backgroundColor: huddleColors.mutedCanvas },
+  userAvatarLg: { width: 64, height: 64, borderRadius: huddleRadii.pill, borderWidth: 1, borderColor: "transparent", backgroundColor: huddleColors.mutedCanvas },
+  userAvatarMd: { width: 48, height: 48, borderRadius: huddleRadii.pill, borderWidth: 1, borderColor: "transparent", backgroundColor: huddleColors.mutedCanvas },
   userAvatarVerified: { borderColor: huddleColors.blue },
-  userAvatarUnverified: { borderColor: huddleColors.fieldBorderStrong },
   userAvatarImageLg: { width: "100%", height: "100%", borderRadius: huddleRadii.pill },
   userAvatarImageMd: { width: "100%", height: "100%", borderRadius: huddleRadii.pill },
   userAvatarVerifiedBadgeLg: { position: "absolute", right: -3, bottom: 3 },
@@ -7009,10 +8876,10 @@ const styles = StyleSheet.create({
   rowBody: { flex: 1, minWidth: 0, justifyContent: "center", gap: huddleSpacing.x1 },
   rowTop: { minHeight: 22, flexDirection: "row", alignItems: "center", gap: huddleSpacing.x2 },
   rowTitleWrap: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: huddleSpacing.x1 },
-  rowTitle: { flex: 1, fontFamily: "Urbanist-700", fontSize: 16, lineHeight: 19, color: huddleColors.text },
+  rowTitle: { flex: 1, fontFamily: "Urbanist-700", fontSize: 17, lineHeight: 20, color: huddleColors.text },
   rowTopMeta: { flexShrink: 0, flexGrow: 0, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: huddleSpacing.x2 },
   serviceStatusBadge: { flexShrink: 0, minHeight: 22, maxWidth: 118, alignItems: "center", justifyContent: "center", borderRadius: huddleRadii.pill, paddingHorizontal: huddleSpacing.x2 },
-  serviceStatusBadgeBlue: { backgroundColor: huddleColors.blueSoft },
+  serviceStatusBadgeBlue: { backgroundColor: huddleColors.glassControl },
   serviceStatusBadgeGreen: { backgroundColor: huddleColors.successSoft },
   serviceStatusBadgeRed: { backgroundColor: huddleColors.validationSoft },
   serviceStatusBadgeText: { fontFamily: "Urbanist-700", fontSize: huddleType.meta, lineHeight: huddleType.metaLine },
@@ -7042,9 +8909,9 @@ const styles = StyleSheet.create({
   groupListTitle: { flex: 1, paddingRight: huddleSpacing.x2, fontFamily: "Urbanist-700", fontSize: huddleType.body, lineHeight: huddleType.labelLine, color: huddleColors.text },
   groupMembersText: { width: 76, textAlign: "right", fontFamily: "Urbanist-500", fontSize: huddleType.helper, lineHeight: huddleType.helperLine, color: huddleColors.caption },
   memberAvatar: { width: 32, height: 32, overflow: "hidden", borderRadius: huddleRadii.pill, backgroundColor: huddleColors.mutedCanvas },
-  memberAvatarFrame: { width: 38, height: 38, alignItems: "center", justifyContent: "center", borderRadius: huddleRadii.pill, borderWidth: 2, borderColor: huddleMap.marker.friendUnverified, backgroundColor: huddleColors.primarySoftFill },
+  memberAvatarFrame: { width: 38, height: 38, alignItems: "center", justifyContent: "center", borderRadius: huddleRadii.pill, borderWidth: 2, borderColor: "transparent", backgroundColor: huddleColors.glassControl },
   memberAvatarFrameVerified: { borderColor: huddleColors.blue },
-  memberAvatarImage: { width: "100%", height: "100%", overflow: "hidden", borderRadius: huddleRadii.pill, alignItems: "center", justifyContent: "center", backgroundColor: huddleColors.primarySoftFill },
+  memberAvatarImage: { width: "100%", height: "100%", overflow: "hidden", borderRadius: huddleRadii.pill, alignItems: "center", justifyContent: "center", backgroundColor: huddleColors.glassControl },
   memberAvatarInitial: { fontFamily: "Urbanist-700", fontSize: 14, lineHeight: 18, color: huddleColors.blue },
   memberVerifiedBadge: { position: "absolute", right: -6, bottom: -5 },
   groupMetaInlineRow: { minHeight: huddleType.helperLine, flexDirection: "row", alignItems: "center", overflow: "hidden" },
@@ -7052,33 +8919,90 @@ const styles = StyleSheet.create({
   groupLocationRow: { minHeight: 22, flexDirection: "row", alignItems: "center", gap: huddleSpacing.x1 },
   groupLocationText: { flex: 1, minWidth: 0, fontFamily: "Urbanist-500", fontSize: huddleType.helper, lineHeight: huddleType.helperLine, color: huddleColors.subtext, includeFontPadding: false },
   groupTagRow: { flexDirection: "row", flexWrap: "wrap", gap: huddleSpacing.x1, marginTop: huddleSpacing.x1 },
-  groupTag: { overflow: "hidden", borderRadius: huddleRadii.pill, paddingHorizontal: huddleSpacing.x2, paddingVertical: huddleSpacing.x1, backgroundColor: huddleColors.primarySoftFill, fontFamily: "Urbanist-600", fontSize: huddleType.helper, lineHeight: huddleType.helperLine, color: huddleColors.blue },
+  groupTag: { overflow: "hidden", borderRadius: huddleRadii.pill, paddingHorizontal: huddleSpacing.x2, paddingVertical: huddleSpacing.x1, backgroundColor: huddleColors.glassControl, fontFamily: "Urbanist-600", fontSize: huddleType.helper, lineHeight: huddleType.helperLine, color: huddleColors.blue },
   groupDescriptionText: { marginTop: huddleSpacing.x1, fontFamily: "Urbanist-500", fontSize: huddleType.label, lineHeight: huddleType.labelLine, color: huddleColors.subtext },
   emptyCard: { minHeight: 260, alignItems: "center", justifyContent: "center", gap: huddleSpacing.x3, padding: huddleSpacing.x5, borderRadius: huddleRadii.glass, backgroundColor: huddleColors.canvas, borderWidth: 1, borderColor: huddleColors.cardBorderSoft, ...huddleShadows.glassElevation1 },
-  webEmptyCard: { width: "100%", maxWidth: 360, minHeight: 360, alignItems: "center", justifyContent: "center", gap: huddleSpacing.x3, marginTop: huddleSpacing.x8, paddingHorizontal: huddleSpacing.x5, paddingVertical: huddleSpacing.x6, borderRadius: huddleRadii.glass, backgroundColor: huddleColors.canvas, borderWidth: 1, borderColor: huddleColors.cardBorderSoft, ...huddleShadows.glassElevation1 },
-  webEmptyCardGroupAligned: { marginTop: -huddleSpacing.x4 },
-  webEmptyImage: { width: "100%", height: 220 },
-  webEmptyTitle: { marginTop: huddleSpacing.x2, textAlign: "center", fontFamily: "Urbanist-700", fontSize: huddleType.h4, lineHeight: huddleType.h4Line, color: huddleColors.text },
-  webEmptyBody: { marginTop: huddleSpacing.x2, paddingHorizontal: huddleSpacing.x2, textAlign: "center", fontFamily: "Urbanist-500", fontSize: huddleType.body, lineHeight: 24, color: huddleColors.subtext },
-  webEmptyBodyStrong: { fontFamily: "Urbanist-700", color: huddleColors.text },
-  webEmptyButton: { minHeight: 44, minWidth: 200, marginTop: huddleSpacing.x4, alignItems: "center", justifyContent: "center", borderRadius: huddleRadii.pill, paddingHorizontal: huddleSpacing.x5, backgroundColor: huddleColors.blue, ...huddleShadows.photoControl },
+  socialEmptyState: {
+    alignItems: "center",
+    paddingHorizontal: huddleSpacing.x5,
+    paddingVertical: huddleSpacing.x7,
+  },
+  socialEmptyStateGroupAligned: {
+    paddingTop: huddleSpacing.x5,
+  },
+  socialEmptyIllustration: {
+    height: huddleSocial.emptyAssetHeight,
+    maxWidth: "100%",
+    width: huddleSocial.emptyAssetWidth,
+  },
+  socialEmptyTitle: {
+    color: huddleColors.text,
+    fontFamily: "Urbanist-700",
+    fontSize: huddleType.h4,
+    lineHeight: huddleType.h4Line,
+    marginTop: huddleSpacing.x4,
+    textAlign: "center",
+  },
+  socialEmptyText: {
+    color: huddleColors.caption,
+    fontFamily: "Urbanist-400",
+    fontSize: huddleSocial.emptyTextSize,
+    lineHeight: huddleSocial.emptyTextLineHeight,
+    marginTop: huddleSpacing.x4,
+    textAlign: "center",
+  },
+  socialEmptyTextStrong: { fontFamily: "Urbanist-600", color: huddleColors.text },
+  webEmptyButton: { minHeight: 44, minWidth: 200, marginTop: huddleSpacing.x4, alignItems: "center", justifyContent: "center", borderRadius: huddleRadii.button, paddingHorizontal: huddleSpacing.x5, backgroundColor: huddleColors.blue, ...huddleShadows.photoControl },
   webEmptyButtonText: { ...huddleButtons.label, color: huddleColors.onPrimary },
-  emptyIcon: { width: 56, height: 56, borderRadius: huddleRadii.pill, alignItems: "center", justifyContent: "center", backgroundColor: huddleColors.blueSoft },
+  emptyIcon: { ...huddleGlassControls.surface, width: 56, height: 56, borderRadius: huddleRadii.pill, alignItems: "center", justifyContent: "center" },
   emptyTitle: { textAlign: "center", fontFamily: "Urbanist-800", fontSize: huddleType.h4, lineHeight: huddleType.h4Line, color: huddleColors.text },
   emptyBody: { textAlign: "center", fontFamily: "Urbanist-500", fontSize: huddleType.label, lineHeight: huddleType.labelLine, color: huddleColors.mutedText },
   secondaryButton: { ...huddleButtons.base, ...huddleButtons.secondary, minHeight: 48 },
   secondaryButtonText: { ...huddleButtons.label, color: huddleColors.text },
   matchRailContent: { gap: huddleSpacing.x2, paddingHorizontal: huddleSpacing.x2, paddingTop: huddleSpacing.x2, paddingBottom: huddleSpacing.x2 },
   matchRailItem: { width: 68, height: 68, alignItems: "center", justifyContent: "center", overflow: "visible" },
+  matchRailItemJustAdded: { borderWidth: 2, borderColor: huddleColors.premiumGold, borderRadius: huddleRadii.pill, backgroundColor: huddleColors.premiumGoldSoft, shadowColor: huddleColors.premiumGold, shadowOpacity: 0.28, shadowRadius: 10, shadowOffset: { width: 0, height: 2 }, elevation: 3 },
   matchRailAvatar: { width: 54, height: 54, borderRadius: huddleRadii.pill, alignItems: "center", justifyContent: "center", backgroundColor: huddleColors.blue, borderWidth: 2, borderColor: huddleColors.canvas, ...huddleShadows.glassElevation1 },
   matchRailImage: { width: "100%", height: "100%", borderRadius: huddleRadii.pill },
+  matchRailMoreTile: { width: 64, height: 64, borderRadius: huddleRadii.pill, alignItems: "center", justifyContent: "center", backgroundColor: huddleColors.mutedCanvas, borderWidth: 1, borderColor: huddleColors.fieldBorder },
+  matchRailMoreText: { fontFamily: "Urbanist-700", fontSize: huddleType.label, lineHeight: huddleType.labelLine, color: huddleColors.blue },
   matchRailVerifiedBadge: { position: "absolute", right: -3, bottom: -2 },
   matchRailCarBadge: { position: "absolute", left: -1, bottom: -1, width: 18, height: 18, alignItems: "center", justifyContent: "center", borderRadius: huddleRadii.pill, backgroundColor: huddleColors.premiumGold, borderWidth: 2, borderColor: huddleColors.canvas },
   discoveryStack: { position: "relative", alignItems: "center", paddingBottom: huddleSpacing.x4 },
+  discoveryStaticDeckCard: {
+    position: "absolute",
+    top: huddleSpacing.x2,
+    borderRadius: huddleRadii.card,
+    borderWidth: 0,
+  },
+  discoveryStaticDeckCardOne: { backgroundColor: "#8192D7" },
+  discoveryStaticDeckCardTwo: { backgroundColor: "#95B7FA" },
+  discoveryStaticDeckCardThree: { backgroundColor: "#DEE2EA" },
+  discoveryPreparedRevealWash: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "#8192D7",
+    borderBottomLeftRadius: huddleRadii.modal,
+    borderBottomRightRadius: huddleRadii.modal,
+    zIndex: 30,
+    elevation: 30,
+  },
+  discoverIconSlashWrap: { width: 20, height: 20, alignItems: "center", justifyContent: "center" },
+  discoverIconSlash: { position: "absolute", width: 25, height: 1.75, borderRadius: 1, transform: [{ rotate: "45deg" }] },
+  // Friends Matching paused — reuses the bottom-card swipe cover (RNBlurView + wash)
+  // to blur the WHOLE top card, with the message + CTA centered on top.
+  discoveryPausedCover: { ...StyleSheet.absoluteFillObject, zIndex: 25, elevation: 25, alignItems: "center", justifyContent: "center", paddingHorizontal: huddleSpacing.x6 },
+  discoveryLocationPermissionInCard: { elevation: 0 },
+  discoveryPausedContent: { alignItems: "center", paddingHorizontal: huddleSpacing.x4, gap: huddleSpacing.x3 },
+  discoveryPausedTitle: { fontFamily: "Urbanist-800", fontSize: huddleType.h3, lineHeight: huddleType.h3Line, color: huddleColors.text, textAlign: "center" },
+  discoveryPausedBody: { fontFamily: "Urbanist-500", fontSize: huddleType.body, lineHeight: 22, color: huddleColors.subtext, textAlign: "center" },
+  discoveryPausedButton: { marginTop: huddleSpacing.x2, minHeight: 48, paddingHorizontal: huddleSpacing.x6, alignItems: "center", justifyContent: "center", borderRadius: huddleRadii.button, backgroundColor: huddleColors.blue },
+  discoveryPausedButtonText: { fontFamily: "Urbanist-700", fontSize: huddleType.body, lineHeight: 22, color: huddleColors.onPrimary },
   discoveryCardUnit: { position: "relative", alignItems: "center" },
-  discoveryProfileCard: { position: "relative", zIndex: 20, width: "100%", overflow: "hidden", borderRadius: huddleRadii.modal, backgroundColor: huddleColors.canvas, borderWidth: 0, ...huddleShadows.glassElevation1, elevation: 20 },
+  discoveryProfileCard: { position: "relative", zIndex: 20, width: "100%", overflow: "hidden", borderRadius: huddleRadii.modal, backgroundColor: huddleColors.canvas, borderWidth: DISCOVERY_PROFILE_CARD_BORDER_WIDTH, borderColor: "rgba(66,73,101,0.12)" },
   // Tighten the verified check next to the name — overrides the badge wrapper to lift the glyph slightly closer to the baseline of the bold name above it.
-  discoveryVerifiedTighten: { marginLeft: -2, marginBottom: 2 },
   // Loading-shell composition that sits over the shimmer fill — name/role placeholder lines + chip row.
   discoveryShellCopyStack: { position: "absolute", left: huddleSpacing.x4, right: huddleSpacing.x4, bottom: huddleSpacing.x6, gap: huddleSpacing.x2 },
   discoveryShellLineWide: { height: 18, width: "62%", borderRadius: huddleRadii.pill },
@@ -7086,16 +9010,18 @@ const styles = StyleSheet.create({
   discoveryShellChipRow: { flexDirection: "row", gap: huddleSpacing.x2, marginTop: huddleSpacing.x1 },
   discoveryShellChip: { height: 22, width: 68, borderRadius: huddleRadii.pill },
   discoveryCardQueued: { position: "absolute", top: huddleSpacing.x2, opacity: 1 },
-  discoveryPhotoWrap: { ...StyleSheet.absoluteFillObject, overflow: "hidden", borderRadius: huddleRadii.modal, backgroundColor: huddleColors.blueSoft },
+  discoveryPhotoWrap: { position: "relative", overflow: "hidden", borderTopLeftRadius: huddleRadii.modal, borderTopRightRadius: huddleRadii.modal, backgroundColor: huddleColors.glassControl },
+  discoveryPhotoWrapRoundedBottom: { borderBottomLeftRadius: huddleRadii.modal, borderBottomRightRadius: huddleRadii.modal },
   discoveryQueuedPrivacyLayer: { zIndex: 17 },
   discoveryQueuedPrivacyWash: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(255,255,255,0.24)" },
-  discoveryQueuedBottomShadow: { position: "absolute", alignSelf: "center", height: 18, borderRadius: huddleRadii.pill, backgroundColor: "transparent", shadowColor: "#42526E", shadowOpacity: 0.28, shadowRadius: 26, shadowOffset: { width: 0, height: 12 }, elevation: 14 },
+  discoveryQueuedBottomShadow: { position: "absolute", alignSelf: "center", height: 18, borderRadius: huddleRadii.pill, backgroundColor: "transparent", shadowColor: "#42526E", shadowOpacity: 0.1, shadowRadius: 28, shadowOffset: { width: 0, height: 14 }, elevation: 6 },
   discoveryProfileTap: { flex: 1 },
-  discoveryPhoto: { width: "100%", height: "100%", borderRadius: huddleRadii.modal },
-  discoveryPhotoFallback: { flex: 1, alignItems: "center", justifyContent: "center", borderRadius: huddleRadii.modal, backgroundColor: huddleColors.blue },
+  discoveryPhoto: { width: "100%", height: "100%", borderTopLeftRadius: huddleRadii.modal, borderTopRightRadius: huddleRadii.modal },
+  discoveryPhotoRoundedBottom: { borderBottomLeftRadius: huddleRadii.modal, borderBottomRightRadius: huddleRadii.modal },
+  discoveryPhotoFallback: { flex: 1, alignItems: "center", justifyContent: "center", borderTopLeftRadius: huddleRadii.modal, borderTopRightRadius: huddleRadii.modal, backgroundColor: huddleColors.blue },
   discoveryPhotoFallbackText: { fontFamily: "Urbanist-800", fontSize: 42, lineHeight: 48, color: huddleColors.onPrimary },
-  discoveryAlbumLeftZone: { position: "absolute", left: 0, top: 0, zIndex: 6, width: "33%", height: "70%" },
-  discoveryAlbumRightZone: { position: "absolute", right: 0, top: 0, zIndex: 6, width: "33%", height: "70%" },
+  discoveryAlbumLeftZone: { position: "absolute", left: 0, top: 0, zIndex: 6, width: "33%" },
+  discoveryAlbumRightZone: { position: "absolute", right: 0, top: 0, zIndex: 6, width: "33%" },
   discoveryAlbumDots: { position: "absolute", left: 0, right: 0, top: huddleSpacing.x3, zIndex: 7, flexDirection: "row", justifyContent: "center", gap: 6 },
   discoveryAlbumDot: { width: 6, height: 6, borderRadius: huddleRadii.pill, backgroundColor: huddleColors.glassControl },
   discoveryAlbumDotActive: { width: 16, backgroundColor: huddleColors.canvas },
@@ -7106,22 +9032,22 @@ const styles = StyleSheet.create({
   discoveryShieldBadge: { width: 36, height: 36, alignItems: "center", justifyContent: "center", borderRadius: huddleRadii.pill, backgroundColor: huddleColors.blue, borderWidth: 1, borderColor: huddleColors.glassBorder, ...huddleShadows.photoControl },
   discoveryTrafficActions: { gap: huddleSpacing.x3, alignItems: "center", paddingTop: huddleSpacing.x1 },
   discoveryTrafficButton: { width: 50, height: 50, alignItems: "center", justifyContent: "center", borderRadius: huddleRadii.pill, backgroundColor: huddleColors.canvas, borderWidth: 1, borderColor: huddleColors.fieldBorderSoft, ...huddleShadows.photoControl },
-  discoveryTrafficStar: { backgroundColor: huddleColors.premiumGold, borderColor: huddleColors.premiumGold },
+  discoveryTrafficStar: { backgroundColor: huddleColors.coral, borderColor: huddleColors.coral },
   discoveryTrafficWave: { backgroundColor: huddleColors.blue, borderColor: huddleColors.blue },
   discoveryTrafficPass: { backgroundColor: huddleColors.canvas, borderColor: huddleColors.glassBorder },
-  discoveryWaveIcon: { transform: [{ rotate: "-60deg" }] },
+  discoveryWaveIcon: { transform: [{ rotate: "0deg" }] },
   discoverySwipeTint: { ...StyleSheet.absoluteFillObject, zIndex: 12 },
   discoveryWaveTint: { backgroundColor: "rgba(33,71,201,0.96)" },
-  // D1: gold lift halo overlay sits above content but below the orb cue. Uses premiumGold for parity.
-  discoveryLiftHalo: { ...StyleSheet.absoluteFillObject, zIndex: 14, backgroundColor: huddleColors.premiumGold },
+  // D1: star lift halo overlay sits above content but below the orb cue. Uses coral for star parity.
+  discoveryLiftHalo: { ...StyleSheet.absoluteFillObject, zIndex: 14, backgroundColor: huddleColors.coral },
   // Discover refresh icon — bare, no background, same Feather "refresh-cw" + subtext color as Map's MapControlButton icon
   discoverRefreshButton: { width: 36, height: 36, alignItems: "center", justifyContent: "center" },
   // D1: ConfirmStarModal Send-button wrap holds the gold pulse halo behind the button while pending.
   confirmStarSendWrap: { position: "relative", flex: 1 },
   // D1: halo sits behind the AppModalButton (zIndex below button). Slight inset so it reads as glow, not a frame.
-  confirmStarSendHalo: { position: "absolute", left: -8, right: -8, top: -8, bottom: -8, zIndex: -1, borderRadius: huddleRadii.button, backgroundColor: huddleColors.premiumGold },
+  confirmStarSendHalo: { position: "absolute", left: -8, right: -8, top: -8, bottom: -8, zIndex: -1, borderRadius: huddleRadii.button, backgroundColor: huddleColors.coral },
   // Bespoke gold Send Star button — mirrors AppModalButton height/radius (48 / pill) without modifying the locked primitive.
-  confirmStarSendGoldButton: { flex: 1, height: 48, borderRadius: huddleRadii.button, alignItems: "center", justifyContent: "center", backgroundColor: huddleColors.premiumGold },
+  confirmStarSendGoldButton: { flex: 1, height: 48, borderRadius: huddleRadii.button, alignItems: "center", justifyContent: "center", backgroundColor: huddleColors.coral },
   confirmStarSendGoldButtonDisabled: { opacity: 0.55 },
   confirmStarSendGoldText: { fontFamily: "Urbanist-700", fontSize: huddleType.label, lineHeight: huddleType.labelLine, color: huddleColors.onPrimary },
   discoveryPassTint: { backgroundColor: "rgba(233,76,92,0.95)" },
@@ -7132,24 +9058,9 @@ const styles = StyleSheet.create({
   // Wave stamp now sits TOP-LEFT, mirroring the pass stamp on TOP-RIGHT. No longer covers the face.
   waveStamp: { left: huddleSpacing.x4, borderColor: huddleColors.blue },
   passStampText: { fontFamily: "Urbanist-800", fontSize: 13, lineHeight: 18, letterSpacing: 2.3, color: "#E94C5C" },
+  passStampIcon: { transform: [{ scaleX: -1 }] },
   waveStampText: { fontFamily: "Urbanist-800", fontSize: 13, lineHeight: 18, letterSpacing: 2.3, color: huddleColors.blue },
   discoveryWaveStampIcon: { transform: [{ rotate: "-60deg" }] },
-  discoveryHeroScrim: { position: "absolute", left: 0, right: 0, bottom: 0, height: "56%" },
-  // Fix #4B: chip-row info-strip — extra dark scrim only over the bottom ~25% so chips have a clear band.
-  discoveryChipInfoStrip: { position: "absolute", left: 0, right: 0, bottom: 0, height: "28%" },
-  discoveryHeroCopy: { position: "absolute", left: 0, right: 0, bottom: 0, paddingHorizontal: huddleSpacing.x4, paddingTop: huddleSpacing.x9, paddingBottom: huddleSpacing.x5 },
-  discoveryHeroNameRow: { maxWidth: "100%", flexDirection: "row", alignItems: "flex-end", alignSelf: "flex-start", flexWrap: "nowrap", gap: huddleSpacing.x1 },
-  discoveryHeroName: { flexShrink: 1, minWidth: 0, fontFamily: "Urbanist-800", fontSize: 34, lineHeight: 36, includeFontPadding: false, textTransform: "uppercase", color: huddleColors.onPrimary, textShadowColor: huddleColors.profileNameShadow, textShadowOffset: { width: 0, height: 2 }, textShadowRadius: 14 },
-  discoveryHeroPills: { marginTop: huddleSpacing.x3, flexDirection: "row", alignItems: "center", gap: huddleSpacing.x2, minWidth: 0, flexWrap: "nowrap" },
-  discoveryHeroRolePill: { minHeight: 34, alignSelf: "flex-start", maxWidth: "72%", flexShrink: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: huddleSpacing.x1, overflow: "hidden", borderRadius: huddleRadii.pill, borderWidth: 1, borderColor: huddleColors.profileHeroRoleBorder, backgroundColor: huddleColors.blueSoft, paddingHorizontal: huddleSpacing.x3, paddingVertical: huddleSpacing.x1 },
-  discoveryHeroRoleDot: { width: 6, height: 6, flexShrink: 0, borderRadius: huddleRadii.pill, backgroundColor: huddleColors.blue },
-  discoveryHeroRoleText: { flexShrink: 1, minWidth: 0, fontFamily: "Urbanist-600", fontSize: 13, lineHeight: 17, color: huddleColors.blue },
-  discoveryHeroTierPill: { minHeight: 32, maxWidth: "28%", flexShrink: 0, minWidth: 0, flexDirection: "row", alignItems: "center", gap: huddleSpacing.x1, borderRadius: huddleRadii.pill, borderWidth: 1, borderColor: huddleColors.profileHeroTierBorder, backgroundColor: huddleColors.profileHeroTierFill, paddingHorizontal: huddleSpacing.x3, paddingVertical: huddleSpacing.x1 },
-  discoveryHeroGoldPill: { borderColor: huddleColors.profileHeroGoldBorder, backgroundColor: huddleColors.premiumGoldSoft },
-  discoveryHeroPlusPill: { borderColor: huddleColors.profileHeroPlusBorder, backgroundColor: huddleColors.profileHeroPlusFill },
-  discoveryHeroTierText: { flexShrink: 1, fontFamily: "Urbanist-600", fontSize: 13, lineHeight: 17, color: huddleColors.onPrimary },
-  discoveryHeroGoldText: { color: huddleColors.premiumGold },
-  discoveryHeroPlusText: { color: huddleColors.onPrimary },
   discoveryNameRow: { position: "absolute", left: huddleSpacing.x4, right: huddleSpacing.x4, bottom: huddleSpacing.x4, flexDirection: "row", alignItems: "center", gap: huddleSpacing.x2 },
   discoveryName: { fontFamily: "Urbanist-800", fontSize: 32, lineHeight: 38, color: huddleColors.onPrimary, textShadowColor: huddleColors.profileNameShadow, textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 },
   verifiedPill: { minHeight: 28, flexDirection: "row", alignItems: "center", gap: huddleSpacing.x1, paddingHorizontal: huddleSpacing.x3, borderRadius: huddleRadii.pill, backgroundColor: huddleColors.blue },
@@ -7161,8 +9072,8 @@ const styles = StyleSheet.create({
   discoveryMetaRow: { gap: huddleSpacing.x2 },
   discoveryGlassMeta: { flexDirection: "row", alignItems: "center", gap: huddleSpacing.x2 },
   discoveryGlassMetaText: { flexShrink: 1, fontFamily: "Urbanist-600", fontSize: huddleType.body, lineHeight: 22, color: huddleColors.onPrimary },
-  discoveryChip: { minHeight: 24, maxWidth: 92, flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: huddleSpacing.x2, borderRadius: huddleRadii.pill, backgroundColor: "rgba(255,255,255,0.18)", borderWidth: 1, borderColor: "rgba(255,255,255,0.32)" },
-  discoveryChipText: { flexShrink: 1, fontFamily: "Urbanist-700", fontSize: 12, lineHeight: 16, color: huddleColors.onPrimary },
+  discoveryChip: { minHeight: 24, maxWidth: 92, flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: huddleSpacing.x2, borderRadius: huddleRadii.pill, backgroundColor: "rgba(255,255,255,0.58)", borderWidth: 1, borderColor: "rgba(255,255,255,0.70)" },
+  discoveryChipText: { flexShrink: 1, fontFamily: "Urbanist-700", fontSize: 12, lineHeight: 16, color: huddleColors.blue },
   discoveryEndWrap: { width: "100%", alignItems: "center", paddingTop: huddleSpacing.x6, paddingHorizontal: huddleSpacing.x6, gap: huddleSpacing.x2 },
   discoveryEndImage: { width: 220, height: 220, marginBottom: huddleSpacing.x2 } as ImageStyle,
   discoveryEndHeadline: { fontFamily: "Urbanist-800", fontSize: huddleType.h4, lineHeight: huddleType.h4Line, color: huddleColors.text, textAlign: "center" },
@@ -7172,28 +9083,82 @@ const styles = StyleSheet.create({
   discoveryEndPrimaryText: { fontFamily: "Urbanist-700", fontSize: huddleType.label, lineHeight: huddleType.labelLine, color: huddleColors.onPrimary },
   discoveryEndSecondary: { minHeight: 44, width: "100%", maxWidth: 280, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: huddleSpacing.x2, borderRadius: huddleRadii.pill, borderWidth: 1, borderColor: huddleColors.fieldFocusRing, backgroundColor: huddleColors.canvas, paddingHorizontal: huddleSpacing.x5 },
   discoveryEndSecondaryText: { fontFamily: "Urbanist-600", fontSize: huddleType.label, lineHeight: huddleType.labelLine, color: huddleColors.blue },
-  discoveryRoleBadge: { minHeight: 32, maxWidth: "100%", justifyContent: "center", paddingHorizontal: huddleSpacing.x3, borderRadius: huddleRadii.pill, backgroundColor: huddleColors.blueSoft, borderWidth: 1, borderColor: huddleColors.fieldFocusRing },
-  discoveryRoleBadgeText: { flexShrink: 1, fontFamily: "Urbanist-800", fontSize: 13, lineHeight: 17, color: huddleColors.blue },
+  discoveryRoleBadge: { minHeight: 32, maxWidth: "100%", justifyContent: "center", paddingHorizontal: huddleSpacing.x3, borderRadius: huddleRadii.pill, backgroundColor: huddleColors.glassControl, borderWidth: 1, borderColor: huddleColors.glassBorder },
+  discoveryRoleBadgeText: { flexShrink: 1, fontFamily: "Urbanist-800", fontSize: 15, lineHeight: 19, color: huddleColors.blue },
   discoveryPetLine: { fontFamily: "Urbanist-800", fontSize: huddleType.label, lineHeight: huddleType.labelLine, color: huddleColors.text },
   discoveryBio: { fontFamily: "Urbanist-500", fontSize: huddleType.body, lineHeight: 22, color: huddleColors.subtext },
   discoveryActionIsland: { width: 220, height: 72, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: huddleSpacing.x3, padding: huddleSpacing.x2, borderRadius: huddleRadii.pill, backgroundColor: huddleColors.glassChrome, borderWidth: 1, borderColor: huddleColors.glassBorder, ...huddleShadows.glassElevation1 },
   discoveryActionIslandSlot: { position: "absolute", left: 0, right: 0, alignItems: "center", zIndex: 30, elevation: 30 },
   discoveryActionSecondary: { width: 56, height: 56, minHeight: 56, alignItems: "center", justifyContent: "center", borderRadius: huddleRadii.pill, backgroundColor: huddleColors.canvas, borderWidth: 1, borderColor: huddleColors.glassBorder, ...huddleShadows.photoControl },
   discoveryActionSecondaryText: { ...huddleButtons.label, color: huddleColors.text },
-  discoveryActionStar: { width: 56, height: 56, minHeight: 56, alignItems: "center", justifyContent: "center", borderRadius: huddleRadii.pill, backgroundColor: huddleColors.premiumGold, borderWidth: 1, borderColor: huddleColors.premiumGold, ...huddleShadows.photoControl },
+  discoveryActionStar: { width: 56, height: 56, minHeight: 56, alignItems: "center", justifyContent: "center", borderRadius: huddleRadii.pill, backgroundColor: huddleColors.coral, borderWidth: 1.5, borderColor: huddleColors.coral, ...huddleShadows.photoControl },
+  discoveryStarIcon: { width: 20, height: 20, alignItems: "center", justifyContent: "center" },
+  discoveryTrafficStarIcon: { width: 22, height: 22 },
+  // Flip the double-chevron horizontally so it points right (skip/next) instead of left.
+  discoveryPassIcon: { transform: [{ scaleX: -1 }] },
+  // --- Discover card v2: on-card glass actions + top-right Next ---
+  // White bottom scrim keeps the photo airy and links the hero copy to the white bio surface below.
+  discoveryBottomGradient: { position: "absolute", left: 0, right: 0, bottom: 0, height: "44%" },
+  discoveryHeroCopy: { position: "absolute", left: huddleSpacing.x4, right: 132, bottom: huddleSpacing.x4, zIndex: 22, gap: huddleSpacing.x1 },
+  discoveryKickerRow: { minHeight: 20, flexDirection: "row", alignItems: "center", gap: huddleSpacing.x2 },
+  discoveryInlineStar: { width: 38, height: 38, borderRadius: huddleRadii.pill, backgroundColor: huddleColors.coral, borderWidth: 1, borderColor: "rgba(255,220,192,0.92)", shadowColor: huddleColors.coral, shadowOpacity: 0.28, shadowRadius: 14, shadowOffset: { width: 0, height: 5 }, elevation: 6 },
+  discoveryRoleKicker: { flexShrink: 1, minWidth: 0, fontFamily: "Urbanist-700", fontSize: 14, lineHeight: 18, letterSpacing: 1, color: huddleColors.mutedText, textTransform: "uppercase" },
+  discoveryHeroNameRow: { maxWidth: "100%", flexDirection: "row", alignItems: "center", gap: huddleSpacing.x2 },
+  discoveryHeroName: { flexShrink: 1, minWidth: 0, fontFamily: "Urbanist-800", fontSize: 32, lineHeight: 35, includeFontPadding: false, color: huddleColors.text, textTransform: "uppercase" },
+  discoveryHeroVerified: { marginLeft: -2, marginTop: 1 },
+  discoveryHeroFacts: { marginTop: huddleSpacing.x2, maxWidth: 210 },
+  discoveryHeroFactsKicker: { fontFamily: "Urbanist-700", fontSize: 14, lineHeight: 18, letterSpacing: 1, color: huddleColors.mutedText, textTransform: "uppercase" },
+  discoveryHeroFactsText: { marginTop: 2, fontFamily: "Urbanist-700", fontSize: 21, lineHeight: 25, color: huddleColors.subtext },
+  // Wave owns the card's bottom-right hero corner. Swipes with the card.
+  discoveryCornerActions: { position: "absolute", right: huddleSpacing.x4, bottom: huddleSpacing.x4, zIndex: 23, flexDirection: "row", alignItems: "flex-end", gap: huddleSpacing.x2 },
+  // Shadow wrappers only — the frosted glass + clipping live in NativeGlassCircle (overflow:hidden clips
+  // its own shadow, so the soft depth shadow sits here on the un-clipped Pressable).
+  discoveryGlassStar: { width: 48, height: 48, borderRadius: huddleRadii.pill, ...huddleShadows.glassElevation1 },
+  discoveryGlassWave: { width: 60, height: 60, borderRadius: huddleRadii.pill, borderWidth: 1, borderColor: "rgba(255,255,255,0.55)", backgroundColor: "transparent", ...huddleShadows.glassElevation1 },
+  discoveryBioPanel: { position: "relative", overflow: "hidden", justifyContent: "center", paddingHorizontal: huddleSpacing.x4, paddingVertical: huddleSpacing.x2, backgroundColor: huddleColors.canvas, borderTopWidth: 0, borderBottomLeftRadius: huddleRadii.modal, borderBottomRightRadius: huddleRadii.modal },
+  discoveryBioPanelQuote: { paddingHorizontal: 8, paddingVertical: 4 },
+  discoveryPackPanel: { paddingHorizontal: 8, paddingVertical: huddleSpacing.x1 },
+  discoveryBioPanelCompact: { paddingVertical: huddleSpacing.x2 },
+  discoveryBioPanelSingle: { paddingHorizontal: 8, paddingVertical: 4 },
+  discoveryBioMeta: { fontFamily: "Urbanist-700", fontSize: huddleType.helper, lineHeight: huddleType.helperLine, letterSpacing: 0.8, color: huddleColors.mutedText, textTransform: "uppercase" },
+  discoveryBioQuoteWrap: { width: "100%", alignSelf: "stretch", justifyContent: "center", paddingHorizontal: 0, paddingVertical: 4 },
+  discoveryBioQuoteOpen: { position: "absolute", left: 8, top: 4, fontFamily: "Georgia", fontSize: 30, lineHeight: 30, color: huddleColors.sectionDividerStrong },
+  discoveryBioQuoteClose: { position: "absolute", right: 8, bottom: 4, fontFamily: "Georgia", fontSize: 30, lineHeight: 30, color: huddleColors.sectionDividerStrong },
+  discoveryBioCopy: { width: "100%", alignSelf: "stretch", paddingHorizontal: 8, fontFamily: "Urbanist-600Italic", fontSize: 17, lineHeight: 27, color: huddleColors.text },
+  discoveryBioCopySingle: { width: "100%", textAlign: "center", fontSize: 16, lineHeight: 24 },
+  discoveryPackPreview: { width: "100%", maxWidth: 370, alignSelf: "center", flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: huddleSpacing.x2 },
+  discoveryPackPreviewSingle: { maxWidth: 360 },
+  discoveryPackCopy: { flex: 1, minWidth: 0 },
+  discoveryPackLineRow: { flexDirection: "row", alignItems: "center", minWidth: 0 },
+  discoveryPackLine: { flex: 1, minWidth: 0, fontFamily: "Urbanist-600Italic", fontSize: 16, lineHeight: 22, color: huddleColors.text },
+  discoveryPackKicker: { flexShrink: 0, fontFamily: "Urbanist-700", fontSize: 14, lineHeight: 18, letterSpacing: 0.7, color: huddleColors.mutedText, textTransform: "uppercase" },
+  discoveryPackMiniCarousel: { width: 62, height: 48, position: "relative", flexShrink: 0 },
+  discoveryPackMiniPolaroid: { position: "absolute", right: 0, top: 0, width: 38, height: 46, padding: 3, paddingBottom: 9, borderRadius: 6, backgroundColor: huddleColors.canvas, borderWidth: 1, borderColor: "rgba(66,73,101,0.10)", shadowColor: huddleColors.neutralShadow, shadowOpacity: 0.12, shadowRadius: 7, shadowOffset: { width: 0, height: 3 }, elevation: 2, transform: [{ rotate: "4deg" }] },
+  discoveryPackMiniPolaroidBack: { right: 23, top: 3, transform: [{ rotate: "-5deg" }], opacity: 0.92 },
+  discoveryPackMiniPhoto: { width: "100%", height: "100%", borderRadius: 4, backgroundColor: huddleColors.glassControl },
+  discoveryPackTitle: { marginTop: 3, fontFamily: "Urbanist-700", fontSize: 16, lineHeight: 20, color: huddleColors.text },
+  discoveryPackMeta: { marginTop: 2, fontFamily: "Urbanist-600", fontSize: 12, lineHeight: 15, letterSpacing: 0.7, color: huddleColors.subtext, textTransform: "uppercase" },
+  discoveryPackPolaroids: { width: 92, height: 74, position: "relative", flexShrink: 0 },
+  discoveryPackPolaroidsSingle: { width: 58, height: 48 },
+  discoveryPackPolaroid: { position: "absolute", right: 0, top: 0, width: 58, height: 70, padding: 4, paddingBottom: 13, borderRadius: 8, backgroundColor: huddleColors.canvas, borderWidth: 1, borderColor: "rgba(66,73,101,0.10)", shadowColor: huddleColors.neutralShadow, shadowOpacity: 0.12, shadowRadius: 9, shadowOffset: { width: 0, height: 4 }, elevation: 3, transform: [{ rotate: "3deg" }] },
+  discoveryPackPolaroidBack: { right: 34, top: 6, transform: [{ rotate: "-5deg" }], opacity: 0.96 },
+  discoveryPackPhoto: { width: "100%", height: "100%", borderRadius: 5, backgroundColor: huddleColors.glassControl },
+  discoveryPackPhotoFallback: { width: "100%", height: "100%", borderRadius: 5, alignItems: "center", justifyContent: "center", backgroundColor: huddleColors.glassControl },
+  // Next: chrome-light, top-right "close" corner. Small + faint, just enough contrast on bright photos.
+  discoveryNextButton: { position: "absolute", right: huddleSpacing.x3, top: huddleSpacing.x3, zIndex: 22, width: 34, height: 34, alignItems: "center", justifyContent: "center", borderRadius: huddleRadii.pill, borderWidth: 1, borderColor: "rgba(255,255,255,0.28)", backgroundColor: huddleCoachMark.passSurface },
   discoveryStarButton: { flexGrow: 0, flexShrink: 0 },
   discoveryActionPrimary: { width: 56, height: 56, minHeight: 56, alignItems: "center", justifyContent: "center", borderRadius: huddleRadii.pill, backgroundColor: huddleColors.blue, borderWidth: 1, borderColor: huddleColors.blue, ...huddleShadows.photoControl },
   discoveryActionPrimaryText: { ...huddleButtons.label, color: huddleColors.onPrimary },
   actionDisabled: { opacity: 0.62 },
   exploreList: { gap: huddleSpacing.x4 },
-  inviteInboxLauncher: { minHeight: 58, flexDirection: "row", alignItems: "center", gap: huddleSpacing.x3, borderRadius: huddleRadii.card, borderWidth: 1, borderColor: huddleColors.fieldFocusRing, paddingHorizontal: huddleSpacing.x4, paddingVertical: huddleSpacing.x3, backgroundColor: huddleColors.blueSoft },
+  inviteInboxLauncher: { ...huddleGlassControls.surface, minHeight: 58, flexDirection: "row", alignItems: "center", gap: huddleSpacing.x3, borderRadius: huddleRadii.card, paddingHorizontal: huddleSpacing.x4, paddingVertical: huddleSpacing.x3 },
   inviteInboxLauncherCopy: { flex: 1, minWidth: 0 },
-  inviteInboxLauncherTitle: { fontFamily: "Urbanist-800", fontSize: huddleType.label, lineHeight: huddleType.labelLine, color: huddleColors.text },
+  inviteInboxLauncherTitle: { fontFamily: "Urbanist-800", fontSize: huddleType.label, lineHeight: huddleType.labelLine, color: huddleColors.blue },
   inviteInboxLauncherBody: { fontFamily: "Urbanist-500", fontSize: huddleType.helper, lineHeight: huddleType.helperLine, color: huddleColors.subtext },
   inviteInboxList: { gap: huddleSpacing.x2 },
   inviteInboxRow: { minHeight: 62, flexDirection: "row", alignItems: "center", gap: huddleSpacing.x2, borderRadius: huddleRadii.card, paddingHorizontal: huddleSpacing.x2, paddingVertical: huddleSpacing.x1 },
   inviteInboxIdentity: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: huddleSpacing.x3 },
-  inviteInboxAvatar: { width: 42, height: 42, alignItems: "center", justifyContent: "center", overflow: "hidden", borderRadius: huddleRadii.pill, borderWidth: 1, borderColor: huddleColors.fieldBorderSoft, backgroundColor: huddleColors.blueSoft },
+  inviteInboxAvatar: { width: 42, height: 42, alignItems: "center", justifyContent: "center", overflow: "hidden", borderRadius: huddleRadii.pill, borderWidth: 1, borderColor: huddleColors.glassBorder, backgroundColor: huddleColors.glassControl },
   inviteInboxAvatarImage: { width: "100%", height: "100%", borderRadius: huddleRadii.pill },
   inviteInboxCopy: { flex: 1, minWidth: 0 },
   inviteInboxName: { fontFamily: "Urbanist-800", fontSize: huddleType.label, lineHeight: huddleType.labelLine, color: huddleColors.text },
@@ -7218,15 +9183,32 @@ const styles = StyleSheet.create({
   exploreCover: { width: "100%", aspectRatio: 16 / 9, overflow: "hidden", backgroundColor: huddleColors.blue },
   exploreCoverImage: { width: "100%", height: "100%" },
   exploreCoverFallback: { flex: 1, backgroundColor: huddleColors.blue },
+  exploreChipSentence: { textTransform: "none", letterSpacing: 0.1 },
+  exploreChipRowWithFaces: { paddingRight: 124 },
+  exploreFaceStack: { position: "absolute", right: huddleSpacing.x3, bottom: huddleSpacing.x3, flexDirection: "row", alignItems: "center" },
+  groupCardFaceStack: { left: huddleSpacing.x3, right: undefined, top: huddleSpacing.x3, bottom: undefined },
+  exploreFaceStackItem: { width: 32, height: 32, borderRadius: huddleRadii.pill, borderWidth: 1, borderColor: huddleColors.canvas, backgroundColor: huddleColors.canvas, overflow: "hidden" },
+  exploreFaceStackItemOut: { borderWidth: 2, borderColor: huddleColors.success },
+  exploreFaceStackImage: { width: "100%", height: "100%", borderRadius: huddleRadii.pill },
+  exploreFaceStackFallback: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: huddleColors.mutedCanvas },
+  exploreFaceStackOverlap: { marginLeft: -9 },
+  exploreFaceStackMore: { minWidth: 32, height: 32, alignItems: "center", justifyContent: "center", backgroundColor: huddleColors.mutedCanvas, paddingHorizontal: 4 },
+  exploreFaceStackMoreText: { fontFamily: "Urbanist-700", fontSize: 11, lineHeight: 14, color: huddleColors.subtext },
+  exploreBodyWithStack: {},
+  exploreOutNowRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  exploreOutNowText: { fontFamily: "Urbanist-700", fontSize: 12.5, lineHeight: 16, color: huddleColors.text },
   exploreScrim: { ...StyleSheet.absoluteFillObject, backgroundColor: huddleColors.profileHeroScrimMid },
   exploreMembers: { position: "absolute", left: huddleSpacing.x3, top: huddleSpacing.x3, overflow: "hidden", borderRadius: huddleRadii.pill, paddingHorizontal: huddleSpacing.x3, paddingVertical: huddleSpacing.x1, backgroundColor: huddleColors.profileCaptionOverlay, fontFamily: "Urbanist-600", fontSize: 11, lineHeight: 14, color: huddleColors.onPrimary },
   exploreHideButton: { position: "absolute", right: huddleSpacing.x3, top: huddleSpacing.x3, width: 34, height: 34, alignItems: "center", justifyContent: "center", borderRadius: huddleRadii.pill, backgroundColor: "rgba(255,255,255,0.72)", borderWidth: 1, borderColor: huddleColors.glassBorder, ...huddleShadows.glassElevation1 },
   exploreOverlay: { position: "absolute", left: huddleSpacing.x4, right: huddleSpacing.x4, bottom: huddleSpacing.x3, gap: huddleSpacing.x1 },
+  exploreEventCountdown: { alignSelf: "flex-start", flexDirection: "row", alignItems: "center", borderRadius: huddleRadii.pill, borderWidth: 1, borderColor: huddleColors.success, backgroundColor: "transparent", overflow: "hidden" },
+  exploreEventCountdownDotWrap: { marginLeft: 10, marginRight: -4 },
+  exploreEventCountdownGlassFill: { borderRadius: huddleRadii.pill, backgroundColor: huddleColors.successSoft },
+  exploreEventCountdownGreenTint: { ...StyleSheet.absoluteFillObject, backgroundColor: huddleColors.successSoft },
+  exploreEventCountdownText: { borderWidth: 0, borderColor: "transparent", backgroundColor: "transparent", color: huddleColors.onPrimary, textTransform: "none" },
   exploreTitle: { fontFamily: "Urbanist-800", fontSize: huddleType.h4, lineHeight: huddleType.h4Line, color: huddleColors.onPrimary },
   exploreMetaRow: { flexDirection: "row", alignItems: "center", gap: huddleSpacing.x1 },
   exploreMeta: { flex: 1, fontFamily: "Urbanist-600", fontSize: huddleType.helper, lineHeight: huddleType.helperLine, color: huddleColors.profileCaptionPlaceholder },
-  exploreChips: { flexDirection: "row", flexWrap: "wrap", gap: huddleSpacing.x1 },
-  exploreChip: { overflow: "hidden", borderRadius: huddleRadii.pill, paddingHorizontal: huddleSpacing.x2, paddingVertical: 3, backgroundColor: huddleColors.glassControl, fontFamily: "Urbanist-800", fontSize: huddleType.meta, lineHeight: huddleType.metaLine, color: huddleColors.onPrimary },
   exploreBody: { padding: huddleSpacing.x4, gap: huddleSpacing.x3 },
   exploreDescription: { fontFamily: "Urbanist-500", fontSize: huddleType.label, lineHeight: huddleType.labelLine, color: huddleColors.subtext },
   exploreCtaInvite: { backgroundColor: huddleColors.coral },
@@ -7258,21 +9240,26 @@ const styles = StyleSheet.create({
   pendingInviteIdentity: { opacity: 0.72 },
   cancelInviteText: { fontFamily: "Urbanist-800", fontSize: huddleType.helper, lineHeight: huddleType.helperLine, color: huddleColors.validationRed },
   mediaSection: { gap: huddleSpacing.x2 },
-  createGroupEventBoundary: { flex: 1, justifyContent: "flex-end" },
   createGroupSheet: { height: "82%", maxHeight: "82%", flexShrink: 0 },
   createGroupScroll: { flex: 1, minHeight: 0 },
   createGroupScrollContent: { paddingBottom: huddleSpacing.x10 },
   createSheetContent: { gap: huddleSpacing.x4, paddingBottom: huddleSpacing.x3 },
   createNameRow: { flexDirection: "row", alignItems: "center", gap: huddleSpacing.x3 },
   createNameField: { flex: 1, minWidth: 0 },
-  createAvatarButton: { width: 58, height: 58, alignItems: "center", justifyContent: "center", borderRadius: huddleRadii.pill, borderWidth: 1, borderColor: huddleColors.fieldBorderSoft, backgroundColor: huddleColors.blueSoft },
+  createAvatarButton: { ...huddleGlassControls.surface, width: 58, height: 58, alignItems: "center", justifyContent: "center", borderRadius: huddleRadii.pill },
   createAvatarButtonError: { ...huddleFieldStates.error },
   createAvatarImage: { width: "100%", height: "100%", borderRadius: huddleRadii.pill },
   createFieldBlock: { gap: huddleSpacing.x1 + 2 },
   createTextField: { height: 58, minHeight: 58, maxHeight: 58, paddingHorizontal: huddleSpacing.x3, paddingTop: 0, paddingBottom: 0, fontFamily: "Urbanist-500", fontSize: huddleType.label, lineHeight: huddleType.labelLine, includeFontPadding: false, textAlignVertical: "center" },
-  createLocationField: { height: 52, minHeight: 52, maxHeight: 52, paddingHorizontal: huddleSpacing.x3, paddingTop: 0, paddingBottom: 0, fontFamily: "Urbanist-500", fontSize: huddleType.label, lineHeight: huddleType.labelLine, includeFontPadding: false, textAlignVertical: "center" },
+  locationFieldRow: { height: 56, minHeight: 56, maxHeight: 56, flexDirection: "row", alignItems: "center", borderWidth: 1, borderColor: huddleColors.fieldBorder, borderRadius: huddleRadii.field, paddingLeft: huddleSpacing.x1, paddingRight: huddleSpacing.x3, backgroundColor: huddleColors.glassChrome, ...huddleShadows.glassElevation1 },
+  // includeFontPadding: false intentionally omitted — on Android it strips the padding
+  // reserved for descenders (g/y/j/p/q), which clips them against this field's fixed-height
+  // parent row. textAlignVertical: "center" still centers the text correctly without it.
+  locationFieldInput: { flex: 1, minWidth: 0, flexShrink: 1, height: "100%", paddingTop: huddleSpacing.x1, paddingBottom: huddleSpacing.x1, fontFamily: "Urbanist-500", fontSize: huddleType.label, lineHeight: huddleType.labelLine, textAlignVertical: "center", color: huddleColors.text, overflow: "hidden" },
+  locationFieldPin: { marginRight: huddleSpacing.x1 },
   groupDetailsNameField: { fontFamily: "Urbanist-800", fontSize: huddleType.h4, lineHeight: huddleType.h4Line, textAlignVertical: "center" },
   createLabel: { marginBottom: huddleSpacing.x1 + 2, paddingLeft: huddleSpacing.x1, fontFamily: "Urbanist-700", fontSize: huddleType.label, lineHeight: huddleType.labelLine, color: huddleColors.text },
+  createHelperText: { marginTop: huddleSpacing.x1, paddingLeft: huddleSpacing.x1, fontFamily: "Urbanist-500", fontSize: huddleType.helper, lineHeight: huddleType.helperLine, color: huddleColors.mutedText },
   createErrorText: { marginTop: -huddleSpacing.x2, paddingLeft: huddleSpacing.x1, fontFamily: "Urbanist-700", fontSize: huddleType.helper, lineHeight: huddleType.helperLine, color: huddleColors.validationRed },
   createSelectLabel: { fontSize: huddleType.label, lineHeight: huddleType.labelLine },
   createSelectTrigger: { minHeight: 52, height: 52 },
@@ -7285,7 +9272,7 @@ const styles = StyleSheet.create({
   petFocusMenu: { marginTop: huddleSpacing.x2, borderRadius: huddleFormControls.select.menuRadius, borderWidth: 1, borderColor: huddleFormControls.select.menuBorderColor, padding: huddleFormControls.select.menuPadding, backgroundColor: huddleColors.canvas, ...huddleShadows.glassElevation1 },
   petFocusMenuContent: { padding: huddleFormControls.select.menuPadding },
   petFocusOption: { minHeight: huddleFormControls.select.optionMinHeight, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: huddleSpacing.x2, borderRadius: huddleFormControls.select.optionRadius, paddingHorizontal: huddleFormControls.select.optionPaddingHorizontal, paddingVertical: huddleFormControls.select.optionPaddingVertical },
-  petFocusOptionActive: { backgroundColor: huddleColors.primarySoftFill },
+  petFocusOptionActive: { backgroundColor: huddleColors.glassControl },
   petFocusOptionText: { flex: 1, fontFamily: "Urbanist-600", fontSize: huddleType.label, lineHeight: huddleType.labelLine, color: huddleColors.text },
   petFocusOptionTextActive: { color: huddleColors.blue },
   petFocusBreedBlock: { gap: huddleSpacing.x2, paddingHorizontal: huddleSpacing.x2, paddingBottom: huddleSpacing.x2 },
@@ -7337,7 +9324,7 @@ const styles = StyleSheet.create({
   filterSummaryWrap: { maxWidth: "52%", flexDirection: "row", alignItems: "center", gap: huddleSpacing.x1 },
   filterSummary: { flexShrink: 1, fontFamily: "Urbanist-500", fontSize: huddleType.helper, lineHeight: huddleType.helperLine, color: huddleColors.mutedText },
   toggleRow: { minHeight: 56, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  nativeSwitch: { width: huddleSpacing.x8, height: huddleSpacing.x5, justifyContent: "center", borderRadius: huddleRadii.pill, paddingHorizontal: huddleSpacing.x1, backgroundColor: huddleColors.mutedCanvas },
+  nativeSwitch: { ...huddleGlassControls.toggleSurface, width: huddleSpacing.x8, height: huddleSpacing.x5, justifyContent: "center", borderRadius: huddleRadii.pill, paddingHorizontal: huddleSpacing.x1 },
   nativeSwitchActive: { backgroundColor: huddleColors.blue },
   nativeSwitchKnob: { width: huddleSpacing.x4, height: huddleSpacing.x4, borderRadius: huddleRadii.pill, backgroundColor: huddleColors.canvas },
   nativeSwitchKnobActive: { alignSelf: "flex-end" },
@@ -7351,7 +9338,6 @@ const styles = StyleSheet.create({
   selectCheckSlot: { width: huddleFormControls.select.checkSlot, height: huddleFormControls.select.checkSlot },
   pressed: { opacity: 0.78, transform: [{ scale: 0.97 }] },
   detailsMeta: { fontFamily: "Urbanist-700", fontSize: huddleType.label, lineHeight: huddleType.labelLine, color: huddleColors.mutedText },
-  groupDetailsEventBoundary: { width: "100%", justifyContent: "flex-end" },
   groupDetailsSheet: { height: "82%", maxHeight: "82%", flexShrink: 0 },
   groupDetailsScroll: { flex: 1, minHeight: 0 },
   groupHeaderActionCluster: { flexDirection: "row", alignItems: "center", gap: huddleSpacing.x1 },
@@ -7359,10 +9345,11 @@ const styles = StyleSheet.create({
   groupHeaderDangerButton: { backgroundColor: huddleColors.validationSoft },
   groupDetailsHeaderSpacer: { flex: 1 },
   groupDetailsScrollContent: { paddingBottom: huddleSpacing.x10 },
+  groupDetailsFooterButtonLabel: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: huddleSpacing.x2 },
   groupDetailsBody: { gap: huddleSpacing.x5 },
   groupEditControls: { gap: huddleSpacing.x4 },
   groupNameEditRow: { flexDirection: "row", alignItems: "flex-end", gap: huddleSpacing.x3 },
-  groupNameEditAvatar: { width: 58, height: 58, marginBottom: 1, alignItems: "center", justifyContent: "center", borderRadius: huddleRadii.pill, borderWidth: 1, borderColor: huddleColors.fieldBorderSoft, backgroundColor: huddleColors.blueSoft },
+  groupNameEditAvatar: { ...huddleGlassControls.surface, width: 58, height: 58, marginBottom: 1, alignItems: "center", justifyContent: "center", borderRadius: huddleRadii.pill },
   groupNameEditAvatarImage: { width: "100%", height: "100%", borderRadius: huddleRadii.pill },
   groupNameEditFieldWrap: { flex: 1, minWidth: 0 },
 	  groupHeroDescriptionBlock: { overflow: "hidden", borderRadius: huddleRadii.glass, backgroundColor: huddleColors.canvas, borderWidth: 1, borderColor: huddleColors.cardBorderSoft },
@@ -7374,7 +9361,7 @@ const styles = StyleSheet.create({
   descriptionInlineHeader: { minHeight: 32, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: huddleSpacing.x3 },
   groupDetailsDescriptionText: { fontFamily: "Urbanist-500", fontSize: huddleType.body, lineHeight: 24, color: huddleColors.text },
   exploreMembersSection: { gap: huddleSpacing.x2 },
-  inlineIconButton: { width: 32, height: 32, alignItems: "center", justifyContent: "center", borderRadius: huddleRadii.pill, backgroundColor: huddleColors.primarySoftFill },
+  inlineIconButton: { ...huddleGlassControls.surface, width: 32, height: 32, alignItems: "center", justifyContent: "center", borderRadius: huddleRadii.pill },
   memberIdentity: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: huddleSpacing.x3 },
 	  groupMemberCompactRow: { minHeight: 40, paddingHorizontal: 0, paddingVertical: 0 },
   groupMemberName: { fontSize: huddleType.body, lineHeight: huddleType.labelLine },
@@ -7444,7 +9431,7 @@ const styles = StyleSheet.create({
   modalPrimaryLabel: { ...huddleButtons.label, color: huddleColors.onPrimary },
   modalSecondaryLabel: { ...huddleButtons.label, color: huddleColors.text },
   createDescriptionWrap: { paddingHorizontal: huddleSpacing.x4, paddingVertical: huddleSpacing.x3 },
-  createDescriptionField: { height: 92, minHeight: 72, maxHeight: 120, borderWidth: 0, borderRadius: 0, paddingHorizontal: 0, paddingTop: 0, paddingBottom: 0, backgroundColor: huddleButtons.ghost.backgroundColor, shadowOpacity: huddleButtons.disabled.shadowOpacity, elevation: huddleButtons.disabled.elevation, fontSize: huddleType.label, lineHeight: huddleType.labelLine },
+  createDescriptionField: { minHeight: GROUP_DESCRIPTION_FIELD_MIN_HEIGHT, maxHeight: GROUP_DESCRIPTION_FIELD_MAX_HEIGHT, borderWidth: 0, borderRadius: 0, paddingHorizontal: 0, paddingTop: 0, paddingBottom: 0, backgroundColor: huddleButtons.ghost.backgroundColor, shadowOpacity: huddleButtons.disabled.shadowOpacity, elevation: huddleButtons.disabled.elevation, fontSize: huddleType.label, lineHeight: huddleType.labelLine },
   joinCodeContent: { alignItems: "center", gap: huddleSpacing.x4 },
   joinCodeField: { width: 176, textAlign: "center", fontFamily: "Urbanist-800", fontSize: huddleType.h4, letterSpacing: 0 },
   joinCodeDots: { flexDirection: "row", gap: huddleSpacing.x2 },
@@ -7452,21 +9439,21 @@ const styles = StyleSheet.create({
   joinCodeDotActive: { backgroundColor: huddleColors.blue },
   locationSuggestionCard: { marginTop: huddleSpacing.x2, overflow: "hidden", borderRadius: huddleRadii.card, borderWidth: 1, borderColor: huddleColors.cardBorderSoft, backgroundColor: huddleColors.canvas, ...huddleShadows.glassElevation1 },
   locationSuggestionRow: { minHeight: 48, justifyContent: "center", gap: 2, paddingHorizontal: huddleSpacing.x3, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: huddleColors.divider },
-  locationSuggestionPrimary: { fontFamily: "Urbanist-700", fontSize: huddleType.label, lineHeight: huddleType.labelLine, color: huddleColors.text },
-  locationSuggestionMeta: { fontFamily: "Urbanist-500", fontSize: huddleType.helper, lineHeight: huddleType.helperLine, color: huddleColors.mutedText },
+  locationSuggestionPrimary: { flexShrink: 1, fontFamily: "Urbanist-700", fontSize: huddleType.label, lineHeight: huddleType.labelLine, color: huddleColors.text },
+  locationSuggestionMeta: { flexShrink: 1, fontFamily: "Urbanist-500", fontSize: huddleType.helper, lineHeight: huddleType.helperLine, color: huddleColors.mutedText },
   sendCueOverlay: { ...StyleSheet.absoluteFillObject, zIndex: 20, alignItems: "center", justifyContent: "center" },
   sendCueOrb: { width: 84, height: 84, alignItems: "center", justifyContent: "center", borderRadius: huddleRadii.pill, ...huddleShadows.glassElevation2 },
   sendCueOrbWave: { backgroundColor: huddleColors.blue },
-  sendCueOrbStar: { backgroundColor: huddleColors.premiumGold },
+  sendCueOrbStar: { backgroundColor: huddleColors.canvas, borderWidth: 2, borderColor: huddleColors.coral },
+  sendCueStarIcon: { width: 42, height: 42, alignItems: "center", justifyContent: "center" },
+  sendCueStarIconFill: { position: "absolute" },
   // Ring + trail dots are absolute, centered via 50% pin + negative margin offset
   sendCueRing: { position: "absolute", top: "50%", left: "50%", width: 110, height: 110, marginTop: -55, marginLeft: -55, borderRadius: huddleRadii.pill, borderWidth: 3 },
   sendCueRingWave: { borderColor: huddleColors.blue },
-  sendCueRingStar: { borderColor: huddleColors.premiumGold },
+  sendCueRingStar: { borderColor: huddleColors.coral },
   sendCueTrailDot: { position: "absolute", top: "50%", left: "50%", width: 10, height: 10, marginTop: -5, marginLeft: -5, borderRadius: 5 },
   sendCueTrailDotSm: { width: 7, height: 7, marginTop: -3.5, marginLeft: -3.5, borderRadius: 3.5 },
-  sendCueTrailDotXs: { width: 5, height: 5, marginTop: -2.5, marginLeft: -2.5, borderRadius: 2.5 },
-  sendCueTrailDotWave: { backgroundColor: huddleColors.blue },
-  sendCueTrailDotStar: { backgroundColor: huddleColors.premiumGold },
+  sendCueTrailDotStar: { backgroundColor: huddleColors.coral },
   matchFullScreen: { flex: 1, backgroundColor: huddleColors.canvas },
   matchFullImage: { ...StyleSheet.absoluteFillObject, width: "100%", height: "100%" },
   // Avatar frame — square, brand-border, soft elevation. Outer holds the
@@ -7484,10 +9471,10 @@ const styles = StyleSheet.create({
   matchSlotImage: { width: "100%", height: "100%" } as ImageStyle,
   matchSlotFallback: { flex: 1, alignItems: "center", justifyContent: "center" },
   matchSlotFallbackBlue: { backgroundColor: huddleColors.blue },
-  matchSlotFallbackGold: { backgroundColor: huddleColors.premiumGold },
+  matchSlotFallbackGold: { backgroundColor: huddleColors.coral },
   matchSlotInitials: { fontFamily: "Urbanist-800", fontSize: 28, lineHeight: 32, color: huddleColors.onPrimary },
   matchKeyboardScrim: { ...StyleSheet.absoluteFillObject, zIndex: 1, backgroundColor: huddleColors.backdrop },
-  matchKeyboardDockWrap: { position: "absolute", left: 0, right: 0, bottom: 0, zIndex: 20 },
+  matchKeyboardDockWrap: { position: "absolute", left: 0, right: 0, bottom: huddleSpacing.x3, zIndex: 20 },
   matchDockBelowPill: { paddingHorizontal: huddleSpacing.x4, paddingBottom: huddleSpacing.x4, gap: huddleSpacing.x2 },
   matchDockFocused: { paddingBottom: huddleSpacing.x1, gap: huddleSpacing.x1 },
   matchModalCard: { width: "100%", maxWidth: 390, alignItems: "center", gap: huddleSpacing.x3, borderRadius: huddleRadii.modal, padding: huddleSpacing.x5, backgroundColor: huddleColors.canvas, ...huddleShadows.glassElevation2 },
@@ -7495,20 +9482,10 @@ const styles = StyleSheet.create({
   matchModalInitials: { fontFamily: "Urbanist-800", fontSize: 30, lineHeight: 36, color: huddleColors.onPrimary },
   matchTitle: { textAlign: "center", fontFamily: "Urbanist-800", fontSize: huddleType.h3, lineHeight: huddleType.h3Line, color: huddleColors.text },
   matchBody: { textAlign: "center", fontFamily: "Urbanist-500", fontSize: huddleType.label, lineHeight: huddleType.labelLine, color: huddleColors.subtext },
-  goldButton: { backgroundColor: huddleColors.premiumGold },
+  goldButton: { backgroundColor: huddleColors.coral },
   // Fix #7: discover toast made quieter — narrower (centered, max 80% width), smaller text,
   // tighter padding, lower elevation. Used only for errors/duplicate notices now that "Wave sent"
   // and "Star sent" banners are removed (the cue animation IS the confirmation).
-  discoverToastWrap: {
-    position: "absolute", top: 8, alignSelf: "center", maxWidth: "82%", zIndex: 50,
-    flexDirection: "row", alignItems: "center", gap: 8,
-    borderRadius: huddleRadii.pill, overflow: "hidden",
-    paddingVertical: 8, paddingRight: 14, paddingLeft: 4,
-    borderWidth: StyleSheet.hairlineWidth, borderColor: huddleColors.glassBorder,
-  },
-  discoverToastIntentBar: { width: 3, alignSelf: "stretch", borderTopLeftRadius: huddleRadii.pill, borderBottomLeftRadius: huddleRadii.pill },
-  discoverToastIcon: { marginLeft: 8 },
-  discoverToastText: { flex: 1, fontFamily: "Urbanist-600", fontSize: huddleType.helper, lineHeight: huddleType.helperLine, color: huddleColors.text },
   // Phase L: match modal additions — white-on-blue, no blue tints anywhere
   matchQuickReplies: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 2, paddingRight: huddleSpacing.x4, paddingBottom: 8 },
   matchQuickReplyChip: {
@@ -7538,6 +9515,9 @@ const styles = StyleSheet.create({
     fontFamily: "Urbanist-500", fontSize: huddleType.body, lineHeight: huddleType.labelLine,
     includeFontPadding: false, textAlignVertical: "center",
     color: huddleColors.text,
+    minWidth: 0,
+    flexShrink: 1,
+    overflow: "hidden",
   },
   matchInputSend: {
     width: 36, height: 36, alignItems: "center", justifyContent: "center",

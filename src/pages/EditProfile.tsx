@@ -25,6 +25,7 @@ import "react-phone-number-input/style.css";
 import { isPhoneCountryAllowed } from "@/config/allowedSmsCountries";
 import { CANONICAL_GENDER_OPTIONS, CANONICAL_ORIENTATION_OPTIONS, CANONICAL_PET_EXPERIENCE_SPECIES_OPTIONS, CANONICAL_SOCIAL_ROLE_OPTIONS } from "@/lib/profileOptions";
 import { canonicalizeSocialAlbumEntries } from "@/lib/socialAlbum";
+import { takeResolvedAuthReturnTo } from "@/lib/authIntent";
 import { ProfilePhotoSlots } from "@/components/profile/edit/ProfilePhotoSlots";
 import {
   deleteProfilePhotoPath,
@@ -46,6 +47,7 @@ import {
   normalizeStorageOwner,
 } from "@/lib/signupOnboarding";
 import { useFormDraftAutosave } from "@/hooks/useFormDraftAutosave";
+import { useAuthGate } from "@/components/auth/authGateContext";
 import {
   draftKeys,
   isPersistableImageUrl,
@@ -227,6 +229,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     new URLSearchParams(window.location.search).get("turnstile_diag") === "1";
   const navigate = useNavigate();
   const { user, profile, refreshProfile } = useAuth();
+  const { requireAuth } = useAuthGate();
   const { data: signupData, reset: resetSignup, setFlowState } = useSignup();
   const [loading, setLoading] = useState(false);
   const [isPremiumOpen, setIsPremiumOpen] = useState(false);
@@ -393,7 +396,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     }
   }, []);
   const [draftHydrationSeed, setDraftHydrationSeed] = useState<{
-    baselineValue: Record<string, unknown>;
+    baselineValue: typeof formData;
     baselineUpdatedAt: string;
   } | null>(null);
   const profileDraftMode: DraftMode = onboardingMode ? "local-only" : "local-and-remote";
@@ -700,7 +703,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
         idUrl,
         source: "signup_onboarding",
       },
-    });
+    } as never);
     if (auditError) {
       console.warn("[EditProfile] Failed to write signup identity verification audit log:", auditError.message);
     }
@@ -869,7 +872,6 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     const allowSignupSeed = onboardingMode && Boolean(signupSeedOwner) && (!user?.id || signupSeedOwner === authSeedOwner);
     const authMetadata = (user?.user_metadata ?? {}) as Record<string, unknown>;
     const authDisplayNameSeed = typeof authMetadata.display_name === "string" ? authMetadata.display_name.trim() : "";
-    const authLegalNameSeed = typeof authMetadata.legal_name === "string" ? authMetadata.legal_name.trim() : "";
     const authSocialIdSeed = typeof authMetadata.social_id === "string" ? authMetadata.social_id.trim() : "";
     const authPhoneMetadataSeed = typeof authMetadata.phone === "string" ? authMetadata.phone.trim() : "";
     const authDobSeed = typeof authMetadata.dob === "string" ? authMetadata.dob.trim() : "";
@@ -878,9 +880,8 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     const signupDisplayName = allowSignupSeed ? signupData.display_name : "";
     const signupSocialId = allowSignupSeed ? signupData.social_id : "";
     const signupPhone = allowSignupSeed ? signupData.phone : "";
-    const signupLegalName = allowSignupSeed ? signupData.legal_name : "";
     const displayName = profile?.display_name || signupDisplayName || cachedValue("display_name") || authDisplayNameSeed;
-    const legalName = profile?.legal_name || signupLegalName || cachedValue("legal_name") || authLegalNameSeed;
+    const legalName = isVerifiedProfile(profile) ? String(profile?.legal_name || "").trim() : "";
     const phone = profile?.phone || signupPhone || cachedValue("phone") || authPhoneSeed;
     const dob = profile?.dob || signupDob || cachedValue("dob") || authDobSeed;
     const bio = profile?.bio || cachedValue("bio");
@@ -997,7 +998,6 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     signupData.display_name,
     signupData.dob,
     signupData.email,
-    signupData.legal_name,
     signupData.phone,
     signupData.social_id,
     resolvePhoneVerifiedForValue,
@@ -1195,7 +1195,10 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
           p_phone: phone,
         });
         if (checkId !== phoneDuplicateCheckRef.current) return;
-        setPhoneDuplicate(!error && Boolean(data?.registered));
+        const registeredResult = data && typeof data === "object" && !Array.isArray(data)
+          ? data as Record<string, unknown>
+          : {};
+        setPhoneDuplicate(!error && Boolean(registeredResult.registered));
       } catch {
         if (checkId !== phoneDuplicateCheckRef.current) return;
         setPhoneDuplicate(false);
@@ -1475,7 +1478,6 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
         !phoneOtpVerified;
 
       if (fieldSet.has("display_name")) payload.display_name = draft.display_name;
-      if (fieldSet.has("legal_name")) payload.legal_name = draft.legal_name || null;
       if (fieldSet.has("phone")) {
         payload.phone = persistedPhone;
         if (shouldRevokePhoneVerification) {
@@ -1671,8 +1673,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
 
     if (!activeUser) {
       if (!onboardingMode) {
-        toast.error("Please sign in to continue.");
-        navigate("/auth");
+        requireAuth("edit-profile", () => {}, { returnTo: "/edit-profile" });
         return;
       }
       // Account creation/sign-in is now protected by Turnstile-backed wrapper routes.
@@ -1684,8 +1685,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
         navigate("/signup/credentials");
         return;
       }
-      toast.error("Please sign in to continue.");
-      navigate("/auth");
+      requireAuth("edit-profile", () => {}, { returnTo: "/edit-profile" });
       return;
     }
 
@@ -1817,20 +1817,16 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       ].filter((item): item is string => Boolean(item)));
       const nextAvatarUrl = getProfilePhotoPublicUrl(nextPhotos.cover);
       const nextSocialAlbum = editorialAlbum;
-      const isOAuthUser = (activeUser.app_metadata?.provider ?? "email") !== "email";
-      const emailVerifiedByAuth = isOAuthUser || Boolean(activeUser.email_confirmed_at);
       const persistedPhone = getPersistedPhoneValue();
       const shouldRevokePhoneVerification = shouldRevokePhoneVerificationOnSave();
 
       const profilePayload = {
-          email: getCanonicalProfileEmail(activeUser),
           display_name: formData.display_name,
           phone: persistedPhone,
           social_id: formData.social_id || null,
           bio: formData.bio,
           gender_genre: formData.gender_genre || null,
           orientation: formData.orientation || null,
-          dob: formData.dob || null,
           height: formData.height ? parseInt(formData.height) : null,
           weight: formData.weight ? parseFloat(formData.weight) : null,
           weight_unit: formData.weight_unit,
@@ -1845,8 +1841,6 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
           location_name: formData.location_name || null,
           location_country: formData.location_country || null,
           location_district: formData.location_district || null,
-          last_lat: locationCoords?.lat ?? (profile?.last_lat ?? null),
-          last_lng: locationCoords?.lng ?? (profile?.last_lng ?? null),
           pet_experience: formData.pet_experience.length > 0 ? formData.pet_experience : null,
           experience_years:
             formData.pet_experience.includes("None") || !formData.experience_years
@@ -1876,47 +1870,13 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
           social_album: nextSocialAlbum,
           avatar_url: nextAvatarUrl,
           photos: nextPhotos,
-          ...(shouldRevokePhoneVerification
-            ? {
-                phone_verification_status: "unverified" as const,
-                phone_verified_at: null,
-              }
-            : {}),
-          updated_at: new Date().toISOString(),
       };
 
-      let profileWrite = await supabase
+      const profileWrite = await supabase
         .from("profiles")
-        .upsert(
-          {
-            id: activeUser.id,
-            ...profilePayload,
-            onboarding_completed: onboardingMode ? true : profile?.onboarding_completed ?? false,
-            email_verified: onboardingMode ? emailVerifiedByAuth : profile?.email_verified ?? emailVerifiedByAuth,
-          },
-          { onConflict: "id" },
-        )
+        .update(profilePayload)
+        .eq("id", activeUser.id)
         .select("updated_at");
-
-      if (
-        profileWrite.error?.code === "PGRST204" &&
-        String(profileWrite.error.message || "").toLowerCase().includes("social_id")
-      ) {
-        const { social_id: _socialId, ...payloadWithoutSocialId } = profilePayload;
-        profileWrite = await supabase
-          .from("profiles")
-          .upsert(
-            {
-              id: activeUser.id,
-              ...payloadWithoutSocialId,
-              onboarding_completed: onboardingMode ? true : profile?.onboarding_completed ?? false,
-              email_verified: onboardingMode ? emailVerifiedByAuth : profile?.email_verified ?? emailVerifiedByAuth,
-            },
-            { onConflict: "id" },
-          )
-          .select("updated_at");
-        if (!profileWrite.error) toast.info(PROFILE_WRITE_SCHEMA_DRIFT_ERROR);
-      }
 
       const error = profileWrite.error;
 
@@ -1968,23 +1928,14 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
           .limit(1)
           .maybeSingle();
         if (passedHumanAttempt) {
-          await supabase
-            .from("profiles")
-            .update({
-              human_verification_status: "passed",
-              human_verified_at: passedHumanAttempt.created_at,
-              is_verified: true,
-              verification_status: "verified",
-            })
-            .eq("id", activeUser.id);
+          // Verification columns are server-owned. The owner-scoped RPC derives
+          // status from the canonical attempt/document/phone records.
+          const { error: syncError } = await supabase.rpc(
+            "refresh_identity_verification_status",
+            { p_user_id: activeUser.id },
+          );
+          if (syncError) console.warn("[EditProfile] Failed to sync verification status:", syncError.message);
         }
-
-        // Sync card / overall verification_status via RPC
-        const { error: syncError } = await supabase.rpc(
-          "refresh_identity_verification_status",
-          { p_user_id: activeUser.id },
-        );
-        if (syncError) console.warn("[EditProfile] Failed to sync verification status:", syncError.message);
       }
 
       await refreshProfile();
@@ -2015,7 +1966,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       if (onboardingMode) {
         const shouldSetPet = petsProfileCount > 0 || formData.owns_pets === true;
         toast.success("Profile completed successfully.");
-        navigate(shouldSetPet ? "/set-pet" : "/", {
+        navigate(shouldSetPet ? "/set-pet" : takeResolvedAuthReturnTo(), {
           state: shouldSetPet ? null : { fromSetProfileNoPet: true },
           replace: !shouldSetPet,
         });

@@ -20,7 +20,14 @@ export function buildNativeReplyTree(
   expandedBranches: Set<string>,
   hiddenIds: Set<string>,
 ) {
-  const visibleComments = comments.filter((comment) => !hiddenIds.has(comment.id));
+  // Last line of defence: the tree is what React keys off, so an id may appear at
+  // most once here no matter what the upstream merges produced.
+  const seenIds = new Set<string>();
+  const visibleComments = comments.filter((comment) => {
+    if (!comment.id || hiddenIds.has(comment.id) || seenIds.has(comment.id)) return false;
+    seenIds.add(comment.id);
+    return true;
+  });
   const visibleIds = new Set(visibleComments.map((comment) => comment.id));
   const childCommentsByParent = new Map<string, NativeSocialComment[]>();
   const topLevelComments: NativeSocialComment[] = [];

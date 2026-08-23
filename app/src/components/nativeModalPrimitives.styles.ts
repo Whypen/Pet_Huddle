@@ -1,5 +1,5 @@
 import { StyleSheet } from "react-native";
-import { huddleButtons, huddleColors, huddleFieldStates, huddleFormControls, huddleFormFields, huddleLayout, huddleMapBroadcastFooter, huddleRadii, huddleShadows, huddleSpacing, huddleType } from "../theme/huddleDesignTokens";
+import { huddleButtons, huddleColors, huddleFieldStates, huddleFormControls, huddleFormFields, huddleGlassControls, huddleLayout, huddleMapBroadcastFooter, huddleRadii, huddleShadows, huddleSpacing, huddleType } from "../theme/huddleDesignTokens";
 
 export const huddleModalTokens = {
   color: {
@@ -158,6 +158,19 @@ export const nativeModalStyles = StyleSheet.create({
     paddingTop: huddleModalTokens.spacing.x2,
     paddingBottom: huddleModalTokens.spacing.x2,
   },
+  // Grab handle: the sheet is swipe-to-dismiss, and this is the only cue that
+  // says so. Rendered only when swiping can actually close the sheet.
+  appBottomSheetHandleArea: {
+    alignItems: "center",
+    paddingBottom: huddleSpacing.x1,
+    paddingTop: huddleSpacing.x2,
+  },
+  appBottomSheetHandle: {
+    backgroundColor: huddleColors.fieldBorderStrong,
+    borderRadius: huddleRadii.pill,
+    height: 4,
+    width: 36,
+  },
   appBottomSheetHeader: {
     minHeight: 62,
     flexDirection: "row",
@@ -191,6 +204,52 @@ export const nativeModalStyles = StyleSheet.create({
     fontSize: huddleType.body,
     lineHeight: huddleType.body * huddleType.lineNormal,
     color: huddleModalTokens.color.mutedText,
+  },
+  appModalToggleList: {
+    gap: huddleSpacing.x2,
+    paddingVertical: huddleSpacing.x3,
+  },
+  appModalCareIllustration: {
+    alignSelf: "center",
+    width: "100%",
+    height: 150,
+    marginTop: huddleSpacing.x3,
+  },
+  appModalToggleRow: {
+    minHeight: huddleLayout.minTouch + huddleSpacing.x4,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: huddleSpacing.x3,
+    paddingHorizontal: huddleSpacing.x4,
+    paddingVertical: huddleSpacing.x3,
+    borderRadius: huddleRadii.card,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: huddleColors.divider,
+    backgroundColor: huddleColors.canvas,
+  },
+  appModalToggleRowActive: {
+    borderColor: huddleColors.blue,
+    backgroundColor: huddleColors.glassControl,
+  },
+  appModalToggleLabel: {
+    flex: 1,
+    fontFamily: huddleModalTokens.type.labelFamily,
+    fontSize: huddleType.body,
+    lineHeight: huddleType.labelLine,
+    color: huddleColors.text,
+  },
+  appModalToggleControl: {
+    ...huddleGlassControls.toggleSurface,
+    width: huddleLayout.minTouch,
+    height: huddleLayout.minTouch,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: huddleRadii.pill,
+  },
+  appModalToggleControlActive: {
+    borderColor: huddleColors.blue,
+    backgroundColor: huddleColors.blue,
   },
   appModalDragHandle: {
     position: "absolute",
@@ -244,6 +303,9 @@ export const nativeModalStyles = StyleSheet.create({
     gap: huddleSpacing.x2,
     paddingHorizontal: huddleSpacing.x3,
   },
+  appActionMenuItemMuted: {
+    opacity: 0.52,
+  },
   appActionMenuText: {
     flex: 1,
     fontFamily: "Urbanist-700",
@@ -253,6 +315,9 @@ export const nativeModalStyles = StyleSheet.create({
   },
   appActionMenuTextDestructive: {
     color: huddleColors.validationRed,
+  },
+  appActionMenuTextMuted: {
+    color: huddleColors.mutedText,
   },
   appModalInlineCard: {
     position: "relative",
@@ -272,7 +337,7 @@ export const nativeModalStyles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderRadius: huddleRadii.pill,
-    backgroundColor: huddleColors.premiumGoldSoft,
+    backgroundColor: huddleColors.coralSoftFill,
   },
   appModalBillingTabs: {
     height: huddleButtons.base.minHeight,
@@ -558,12 +623,12 @@ export const nativeModalStyles = StyleSheet.create({
     ...huddleShadows.photoControl,
   },
   appModalCompactIconButton: {
+    ...huddleGlassControls.surface,
     width: 36,
     height: 36,
     alignItems: "center",
     justifyContent: "center",
     borderRadius: huddleRadii.pill,
-    backgroundColor: huddleColors.blueSoft,
   },
   appModalSocialIconButton: {
     minHeight: 34,
@@ -576,11 +641,11 @@ export const nativeModalStyles = StyleSheet.create({
     maxWidth: "90%",
     overflow: "hidden",
     borderRadius: huddleRadii.card,
-    backgroundColor: huddleColors.blueSoft,
+    backgroundColor: huddleColors.glassControl,
     ...huddleFieldStates.focused,
   },
   appModalShareCardMine: {
-    backgroundColor: huddleColors.blueSoft,
+    backgroundColor: huddleColors.glassControl,
   },
   appModalShareCardBody: {
     flexDirection: "row",
@@ -707,6 +772,8 @@ export const nativeModalStyles = StyleSheet.create({
     backgroundColor: huddleModalTokens.color.canvas,
   },
   appModalField: {
+    flexShrink: 1,
+    minWidth: 0,
     height: huddleModalTokens.size.fieldHeight,
     borderWidth: 1,
     borderColor: huddleModalTokens.color.fieldBorder,
@@ -720,6 +787,7 @@ export const nativeModalStyles = StyleSheet.create({
     includeFontPadding: false,
     color: huddleModalTokens.color.text,
     textAlignVertical: "center",
+    overflow: "hidden",
     backgroundColor: huddleColors.glassChrome,
     shadowColor: huddleModalTokens.color.neutralShadow,
     shadowOpacity: huddleFormFields.shadowOpacity,

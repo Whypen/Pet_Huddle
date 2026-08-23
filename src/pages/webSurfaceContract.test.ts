@@ -264,8 +264,8 @@ describe("web surface release contract", () => {
 
   it("uses the native Auth motion assets on Join", () => {
     const brand = source("src/components/brand/WebBrandMedia.tsx");
-    expect(brand).toContain("app/assets/APP/brandlogo.mp4");
-    expect(brand).toContain("app/assets/APP/brandlogofallback.png");
+    expect(brand).toContain('@/assets/brand/brandlogo.mp4');
+    expect(brand).toContain('@/assets/brand/brandlogofallback.png');
     expect(source("src/pages/Join.tsx")).toContain("<WebBrandMedia");
   });
 

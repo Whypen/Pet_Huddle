@@ -5,6 +5,16 @@ import { ProfilePhotoSlot } from "@/components/profile/edit/ProfilePhotoSlot";
 const uploadProfilePhotoBlob = vi.fn();
 const validateProfilePhotoFile = vi.fn();
 
+vi.mock("@/components/auth/authGateContext", () => ({
+  useAuthGate: () => ({
+    isSignedIn: true,
+    requireAuth: (_intent: unknown, action: () => void) => {
+      action();
+      return true;
+    },
+  }),
+}));
+
 vi.mock("@/lib/profilePhotos", () => ({
   resolveProfilePhotoDisplayUrl: vi.fn(async (value: string | null) => value),
   uploadProfilePhotoBlob: (...args: unknown[]) => uploadProfilePhotoBlob(...args),

@@ -1,12 +1,22 @@
 import { supabase } from "./supabase";
-import { getCachedSignedStorageUrl, resolveNativeProfileImageUrlAsync } from "./nativeStorageUrlCache";
+import { resolveNativeProfileImageUrlAsync } from "./nativeStorageUrlCache";
 import { isNativeVerifiedProfile } from "./nativeVerificationGate";
+import { isVerifiedPublicCredentialLabel, normalizePublicCredentialLabel } from "./nativeCredentialStatus";
+
+export { isVerifiedPublicCredentialLabel } from "./nativeCredentialStatus";
 
 export type NativeRateRow = {
   price: string;
   rate: string;
   services: string[];
   voluntary?: boolean;
+};
+
+export type NativeCareLocationArea = {
+  country: string;
+  label: string;
+  lat: number | null;
+  lng: number | null;
 };
 
 export type NativeProfessionalCredential = {
@@ -30,8 +40,7 @@ export type NativePublicCredentialBadgeLabel =
   | "Registry matched"
   | "Certificate matched"
   | "Organization matched"
-  | "Directory matched"
-  | "Unable to verify online";
+  | "Directory matched";
 
 export type NativePublicCredentialBadge = {
   credentialType: string;
@@ -61,6 +70,10 @@ export type NativeCarerProfileData = {
   minNoticeUnit: "hours" | "days";
   locationStyles: string[];
   areaName: string;
+  areaCountry: string;
+  areaLat: number | null;
+  areaLng: number | null;
+  preferredMeetupAreas: NativeCareLocationArea[];
   servicesOffered: string[];
   servicesOther: string;
   petTypes: string[];
@@ -94,6 +107,14 @@ export type NativeCarerProfileViewData = NativeCarerProfileData & {
   startingPrice: string | null;
   startingPriceRateUnit: string | null;
   serviceRankWeight: number;
+};
+
+export const isNativeCarerEmergencyBadgeEligible = (
+  provider: Pick<NativeCarerProfileData, "emergencyReadiness" | "minNoticeValue" | "minNoticeUnit">,
+) => {
+  if (provider.emergencyReadiness === true) return true;
+  const noticeValue = Number.parseInt(provider.minNoticeValue, 10);
+  return provider.minNoticeUnit === "hours" && Number.isFinite(noticeValue) && noticeValue <= 2;
 };
 
 export const STRENGTHS = [
@@ -141,9 +162,204 @@ export const SERVICES_OFFERED = ["Sitting & Visit", "Boarding", "Grooming", "Tra
 export const PET_TYPES = ["Dogs", "Cats", "Birds", "Fish", "Reptiles", "Small Mammals", "Farm Animals", "Others"] as const;
 export const DOG_SIZES = ["Small", "Medium", "Large", "Giant"] as const;
 export const CURRENCIES = ["USD", "HKD", "GBP", "EUR", "AUD", "SGD", "CAD", "JPY"] as const;
+export type NativeCarerCurrency = (typeof CURRENCIES)[number];
+const SUPPORTED_CURRENCY_SET = new Set<string>(CURRENCIES);
+const CURRENCY_DISPLAY_SYMBOLS: Record<NativeCarerCurrency, string> = {
+  AUD: "AU$",
+  CAD: "CA$",
+  EUR: "€",
+  GBP: "£",
+  HKD: "HK$",
+  JPY: "¥",
+  SGD: "SG$",
+  USD: "US$",
+};
+const EUR_COUNTRY_CODES = new Set([
+  "AT", "BE", "CY", "DE", "EE", "ES", "FI", "FR", "GR", "HR", "IE", "IT",
+  "LT", "LU", "LV", "MT", "NL", "PT", "SI", "SK",
+]);
+const COUNTRY_CURRENCY_BY_CODE: Record<string, NativeCarerCurrency> = {
+  AU: "AUD",
+  CA: "CAD",
+  GB: "GBP",
+  HK: "HKD",
+  JP: "JPY",
+  SG: "SGD",
+  US: "USD",
+};
+const COUNTRY_CURRENCY_BY_NAME: Record<string, NativeCarerCurrency> = {
+  australia: "AUD",
+  canada: "CAD",
+  "hong kong": "HKD",
+  "hong kong sar": "HKD",
+  japan: "JPY",
+  singapore: "SGD",
+  "united kingdom": "GBP",
+  uk: "GBP",
+  "great britain": "GBP",
+  "united states": "USD",
+  usa: "USD",
+};
+
+export const normalizeNativeCarerCurrency = (value: unknown): NativeCarerCurrency | "" => {
+  const currency = String(value || "").trim().toUpperCase();
+  return SUPPORTED_CURRENCY_SET.has(currency) ? currency as NativeCarerCurrency : "";
+};
+
+export const formatNativeCareCurrencySymbol = (value: unknown): string =>
+  CURRENCY_DISPLAY_SYMBOLS[normalizeNativeCarerCurrency(value) || "USD"];
+
+export const formatNativeCareLocationSummary = (
+  locationStyles: readonly string[] | null | undefined,
+  areaName: unknown,
+  preferredMeetupAreas: readonly NativeCareLocationArea[] | null | undefined = [],
+): string => {
+  const styles = Array.isArray(locationStyles) ? locationStyles.map((item) => String(item || "").trim()).filter(Boolean) : [];
+  const area = styles.includes("Carer's Place") ? String(areaName || "").trim() : "";
+  const preferredAreas = Array.isArray(preferredMeetupAreas)
+    ? preferredMeetupAreas.map((item) => item.label.trim()).filter(Boolean)
+    : [];
+  const locationParts = [area, ...preferredAreas].filter(Boolean);
+  const seenLocations = new Set<string>();
+  const dedupedLocations = locationParts.filter((item) => {
+    const key = item.toLowerCase().replace(/\s+/g, " ").trim();
+    if (!key || seenLocations.has(key)) return false;
+    seenLocations.add(key);
+    return true;
+  });
+  if (dedupedLocations.length > 0) return dedupedLocations.join(", ");
+  if (styles.includes("Outdoor")) return "Outdoor";
+  if (styles.includes("Flexible")) return "Flexible";
+  return "";
+};
+
+export const resolveNativeCarerCurrencyForCountry = (countryCodeOrName: unknown): NativeCarerCurrency => {
+  const raw = String(countryCodeOrName || "").trim();
+  if (!raw) return "USD";
+  const code = raw.length === 2 ? raw.toUpperCase() : "";
+  if (code && EUR_COUNTRY_CODES.has(code)) return "EUR";
+  if (code && COUNTRY_CURRENCY_BY_CODE[code]) return COUNTRY_CURRENCY_BY_CODE[code];
+  const normalizedName = raw.toLowerCase();
+  return COUNTRY_CURRENCY_BY_NAME[normalizedName] || "USD";
+};
+
+export const resolveNativeCarerCurrency = (...countrySignals: unknown[]): NativeCarerCurrency => {
+  for (const signal of countrySignals) {
+    const currency = resolveNativeCarerCurrencyForCountry(signal);
+    if (currency !== "USD" || String(signal || "").trim()) return currency;
+  }
+  return "USD";
+};
+
+// THE single source of truth for the currency shown anywhere in the care booking flow
+// (rate field, Care Scope/Quote, Care Scope Summary, payment). Every surface must derive
+// its currency from this — never from its own ad-hoc fallback — so the summary can never
+// disagree with the quote (the "US$ here, HK$ there" trust-breaking split).
+//
+// Priority, highest first:
+//   1. The agreed quote currency (what the Care Scope/Quote already says)
+//   2. The requested currency (owner's proposed rate)
+//   3. The carer's stored profile currency
+//   4. Carer service location → GPS → profile country (in that order)
+//   5. USD (only when nothing above resolves)
+// For a volunteer booking with no price yet, 1–3 are empty, so it resolves via the
+// location chain exactly as required.
+export const resolveCareScopeCurrency = (input: {
+  quoteCurrency?: unknown;
+  requestCurrency?: unknown;
+  providerCurrency?: unknown;
+  locationCountries?: unknown[];
+}): NativeCarerCurrency =>
+  normalizeNativeCarerCurrency(input.quoteCurrency)
+  || normalizeNativeCarerCurrency(input.requestCurrency)
+  || normalizeNativeCarerCurrency(input.providerCurrency)
+  || resolveNativeCarerCurrency(...(input.locationCountries ?? []));
+
+// Out-of-service-area advisory helpers live in a dependency-free module so they can be
+// unit-tested directly; re-exported here for existing import sites.
+export { isNativeCareLocationOutOfArea, type NativeCareServiceArea } from "./nativeCareServiceArea";
+
+// All currencies a carer can charge in, derived from their service locations (the
+// Carer's Place area country + each preferred meetup area country), deduped in priority
+// order. This is the pick-list for the rate currency: a carer serving multiple countries
+// can choose among e.g. HK$ / £ / US$. Returns [] when no service area is set yet.
+export const nativeCarerServiceCurrencies = (
+  areaCountry?: string | null,
+  preferredCountries: Array<string | null | undefined> = [],
+): NativeCarerCurrency[] => {
+  const out: NativeCarerCurrency[] = [];
+  for (const country of [areaCountry, ...preferredCountries]) {
+    if (!String(country || "").trim()) continue;
+    const currency = resolveNativeCarerCurrencyForCountry(country);
+    if (!out.includes(currency)) out.push(currency);
+  }
+  return out;
+};
+
+export const dedupeNativeCarerCurrencies = (values: Array<unknown> = []): NativeCarerCurrency[] => {
+  const out: NativeCarerCurrency[] = [];
+  for (const value of values) {
+    const currency = normalizeNativeCarerCurrency(value);
+    if (currency && !out.includes(currency)) out.push(currency);
+  }
+  return out;
+};
+
+export const resolveCareScopeCurrencyDecision = (input: {
+  allowedCurrencies?: Array<unknown>;
+  forceProviderCurrency?: boolean;
+  locationCountries?: unknown[];
+  preferredCurrency?: unknown;
+  providerCurrency?: unknown;
+  quoteCurrency?: unknown;
+  requestCurrency?: unknown;
+}): { canSelect: boolean; currency: NativeCarerCurrency; options: NativeCarerCurrency[] } => {
+  const options = dedupeNativeCarerCurrencies(input.allowedCurrencies ?? []);
+  const forcedProviderCurrency = normalizeNativeCarerCurrency(input.providerCurrency);
+  if (input.forceProviderCurrency && forcedProviderCurrency) {
+    return { canSelect: false, currency: forcedProviderCurrency, options };
+  }
+  const located = resolveNativeCarerCurrency(...(input.locationCountries ?? []));
+  const candidates = dedupeNativeCarerCurrencies([
+    input.quoteCurrency,
+    input.preferredCurrency,
+    input.requestCurrency,
+    input.providerCurrency,
+    located,
+  ]);
+  if (options.length === 1) return { canSelect: false, currency: options[0], options };
+  if (options.length > 1) {
+    return { canSelect: true, currency: candidates.find((item) => options.includes(item)) || options[0], options };
+  }
+  return { canSelect: false, currency: candidates[0] || located, options };
+};
+
+// Reconcile the stored rate currency against the carer's service locations. Keeps the
+// current currency when it still matches one of their areas (so a multi-country carer
+// keeps their chosen currency), otherwise defaults to the Carer's Place area currency —
+// auto-correcting a stale currency left over from a removed area (e.g. GBP after the only
+// UK area was swapped for a HK one). Falls back to GPS / profile country only when there
+// is no service area at all yet.
+export const reconcileNativeCarerCurrency = (input: {
+  areaCountry?: string | null;
+  preferredCountries?: Array<string | null | undefined>;
+  current?: string | null;
+  fallbackCountries?: unknown[];
+}): NativeCarerCurrency => {
+  const serviceCurrencies = nativeCarerServiceCurrencies(input.areaCountry, input.preferredCountries ?? []);
+  const current = normalizeNativeCarerCurrency(input.current) || null;
+  if (current && serviceCurrencies.includes(current)) return current;
+  if (String(input.areaCountry || "").trim()) return resolveNativeCarerCurrencyForCountry(input.areaCountry);
+  if (serviceCurrencies.length > 0) return serviceCurrencies[0];
+  // No country-bound service area (e.g. Outdoor/Flexible only): keep whatever currency
+  // the carer already has rather than overriding it, and only derive from GPS/profile
+  // when there is nothing set at all.
+  if (current) return current;
+  return resolveNativeCarerCurrency(...(input.fallbackCountries ?? []));
+};
 export const RATE_OPTIONS = ["Per hour", "Per day", "Per session", "Per night"] as const;
 export const AGREEMENT_VERSION = "1.0";
-export const PET_TYPES_REQUIRING_SIZE = ["Dogs", "Reptiles", "Farm Animals", "Others"] as const;
+export const PET_TYPES_REQUIRING_SIZE = ["Dogs"] as const;
 export const EMPTY_PROFESSIONAL_PROFILE: NativeProfessionalProfile = {
   enabled: false,
   roles: [],
@@ -175,6 +391,10 @@ export const EMPTY_CARER_PROFILE: NativeCarerProfileData = {
   minNoticeUnit: "hours",
   locationStyles: [],
   areaName: "",
+  areaCountry: "",
+  areaLat: null,
+  areaLng: null,
+  preferredMeetupAreas: [],
   servicesOffered: [],
   servicesOther: "",
   petTypes: [],
@@ -216,7 +436,6 @@ const PUBLIC_CREDENTIAL_BADGE_LABELS = new Set<NativePublicCredentialBadgeLabel>
   "Certificate matched",
   "Organization matched",
   "Directory matched",
-  "Unable to verify online",
 ]);
 
 const publicCredentialBadgeCache = new Map<string, { badges: NativePublicCredentialBadge[]; cachedAt: number }>();
@@ -225,7 +444,7 @@ const PUBLIC_CREDENTIAL_BADGE_CACHE_MS = 5 * 60 * 1000;
 
 export const normalizePublicCredentialBadge = (value: unknown): NativePublicCredentialBadge | null => {
   if (!isRecord(value)) return null;
-  const publicLabel = String(value.public_label ?? "");
+  const publicLabel = normalizePublicCredentialLabel(String(value.public_label ?? ""));
   if (!PUBLIC_CREDENTIAL_BADGE_LABELS.has(publicLabel as NativePublicCredentialBadgeLabel)) return null;
   return {
     credentialType: String(value.credential_type ?? ""),
@@ -306,8 +525,59 @@ export const normalizeProfessionalProfile = (value: unknown): NativeProfessional
   };
 };
 
+const normalizeCareLocationArea = (value: unknown): NativeCareLocationArea | null => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const label = String(record.label ?? "").trim();
+  if (!label) return null;
+  const lat = Number(record.lat);
+  const lng = Number(record.lng);
+  return {
+    country: String(record.country ?? "").trim(),
+    label,
+    lat: Number.isFinite(lat) && lat !== 0 ? lat : null,
+    lng: Number.isFinite(lng) && lng !== 0 ? lng : null,
+  };
+};
+
+export const normalizeCareLocationAreas = (value: unknown): NativeCareLocationArea[] => {
+  const source = Array.isArray(value) ? value : [];
+  const seen = new Set<string>();
+  const areas: NativeCareLocationArea[] = [];
+  for (const item of source) {
+    const area = normalizeCareLocationArea(item);
+    if (!area) continue;
+    const key = `${area.label.toLowerCase()}|${area.country.toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    areas.push(area);
+  }
+  return areas.slice(0, 5);
+};
+
+const normalizeProofMetadata = (value: unknown): Record<string, unknown> =>
+  value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+
+const normalizeProofCareLocation = (value: unknown): Record<string, unknown> =>
+  value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+
+export const normalizePreferredMeetupAreasFromProofMetadata = (value: unknown): NativeCareLocationArea[] => {
+  const proofMetadata = normalizeProofMetadata(value);
+  const careLocation = normalizeProofCareLocation(proofMetadata.careLocation);
+  return normalizeCareLocationAreas(careLocation.preferredMeetupAreas);
+};
+
 export const buildProofMetadata = (data: NativeCarerProfileData): Record<string, unknown> => {
   const next = { ...data.proofMetadata };
+  const careLocation = { ...normalizeProofCareLocation(next.careLocation) };
+  if (data.preferredMeetupAreas.length > 0) {
+    careLocation.preferredMeetupAreas = normalizeCareLocationAreas(data.preferredMeetupAreas);
+    next.careLocation = careLocation;
+  } else {
+    delete careLocation.preferredMeetupAreas;
+    if (Object.keys(careLocation).length > 0) next.careLocation = careLocation;
+    else delete next.careLocation;
+  }
   const professional = normalizeProfessionalProfile(data.professional);
   if (!professional.enabled || (professional.roles.length === 0 && professional.credentials.length === 0)) {
     next.professional = { ...EMPTY_PROFESSIONAL_PROFILE };
@@ -330,6 +600,15 @@ export const normalizeRateUnit = (raw: string) => {
 export function serializeRateRow(row: NativeRateRow): string {
   return JSON.stringify(row);
 }
+
+export const hasPaidNativeRateRows = (rateRows: NativeRateRow[]) =>
+  rateRows.some((row) => row.voluntary !== true);
+
+export const hasVoluntaryNativeRateRows = (rateRows: NativeRateRow[]) =>
+  rateRows.some((row) => row.voluntary === true);
+
+export const isVolunteerOnlyNativeRateRows = (rateRows: NativeRateRow[]) =>
+  rateRows.length > 0 && rateRows.every((row) => row.voluntary === true);
 
 export function deserializeRateRow(raw: string): NativeRateRow {
   try {
@@ -363,7 +642,10 @@ export const mapCarerRowToForm = (row: Record<string, unknown>): NativeCarerProf
         if (parsed.services.length === 0 && index === 0) parsed.services = servicesOffered;
         return parsed;
       });
-  const proofMetadata = row.proof_metadata && typeof row.proof_metadata === "object" ? (row.proof_metadata as Record<string, unknown>) : {};
+  const proofMetadata = normalizeProofMetadata(row.proof_metadata);
+  const locationStyles = isStringArray(row.location_styles) ? row.location_styles : [];
+  const hasCarerPlace = locationStyles.includes("Carer's Place");
+  const preferredMeetupAreas = normalizeCareLocationAreas(row.preferred_meetup_areas);
 
   return {
     story: String(row.story ?? ""),
@@ -378,8 +660,12 @@ export const mapCarerRowToForm = (row: Record<string, unknown>): NativeCarerProf
     emergencyReadiness: typeof row.emergency_readiness === "boolean" ? row.emergency_readiness : null,
     minNoticeValue: row.min_notice_value != null ? String(row.min_notice_value) : "",
     minNoticeUnit: row.min_notice_unit === "days" ? "days" : "hours",
-    locationStyles: isStringArray(row.location_styles) ? row.location_styles : [],
-    areaName: String(row.area_name ?? ""),
+    locationStyles,
+    areaName: hasCarerPlace ? String(row.area_name ?? "") : "",
+    areaCountry: hasCarerPlace ? String(row.area_country ?? "") : "",
+    areaLat: hasCarerPlace && typeof row.area_lat === "number" && Number.isFinite(row.area_lat) ? row.area_lat : null,
+    areaLng: hasCarerPlace && typeof row.area_lng === "number" && Number.isFinite(row.area_lng) ? row.area_lng : null,
+    preferredMeetupAreas: preferredMeetupAreas.length > 0 ? preferredMeetupAreas : normalizePreferredMeetupAreasFromProofMetadata(proofMetadata),
     servicesOffered,
     servicesOther: String(row.services_other ?? ""),
     petTypes: isStringArray(row.pet_types) ? row.pet_types : [],
@@ -417,20 +703,29 @@ export const computeCarerCompleted = (data: NativeCarerProfileData) => {
   if (data.minNoticeValue.trim() === "" || Number.isNaN(noticeValue) || noticeValue < 0) return false;
   for (const row of data.rateRows) {
     if (row.services.length === 0) return false;
-    if (!row.voluntary) {
-      const price = Number.parseFloat(row.price ?? "");
-      if (!row.price.trim() || Number.isNaN(price) || price < 0) return false;
-      if (!data.currency || !row.rate) return false;
-    }
+    const hasPrice = row.price.trim().length > 0;
+    const hasRate = row.rate.trim().length > 0;
+    if (row.voluntary && !hasPrice && !hasRate) continue;
+    const price = Number.parseFloat(row.price ?? "");
+    if (!hasPrice || Number.isNaN(price) || price <= 0) return false;
+    if (!data.currency || !hasRate) return false;
   }
   if (data.locationStyles.length === 0) return false;
+  const hasPreferredArea = data.preferredMeetupAreas.some((area) => (
+    area.label.trim().length > 0
+    && (area.country.trim().length > 0 || (typeof area.lat === "number" && Number.isFinite(area.lat) && typeof area.lng === "number" && Number.isFinite(area.lng)))
+  ));
+  if (!hasPreferredArea) return false;
   if (data.emergencyReadiness === null) return false;
   if (data.professional.has_credentials && !data.professional.credentials.some(isProfessionalCredentialComplete)) return false;
   return true;
 };
 
 export const computeCarerListingEligible = (data: NativeCarerProfileData, providerEligible: boolean) =>
-  computeCarerCompleted(data) && data.stripePayoutsEnabled === true && data.agreementAccepted && providerEligible;
+  computeCarerCompleted(data)
+  && data.stripePayoutsEnabled === true
+  && data.agreementAccepted
+  && providerEligible;
 
 export const deriveWalletState = (data: Pick<NativeCarerProfileData, "stripeAccountId" | "stripeDetailsSubmitted" | "stripePayoutsEnabled" | "stripeRequirementsCurrentlyDue">): NativeWalletUiState => {
   if (!data.stripeAccountId) return "none";
@@ -442,14 +737,17 @@ export const deriveWalletState = (data: Pick<NativeCarerProfileData, "stripeAcco
 export const buildCarerUpsertPayload = (userId: string, data: NativeCarerProfileData, providerEligible: boolean) => {
   const noticeValue = Number.parseInt(data.minNoticeValue, 10);
   const rateRows = data.rateRows.length > 0 ? data.rateRows : [{ price: "", rate: "", services: [], voluntary: false }];
-  const pricedRows = rateRows.filter((row) => !row.voluntary);
+  const pricedRows = rateRows.filter((row) => {
+    const price = Number.parseFloat(row.price);
+    return row.price.trim() && row.rate.trim() && Number.isFinite(price) && price > 0;
+  });
   const firstPricedRow = pricedRows[0];
+  const hasCarerPlace = data.locationStyles.includes("Carer's Place");
   return {
     user_id: userId,
     story: data.story.trim(),
     skills: data.skills,
     proof_metadata: buildProofMetadata(data),
-    vet_license_found: data.vetLicenseFound,
     days: data.days,
     time_blocks: data.timeBlocks,
     other_time_from: data.timeBlocks.includes("Specify") ? data.otherTimeFrom : null,
@@ -458,17 +756,19 @@ export const buildCarerUpsertPayload = (userId: string, data: NativeCarerProfile
     min_notice_value: data.minNoticeValue.trim() !== "" && !Number.isNaN(noticeValue) && noticeValue >= 0 ? noticeValue : null,
     min_notice_unit: data.minNoticeUnit,
     location_styles: data.locationStyles,
-    specify_area: data.areaName.trim().length > 0,
-    area_name: data.areaName.trim() || null,
-    area_lat: null,
-    area_lng: null,
+    specify_area: hasCarerPlace && data.areaName.trim().length > 0,
+    area_name: hasCarerPlace ? data.areaName.trim() || null : null,
+    area_country: hasCarerPlace ? data.areaCountry.trim() || null : null,
+    area_lat: hasCarerPlace && typeof data.areaLat === "number" && Number.isFinite(data.areaLat) ? data.areaLat : null,
+    area_lng: hasCarerPlace && typeof data.areaLng === "number" && Number.isFinite(data.areaLng) ? data.areaLng : null,
+    preferred_meetup_areas: normalizeCareLocationAreas(data.preferredMeetupAreas),
     services_offered: [...new Set(rateRows.flatMap((row) => row.services))],
     services_other: rateRows.some((row) => row.services.includes("Others")) ? data.servicesOther.trim() || null : null,
     pet_types: data.petTypes,
     pet_types_other: data.petTypes.includes("Others") ? data.petTypesOther.trim() || null : null,
     dog_sizes: data.dogSizes,
     starting_price: firstPricedRow?.price.trim() ? Number.parseFloat(firstPricedRow.price) : null,
-    currency: firstPricedRow ? data.currency || null : null,
+    currency: data.currency || null,
     rates: rateRows.map(serializeRateRow),
     agreement_accepted: data.agreementAccepted,
     agreement_accepted_at: data.agreementAccepted ? (data.agreementAcceptedAt ?? new Date().toISOString()) : null,
@@ -478,14 +778,14 @@ export const buildCarerUpsertPayload = (userId: string, data: NativeCarerProfile
   };
 };
 
-export const isAge18PlusFromDob = (dob: unknown) => {
+export const isAge16PlusFromDob = (dob: unknown) => {
   if (typeof dob !== "string" || !dob) return false;
   const birth = new Date(dob);
   if (Number.isNaN(birth.getTime())) return false;
   const now = new Date();
   const age = now.getFullYear() - birth.getFullYear();
   const month = now.getMonth() - birth.getMonth();
-  return age > 18 || (age === 18 && (month > 0 || (month === 0 && now.getDate() >= birth.getDate())));
+  return age > 16 || (age === 16 && (month > 0 || (month === 0 && now.getDate() >= birth.getDate())));
 };
 
 export const formatCarerTime = (value: string) => {
@@ -536,10 +836,8 @@ export const makeCarerViewData = (
   };
 };
 
-const SOCIAL_ALBUM_BUCKET = "social_album";
 const PROFILE_PHOTOS_BUCKET = "profile_photos";
-const LEGACY_PROFILE_PHOTOS_BUCKET = "Profiles";
-const PROFILE_PHOTO_BUCKETS = new Set([PROFILE_PHOTOS_BUCKET, LEGACY_PROFILE_PHOTOS_BUCKET]);
+const PROFILE_PHOTO_BUCKETS = new Set([PROFILE_PHOTOS_BUCKET]);
 
 const isDataOrBlobUrl = (value: string) => value.startsWith("data:") || value.startsWith("blob:");
 
@@ -554,20 +852,14 @@ const withStorageBucketPrefix = (bucket: string, key: string) => {
 const extractStorageKeyFromUrl = (value: string): string | null => {
   try {
     const pathname = decodeURIComponent(new URL(value).pathname || "");
-    const signedSocialMatch = pathname.match(/\/storage\/v1\/object\/sign\/social_album\/(.+)$/);
-    if (signedSocialMatch?.[1]) return sanitizeStoragePath(signedSocialMatch[1]);
-    const publicSocialMatch = pathname.match(/\/storage\/v1\/object\/public\/social_album\/(.+)$/);
-    if (publicSocialMatch?.[1]) return sanitizeStoragePath(publicSocialMatch[1]);
-    const publicProfileMatch = pathname.match(/\/storage\/v1\/object\/public\/(profile_photos|Profiles)\/(.+)$/);
+    const publicProfileMatch = pathname.match(/\/storage\/v1\/object\/public\/(profile_photos)\/(.+)$/);
     if (publicProfileMatch?.[1] && publicProfileMatch?.[2]) {
       return withStorageBucketPrefix(publicProfileMatch[1], publicProfileMatch[2]);
     }
-    const signedProfileMatch = pathname.match(/\/storage\/v1\/object\/sign\/(profile_photos|Profiles)\/(.+)$/);
+    const signedProfileMatch = pathname.match(/\/storage\/v1\/object\/sign\/(profile_photos)\/(.+)$/);
     if (signedProfileMatch?.[1] && signedProfileMatch?.[2]) {
       return withStorageBucketPrefix(signedProfileMatch[1], signedProfileMatch[2]);
     }
-    const genericSocialMatch = pathname.match(/\/social_album\/(.+)$/);
-    if (genericSocialMatch?.[1]) return sanitizeStoragePath(genericSocialMatch[1]);
     return null;
   } catch {
     return null;
@@ -579,10 +871,11 @@ const toStorageBucketKey = (value: string): string | null => {
   if (!raw || isDataOrBlobUrl(raw)) return null;
   if (/^https?:\/\//i.test(raw)) {
     const extracted = extractStorageKeyFromUrl(raw);
-    return extracted ? sanitizeStoragePath(extracted).replace(/^(social_album\/)+/i, "") : null;
+    return extracted ? sanitizeStoragePath(extracted) : null;
   }
   if (!raw.includes("/")) return null;
-  return sanitizeStoragePath(raw).replace(/^(social_album\/)+/i, "") || null;
+  const path = sanitizeStoragePath(raw);
+  return /^profile_photos\//i.test(path) ? path : null;
 };
 
 const expandStorageCandidates = (value: string): string[] => {
@@ -591,21 +884,12 @@ const expandStorageCandidates = (value: string): string[] => {
   const extractedFromUrl = /^https?:\/\//i.test(raw) ? (extractStorageKeyFromUrl(raw) || "") : raw;
   const normalizedRaw = sanitizeStoragePath(extractedFromUrl);
   const normalizedDerived = sanitizeStoragePath(toStorageBucketKey(raw) || "");
-  const withoutSocialPrefixRaw = normalizedRaw.replace(/^(social_album\/)+/i, "");
-  const withoutSocialPrefixDerived = normalizedDerived.replace(/^(social_album\/)+/i, "");
-  return Array.from(new Set([normalizedRaw, normalizedDerived, withoutSocialPrefixRaw, withoutSocialPrefixDerived].map(sanitizeStoragePath).filter(Boolean)));
+  return Array.from(new Set([normalizedRaw, normalizedDerived].map(sanitizeStoragePath).filter((path) => /^profile_photos\//i.test(path))));
 };
 
 const isProfilePhotoKey = (value: string) => {
   const bucket = sanitizeStoragePath(value).split("/")[0] || "";
   return PROFILE_PHOTO_BUCKETS.has(bucket);
-};
-
-const publicStorageUrl = (bucket: string, path: string) => {
-  if (__DEV__) {
-    console.log("STORAGE_URL_GET_PUBLIC", { bucket, path });
-  }
-  return supabase.storage.from(bucket).getPublicUrl(path).data?.publicUrl ?? null;
 };
 
 const resolveProfilePhotoCandidate = async (candidate: string) => {
@@ -638,20 +922,12 @@ export const resolveSocialAlbumUrlList = async (entries: string[]) => {
     canonical.map(async (entry) => {
       if (isDataOrBlobUrl(entry)) return entry;
       if (/^https?:\/\//i.test(entry)) return entry;
-      const resolved = await resolveNativeProfileImageUrlAsync(entry, 60 * 60, { defaultBucket: "social_album" });
+      const resolved = await resolveNativeProfileImageUrlAsync(entry, 60 * 60, { defaultBucket: "profile_photos" });
       if (resolved) return resolved;
       const candidates = expandStorageCandidates(entry);
       const profilePhotoCandidate = candidates.find(isProfilePhotoKey);
       if (profilePhotoCandidate) {
         return resolveProfilePhotoCandidate(profilePhotoCandidate);
-      }
-      for (const candidate of candidates) {
-        const signedUrl = await getCachedSignedStorageUrl(SOCIAL_ALBUM_BUCKET, candidate, 60 * 60);
-        if (signedUrl) return signedUrl;
-      }
-      for (const candidate of candidates) {
-        const publicUrl = publicStorageUrl(SOCIAL_ALBUM_BUCKET, candidate);
-        if (publicUrl) return publicUrl;
       }
       return "";
     }),

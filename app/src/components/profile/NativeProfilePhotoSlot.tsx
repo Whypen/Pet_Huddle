@@ -5,15 +5,19 @@ import { Image as ExpoImage } from "expo-image";
 import { useEffect, useRef, useState } from "react";
 import {
   resolveNativeProfilePhotoDisplayUrl,
+  cleanupNativeProfilePhotoTemporaryAsset,
   uploadNativeProfilePhotoAsset,
   type NativeProfilePhotoSlot as NativeProfilePhotoSlotName,
   type NativeProfileUploadAsset,
+  type NativeProfilePhotoPresentationCrop,
   type NativeSoloAspect,
 } from "../../lib/nativeProfilePhotos";
+import { nativeFreshImageKey, nativeFreshImageUri } from "../../lib/nativeImageFreshness";
 import { logNativeProtectedActionFailure } from "../../lib/nativeStorageCleanup";
-import { huddleButtons, huddleColors, huddleFieldStates, huddleLayout, huddleProfilePhotoSlots, huddleRadii, huddleShadows, huddleSpacing, huddleType } from "../../theme/huddleDesignTokens";
+import { nativeSafeErrorCopy } from "../../lib/nativeSafeErrorCopy";
+import { huddleButtons, huddleColors, huddleFieldStates, huddleGlassControls, huddleLayout, huddleProfilePhotoSlots, huddleRadii, huddleShadows, huddleSpacing, huddleType } from "../../theme/huddleDesignTokens";
 import { NativeProfilePhotoCropper } from "./NativeProfilePhotoCropper";
-import { pickNativeProfilePhoto } from "./NativeProfilePhotoPicker";
+import { loadNativeProfilePhotoForEditing, pickNativeProfilePhoto } from "./NativeProfilePhotoPicker";
 import { nativeProfileSlotBriefs } from "./nativeProfilePhotoSlotBriefs";
 
 const CAPTION_LINE_HEIGHT = 20;
@@ -28,13 +32,15 @@ type NativeProfilePhotoSlotProps = {
   onCaptionCommit?: (value: string | null) => void;
   onError?: (message: string) => void;
   onRemoved: (slot: NativeProfilePhotoSlotName, previousPath: string | null) => void;
-  onUploaded: (slot: NativeProfilePhotoSlotName, path: string, soloAspect: NativeSoloAspect | null, previousPath: string | null) => void;
+  onUploaded: (slot: NativeProfilePhotoSlotName, path: string, soloAspect: NativeSoloAspect | null, previousPath: string | null, presentationCrop?: NativeProfilePhotoPresentationCrop) => void;
   accessToken?: string | null;
   error?: boolean;
   slot: NativeProfilePhotoSlotName;
   soloAspect: NativeSoloAspect | null;
   userId: string | null;
   value: string | null;
+  version?: string | null;
+  avatarPresentation?: NativeProfilePhotoPresentationCrop | null;
 };
 
 export function NativeProfilePhotoSlot({
@@ -50,32 +56,74 @@ export function NativeProfilePhotoSlot({
   soloAspect,
   userId,
   value,
+  version,
+  avatarPresentation,
 }: NativeProfilePhotoSlotProps) {
   const brief = nativeProfileSlotBriefs[slot];
   const [displayUrl, setDisplayUrl] = useState<string | null>(null);
-  const [actionsOpen, setActionsOpen] = useState(false);
+  const [displayFailed, setDisplayFailed] = useState(false);
+  const [optimisticDisplayUrl, setOptimisticDisplayUrl] = useState<string | null>(null);
+  // Monotonic cache-bust token. New uploads use unique paths, but legacy avatars
+  // were stored at a deterministic path (e.g. cover.webp) whose URL never changes
+  // across replacements, so expo-image and the Supabase CDN can serve stale bytes.
+  // We bump this locally on upload and otherwise fall back to the profile-level
+  // `version` (updated_at) passed from the parent.
+  const [localVersion, setLocalVersion] = useState<string | null>(null);
   const [confirmingRemove, setConfirmingRemove] = useState(false);
   const [cropAsset, setCropAsset] = useState<(NativeProfileUploadAsset & { height?: number | null; width?: number | null }) | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [editingExisting, setEditingExisting] = useState(false);
   const [selectedSoloAspect, setSelectedSoloAspect] = useState<NativeSoloAspect>(soloAspect ?? "4:5");
   const [captionDraft, setCaptionDraft] = useState(captionValue ?? "");
   const [captionInputWidth, setCaptionInputWidth] = useState(0);
   const acceptedCaptionDraft = useRef(captionValue ?? "");
   const pendingCaptionDraft = useRef(captionValue ?? "");
   const pendingCaptionIsAddition = useRef(false);
+  const captionInputRef = useRef<TextInput>(null);
+  const optimisticPathRef = useRef<string | null>(null);
+  const optimisticTemporaryAssetRef = useRef<NativeProfileUploadAsset | null>(null);
+  const [captioning, setCaptioning] = useState(false);
   const hasPhoto = Boolean(value);
   const allowCaption = hasPhoto && slot !== "cover";
+  // Caption is optional and hidden until the user adds one: only render it while
+  // actively editing (tapped the caption icon) or when a caption already exists.
+  const showCaption = allowCaption && (captioning || captionDraft.trim().length > 0);
 
   useEffect(() => {
     let cancelled = false;
     setDisplayUrl(null);
+    setDisplayFailed(false);
+    if (!value || value !== optimisticPathRef.current) {
+      optimisticPathRef.current = null;
+      setOptimisticDisplayUrl(null);
+      // A genuinely different path resolves to its own fresh URL, so drop the
+      // local bump and let the parent-provided version drive cache-busting.
+      setLocalVersion(null);
+    }
     void resolveNativeProfilePhotoDisplayUrl(value).then((url) => {
-      if (!cancelled) setDisplayUrl(url);
+      if (cancelled) return;
+      setDisplayUrl(url);
+      // Hand off from the local optimistic preview to the resolved remote URL once
+      // it's ready for the just-uploaded path. Without this, the local crop URI
+      // (which differs from the server-processed/resized image) stays pinned in
+      // edit mode forever, because value === optimisticPathRef skips the reset above.
+      if (url && value === optimisticPathRef.current) {
+        optimisticPathRef.current = null;
+        setOptimisticDisplayUrl(null);
+        const temporaryAsset = optimisticTemporaryAssetRef.current;
+        optimisticTemporaryAssetRef.current = null;
+        void cleanupNativeProfilePhotoTemporaryAsset(temporaryAsset);
+      }
     });
     return () => {
       cancelled = true;
     };
-  }, [value]);
+  }, [slot, value]);
+
+  useEffect(() => () => {
+    void cleanupNativeProfilePhotoTemporaryAsset(optimisticTemporaryAssetRef.current);
+    optimisticTemporaryAssetRef.current = null;
+  }, []);
 
   useEffect(() => {
     const nextCaption = captionValue ?? "";
@@ -93,15 +141,28 @@ export function NativeProfilePhotoSlot({
     try {
       setConfirmingRemove(false);
       const picked = await pickNativeProfilePhoto({ soloAspect: selectedSoloAspect });
-      setActionsOpen(false);
       if (!picked) return;
       if (!userId) {
         onError?.("Please sign in to upload photos.");
         return;
       }
+      setEditingExisting(false);
       setCropAsset(picked.asset);
     } catch (error) {
-      onError?.(error instanceof Error && error.message ? error.message : "Couldn't save that photo. Try again in a moment.");
+      onError?.(nativeSafeErrorCopy(error, "Couldn't open your photo library. Try again."));
+    }
+  };
+
+  const handleEditCurrent = async () => {
+    if (!value) {
+      await handlePickAndUpload();
+      return;
+    }
+    try {
+      setEditingExisting(true);
+      setCropAsset(await loadNativeProfilePhotoForEditing(value));
+    } catch (error) {
+      onError?.(nativeSafeErrorCopy(error, "Couldn't prepare that photo for editing. Try replacing it instead."));
     }
   };
 
@@ -161,13 +222,19 @@ export function NativeProfilePhotoSlot({
     pendingCaptionIsAddition.current = false;
   };
 
-  const handleCroppedSave = async (asset: NativeProfileUploadAsset, nextSoloAspect: NativeSoloAspect | null) => {
+  const handleCroppedSave = async (asset: NativeProfileUploadAsset, nextSoloAspect: NativeSoloAspect | null, presentationCrop?: NativeProfilePhotoPresentationCrop) => {
     if (!userId) {
       onError?.("Please sign in to upload photos.");
       return;
     }
     setUploading(true);
     try {
+      if (editingExisting && slot === "cover" && value) {
+        onUploaded(slot, value, nextSoloAspect, value, presentationCrop);
+        await cleanupNativeProfilePhotoTemporaryAsset(asset);
+        setCropAsset(null);
+        return;
+      }
       if (__DEV__) {
         console.log("NATIVE_PROFILE_UPLOAD_SESSION", {
           propUserId: userId,
@@ -176,26 +243,39 @@ export function NativeProfilePhotoSlot({
         });
       }
       const path = await uploadNativeProfilePhotoAsset(userId, slot, asset, accessToken);
-      onUploaded(slot, path, nextSoloAspect, value);
+      optimisticPathRef.current = path;
+      optimisticTemporaryAssetRef.current = asset;
+      setOptimisticDisplayUrl(asset.uri || null);
+      // Advance the cache-bust token so the resolved remote URL reloads fresh bytes
+      // even when the storage path (and therefore the base URL) is unchanged.
+      setLocalVersion(String(Date.now()));
+      onUploaded(slot, path, nextSoloAspect, value, presentationCrop);
       onError?.(`Photo uploaded to ${brief.label}`);
       setCropAsset(null);
     } catch (error) {
       logNativeProtectedActionFailure("[native.profilePhotoSlot] upload_failed", error);
-      onError?.(error instanceof Error && error.message ? error.message : "Couldn't save that photo. Try again in a moment.");
+      // Drop the local preview so a failed replace falls back to the committed
+      // value rather than stranding a stale/older local snapshot in edit mode.
+      optimisticPathRef.current = null;
+      setOptimisticDisplayUrl(null);
+      onError?.(nativeSafeErrorCopy(error, "Couldn't save that photo. Try again in a moment."));
       setCropAsset(null);
-      setActionsOpen(false);
       setConfirmingRemove(false);
     } finally {
       setUploading(false);
     }
   };
 
+  // Cache-bust token for the resolved remote image: prefer the local upload bump,
+  // then the parent profile version (updated_at), then fall back to the path.
+  const freshnessVersion = localVersion || version || value || displayUrl;
+
   return (
     <View style={styles.slotShell}>
       <Pressable
-        accessibilityLabel={`${brief.label}, ${brief.helper}`}
+        accessibilityLabel={hasPhoto ? `Edit ${brief.label} photo` : `${brief.label}, ${brief.helper}`}
         accessibilityRole="button"
-        onPress={handlePickAndUpload}
+        onPress={hasPhoto ? () => void handleEditCurrent() : handlePickAndUpload}
         style={({ pressed }) => [styles.card, !hasPhoto ? styles.emptyCard : null, error ? styles.errorCard : null, pressed ? styles.pressed : null]}
       >
         {!hasPhoto ? (
@@ -212,30 +292,50 @@ export function NativeProfilePhotoSlot({
         ) : null}
         {hasPhoto ? (
           <>
-            {displayUrl ? (
-              <ExpoImage accessibilityIgnoresInvertColors cachePolicy="memory-disk" contentFit="cover" source={{ uri: displayUrl }} style={styles.photo} transition={120} />
+            {(optimisticDisplayUrl || displayUrl) && !displayFailed ? (
+              <ExpoImage accessibilityIgnoresInvertColors cachePolicy={optimisticDisplayUrl ? "none" : "memory-disk"} contentFit="cover" key={nativeFreshImageKey(optimisticDisplayUrl || displayUrl, optimisticDisplayUrl || freshnessVersion)} onError={() => setDisplayFailed(true)} source={{ uri: optimisticDisplayUrl || nativeFreshImageUri(displayUrl, freshnessVersion) }} style={styles.photo} transition={120} />
             ) : (
               <View style={styles.photoPlaceholder} />
             )}
+            {allowCaption ? (
+              <Pressable
+                accessibilityLabel={captionDraft.trim() ? `Edit caption for ${brief.label}` : `Add a caption to ${brief.label}`}
+                accessibilityRole="button"
+                onPress={() => {
+                  setCaptioning(true);
+                  setTimeout(() => captionInputRef.current?.focus(), 50);
+                }}
+                style={({ pressed }) => [styles.captionButton, pressed ? styles.pressed : null]}
+              >
+                <Feather color={huddleColors.text} name="edit-3" size={16} />
+              </Pressable>
+            ) : null}
             <Pressable
-              accessibilityLabel={`Replace ${brief.label} photo`}
+              accessibilityLabel={`Choose a new ${brief.label} photo`}
               accessibilityRole="button"
-              onPress={handlePickAndUpload}
-              style={({ pressed }) => [styles.replaceButton, pressed ? styles.pressed : null]}
+              onPress={(event) => {
+                event.stopPropagation();
+                void handlePickAndUpload();
+              }}
+              style={({ pressed }) => [styles.changeButton, pressed ? styles.pressed : null]}
             >
               <Feather color={huddleColors.text} name="image" size={17} />
             </Pressable>
             <Pressable
               accessibilityLabel={`Remove ${brief.label} photo`}
               accessibilityRole="button"
-              onPress={() => onRemoved(slot, value)}
-              style={({ pressed }) => [styles.photoRemoveButton, pressed ? styles.pressed : null]}
+              onPress={(event) => {
+                event.stopPropagation();
+                setConfirmingRemove(true);
+              }}
+              style={({ pressed }) => [styles.removePhotoButton, pressed ? styles.pressed : null]}
             >
               <Feather color={huddleColors.text} name="x" size={17} />
             </Pressable>
-            {allowCaption ? (
+            {showCaption ? (
               <View style={styles.captionWrap}>
                 <TextInput
+                  ref={captionInputRef}
                   autoCapitalize="none"
                   multiline
                   numberOfLines={CAPTION_LINES}
@@ -243,12 +343,13 @@ export function NativeProfilePhotoSlot({
                     const next = captionDraft.trim() || null;
                     onCaptionChange?.(next);
                     onCaptionCommit?.(next);
+                    setCaptioning(false);
                   }}
                   onChangeText={updateCaptionDraft}
-                  placeholder={brief.label}
+                  placeholder="Add a caption"
                   placeholderTextColor={huddleColors.profileCaptionPlaceholder}
                   onLayout={(event) => setCaptionInputWidth(event.nativeEvent.layout.width)}
-                  scrollEnabled={false}
+                  scrollEnabled
                   style={styles.captionInput}
                   value={captionDraft}
                 />
@@ -272,38 +373,14 @@ export function NativeProfilePhotoSlot({
             <View style={styles.emptyIcon}>
               <Feather color={huddleColors.blue} name="plus" size={26} />
             </View>
-            <Text style={styles.emptyTitle}>{brief.label}</Text>
-            <Text style={styles.emptyHelper}>{brief.helper}</Text>
+            <Text ellipsizeMode="tail" numberOfLines={2} style={styles.emptyTitle}>{brief.label}</Text>
+            <Text ellipsizeMode="tail" numberOfLines={2} style={styles.emptyHelper}>{brief.helper}</Text>
           </View>
         )}
       </Pressable>
 
-      <Modal animationType="fade" onRequestClose={() => setActionsOpen(false)} transparent visible={actionsOpen}>
-        <View style={styles.sheetBackdrop}>
-          <Pressable accessibilityLabel="Close photo options" accessibilityRole="button" onPress={() => setActionsOpen(false)} style={StyleSheet.absoluteFill} />
-          <Pressable onPress={(event) => event.stopPropagation()} style={styles.sheet}>
-            <Text style={styles.sheetTitle}>Photo options</Text>
-            <Pressable accessibilityRole="button" onPress={handlePickAndUpload} style={styles.sheetRow}>
-              <Feather color={huddleColors.blue} name="refresh-cw" size={18} />
-              <Text style={styles.sheetRowText}>Replace photo</Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => {
-                setActionsOpen(false);
-                setConfirmingRemove(true);
-              }}
-              style={styles.sheetRow}
-            >
-              <Feather color={huddleColors.validationRed} name="trash-2" size={18} />
-              <Text style={[styles.sheetRowText, styles.removeText]}>Remove photo</Text>
-            </Pressable>
-          </Pressable>
-        </View>
-      </Modal>
-
       <Modal animationType="fade" onRequestClose={() => setConfirmingRemove(false)} transparent visible={confirmingRemove}>
-        <Pressable onPress={() => setConfirmingRemove(false)} style={styles.sheetBackdrop}>
+        <Pressable onPress={() => setConfirmingRemove(false)} style={[styles.sheetBackdrop, styles.confirmBackdrop]}>
           <Pressable onPress={(event) => event.stopPropagation()} style={styles.confirmCard}>
             <Text style={styles.confirmTitle}>Remove this photo?</Text>
             <Text style={styles.confirmBody}>It'll disappear from your profile right away.</Text>
@@ -315,7 +392,6 @@ export function NativeProfilePhotoSlot({
                 accessibilityRole="button"
                 onPress={() => {
                   setConfirmingRemove(false);
-                  setActionsOpen(false);
                   onRemoved(slot, value);
                 }}
                 style={[styles.confirmButton, styles.confirmRemoveButton]}
@@ -328,9 +404,15 @@ export function NativeProfilePhotoSlot({
       </Modal>
 
       <NativeProfilePhotoCropper
+        avatarCrop={slot === "cover"}
         asset={cropAsset}
+        initialPresentationCrop={slot === "cover" ? avatarPresentation : null}
         aspect={brief.aspect}
-        onCancel={() => setCropAsset(null)}
+        onCancel={() => {
+          void cleanupNativeProfilePhotoTemporaryAsset(cropAsset);
+          setCropAsset(null);
+          setEditingExisting(false);
+        }}
         onError={onError}
         onSoloAspectChange={slot === "solo" ? setSelectedSoloAspect : undefined}
         onSave={handleCroppedSave}
@@ -373,7 +455,7 @@ const styles = StyleSheet.create({
   photoPlaceholder: {
     width: "100%",
     height: "100%",
-    backgroundColor: huddleColors.primarySoftFill,
+    backgroundColor: huddleColors.glassControl,
   },
   coverBadge: {
     position: "absolute",
@@ -393,11 +475,11 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     color: huddleColors.text,
   },
-  replaceButton: {
+  captionButton: {
     position: "absolute",
-    top: huddleSpacing.x3,
-    left: huddleSpacing.x3,
-    zIndex: 2,
+    bottom: huddleSpacing.x3,
+    right: huddleSpacing.x3,
+    zIndex: 3,
     width: huddleLayout.minTouch,
     height: huddleLayout.minTouch,
     alignItems: "center",
@@ -406,7 +488,20 @@ const styles = StyleSheet.create({
     backgroundColor: huddleColors.glassChrome,
     ...huddleShadows.photoControl,
   },
-  photoRemoveButton: {
+  changeButton: {
+    position: "absolute",
+    top: huddleSpacing.x3,
+    left: huddleSpacing.x3,
+    zIndex: 3,
+    width: huddleLayout.minTouch,
+    height: huddleLayout.minTouch,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: huddleRadii.pill,
+    backgroundColor: huddleColors.glassChrome,
+    ...huddleShadows.photoControl,
+  },
+  removePhotoButton: {
     position: "absolute",
     top: huddleSpacing.x3,
     right: huddleSpacing.x3,
@@ -471,12 +566,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: huddleSpacing.x5,
   },
   emptyIcon: {
+    ...huddleGlassControls.surface,
     width: huddleProfilePhotoSlots.emptyIconSize,
     height: huddleProfilePhotoSlots.emptyIconSize,
     alignItems: "center",
     justifyContent: "center",
     borderRadius: huddleRadii.pill,
-    backgroundColor: huddleColors.primarySoftFill,
     marginBottom: huddleSpacing.x3,
   },
   emptyTitle: {
@@ -534,11 +629,17 @@ const styles = StyleSheet.create({
   },
   confirmCard: {
     marginHorizontal: huddleSpacing.x4,
-    marginBottom: huddleSpacing.x8,
+    width: "100%",
+    maxWidth: 360,
     borderRadius: huddleRadii.modal,
     backgroundColor: huddleColors.canvas,
     padding: huddleSpacing.x5,
     ...huddleShadows.glassElevation2,
+  },
+  confirmBackdrop: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: huddleSpacing.x4,
   },
   confirmTitle: {
     fontFamily: "Urbanist-700",

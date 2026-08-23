@@ -11,6 +11,7 @@ import type { ProfilePhotoSlot as ProfilePhotoSlotName, SoloAspect } from "@/typ
 import { slotBriefs } from "./copy/slotBriefs";
 import { ProfilePhotoCropper } from "./ProfilePhotoCropper";
 import { ProfilePhotoSlotSheet } from "./ProfilePhotoSlotSheet";
+import { useAuthGate } from "@/components/auth/authGateContext";
 
 type ProfilePhotoSlotProps = {
   slot: ProfilePhotoSlotName;
@@ -35,6 +36,7 @@ export function ProfilePhotoSlot({
   onUploaded,
   onRemoved,
 }: ProfilePhotoSlotProps) {
+  const { requireAuth } = useAuthGate();
   const [displayUrl, setDisplayUrl] = useState<string | null>(null);
   const [actionOpen, setActionOpen] = useState(false);
   const [confirmingRemove, setConfirmingRemove] = useState(false);
@@ -73,7 +75,7 @@ export function ProfilePhotoSlot({
 
   const handleCropSave = async (blob: Blob, nextSoloAspect: SoloAspect | null) => {
     if (!userId) {
-      toast.error("Please sign in to upload photos.");
+      requireAuth("edit-profile", () => {}, { returnTo: "/edit-profile" });
       return;
     }
     setUploading(true);

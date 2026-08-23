@@ -87,6 +87,28 @@ export function formatPetSpecies(value?: string | null): string {
 
 export const nativePetFocusLabels = PET_FOCUS_OPTIONS.map((item) => item.label);
 
+export function nativePetEmojiForLabel(label?: string | null): string {
+  const normalized = String(label || "").toLowerCase();
+  if (normalized.includes("dog")) return "🐕";
+  if (normalized.includes("cat")) return "🐈";
+  if (normalized.includes("bird")) return "🐦";
+  if (normalized.includes("fish")) return "🐟";
+  if (normalized.includes("reptile")) return "🦎";
+  if (normalized.includes("small")) return "🐰";
+  if (normalized.includes("farm")) return "🐐";
+  return "🐾";
+}
+
+export function normalizeNativePetFocusLabel(label?: string | null): string | null {
+  const normalized = String(label || "").trim().toLowerCase();
+  const option = PET_FOCUS_OPTIONS.find((item) => (
+    normalized === item.label.toLowerCase()
+    || normalized === item.value.toLowerCase()
+    || normalized === item.id.toLowerCase()
+  ));
+  return option?.label ?? null;
+}
+
 export function buildNativePetFocusLabel(species?: string | null, breed?: string | null): string {
   const speciesLabel = formatPetSpecies(species);
   const cleanBreed = String(breed || "").trim();

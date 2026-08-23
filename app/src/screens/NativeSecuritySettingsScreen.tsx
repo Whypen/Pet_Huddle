@@ -1,10 +1,14 @@
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { fetchNativeResponseWithTimeout as fetch } from "../lib/nativeTimeout";
 import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import type { Session } from "@supabase/supabase-js";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Linking, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { AppKeyboardAvoidingView, AppModalCloseButton } from "../components/nativeModalPrimitives";
+import { NativeSpinner } from "../components/NativeSpinner";
 import { NativeTurnstile } from "../components/NativeTurnstile";
-import { createNativeFunctionHeaders } from "../lib/nativeFunctionClient";
+import { hasNativePasswordProvider, isNativeOAuthOnlyAccount, nativeOAuthAccountResetNotAvailableCopy } from "../lib/nativeAuthAccountType";
+import { createFreshNativeFunctionHeaders, getFreshNativeSession, installNativeAuthSession, noteNativeAuthState } from "../lib/nativeFunctionClient";
 import {
   clearNativeBiometricSession,
   getNativeBiometricAvailability,
@@ -12,7 +16,11 @@ import {
   saveNativeBiometricSession,
 } from "../lib/nativeBiometricAuth";
 import { haptic } from "../lib/nativeHaptics";
-import { supabase, supabaseAnonKey, supabaseUrl } from "../lib/supabase";
+import { nativePasswordPolicyError, nativePasswordSecurityError } from "../lib/nativePasswordSecurity";
+import { createNativeSecurityActionGate } from "../lib/nativeSecurityActionGate";
+import { nativeSafeErrorCopy } from "../lib/nativeSafeErrorCopy";
+import { getNativeTurnstileSiteKey } from "../lib/nativeTurnstile";
+import { supabase, supabaseUrl } from "../lib/supabase";
 import {
   huddleButtons,
   huddleColors,
@@ -25,104 +33,30 @@ import {
   huddleVerifyIdentity,
 } from "../theme/huddleDesignTokens";
 
-type MfaPhase = "off" | "setup" | "verifying" | "active";
-type TotpFactorSummary = {
-  id: string;
-  status: string;
-};
 type NativeSecuritySettingsScreenProps = {
   initialSession?: Session | null;
   onBack?: () => void;
 };
 
-const turnstileSiteKey =
-  process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY ||
-  process.env.VITE_TURNSTILE_SITE_KEY ||
-  "";
 
-const mapMfaError = (error: unknown, fallback: string) => {
+const mapSecurityActionError = (error: unknown, fallback: string) => {
   const raw = String((error as { message?: string } | null)?.message || "").toLowerCase();
   if (!raw) return fallback;
-  if (raw.includes("invalid") && raw.includes("otp")) return "Incorrect code. Check your authenticator app and try again.";
   if (raw.includes("expired")) return "This code expired. Use the latest code and try again.";
-  if (raw.includes("challenge")) return "Couldn't start verification. Please try again.";
-  if (raw.includes("factor")) return "Two-factor setup is incomplete. Please set up authenticator again.";
   if (raw.includes("too many")) return "Too many attempts. Please wait a moment and try again.";
   if (raw.includes("network") || raw.includes("fetch")) return "Network issue. Check your connection and try again.";
   return fallback;
 };
 
-const listTotpFactors = async (): Promise<TotpFactorSummary[]> => {
-  const { data, error } = await supabase.auth.mfa.listFactors();
-  if (error) throw error;
-  const all = Array.isArray((data as { all?: unknown[] } | null)?.all)
-    ? ((data as { all?: unknown[] }).all as Array<Record<string, unknown>>)
-    : [];
-  return all
-    .filter((row) => String(row.factor_type || "").toLowerCase() === "totp" && typeof row.id === "string")
-    .map((row) => ({
-      id: String(row.id),
-      status: String(row.status || "unverified"),
-    }));
-};
-
-const unenrollFactor = async (factorId: string) => {
-  const { error } = await supabase.auth.mfa.unenroll({ factorId });
-  if (error) throw error;
-};
-
-const clearUnverifiedTotpFactors = async () => {
-  const factors = await listTotpFactors();
-  const stale = factors.filter((factor) => factor.status !== "verified");
-  for (const factor of stale) {
-    try {
-      await unenrollFactor(factor.id);
-    } catch {
-      // best effort cleanup before fresh enrollment
-    }
-  }
-};
-
-const enrollTotp = async (accessToken: string) => {
-  const response = await fetch(`${supabaseUrl}/auth/v1/factors`, {
-    method: "POST",
-    headers: {
-      apikey: supabaseAnonKey,
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      factor_type: "totp",
-      friendly_name: "Authenticator App",
-      issuer: "Huddle",
-    }),
-  });
-  const data = (await response.json().catch(() => null)) as Record<string, unknown> | null;
-  if (!response.ok) {
-    const message = typeof data?.msg === "string"
-      ? data.msg
-      : typeof data?.message === "string"
-        ? data.message
-        : typeof data?.error === "string"
-          ? data.error
-          : `totp_enroll_http_${response.status}`;
-    throw new Error(message);
-  }
-  const totp = (data?.totp && typeof data.totp === "object" ? data.totp : {}) as Record<string, unknown>;
-  return {
-    factorId: typeof data?.id === "string" ? data.id : null,
-    secret: typeof totp.secret === "string" ? totp.secret : null,
-    uri: typeof totp.uri === "string" ? totp.uri : null,
-  };
-};
-
-const challengeAndVerifyTotp = async (factorId: string, code: string) => {
-  const { data: challengeData, error: challengeError } = await supabase.auth.mfa.challenge({ factorId });
-  if (challengeError) throw challengeError;
-  const challengeId = typeof challengeData?.id === "string" ? challengeData.id : "";
-  if (!challengeId) throw new Error("challenge_unavailable");
-  const { error: verifyError } = await supabase.auth.mfa.verify({ factorId, challengeId, code });
-  if (verifyError) throw verifyError;
+const mapBiometricError = (error: unknown) => {
+  const raw = String(error instanceof Error ? error.message : error || "").toLowerCase();
+  if (raw.includes("not_enrolled")) return "Set up Face ID or Touch ID on this device first.";
+  if (raw.includes("hardware_missing")) return "This device does not support biometric sign in.";
+  if (raw.includes("unsupported")) return "Biometric sign in is not available in this build.";
+  if (raw.includes("session_missing") || raw.includes("auth_required")) return "Sign in again before setting up biometric sign in.";
+  if (raw.includes("cancel")) return "Biometric setup was cancelled.";
+  if (raw.includes("passcode")) return "Set a device passcode before using biometric sign in.";
+  return "Couldn't enable biometric sign in right now.";
 };
 
 export function NativeSecuritySettingsScreen({ initialSession = null, onBack }: NativeSecuritySettingsScreenProps) {
@@ -132,16 +66,12 @@ export function NativeSecuritySettingsScreen({ initialSession = null, onBack }: 
       onBack();
       return;
     }
-    void Linking.openURL("huddle:/settings").catch(() => {});
+    void Linking.openURL("huddle://settings").catch(() => {});
   };
 
 
-  const [mfaLoading, setMfaLoading] = useState(true);
-  const [mfaPhase, setMfaPhase] = useState<MfaPhase>("off");
-  const [otpCode, setOtpCode] = useState("");
-  const [mfaError, setMfaError] = useState("");
+  const [biometricError, setBiometricError] = useState("");
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
-  const [disableMfaOpen, setDisableMfaOpen] = useState(false);
   const [removePasskeyOpen, setRemovePasskeyOpen] = useState(false);
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [currentPassword, setCurrentPassword] = useState("");
@@ -149,89 +79,63 @@ export function NativeSecuritySettingsScreen({ initialSession = null, onBack }: 
   const [confirmPassword, setConfirmPassword] = useState("");
   const [passwordBusy, setPasswordBusy] = useState(false);
   const [passwordError, setPasswordError] = useState("");
+  const [focusedPasswordField, setFocusedPasswordField] = useState<"current" | "new" | "confirm" | null>(null);
   const newPasswordInputRef = useRef<TextInput | null>(null);
   const confirmPasswordInputRef = useRef<TextInput | null>(null);
+  const passwordScrollRef = useRef<ScrollView | null>(null);
   const [turnstileToken, setTurnstileToken] = useState("");
   const [turnstileError, setTurnstileError] = useState("");
-  const [totpFactorId, setTotpFactorId] = useState<string | null>(null);
+  const [turnstileResetKey, setTurnstileResetKey] = useState(0);
   const [biometricEnabled, setBiometricEnabled] = useState(false);
+  const [biometricBusy, setBiometricBusy] = useState(false);
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [biometricLabel, setBiometricLabel] = useState("Biometric Sign In");
-  const [setupSecret, setSetupSecret] = useState("");
-  const [setupUri, setSetupUri] = useState("");
+  const [passwordLoginAvailable, setPasswordLoginAvailable] = useState(true);
+  const biometricSetupGateRef = useRef(createNativeSecurityActionGate());
 
   const ensureNativeSession = useCallback(async () => {
-    const { data } = await supabase.auth.getSession();
-    if (data.session?.access_token && data.session.refresh_token) return data.session;
+    const fresh = await getFreshNativeSession(initialSession);
+    if (fresh?.session) return fresh.session;
     if (initialSession?.access_token && initialSession.refresh_token) {
-      const { data: setData, error } = await supabase.auth.setSession({
+      return installNativeAuthSession({
         access_token: initialSession.access_token,
         refresh_token: initialSession.refresh_token,
       });
-      if (error || !setData.session) throw error || new Error("auth_required");
-      return setData.session;
     }
     throw new Error("auth_required");
   }, [initialSession]);
 
-  const loadMfaState = useCallback(async () => {
-    setMfaLoading(true);
-    setMfaError("");
+  const loadSecurityState = useCallback(async () => {
     try {
-      await ensureNativeSession();
-      const [factors, biometricAvailability, biometricHint] = await Promise.all([
-        listTotpFactors(),
+      const session = await ensureNativeSession();
+      const [biometricAvailability, biometricHint] = await Promise.all([
         getNativeBiometricAvailability(),
         hasNativeBiometricSessionHint(),
       ]);
-      const verified = factors.find((factor) => factor.status === "verified") || null;
-      if (verified) {
-        setTotpFactorId(verified.id);
-        setMfaPhase("active");
-      } else {
-        if (factors.some((factor) => factor.status !== "verified")) {
-          await clearUnverifiedTotpFactors();
-        }
-        setTotpFactorId(null);
-        setMfaPhase("off");
-        setSetupSecret("");
-        setSetupUri("");
-      }
+      const oauthOnly = isNativeOAuthOnlyAccount(session.user);
+      setPasswordLoginAvailable(hasNativePasswordProvider(session.user) && !oauthOnly);
       setBiometricAvailable(biometricAvailability.available);
       setBiometricLabel(biometricAvailability.label);
       setBiometricEnabled(biometricAvailability.available && biometricHint);
+      setBiometricError("");
     } catch {
-      setMfaError("Couldn't load two-factor status. Please retry.");
-      setMfaPhase("off");
-    } finally {
-      setMfaLoading(false);
+      setBiometricError("Couldn't load biometric status. Please retry.");
     }
   }, [ensureNativeSession]);
 
   useEffect(() => {
-    void loadMfaState();
-  }, [loadMfaState]);
-
-  const handleStartMfaSetup = async () => {
-    setMfaError("");
-    setStatusMessage(null);
-    try {
-      const session = await ensureNativeSession();
-      await clearUnverifiedTotpFactors();
-      const enrollment = await enrollTotp(session.access_token);
-      setTotpFactorId(enrollment.factorId);
-      setSetupSecret(enrollment.secret || "");
-      setSetupUri(enrollment.uri || "");
-      if (!enrollment.secret || !enrollment.uri) throw new Error("totp_setup_payload_missing");
-      setMfaPhase("setup");
-    } catch (error) {
-      setMfaError(mapMfaError(error, "Couldn't start two-factor setup."));
-    }
-  };
+    void loadSecurityState();
+  }, [loadSecurityState]);
 
   const handleChangePassword = async () => {
     setPasswordError("");
     setStatusMessage(null);
+    if (!passwordLoginAvailable) {
+      haptic.error();
+      const session = await ensureNativeSession().catch(() => null);
+      setPasswordError(nativeOAuthAccountResetNotAvailableCopy(session?.user));
+      return;
+    }
     if (!currentPassword || !newPassword || !confirmPassword) {
       haptic.error();
       setPasswordError("Please complete all password fields.");
@@ -242,9 +146,10 @@ export function NativeSecuritySettingsScreen({ initialSession = null, onBack }: 
       setPasswordError("Passwords do not match.");
       return;
     }
-    if (newPassword.length < 8) {
+    const policyError = nativePasswordPolicyError(newPassword);
+    if (policyError) {
       haptic.error();
-      setPasswordError("Password must be at least 8 characters.");
+      setPasswordError(policyError);
       return;
     }
     if (!turnstileToken.trim()) {
@@ -252,15 +157,32 @@ export function NativeSecuritySettingsScreen({ initialSession = null, onBack }: 
       setTurnstileError(turnstileError || "Complete human verification first.");
       return;
     }
+    const turnstileProof = turnstileToken.trim();
     setPasswordBusy(true);
     try {
+      const securityError = await nativePasswordSecurityError(newPassword);
+      if (securityError) {
+        haptic.error();
+        setTurnstileToken("");
+        setTurnstileError("");
+        setTurnstileResetKey((key) => key + 1);
+        setPasswordError(securityError);
+        return;
+      }
       const session = await ensureNativeSession();
       const email = String(session.user.email || "").trim();
       const phone = String(session.user.phone || "").trim();
       if (!email && !phone) {
+        setTurnstileToken("");
+        setTurnstileError("");
+        setTurnstileResetKey((key) => key + 1);
         setPasswordError("We couldn't verify your current password for this account.");
         return;
       }
+      // A solved challenge gets one current-password attempt, successful or not.
+      setTurnstileToken("");
+      setTurnstileError("");
+      setTurnstileResetKey((key) => key + 1);
       const credentials = email
         ? { email, password: currentPassword }
         : { phone, password: currentPassword };
@@ -269,35 +191,41 @@ export function NativeSecuritySettingsScreen({ initialSession = null, onBack }: 
         setPasswordError("Current password is incorrect.");
         return;
       }
+      noteNativeAuthState(verifiedData.session);
       const response = await fetch(`${supabaseUrl}/functions/v1/auth-change-password`, {
         method: "POST",
-        headers: createNativeFunctionHeaders(verifiedData.session.access_token),
+        headers: await createFreshNativeFunctionHeaders(verifiedData.session.access_token),
         body: JSON.stringify({
           password: newPassword,
-          turnstile_token: turnstileToken.trim(),
+          turnstile_token: turnstileProof,
           turnstile_action: "change_password",
         }),
       });
       const body = (await response.json().catch(() => null)) as { error?: string; message?: string } | null;
-      if (!response.ok) throw new Error(body?.error || body?.message || "password_change_failed");
+      if (!response.ok) throw new Error(nativeSafeErrorCopy(body?.error || body?.message || "password_change_failed", "We couldn't update your password just yet. Try saving it again later."));
       setPasswordOpen(false);
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
       setTurnstileToken("");
       setTurnstileError("");
+      setTurnstileResetKey((key) => key + 1);
       haptic.success();
       setStatusMessage("Password updated.");
-    } catch {
+    } catch (error) {
       haptic.error();
-      setPasswordError("We couldn't update your password. Please retry.");
+      setTurnstileToken("");
+      setTurnstileResetKey((key) => key + 1);
+      setPasswordError(nativeSafeErrorCopy(error, "We couldn't update your password. Please retry."));
     } finally {
       setPasswordBusy(false);
     }
   };
 
   const handleEnableBiometric = async () => {
-    setMfaError("");
+    if (!biometricSetupGateRef.current.enter()) return;
+    setBiometricBusy(true);
+    setBiometricError("");
     setStatusMessage(null);
     try {
       const session = await ensureNativeSession();
@@ -310,14 +238,10 @@ export function NativeSecuritySettingsScreen({ initialSession = null, onBack }: 
       setStatusMessage(`${availability.label} enabled.`);
     } catch (error) {
       haptic.error();
-      const raw = String(error instanceof Error ? error.message : error || "").toLowerCase();
-      if (raw.includes("not_enrolled")) {
-        setMfaError("Set up Face ID or Touch ID on this device first.");
-      } else if (raw.includes("hardware_missing")) {
-        setMfaError("This device does not support biometric sign in.");
-      } else {
-        setMfaError("Couldn't enable biometric sign in right now.");
-      }
+      setBiometricError(mapBiometricError(error));
+    } finally {
+      biometricSetupGateRef.current.leave();
+      setBiometricBusy(false);
     }
   };
 
@@ -329,65 +253,28 @@ export function NativeSecuritySettingsScreen({ initialSession = null, onBack }: 
       setStatusMessage("Biometric sign in removed.");
     } catch (error) {
       haptic.error();
-      setMfaError(mapMfaError(error, "Couldn't remove biometric sign in right now."));
+      setBiometricError(mapSecurityActionError(error, "Couldn't remove biometric sign in right now."));
     } finally {
       setRemovePasskeyOpen(false);
     }
   };
 
-  const handleOpenAuthApp = async () => {
-    if (!setupUri) {
-      setMfaError("Authenticator link not available. Use setup key manually.");
-      return;
-    }
-    try {
-      await Linking.openURL(setupUri);
-    } catch {
-      setMfaError("Authenticator app could not be opened. Use setup key manually.");
-    }
-  };
+  const closePasswordModal = useCallback(() => {
+    if (passwordBusy) return;
+    setPasswordOpen(false);
+  }, [passwordBusy]);
 
-  const handleVerifyCode = async () => {
-    const code = otpCode.trim();
-    if (code.length < 6 || !totpFactorId) return;
-    setMfaPhase("verifying");
-    setMfaError("");
-    setStatusMessage(null);
-    try {
-      await ensureNativeSession();
-      await challengeAndVerifyTotp(totpFactorId, code);
-      const { data } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
-      if (data?.currentLevel !== "aal2") throw new Error("aal_not_upgraded");
-      setOtpCode("");
-      setMfaPhase("active");
-      setStatusMessage("Two-factor authentication enabled.");
-    } catch (error) {
-      setMfaPhase("setup");
-      setMfaError(mapMfaError(error, "Could not verify code. Please try again."));
-    }
-  };
-
-  const handleDisableMfa = async () => {
-    if (!totpFactorId) {
-      setDisableMfaOpen(false);
-      return;
-    }
-    try {
-      await ensureNativeSession();
-      await unenrollFactor(totpFactorId);
-      setMfaPhase("off");
-      setTotpFactorId(null);
-      setOtpCode("");
-      setMfaError("");
-      setSetupSecret("");
-      setSetupUri("");
-      setStatusMessage("Authenticator app removed.");
-    } catch (error) {
-      setMfaError(mapMfaError(error, "Couldn't remove authenticator app right now."));
-    } finally {
-      setDisableMfaOpen(false);
-    }
-  };
+  const scrollPasswordFieldIntoView = useCallback((field: "current" | "new" | "confirm") => {
+    setFocusedPasswordField(field);
+    const offsets = {
+      current: 0,
+      new: huddleSpacing.x6,
+      confirm: huddleSpacing.x8,
+    };
+    const scroll = () => passwordScrollRef.current?.scrollTo({ y: offsets[field], animated: true });
+    requestAnimationFrame(scroll);
+    setTimeout(scroll, 120);
+  }, []);
 
   return (
     <View style={styles.screen}>
@@ -399,7 +286,22 @@ export function NativeSecuritySettingsScreen({ initialSession = null, onBack }: 
         <View style={[styles.backButton, styles.headerSpacer]} />
       </View>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <Text style={styles.sectionLabel}>BIOMETRIC SIGN IN</Text>
+        {passwordLoginAvailable ? (
+          <>
+            <Text style={styles.sectionLabel}>ACCOUNT PASSWORD</Text>
+            <View style={styles.group}>
+              <Pressable onPress={() => setPasswordOpen(true)} style={styles.statusRow}>
+                <View style={styles.rowIcon}>
+                  <Feather color={huddleColors.iconMuted} name="lock" size={17} />
+                </View>
+                <Text style={styles.actionLabel}>Change Password</Text>
+                <Feather color={huddleColors.mutedText} name="chevron-right" size={17} />
+              </Pressable>
+            </View>
+          </>
+        ) : null}
+
+        <Text style={[styles.sectionLabel, passwordLoginAvailable ? styles.sectionLabelAfterGroup : null]}>BIOMETRIC SIGN IN</Text>
         <View style={styles.group}>
           <View style={styles.statusRow}>
             <View style={styles.rowIcon}>
@@ -407,15 +309,15 @@ export function NativeSecuritySettingsScreen({ initialSession = null, onBack }: 
             </View>
             <Text style={styles.actionLabel}>{biometricLabel}</Text>
             <View style={[styles.badge, biometricEnabled && styles.badgeActive]}>
-              <Text style={[styles.badgeText, biometricEnabled && styles.badgeTextActive]}>{biometricEnabled ? "Active" : "Off"}</Text>
+              <Text style={[styles.badgeText, biometricEnabled && styles.badgeTextActive]}>{biometricEnabled ? "Active" : "Not set up"}</Text>
             </View>
           </View>
 
           <View style={styles.panelBody}>
             <Text style={styles.bodyText}>Sign in securely with Face ID or your fingerprint on this device.</Text>
             {biometricEnabled ? null : (
-              <Pressable disabled={!biometricAvailable} onPress={() => void handleEnableBiometric()} style={({ pressed }) => [styles.primaryButton, (pressed || !biometricAvailable) ? styles.pressed : null]}>
-                <Text style={styles.primaryButtonText}>{biometricAvailable ? "Set Up Biometric Sign In" : "Biometric Sign In Unavailable"}</Text>
+              <Pressable disabled={!biometricAvailable || biometricBusy} onPress={() => void handleEnableBiometric()} style={({ pressed }) => [styles.primaryButton, (pressed || !biometricAvailable || biometricBusy) ? styles.pressed : null]}>
+                {biometricBusy ? <NativeSpinner tone="primary" /> : <Text style={styles.primaryButtonText}>{biometricAvailable ? "Set Up Biometric Sign In" : "Biometric Sign In Unavailable"}</Text>}
               </Pressable>
             )}
           </View>
@@ -426,105 +328,12 @@ export function NativeSecuritySettingsScreen({ initialSession = null, onBack }: 
               <Feather color={huddleColors.validationRed} name="chevron-right" size={17} />
             </Pressable>
           ) : null}
-        </View>
-
-        <Text style={[styles.sectionLabel, styles.sectionLabelAfterGroup]}>AUTHENTICATOR APP</Text>
-        <View style={styles.group}>
-          <View style={styles.statusRow}>
-            <View style={styles.rowIcon}>
-              <Feather color={mfaPhase === "active" ? "#16A34A" : huddleColors.iconMuted} name="shield" size={17} />
-            </View>
-            <Text style={styles.actionLabel}>Authenticator App</Text>
-            <View style={[styles.badge, mfaPhase === "active" && styles.badgeActive]}>
-              <Text style={[styles.badgeText, mfaPhase === "active" && styles.badgeTextActive]}>{mfaPhase === "active" ? "Active" : "Off"}</Text>
-            </View>
-          </View>
-
-          {mfaPhase === "off" ? (
-            <View style={styles.panelBody}>
-              <Text style={styles.bodyText}>Add an extra layer of protection with codes from your authenticator app.</Text>
-              <Pressable disabled={mfaLoading} onPress={() => void handleStartMfaSetup()} style={({ pressed }) => [styles.primaryButton, (pressed || mfaLoading) && styles.pressed]}>
-                {mfaLoading ? <ActivityIndicator color={huddleColors.onPrimary} /> : <Text style={styles.primaryButtonText}>Set Up Authenticator App</Text>}
-              </Pressable>
-            </View>
-          ) : null}
-
-          {mfaPhase === "setup" || mfaPhase === "verifying" ? (
-            <View style={styles.panelBody}>
-              <Text style={styles.stepTitle}>Step 1 - Add Huddle to your authenticator app</Text>
-              <Text style={styles.bodyText}>Open your authenticator app automatically, or enter the setup key manually.</Text>
-              <Pressable onPress={() => void handleOpenAuthApp()} style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}>
-                <Feather color={huddleColors.text} name="external-link" size={16} />
-                <Text style={styles.secondaryButtonText}>Open Authenticator App</Text>
-              </Pressable>
-              <View style={styles.secretBox}>
-                <Text numberOfLines={1} style={styles.secretText}>{setupSecret || "-"}</Text>
-              </View>
-              <Text style={styles.helperText}>In your authenticator app, choose "Enter a setup key" and use this code.</Text>
-
-              <Text style={styles.stepTitle}>Step 2 - Enter the 6-digit code</Text>
-              <TextInput
-                autoComplete="one-time-code"
-                editable={mfaPhase !== "verifying"}
-                inputMode="numeric"
-                keyboardType="number-pad"
-                maxLength={6}
-                onChangeText={(value) => {
-                  setOtpCode(value.replace(/\D/g, "").slice(0, 6));
-                  if (mfaError) setMfaError("");
-                }}
-                placeholder="6-digit code"
-                placeholderTextColor={huddleColors.mutedText}
-                style={[styles.input, mfaError ? styles.inputError : null]}
-                value={otpCode}
-              />
-              <Pressable disabled={otpCode.length < 6 || !totpFactorId || mfaPhase === "verifying"} onPress={() => void handleVerifyCode()} style={({ pressed }) => [styles.primaryButton, (pressed || otpCode.length < 6 || !totpFactorId || mfaPhase === "verifying") && styles.pressed]}>
-                {mfaPhase === "verifying" ? <ActivityIndicator color={huddleColors.onPrimary} /> : <Text style={styles.primaryButtonText}>Verify Code</Text>}
-              </Pressable>
-              <Pressable
-                onPress={() => {
-                  setMfaPhase("off");
-                  setOtpCode("");
-                  setMfaError("");
-                  setSetupSecret("");
-                  setSetupUri("");
-                  setTotpFactorId(null);
-                }}
-                style={styles.textButton}
-              >
-                <Text style={styles.textButtonLabel}>Cancel</Text>
-              </Pressable>
-            </View>
-          ) : null}
-
-          {mfaPhase === "active" ? (
-            <Pressable onPress={() => setDisableMfaOpen(true)} style={styles.dangerRow}>
-              <Text style={styles.dangerLabel}>Remove Authenticator App</Text>
-              <Feather color={huddleColors.validationRed} name="chevron-right" size={17} />
-            </Pressable>
-          ) : null}
-          {mfaError ? <Text style={styles.panelErrorText}>{mfaError}</Text> : null}
-        </View>
-
-        <Text style={[styles.sectionLabel, styles.sectionLabelAfterGroup]}>ACCOUNT PASSWORD</Text>
-        <View style={styles.group}>
-          <Pressable onPress={() => setPasswordOpen(true)} style={styles.statusRow}>
-            <View style={styles.rowIcon}>
-              <Feather color={huddleColors.iconMuted} name="lock" size={17} />
-            </View>
-            <Text style={styles.actionLabel}>Change Password</Text>
-            <Feather color={huddleColors.mutedText} name="chevron-right" size={17} />
-          </Pressable>
+          {biometricError ? <Text style={styles.panelErrorText}>{biometricError}</Text> : null}
         </View>
 
         {statusMessage ? <Text style={styles.statusText}>{statusMessage}</Text> : null}
       </ScrollView>
 
-      <ConfirmRemoveModal
-        open={disableMfaOpen}
-        onClose={() => setDisableMfaOpen(false)}
-        onConfirm={() => void handleDisableMfa()}
-      />
       <ConfirmRemoveModal
         body="This biometric sign-in method will no longer be available for your account."
         confirmLabel="Remove"
@@ -533,27 +342,40 @@ export function NativeSecuritySettingsScreen({ initialSession = null, onBack }: 
         onConfirm={() => void handleRemoveBiometric()}
         title="Remove Biometric Sign In?"
       />
-      <Modal animationType="fade" onRequestClose={() => setPasswordOpen(false)} transparent visible={passwordOpen}>
-        <Pressable onPress={() => setPasswordOpen(false)} style={styles.modalBackdrop}>
+      <Modal animationType="fade" onRequestClose={closePasswordModal} transparent visible={passwordOpen}>
+        <AppKeyboardAvoidingView behavior="padding" keyboardVerticalOffset={0} style={styles.modalBackdrop}>
+          <Pressable onPress={closePasswordModal} style={StyleSheet.absoluteFill} />
           <Pressable onPress={(event) => event.stopPropagation()} style={styles.modalCard}>
+            <AppModalCloseButton onPress={closePasswordModal} />
             <Text style={styles.modalTitle}>Change Password</Text>
-            <View style={styles.modalFieldGroup}>
+            <ScrollView keyboardShouldPersistTaps="handled" ref={passwordScrollRef} showsVerticalScrollIndicator={false}>
+              <View style={styles.modalFieldGroup}>
               <TextInput
+                multiline={false}
+                scrollEnabled
+                numberOfLines={1} lineBreakModeIOS="tail" lineBreakStrategyIOS="none"
+                textBreakStrategy="simple"
                 autoCapitalize="none"
                 autoComplete="current-password"
                 onChangeText={(value) => {
                   setCurrentPassword(value);
                   if (passwordError) setPasswordError("");
                 }}
+                onBlur={() => setFocusedPasswordField((current) => current === "current" ? null : current)}
+                onFocus={() => scrollPasswordFieldIntoView("current")}
                 onSubmitEditing={() => newPasswordInputRef.current?.focus()}
                 placeholder="Current password"
                 placeholderTextColor={huddleColors.mutedText}
                 returnKeyType="next"
                 secureTextEntry
-                style={styles.input}
+                style={[styles.input, focusedPasswordField === "current" ? styles.inputFocused : null, passwordError ? styles.inputError : null]}
                 value={currentPassword}
               />
               <TextInput
+                multiline={false}
+                scrollEnabled
+                numberOfLines={1} lineBreakModeIOS="tail" lineBreakStrategyIOS="none"
+                textBreakStrategy="simple"
                 ref={newPasswordInputRef}
                 autoCapitalize="none"
                 autoComplete="new-password"
@@ -561,15 +383,21 @@ export function NativeSecuritySettingsScreen({ initialSession = null, onBack }: 
                   setNewPassword(value);
                   if (passwordError) setPasswordError("");
                 }}
+                onBlur={() => setFocusedPasswordField((current) => current === "new" ? null : current)}
+                onFocus={() => scrollPasswordFieldIntoView("new")}
                 onSubmitEditing={() => confirmPasswordInputRef.current?.focus()}
                 placeholder="New password"
                 placeholderTextColor={huddleColors.mutedText}
                 returnKeyType="next"
                 secureTextEntry
-                style={styles.input}
+                style={[styles.input, focusedPasswordField === "new" ? styles.inputFocused : null, passwordError ? styles.inputError : null]}
                 value={newPassword}
               />
               <TextInput
+                multiline={false}
+                scrollEnabled
+                numberOfLines={1} lineBreakModeIOS="tail" lineBreakStrategyIOS="none"
+                textBreakStrategy="simple"
                 ref={confirmPasswordInputRef}
                 autoCapitalize="none"
                 autoComplete="new-password"
@@ -577,48 +405,52 @@ export function NativeSecuritySettingsScreen({ initialSession = null, onBack }: 
                   setConfirmPassword(value);
                   if (passwordError) setPasswordError("");
                 }}
+                onBlur={() => setFocusedPasswordField((current) => current === "confirm" ? null : current)}
+                onFocus={() => scrollPasswordFieldIntoView("confirm")}
                 onSubmitEditing={() => void handleChangePassword()}
                 placeholder="Confirm password"
                 placeholderTextColor={huddleColors.mutedText}
                 returnKeyType="done"
                 secureTextEntry
-                style={styles.input}
+                style={[styles.input, focusedPasswordField === "confirm" ? styles.inputFocused : null, passwordError ? styles.inputError : null]}
                 value={confirmPassword}
               />
               <NativeTurnstile
                 action="change_password"
+                key={`change-password-turnstile-${turnstileResetKey}`}
                 onError={setTurnstileError}
                 onToken={(token) => {
                   setTurnstileToken(token);
                   if (token) setTurnstileError("");
                 }}
-                siteKey={turnstileSiteKey}
+                siteKey={getNativeTurnstileSiteKey()}
               />
               {turnstileError ? <Text style={styles.errorText}>{turnstileError}</Text> : null}
               {passwordError ? <Text style={styles.errorText}>{passwordError}</Text> : null}
-            </View>
+              </View>
+            </ScrollView>
             <View style={styles.modalActions}>
               <Pressable disabled={passwordBusy} onPress={() => setPasswordOpen(false)} style={({ pressed }) => [styles.modalButton, styles.modalSecondaryButton, pressed && styles.pressed]}>
                 <Text style={styles.modalSecondaryText}>Cancel</Text>
               </Pressable>
               <Pressable disabled={passwordBusy || !currentPassword || !newPassword || !confirmPassword || !turnstileToken.trim()} onPress={() => void handleChangePassword()} style={({ pressed }) => [styles.modalButton, styles.modalPrimaryButton, (pressed || passwordBusy || !currentPassword || !newPassword || !confirmPassword || !turnstileToken.trim()) && styles.pressed]}>
-                {passwordBusy ? <ActivityIndicator color={huddleColors.onPrimary} /> : <Text style={styles.modalPrimaryText}>Update</Text>}
+                {passwordBusy ? <NativeSpinner tone="primary" /> : <Text style={styles.modalPrimaryText}>Update</Text>}
               </Pressable>
             </View>
           </Pressable>
-        </Pressable>
+        </AppKeyboardAvoidingView>
       </Modal>
     </View>
   );
 }
 
 function ConfirmRemoveModal({
-  body = "You'll no longer need a code to sign in. This reduces your account security.",
+  body = "This biometric sign-in method will no longer be available for your account.",
   confirmLabel = "Remove",
   open,
   onClose,
   onConfirm,
-  title = "Remove Authenticator App?",
+  title = "Remove Biometric Sign In?",
 }: {
   body?: string;
   confirmLabel?: string;
@@ -758,18 +590,6 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     color: huddleColors.subtext,
   },
-  stepTitle: {
-    fontFamily: "Urbanist-700",
-    fontSize: huddleType.label,
-    lineHeight: huddleType.labelLine,
-    color: huddleColors.text,
-  },
-  helperText: {
-    fontFamily: "Urbanist-400",
-    fontSize: huddleType.helper,
-    lineHeight: 17,
-    color: huddleColors.mutedText,
-  },
   primaryButton: {
     ...huddleButtons.base,
     ...huddleButtons.primary,
@@ -779,84 +599,28 @@ const styles = StyleSheet.create({
     lineHeight: huddleType.labelLine,
     color: huddleColors.onPrimary,
   },
-  disabledButton: {
-    ...huddleButtons.disabled,
-  },
-  disabledButtonText: {
-    color: huddleColors.onPrimary,
-  },
-  secondaryButton: {
-    ...huddleButtons.base,
-    ...huddleButtons.secondary,
-    flexDirection: "row",
-    gap: huddleSpacing.x2,
-  },
-  secondaryButtonText: {
-    ...huddleButtons.label,
-    lineHeight: huddleType.labelLine,
-    color: huddleColors.text,
-  },
-  secretBox: {
-    minHeight: huddleLayout.fieldHeight,
-    justifyContent: "center",
-    borderRadius: huddleRadii.field,
-    borderWidth: 1,
-    borderColor: "rgba(198, 202, 214, 0.7)",
-    backgroundColor: huddleColors.mutedCanvas,
-    paddingHorizontal: huddleSpacing.x4,
-  },
-  secretText: {
-    fontFamily: "Courier",
-    fontSize: huddleType.helper,
-    lineHeight: 16,
-    color: huddleColors.text,
-  },
   input: {
+    width: "100%",
+    maxWidth: "100%",
+    flexShrink: 1,
+    minWidth: 0,
     minHeight: huddleLayout.fieldHeight,
     borderRadius: huddleRadii.field,
     borderWidth: 1,
-    borderColor: "rgba(198, 202, 214, 0.9)",
+    borderColor: huddleColors.fieldBorder,
     backgroundColor: huddleColors.canvas,
     paddingHorizontal: huddleSpacing.x4,
     fontFamily: "Urbanist-600",
     fontSize: huddleType.body,
     lineHeight: 22,
     color: huddleColors.text,
+    overflow: "hidden",
+  },
+  inputFocused: {
+    ...huddleFieldStates.focused,
   },
   inputError: {
     ...huddleFieldStates.error,
-  },
-  turnstileBox: {
-    minHeight: 74,
-    overflow: "hidden",
-  },
-  turnstileContainer: {
-    height: 74,
-    backgroundColor: "transparent",
-  },
-  turnstileWebView: {
-    height: 74,
-    backgroundColor: "transparent",
-  },
-  turnstileStatus: {
-    position: "absolute",
-    left: 2,
-    bottom: 0,
-    fontFamily: "Urbanist-500",
-    fontSize: 12,
-    lineHeight: 16,
-    color: huddleColors.mutedText,
-  },
-  textButton: {
-    minHeight: huddleLayout.minTouch,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  textButtonLabel: {
-    fontFamily: "Urbanist-600",
-    fontSize: huddleType.label,
-    lineHeight: huddleType.labelLine,
-    color: huddleColors.mutedText,
   },
   dangerRow: {
     minHeight: 54,

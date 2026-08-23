@@ -1,6 +1,8 @@
 import { LinearGradient } from "expo-linear-gradient";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Image as ExpoImage } from "expo-image";
+import { useEffect, useState } from "react";
+import { nativeFreshImageKey, nativeFreshImageUri } from "../../lib/nativeImageFreshness";
 import {
   huddleColors,
   huddleSpacing,
@@ -17,6 +19,7 @@ type NativeProfilePhotoPlateProps = {
   caption?: string | null;
   onPress?: (src: string) => void;
   src: string | null;
+  version?: string | number | null;
 };
 
 const aspectRatioFor = (aspect: NativeProfilePhotoAspect) => {
@@ -42,7 +45,14 @@ export function NativeProfilePhotoPlate({
   caption,
   onPress,
   src,
+  version,
 }: NativeProfilePhotoPlateProps) {
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [src, version]);
+
   if (!src) return null;
 
   return (
@@ -58,7 +68,11 @@ export function NativeProfilePhotoPlate({
         pressed ? styles.pressed : null,
       ]}
     >
-      <ExpoImage accessibilityIgnoresInvertColors cachePolicy="memory-disk" contentFit="cover" source={{ uri: src }} style={styles.image} transition={120} />
+      {!failed ? (
+        <ExpoImage accessibilityIgnoresInvertColors cachePolicy="memory-disk" contentFit="cover" key={nativeFreshImageKey(src, version || src)} onError={() => setFailed(true)} source={{ uri: nativeFreshImageUri(src, version || src) }} style={styles.image} transition={120} />
+      ) : (
+        <View style={[styles.image, styles.fallback]} />
+      )}
       {caption ? (
         <LinearGradient
           colors={[huddleColors.profilePhotoScrimStart, huddleColors.profilePhotoScrimEnd]}
@@ -66,7 +80,7 @@ export function NativeProfilePhotoPlate({
           start={{ x: 0, y: 1 }}
           style={styles.captionScrim}
         >
-          <Text style={styles.caption}>{caption}</Text>
+          <Text ellipsizeMode="tail" numberOfLines={2} style={styles.caption}>{caption}</Text>
         </LinearGradient>
       ) : null}
     </Pressable>
@@ -112,7 +126,7 @@ const styles = StyleSheet.create({
     color: huddleColors.onPrimary,
   },
   fallback: {
-    backgroundColor: huddleColors.primarySoftFill,
+    backgroundColor: huddleColors.glassControl,
   },
   pressed: {
     opacity: 0.9,

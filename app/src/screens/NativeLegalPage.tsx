@@ -1,9 +1,9 @@
 import { ScrollView, StyleSheet, Text, View } from "react-native";
+import { NativeLegalText } from "../components/NativeLegalText";
 import type { NativeLegalPageContent } from "../content/nativeLegalPages";
 import {
   huddleColors,
   huddleLayout,
-  huddleRadii,
   huddleSpacing,
   huddleType,
 } from "../theme/huddleDesignTokens";
@@ -18,27 +18,23 @@ export function NativeLegalPage({ page }: NativeLegalPageProps) {
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.card}>
           {page.intro.map((paragraph, index) => (
-            <Text key={`intro-${index}`} style={styles.body}>
-              {paragraph}
-            </Text>
+            <NativeLegalText key={`intro-${index}`} style={styles.body}>{paragraph}</NativeLegalText>
           ))}
           {page.sections.map((section) => (
             <View key={section.title} style={styles.section}>
               <Text style={styles.sectionTitle}>{section.title}</Text>
               {section.body.map((paragraph, index) => (
-                <Text key={`${section.title}-${index}`} style={styles.body}>
-                  {paragraph}
-                </Text>
+                <NativeLegalText key={`${section.title}-${index}`} style={styles.body}>{paragraph}</NativeLegalText>
               ))}
               {section.bullets?.map((bullet, index) => (
                 <View key={`${section.title}-bullet-${index}`} style={styles.bulletRow}>
                   <Text style={styles.bulletDot}>•</Text>
-                  <Text style={styles.bulletText}>{bullet}</Text>
+                  <NativeLegalText style={styles.bulletText}>{bullet}</NativeLegalText>
                 </View>
               ))}
             </View>
           ))}
-          <Text style={styles.meta}>Date of creation: {page.effectiveDate}</Text>
+          <Text style={styles.meta}>Updated: {page.effectiveDate}</Text>
         </View>
       </ScrollView>
     </View>
@@ -61,13 +57,8 @@ const styles = StyleSheet.create({
     width: "100%",
     maxWidth: 680,
     alignSelf: "center",
-    borderRadius: huddleRadii.glass,
-    borderWidth: 1,
-    borderColor: "rgba(66, 73, 101, 0.06)",
     backgroundColor: huddleColors.canvas,
-    paddingHorizontal: huddleSpacing.x4,
-    paddingTop: huddleSpacing.x4,
-    paddingBottom: huddleSpacing.x6,
+    paddingBottom: huddleSpacing.x4,
   },
   meta: {
     marginTop: huddleSpacing.x6,
@@ -82,8 +73,8 @@ const styles = StyleSheet.create({
   sectionTitle: {
     marginBottom: huddleSpacing.x2,
     fontFamily: "Urbanist-700",
-    fontSize: huddleType.label,
-    lineHeight: huddleType.labelLine,
+    fontSize: 16,
+    lineHeight: 22,
     color: huddleColors.text,
   },
   body: {
@@ -108,6 +99,7 @@ const styles = StyleSheet.create({
   },
   bulletText: {
     flex: 1,
+    minWidth: 0,
     fontFamily: "Urbanist-400",
     fontSize: huddleType.label,
     lineHeight: 22,

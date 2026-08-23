@@ -6,35 +6,82 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import Stripe from "https://esm.sh/stripe@14.11.0?target=deno";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
-
-const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") as string, {
-  apiVersion: "2023-10-16",
-  httpClient: Stripe.createFetchHttpClient(),
-});
+import { pickStripeRuntimeSecret, resolveStripeRuntimeMode } from "../stripeModeContract.ts";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL") as string;
 const supabaseServiceKey = (Deno.env.get("HUDDLE_SUPABASE_SERVICE_KEY") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")) as string;
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
-const stripeSecret = Deno.env.get("STRIPE_SECRET_KEY") || "";
-const stripeMode = stripeSecret.startsWith("sk_live_") ? "live" : "test";
+const stripeDefaultSecret = Deno.env.get("STRIPE_SECRET_KEY") || "";
+const stripeTestSecret = Deno.env.get("STRIPE_TEST_SECRET_KEY") || "";
+const stripeLiveSecret = Deno.env.get("STRIPE_LIVE_SECRET_KEY") || "";
+const stripeModeHint = String(Deno.env.get("STRIPE_MODE") || "").trim().toLowerCase();
+
+const pickStripeSecret = (mode: "test" | "live"): string =>
+  pickStripeRuntimeSecret(mode, {
+    defaultSecret: stripeDefaultSecret,
+    testSecret: stripeTestSecret,
+    liveSecret: stripeLiveSecret,
+  });
+
+const createStripeClient = (secret: string): Stripe =>
+  new Stripe(secret, {
+    apiVersion: "2023-10-16",
+    httpClient: Stripe.createFetchHttpClient(),
+  });
 
 // =====================================================
 // STRIPE PRICE MAP (canonical env names per MASTER_SPEC)
 // =====================================================
-const STRIPE_PRICE_IDS: Record<string, string | undefined> = {
-  plus_monthly: Deno.env.get("STRIPE_PRICE_PLUS_MONTHLY"),
-  plus_annual: Deno.env.get("STRIPE_PRICE_PLUS_ANNUAL"),
-  gold_monthly: Deno.env.get("STRIPE_PRICE_GOLD_MONTHLY"),
-  gold_annual: Deno.env.get("STRIPE_PRICE_GOLD_ANNUAL"),
-  star_pack: Deno.env.get("STRIPE_PRICE_STAR_PACK"),
-  emergency_alert: Deno.env.get("STRIPE_PRICE_BROADCAST_ALERT"),
-  vet_media: Deno.env.get("STRIPE_PRICE_MEDIA_10"),
-  // Add-ons
-  superBroadcast: Deno.env.get("STRIPE_PRICE_SUPER_BROADCAST"),
-  topProfileBooster: Deno.env.get("STRIPE_PRICE_TOP_PROFILE"),
-  sharePerks: Deno.env.get("STRIPE_PRICE_FAMILY_MEMBER"),
-  family_member: Deno.env.get("STRIPE_PRICE_FAMILY_MEMBER"),
-  Family_Member: Deno.env.get("STRIPE_PRICE_FAMILY_MEMBER"),
+const PRICE_ENV_NAMES: Record<string, string> = {
+  plus_monthly: "STRIPE_PRICE_PLUS_MONTHLY",
+  plus_annual: "STRIPE_PRICE_PLUS_ANNUAL",
+  gold_monthly: "STRIPE_PRICE_GOLD_MONTHLY",
+  gold_annual: "STRIPE_PRICE_GOLD_ANNUAL",
+  star_pack: "STRIPE_PRICE_STAR_PACK",
+  emergency_alert: "STRIPE_PRICE_BROADCAST_ALERT",
+  vet_media: "STRIPE_PRICE_MEDIA_10",
+  superBroadcast: "STRIPE_PRICE_SUPER_BROADCAST",
+  topProfileBooster: "STRIPE_PRICE_TOP_PROFILE",
+  sharePerks: "STRIPE_PRICE_FAMILY_MEMBER",
+  family_member: "STRIPE_PRICE_FAMILY_MEMBER",
+  Family_Member: "STRIPE_PRICE_FAMILY_MEMBER",
+};
+
+// Stripe price ids are publishable identifiers, not secrets. Keeping the
+// account/mode pairs explicit prevents a test checkout from ever resolving a
+// live price (and vice versa) without consuming scarce project secret slots.
+const PRICE_IDS_BY_MODE: Record<"test" | "live", Record<string, string | undefined>> = {
+  test: {
+    plus_monthly: "price_1U41ca5QcAjQDse0JTnyQZe9",
+    plus_annual: "price_1U41cd5QcAjQDse0C2dddaPO",
+    gold_monthly: "price_1U41cj5QcAjQDse0LVTEFy8t",
+    gold_annual: "price_1U41cp5QcAjQDse0s4iaEPIz",
+    star_pack: "price_1T3k8X5QcAjQDse0XxZV4WpN",
+    emergency_alert: "price_1T3k8a5QcAjQDse07dq9nmR1",
+    vet_media: "price_1T3k8d5QcAjQDse0nFuWHXK5",
+    superBroadcast: "price_1U6pw55QcAjQDse0huM8TvG3",
+    topProfileBooster: "price_1U6pw75QcAjQDse0tTznPuEY",
+    sharePerks: "price_1U6pw85QcAjQDse000uiuDWu",
+    family_member: "price_1U6pw85QcAjQDse000uiuDWu",
+    Family_Member: "price_1U6pw85QcAjQDse000uiuDWu",
+  },
+  live: {
+    plus_monthly: "price_1T926a5QcAjQDse0QEYva3ZH",
+    plus_annual: "price_1T92355QcAjQDse0BAnwV7PU",
+    gold_monthly: "price_1T92Cp5QcAjQDse0W4wT20OX",
+    gold_annual: "price_1T92Cp5QcAjQDse0jvWohWoJ",
+    superBroadcast: "price_1T9Ohz5QcAjQDse0pWymLfQz",
+    topProfileBooster: "price_1SwQuF5QcAjQDse0RIOnO9cF",
+    sharePerks: "price_1SwQsp5QcAjQDse0RaD0z8nh",
+    family_member: "price_1SwQsp5QcAjQDse0RaD0z8nh",
+    Family_Member: "price_1SwQsp5QcAjQDse0RaD0z8nh",
+  },
+};
+
+const resolveConfiguredPriceId = (type: string, stripeMode: "test" | "live"): string | undefined => {
+  const envName = PRICE_ENV_NAMES[type];
+  if (!envName) return undefined;
+  return PRICE_IDS_BY_MODE[stripeMode][type] || Deno.env.get(envName) || undefined;
 };
 
 const ADDON_DEFAULTS: Record<string, number> = {
@@ -42,8 +89,8 @@ const ADDON_DEFAULTS: Record<string, number> = {
   emergency_alert: 299,
   vet_media: 399,
   // Add-ons (amounts in cents)
-  superBroadcast: 499,
-  topProfileBooster: 299,
+  superBroadcast: 1999,
+  topProfileBooster: 399,
   sharePerks: 499,
   family_member: 499,
   Family_Member: 499,
@@ -227,11 +274,13 @@ async function buildCheckoutIdempotencyKey(input: {
 }
 
 async function resolveStripePrice(
+  stripe: Stripe,
+  stripeMode: "test" | "live",
   type: string,
   required: boolean,
   mode?: "subscription" | "payment",
 ) {
-  const priceId = STRIPE_PRICE_IDS[type];
+  const priceId = resolveConfiguredPriceId(type, stripeMode);
   if (!priceId) {
     if (required) {
       return {
@@ -283,7 +332,7 @@ async function resolveStripePrice(
   }
 }
 
-async function resolvePriceByLookupKey(lookupKey: string, mode: "subscription" | "payment") {
+async function resolvePriceByLookupKey(stripe: Stripe, lookupKey: string, mode: "subscription" | "payment") {
   const trimmed = String(lookupKey || "").trim();
   if (!trimmed) return null;
   const list = await stripe.prices.list({
@@ -298,7 +347,7 @@ async function resolvePriceByLookupKey(lookupKey: string, mode: "subscription" |
   return price.id;
 }
 
-async function resolvePriceObjectByLookupKey(lookupKey: string): Promise<Stripe.Price | null> {
+async function resolvePriceObjectByLookupKey(stripe: Stripe, lookupKey: string): Promise<Stripe.Price | null> {
   const trimmed = String(lookupKey || "").trim();
   if (!trimmed) return null;
   const list = await stripe.prices.list({
@@ -326,7 +375,7 @@ async function resolveLookupKeyFromMetadata(planKey: string, currency: string): 
   return lookup || null;
 }
 
-async function validateExplicitPriceId(priceId: string, mode: "subscription" | "payment") {
+async function validateExplicitPriceId(stripe: Stripe, priceId: string, mode: "subscription" | "payment") {
   const trimmed = String(priceId || "").trim();
   if (!trimmed) return null;
   const price = await stripe.prices.retrieve(trimmed);
@@ -341,8 +390,6 @@ serve(async (req: Request) => {
   }
 
   try {
-    console.log(`[CHECKOUT] Stripe mode=${stripeMode}`);
-
     const body = (await req.json().catch(() => null)) as CheckoutRequestBody | null;
     if (!body) {
       return json({ error: "Invalid JSON body" }, 400);
@@ -361,6 +408,13 @@ serve(async (req: Request) => {
       currency,
       country,
     } = body;
+    const stripeMode = resolveStripeRuntimeMode(stripeModeHint, req.headers.get("origin"), successUrl, cancelUrl);
+    const stripeSecret = pickStripeSecret(stripeMode);
+    if (!stripeSecret) {
+      return json({ error: `Stripe config invalid: missing ${stripeMode} secret key.` }, 500);
+    }
+    const stripe = createStripeClient(stripeSecret);
+    console.log(`[CHECKOUT] Stripe mode=${stripeMode}`);
 
     // Enforce auth: require a valid JWT and bind user_id to auth.uid.
     const accessToken = extractUserAccessToken(req, body);
@@ -400,6 +454,17 @@ serve(async (req: Request) => {
 
     let customerId = profile?.stripe_customer_id;
 
+    if (customerId) {
+      try {
+        const existingCustomer = await stripe.customers.retrieve(customerId);
+        if (existingCustomer.deleted) customerId = undefined;
+      } catch {
+        // Customer ids are scoped to a Stripe account and mode. A live
+        // customer must never block a localhost test checkout (or vice versa).
+        customerId = undefined;
+      }
+    }
+
     if (!customerId) {
       const authUser = await supabase.auth.admin.getUserById(userId);
       const email = authUser.data?.user?.email || undefined;
@@ -410,10 +475,12 @@ serve(async (req: Request) => {
 
       customerId = customer.id;
 
-      await supabase
-        .from("profiles")
-        .update({ stripe_customer_id: customerId })
-        .eq("id", userId);
+      if (stripeMode === "live") {
+        await supabase
+          .from("profiles")
+          .update({ stripe_customer_id: customerId })
+          .eq("id", userId);
+      }
     }
 
     const normalizedType = normalizeCheckoutType(typeof type === "string" ? type : "");
@@ -463,10 +530,10 @@ serve(async (req: Request) => {
 
           const dynamicLookup = await resolveLookupKeyFromMetadata(itemType, checkoutCurrency);
           if (dynamicLookup) {
-            price = await resolvePriceObjectByLookupKey(dynamicLookup);
+            price = await resolvePriceObjectByLookupKey(stripe, dynamicLookup);
           }
           if (!price) {
-            const envPriceId = STRIPE_PRICE_IDS[itemType];
+            const envPriceId = resolveConfiguredPriceId(itemType, stripeMode);
             if (envPriceId) {
               price = await stripe.prices.retrieve(envPriceId);
             }
@@ -493,23 +560,23 @@ serve(async (req: Request) => {
       if (!resolvedPriceId) {
         const dynamicLookup = await resolveLookupKeyFromMetadata(normalizedType, checkoutCurrency);
         if (dynamicLookup) {
-          resolvedPriceId = await resolvePriceByLookupKey(dynamicLookup, "subscription");
+          resolvedPriceId = await resolvePriceByLookupKey(stripe, dynamicLookup, "subscription");
         }
       }
 
       if (!resolvedPriceId && typeof priceId === "string" && priceId.trim().length > 0) {
-        resolvedPriceId = await validateExplicitPriceId(priceId, "subscription");
+        resolvedPriceId = await validateExplicitPriceId(stripe, priceId, "subscription");
       }
 
       if (!resolvedPriceId && typeof lookupKey === "string" && lookupKey.trim().length > 0) {
-        resolvedPriceId = await resolvePriceByLookupKey(lookupKey, "subscription");
+        resolvedPriceId = await resolvePriceByLookupKey(stripe, lookupKey, "subscription");
       }
 
       if (!resolvedPriceId) {
-        if (!requiredSubscriptionTypes.has(normalizedType) && !STRIPE_PRICE_IDS[normalizedType]) {
+        if (!requiredSubscriptionTypes.has(normalizedType) && !resolveConfiguredPriceId(normalizedType, stripeMode)) {
           return json({ error: `Unknown subscription type: ${normalizedType}` }, 400);
         }
-        const resolved = await resolveStripePrice(normalizedType, true, "subscription");
+        const resolved = await resolveStripePrice(stripe, stripeMode, normalizedType, true, "subscription");
         if (!resolved.ok) return resolved.response;
         resolvedPriceId = resolved.priceId || null;
       }
@@ -541,10 +608,10 @@ serve(async (req: Request) => {
         let resolvedPriceId: string | null = null;
         const dynamicLookup = await resolveLookupKeyFromMetadata(itemType, checkoutCurrency);
         if (dynamicLookup) {
-          resolvedPriceId = await resolvePriceByLookupKey(dynamicLookup, "payment");
+          resolvedPriceId = await resolvePriceByLookupKey(stripe, dynamicLookup, "payment");
         }
         if (!resolvedPriceId) {
-          const resolved = await resolveStripePrice(itemType, false, "payment");
+          const resolved = await resolveStripePrice(stripe, stripeMode, itemType, false, "payment");
           if (!resolved.ok) return resolved.response;
           resolvedPriceId = resolved.priceId || null;
         }

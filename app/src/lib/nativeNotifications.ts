@@ -1,7 +1,10 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabaseAnonKey, supabaseUrl } from "./supabase";
-import { fetchNativeMapAlertById } from "./nativeMapData";
-import { resolveNativeViewerScope, type NativeViewerScopePoint } from "./nativeViewerScope";
+import { createNativeAuthenticatedHeaders, getFreshNativeAccessToken } from "./nativeFunctionClient";
+import { fetchNativeResponseWithTimeout as fetch } from "./nativeTimeout";
+import { withNativeMapAlertRouteContext } from "./nativeAlertNotificationRoute";
+import { canonicalizeNativeNotificationPath } from "./nativeNavigationState";
+import { readNativeDisplayCacheItem } from "./nativeDisplayCacheStorage";
 
 export type NativeNotificationRow = {
   id: string;
@@ -16,13 +19,12 @@ export type NativeNotificationRow = {
   data?: Record<string, unknown> | null;
 };
 
-type NativeNotificationAlertScope =
-  | { mode: "primary_point"; anchorPoint: NativeViewerScopePoint; country: string | null; district: string | null }
-  | { mode: "country_district_fallback"; anchorPoint: null; country: string | null; district: string | null }
-  | { mode: "unresolved"; anchorPoint: null; country: null; district: null };
-
 const NOTIFICATION_CACHE_VERSION = 1;
 const NOTIFICATION_CACHE_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+const NOTIFICATION_OWNERSHIP_TIMEOUT_MS = 4_000;
+const TEAM_HUDDLE_NOTIFICATION_USER_ID = "8f55ab31-6b25-4d1a-98c7-3a6e8af2d941";
+
+export type NativeNotificationOwnership = "owned" | "not_owned" | "unavailable";
 
 type NativeNotificationRowsCachePayload = {
   cachedAt: number;
@@ -54,7 +56,7 @@ export const readCachedNativeNotifications = async (userId: string, options: { s
   const memory = notificationRowsMemoryCache.get(key);
   if (memory && memory.userId === userId && memory.sessionKey === sessionKey && isFreshNotificationCache(memory.cachedAt)) return memory.rows;
   try {
-    const raw = await AsyncStorage.getItem(key);
+    const raw = await readNativeDisplayCacheItem(key);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<NativeNotificationRowsCachePayload>;
     if (
@@ -106,7 +108,7 @@ export const readCachedNativeUnreadNotificationCount = async (userId: string, op
   const memory = notificationUnreadMemoryCache.get(key);
   if (memory && memory.userId === userId && memory.sessionKey === sessionKey && isFreshNotificationCache(memory.cachedAt)) return memory.count;
   try {
-    const raw = await AsyncStorage.getItem(key);
+    const raw = await readNativeDisplayCacheItem(key);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<NativeNotificationUnreadCachePayload>;
     if (
@@ -152,6 +154,39 @@ export const writeNativeUnreadNotificationCountCache = async (userId: string, co
   }
 };
 
+export const verifyNativeNotificationOwnershipWithToken = async (
+  notificationId: string,
+  userId: string,
+  accessToken: string,
+): Promise<NativeNotificationOwnership> => {
+  const cleanNotificationId = String(notificationId || "").trim();
+  const cleanUserId = String(userId || "").trim();
+  const cleanAccessToken = String(accessToken || "").trim();
+  if (!cleanNotificationId || !cleanUserId || !cleanAccessToken) return "not_owned";
+  const params = new URLSearchParams({
+    select: "id",
+    id: `eq.${cleanNotificationId}`,
+    user_id: `eq.${cleanUserId}`,
+    limit: "1",
+  });
+  try {
+    // A notification tap is an interactive route handoff. Do not use the raw
+    // supabase-js query here: its iOS socket can stay unresolved for minutes,
+    // poisoning this response as "handled" before navigation ever runs.
+    const response = await fetch(`${supabaseUrl}/rest/v1/notifications?${params.toString()}`, {
+      headers: createNativeAuthenticatedHeaders(cleanAccessToken),
+    }, NOTIFICATION_OWNERSHIP_TIMEOUT_MS);
+    const raw = await response.text();
+    if (!response.ok) return "unavailable";
+    const rows = raw ? JSON.parse(raw) as Array<{ id?: unknown }> : [];
+    return Array.isArray(rows) && rows.some((row) => String(row?.id || "") === cleanNotificationId)
+      ? "owned"
+      : "not_owned";
+  } catch {
+    return "unavailable";
+  }
+};
+
 const firstString = (...values: unknown[]) => {
   for (const value of values) {
     if (typeof value !== "string") continue;
@@ -166,44 +201,79 @@ const numberValue = (value: unknown) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
-const normalizedText = (value: unknown) => String(value || "").trim().toLowerCase();
-
-const distanceMeters = (left: NativeViewerScopePoint, right: NativeViewerScopePoint) => {
-  const toRad = (value: number) => value * Math.PI / 180;
-  const earthRadiusMeters = 6371000;
-  const dLat = toRad(right.lat - left.lat);
-  const dLng = toRad(right.lng - left.lng);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(left.lat)) * Math.cos(toRad(right.lat)) * Math.sin(dLng / 2) ** 2;
-  return 2 * earthRadiusMeters * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-};
-
-export const resolveNativeNotificationAlertScope = async ({
-  userId,
-  accessToken,
-}: {
-  userId: string;
-  accessToken: string;
-}): Promise<NativeNotificationAlertScope> => {
-  const viewerScope = await resolveNativeViewerScope({ userId, accessToken });
-  const country = viewerScope.country ?? null;
-  const district = viewerScope.district ?? null;
-  if (viewerScope.primaryPoint) {
-    return { mode: "primary_point", anchorPoint: viewerScope.primaryPoint, country, district };
-  }
-  if (country || district) {
-    return { mode: "country_district_fallback", anchorPoint: null, country, district };
-  }
-  return { mode: "unresolved", anchorPoint: null, country: null, district: null };
-};
-
 export const firstNotificationText = (...values: Array<string | null | undefined>) => {
   for (const value of values) {
     const trimmed = String(value || "").trim();
     if (trimmed) return trimmed;
   }
   return "Notification";
+};
+
+// The in-app hub is a single-line list, never push's separate title/body split
+// (that stacked bold-subject-above-body layout is push/OS-tray only). Several
+// kinds have a title that's just the person's name and a body that's a short
+// verb phrase assuming that name comes first ("Sent you a message", "Liked your
+// post") — those get woven into one complete sentence. Group invite and pet
+// reminder need the same treatment but in the other word order. Everything
+// else's body already reads as a complete sentence on its own.
+const resolveNotificationKind = (row: Pick<NativeNotificationRow, "type" | "data" | "metadata">) => {
+  const meta = { ...(row.metadata || {}), ...(row.data || {}) } as Record<string, unknown>;
+  return String(meta.kind || row.type || "").trim();
+};
+
+const lowerFirst = (value: string) => (value ? value.charAt(0).toLowerCase() + value.slice(1) : value);
+
+// Title = the actor's name, body = a short verb phrase that assumes the name
+// comes first ("Sent you a message" -> "{Name} sent you a message").
+const WEAVE_NAME_BEFORE_BODY_KINDS = new Set([
+  "new_message",
+  "care_chat_message",
+  "like",
+  "comment_like",
+  "reply_like",
+  "comment",
+  "reply",
+  "mention",
+  "thread_mention",
+  "thread_reply",
+  "alert_like",
+  "star",
+  "friend_added",
+  "group_event_created",
+  "group_event_updated",
+]);
+
+export const notificationHubText = (
+  row: Pick<NativeNotificationRow, "message" | "body" | "title" | "type" | "data" | "metadata">,
+): string => {
+  const meta = { ...(row.metadata || {}), ...(row.data || {}) } as Record<string, unknown>;
+  const explicitHubBody = String(meta.hubBody || "").trim();
+  if (explicitHubBody) return explicitHubBody;
+
+  const rawMessage = String(row.message || "").trim();
+  const rawBody = String(row.body || "").trim();
+  const bodyText = firstNotificationText(row.body, row.message);
+  const titleText = String(row.title || "").trim();
+  const kind = resolveNotificationKind(row);
+
+  if (kind === "group_invite") {
+    return titleText ? `${bodyText} ${titleText}`.trim() : bodyText;
+  }
+  if (kind === "reminder") {
+    const petName = titleText.replace(/'s Reminder$/i, "").trim();
+    return petName ? `${petName}: ${bodyText}` : bodyText || titleText;
+  }
+  if (kind === "engagement_tier_promotion") {
+    // Title is the tier label ("Trusted ✨"), body is already a full standalone
+    // sentence — join with a dash instead of the verb-phrase weave below, since
+    // there's no shared subject to merge, just a label plus a sentence.
+    return titleText && titleText !== bodyText ? `${titleText} — ${bodyText}` : bodyText || titleText;
+  }
+  if (titleText && titleText !== bodyText && WEAVE_NAME_BEFORE_BODY_KINDS.has(kind)) {
+    if (rawMessage && rawBody && rawMessage !== rawBody) return rawMessage;
+    return `${titleText} ${lowerFirst(bodyText)}`.trim();
+  }
+  return bodyText || titleText;
 };
 
 export const notificationTimeAgo = (value?: string | null) => {
@@ -226,89 +296,17 @@ export const isSuppressedNativeNotification = (row: Pick<NativeNotificationRow, 
   return data.skip_history === true || metadata.skip_history === true || text === "your alert has expired and is no longer visible";
 };
 
-const isAlertNotification = (row: NativeNotificationRow) => {
-  const meta = { ...(row.metadata || {}), ...(row.data || {}) };
-  const type = normalizedText(row.type || meta.type || meta.alert_type || meta.alertType);
-  const href = normalizedText(row.href || meta.href || meta.path || meta.route);
-  return Boolean(
-    meta.alert_id ||
-    meta.alertId ||
-    meta.broadcast_id ||
-    meta.broadcastId ||
-    type.includes("alert") ||
-    type.includes("broadcast") ||
-    href.startsWith("/map"),
-  );
-};
+// Delivery is the audience decision. The hub trusts complete notification rows
+// and never re-runs GPS/map eligibility while opening.
+const filterHubNotifications = (rows: NativeNotificationRow[]) =>
+  rows.filter((row) => !isSuppressedNativeNotification(row));
 
-const notificationAlertPoint = (row: NativeNotificationRow): NativeViewerScopePoint | null => {
-  const meta = { ...(row.metadata || {}), ...(row.data || {}) };
-  const lat = numberValue(meta.alert_lat ?? meta.alertLat ?? meta.lat ?? meta.latitude);
-  const lng = numberValue(meta.alert_lng ?? meta.alertLng ?? meta.lng ?? meta.longitude);
-  return lat === null || lng === null ? null : { lat, lng };
-};
-
-const notificationAlertId = (row: NativeNotificationRow) => {
-  const meta = { ...(row.metadata || {}), ...(row.data || {}) };
-  return firstString(meta.alert_id, meta.alertId, meta.map_id, meta.mapId, meta.broadcast_id, meta.broadcastId);
-};
-
-const withResolvedAlertScopeMetadata = async (
-  rows: NativeNotificationRow[],
-  userId: string,
-  accessToken: string,
-) => {
-  const alertIds = Array.from(new Set(rows
-    .filter(isAlertNotification)
-    .filter((row) => !notificationAlertPoint(row))
-    .map(notificationAlertId)
-    .filter((alertId): alertId is string => Boolean(alertId))));
-  if (alertIds.length === 0) return rows;
-
-  const details = new Map<string, Awaited<ReturnType<typeof fetchNativeMapAlertById>>>();
-  await Promise.all(alertIds.map(async (alertId) => {
-    const alert = await fetchNativeMapAlertById(alertId, userId, { accessToken }).catch(() => null);
-    details.set(alertId, alert);
-  }));
-
-  return rows.map((row) => {
-    const alertId = notificationAlertId(row);
-    const alert = alertId ? details.get(alertId) ?? null : null;
-    if (!alert) return row;
-    const metadata = {
-      ...(row.metadata || {}),
-      alert_lat: alert.latitude,
-      alert_lng: alert.longitude,
-      range_m: alert.range_meters ?? undefined,
-    };
-    return { ...row, metadata };
-  });
-};
-
-const isNotificationInAlertScope = (row: NativeNotificationRow, scope: NativeNotificationAlertScope) => {
-  if (!isAlertNotification(row)) return true;
-  const meta = { ...(row.metadata || {}), ...(row.data || {}) };
-  const alertPoint = notificationAlertPoint(row);
-  if (scope.anchorPoint) {
-    if (!alertPoint) return false;
-    const radiusMeters = numberValue(meta.radius_m ?? meta.radiusMeters ?? meta.range_m ?? meta.rangeMeters) ?? 5000;
-    return distanceMeters(scope.anchorPoint, alertPoint) <= Math.max(0, radiusMeters);
-  }
-  const alertCountry = normalizedText(meta.country ?? meta.location_country ?? meta.locationCountry);
-  const alertDistrict = normalizedText(meta.district ?? meta.location_district ?? meta.locationDistrict);
-  const scopeCountry = normalizedText(scope.country);
-  const scopeDistrict = normalizedText(scope.district);
-  if (alertDistrict && scopeDistrict) return alertDistrict === scopeDistrict;
-  if (alertCountry && scopeCountry) return alertCountry === scopeCountry;
-
-  return true;
-};
-
-const filterNotificationsForAlertScope = (rows: NativeNotificationRow[], scope: NativeNotificationAlertScope) =>
-  rows.filter((row) => !isSuppressedNativeNotification(row) && isNotificationInAlertScope(row, scope));
-
+// Must stay in sync with the routable screens in RootNavigator's normalizePath:
+// any href that resolves to a real screen has to be allowed here, otherwise the
+// notification is silently nulled and its row becomes untappable. (Legacy hrefs
+// like /verify and /pets are intentionally excluded — they map to no screen.)
 const allowedNotificationPath = (path: string) =>
-  /^\/(social|chats|map|threads|chat-dialogue|verify-identity|pet-details|edit-pet-profile|settings|notifications)(\?|$)/.test(path);
+  path === "/" || /^\/(social|chats|threads|service-chat|service|map|chat-dialogue|verify-identity|pet-details|edit-pet-profile|edit-profile|profile|carerprofile|premium|settings|notifications)(\?|$)/.test(path);
 
 const normalizePathCandidate = (candidate: unknown) => {
   if (typeof candidate !== "string" || !candidate.trim()) return null;
@@ -394,10 +392,17 @@ export const notificationDestinationPath = (row: NativeNotificationRow) => {
     meta.conversationId,
   );
   const chatName = firstString(meta.chat_name, meta.chatName, meta.room_name, meta.roomName, meta.name);
-  const chatPeer = firstString(meta.with, meta.with_user_id, meta.withUserId, meta.peer_user_id, meta.peerUserId);
+  const directNotificationPeer = ["new_message", "direct_message", "match", "star"].includes(normalizedType)
+    ? firstString(meta.sender_id, meta.senderId, meta.from_user_id, meta.fromUserId, meta.matched_user_id, meta.matchedUserId)
+    : "";
+  const chatPeer = firstString(meta.with, meta.with_user_id, meta.withUserId, meta.peer_user_id, meta.peerUserId, directNotificationPeer);
+  const chatAvatar = firstString(meta.avatar, meta.avatar_url, meta.avatarUrl, meta.peer_avatar_url, meta.peerAvatarUrl, meta.sender_avatar_url, meta.senderAvatarUrl);
   const chatMessage = firstString(meta.targetMessage, meta.target_message, meta.message_id, meta.messageId);
 
-  let nextPath = directCandidate;
+  // A friend request is an inbox item, not a message. Even if an older payload
+  // happens to carry a room id, opening it must land on the Friends list where
+  // accepting/declining the request marks that inbox item handled.
+  let nextPath = normalizedType === "friend_request" ? "/chats?tab=friends" : directCandidate;
   if (!nextPath && chatTarget && (
     ["chat", "chats", "message", "chat_message", "direct_message", "group_chat", "group_message"].includes(normalizedType) ||
     normalizedType.includes("chat") ||
@@ -421,36 +426,70 @@ export const notificationDestinationPath = (row: NativeNotificationRow) => {
   }
   if (!nextPath) return null;
 
-  if (nextPath.startsWith("/map")) {
-    const [, rawQuery = ""] = nextPath.split("?");
+  if (nextPath.startsWith("/chat-dialogue") || nextPath.startsWith("/service-chat")) {
+    const [pathname, rawQuery = ""] = nextPath.split("?");
     const params = new URLSearchParams(rawQuery);
-    if (!params.get("alert") && alertTarget) params.set("alert", alertTarget);
-    const query = params.toString();
-    nextPath = query ? `/map?${query}` : "/map";
+    if (!params.get("name") && chatName) params.set("name", chatName);
+    if (!params.get("with") && chatPeer) params.set("with", chatPeer);
+    if (!params.get("avatar") && chatAvatar) params.set("avatar", chatAvatar);
+    if (!params.get("targetMessage") && chatMessage) params.set("targetMessage", chatMessage);
+    const roomType = (firstString(meta.room_type, meta.roomType, meta.chat_type, meta.chatType) || "").toLowerCase();
+    if (!params.get("returnTo")) {
+      params.set("returnTo", nextPath.startsWith("/service-chat") || roomType === "service" ? "/chats?tab=service" : roomType === "group" ? "/chats?tab=groups" : "/chats?tab=friends");
+    }
+    nextPath = `${pathname}?${params.toString()}`;
   }
 
+  if (nextPath.startsWith("/map")) {
+    const alertLat = numberValue(meta.alert_lat ?? meta.alertLat ?? meta.latitude ?? meta.lat);
+    const alertLng = numberValue(meta.alert_lng ?? meta.alertLng ?? meta.longitude ?? meta.lng);
+    const alertType = firstString(meta.alert_type, meta.alertType);
+    nextPath = withNativeMapAlertRouteContext(nextPath, {
+      alertId: alertTarget,
+      alertLat,
+      alertLng,
+      alertType,
+      verifiedOnly: meta.verified_only === true,
+    });
+  }
+
+  // Team huddle is an official direct conversation in Friends. Repair older
+  // notifications that did not store the direct peer or a return destination.
+  const notificationPeer = firstString(
+    meta.sender_id,
+    meta.senderId,
+    meta.with_user_id,
+    meta.withUserId,
+    meta.peer_user_id,
+    meta.peerUserId,
+  );
+  if (nextPath.startsWith("/chat-dialogue") && notificationPeer === TEAM_HUDDLE_NOTIFICATION_USER_ID) {
+    const [pathname, rawQuery = ""] = nextPath.split("?");
+    const params = new URLSearchParams(rawQuery);
+    if (!params.get("with")) params.set("with", TEAM_HUDDLE_NOTIFICATION_USER_ID);
+    if (!params.get("returnTo")) params.set("returnTo", "/chats?tab=friends");
+    nextPath = `${pathname}?${params.toString()}`;
+  }
+
+  nextPath = canonicalizeNativeNotificationPath(nextPath);
   return allowedNotificationPath(nextPath) ? nextPath : null;
 };
 
 export const fetchNativeUnreadNotificationCountWithToken = async (
   userId: string,
   accessToken: string,
-  options: { cacheWriteGuard?: () => boolean; sessionKey?: string | null } = {},
+  options: { cacheWriteGuard?: () => boolean; onFriendRequestUnreadChange?: (unread: boolean) => void; sessionKey?: string | null } = {},
 ) => {
-  const token = String(accessToken || "").trim();
+  const token = await getFreshNativeAccessToken(accessToken);
   if (!token) throw new Error("notification_unread_access_token_required");
-  const scope = await resolveNativeNotificationAlertScope({ userId, accessToken: token });
   const params = new URLSearchParams({
-    select: "id,message,body,title,metadata,data",
+    select: "id,message,body,title,type,metadata,data",
     limit: "200",
     user_id: `eq.${userId}`,
     read: "eq.false",
   });
   const response = await fetch(`${supabaseUrl}/rest/v1/notifications?${params.toString()}`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      apikey: supabaseAnonKey,
-    },
+    headers: createNativeAuthenticatedHeaders(token),
   });
   const raw = await response.text();
   const parsed = raw ? JSON.parse(raw) as unknown : [];
@@ -458,8 +497,9 @@ export const fetchNativeUnreadNotificationCountWithToken = async (
     throw new Error(typeof parsed === "object" && parsed && "message" in parsed ? String((parsed as { message?: unknown }).message) : String(raw || response.statusText));
   }
   const rows = Array.isArray(parsed) ? parsed as NativeNotificationRow[] : [];
-  const scopedRows = await withResolvedAlertScopeMetadata(rows, userId, token);
-  const count = filterNotificationsForAlertScope(scopedRows, scope).length;
+  const unreadRows = filterHubNotifications(rows);
+  const count = unreadRows.length;
+  options.onFriendRequestUnreadChange?.(unreadRows.some((row) => String(row.type || "").toLowerCase() === "friend_request"));
   await writeNativeUnreadNotificationCountCache(userId, count, options);
   return count;
 };
@@ -470,9 +510,8 @@ export const fetchNativeNotificationsWithToken = async (
   limit = 200,
   options: { cacheWriteGuard?: () => boolean; sessionKey?: string | null } = {},
 ) => {
-  const token = String(accessToken || "").trim();
+  const token = await getFreshNativeAccessToken(accessToken);
   if (!token) throw new Error("notifications_access_token_required");
-  const scope = await resolveNativeNotificationAlertScope({ userId, accessToken: token });
   const safeLimit = Math.max(1, Math.min(limit, 200));
   const params = new URLSearchParams({
     select: "id,message,title,body,type,href,read,created_at,metadata,data",
@@ -481,10 +520,7 @@ export const fetchNativeNotificationsWithToken = async (
     limit: String(safeLimit),
   });
   const response = await fetch(`${supabaseUrl}/rest/v1/notifications?${params.toString()}`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      apikey: supabaseAnonKey,
-    },
+    headers: createNativeAuthenticatedHeaders(token),
   });
   const raw = await response.text();
   const parsed = raw ? JSON.parse(raw) as unknown : [];
@@ -492,28 +528,49 @@ export const fetchNativeNotificationsWithToken = async (
     throw new Error(typeof parsed === "object" && parsed && "message" in parsed ? String((parsed as { message?: unknown }).message) : String(raw || response.statusText));
   }
   const rows = Array.isArray(parsed) ? parsed as NativeNotificationRow[] : [];
-  const scopedRows = await withResolvedAlertScopeMetadata(rows, userId, token);
-  const filteredRows = filterNotificationsForAlertScope(scopedRows, scope);
+  const filteredRows = filterHubNotifications(rows);
   await writeNativeNotificationsCache(userId, filteredRows, options);
   await writeNativeUnreadNotificationCountCache(userId, filteredRows.filter((row) => row.read !== true).length, options);
   return filteredRows;
 };
 
 export const markAllNativeNotificationsReadWithToken = async (userId: string, accessToken: string) => {
-  const token = String(accessToken || "").trim();
+  const token = await getFreshNativeAccessToken(accessToken);
   if (!token) throw new Error("notifications_mark_read_access_token_required");
   const params = new URLSearchParams({
     user_id: `eq.${userId}`,
     read: "eq.false",
+    or: "(type.neq.friend_request,type.is.null)",
   });
   const response = await fetch(`${supabaseUrl}/rest/v1/notifications?${params.toString()}`, {
     method: "PATCH",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      apikey: supabaseAnonKey,
+    headers: createNativeAuthenticatedHeaders(token, {
       "content-type": "application/json",
       prefer: "return=minimal",
-    },
+    }),
+    body: JSON.stringify({ read: true }),
+  });
+  if (!response.ok) {
+    const raw = await response.text();
+    const parsed = raw ? JSON.parse(raw) as unknown : null;
+    throw new Error(typeof parsed === "object" && parsed && "message" in parsed ? String((parsed as { message?: unknown }).message) : String(raw || response.statusText));
+  }
+};
+
+export const markNativeFriendRequestNotificationsReadWithToken = async (userId: string, accessToken: string) => {
+  const token = await getFreshNativeAccessToken(accessToken);
+  if (!token) throw new Error("friend_request_notifications_mark_read_access_token_required");
+  const params = new URLSearchParams({
+    user_id: `eq.${userId}`,
+    read: "eq.false",
+    type: "eq.friend_request",
+  });
+  const response = await fetch(`${supabaseUrl}/rest/v1/notifications?${params.toString()}`, {
+    method: "PATCH",
+    headers: createNativeAuthenticatedHeaders(token, {
+      "content-type": "application/json",
+      prefer: "return=minimal",
+    }),
     body: JSON.stringify({ read: true }),
   });
   if (!response.ok) {

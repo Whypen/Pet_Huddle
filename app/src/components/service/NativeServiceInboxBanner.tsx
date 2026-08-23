@@ -1,19 +1,25 @@
 import Feather from "@expo/vector-icons/Feather";
+import { useEventListener } from "expo";
 import { AppState } from "react-native";
-import { LinearGradient } from "expo-linear-gradient";
 import { Image as ExpoImage } from "expo-image";
+import { useVideoPlayer, VideoView } from "expo-video";
 import { useEffect, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import Animated, { useAnimatedStyle, useReducedMotion, useSharedValue, withRepeat, withTiming } from "react-native-reanimated";
+import Animated, { Easing, interpolate, useAnimatedStyle, useReducedMotion, useSharedValue, withRepeat, withTiming } from "react-native-reanimated";
 import { huddleColors, huddleRadii, huddleShadows, huddleSpacing, huddleType } from "../../theme/huddleDesignTokens";
 import { fetchNativeChatInbox, type NativeChatInboxRow } from "../../lib/nativeChat";
+import { writeNativeChatsInboxHandoff, writeNativeChatsLastTabHandoff } from "../../lib/nativeChatHandoff";
 import { haptic } from "../../lib/nativeHaptics";
+import { nativeFreshImageKey, nativeFreshImageUri } from "../../lib/nativeImageFreshness";
 import { createSingleRealtimeChannel } from "../../lib/realtimeChannelManager";
 
-// Animated background — orb stays static, color zones drift in waves over 6s loop.
 // Metro bundler resolves static assets via require() — eslint-disable matches the project convention.
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const SERVICE_BANNER_ORB = require("../../../assets/service-banner-orb.webp");
+const SERVICE_BANNER = require("../../../assets/service-banner.png");
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const SERVICE_BANNER_ORB = require("../../../assets/service-banner-orb.png");
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const SERVICE_BANNER_ORB_VIDEO = require("../../../assets/service-banner-orb.mp4");
 
 const TERMINAL_SERVICE_STATUSES = new Set(["cancelled", "completed", "declined", "expired", "disputed"]);
 const LIVE_SERVICE_STATUS = "in_progress";
@@ -30,8 +36,34 @@ const SERVICE_INBOX_ROUTE = "/chats?tab=service";
 export function NativeServiceInboxBanner({ userId, accessToken, sessionKey, onNavigate }: Props) {
   const [rows, setRows] = useState<NativeChatInboxRow[]>([]);
   const [hydrated, setHydrated] = useState(false);
+  const [videoFailed, setVideoFailed] = useState(false);
+  const [videoReady, setVideoReady] = useState(false);
+  const [videoFrameReady, setVideoFrameReady] = useState(false);
   const reduceMotion = useReducedMotion();
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const orbPlayer = useVideoPlayer(SERVICE_BANNER_ORB_VIDEO, (player) => {
+    player.audioMixingMode = "mixWithOthers";
+    player.loop = true;
+    player.muted = true;
+    player.timeUpdateEventInterval = 0.1;
+    player.play();
+  });
+
+  useEventListener(orbPlayer, "statusChange", ({ status, error }) => {
+    if (status === "error" || error) {
+      setVideoFailed(true);
+      setVideoReady(false);
+      setVideoFrameReady(false);
+    }
+  });
+  useEventListener(orbPlayer, "sourceLoad", () => {
+    setVideoFailed(false);
+    setVideoReady(true);
+    setVideoFrameReady(false);
+  });
+  useEventListener(orbPlayer, "timeUpdate", ({ currentTime }) => {
+    if (currentTime > 0) setVideoFrameReady(true);
+  });
 
   useEffect(() => {
     if (!userId) {
@@ -136,15 +168,43 @@ export function NativeServiceInboxBanner({ userId, accessToken, sessionKey, onNa
     transform: [{ scale: 0.85 + livePulse.value * 0.3 }],
   }));
 
-  if (!hydrated) return null;
+  const backgroundPulse = useSharedValue(0);
+  useEffect(() => {
+    if (reduceMotion) {
+      backgroundPulse.value = 0;
+      return;
+    }
+    backgroundPulse.value = withRepeat(withTiming(1, { duration: 3000, easing: Easing.inOut(Easing.sin) }), -1, true);
+  }, [backgroundPulse, reduceMotion]);
+  const backgroundOrbStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(backgroundPulse.value, [0, 1], [0.12, 0.24]),
+    transform: [{ scale: interpolate(backgroundPulse.value, [0, 1], [1, 1.2]) }],
+  }));
+
+  if (!hydrated) {
+    return (
+      <View
+        accessibilityLabel="Loading care chats"
+        accessibilityRole="progressbar"
+        style={[styles.card, styles.skeletonCard]}
+      >
+        <View style={styles.skeletonGlow} />
+        <View style={styles.skeletonLineWide} />
+        <View style={styles.skeletonLineNarrow} />
+      </View>
+    );
+  }
 
   const activeRows = rows.filter((row) => row.serviceStatus && !TERMINAL_SERVICE_STATUSES.has(row.serviceStatus));
+  const hasActiveChats = activeRows.length > 0;
   const unreadCount = rows.reduce((sum, row) => sum + (row.unreadCount || 0), 0);
   const previewRows = (activeRows.length > 0 ? activeRows : rows).slice(0, 3);
   const statusBadge = serviceStatusBadge((activeRows[0] ?? rows[0])?.serviceStatus ?? null);
 
   const handlePress = () => {
     haptic.selectTab();
+    writeNativeChatsLastTabHandoff({ sessionKey, tab: "service", userId });
+    writeNativeChatsInboxHandoff({ rows, sessionKey, tab: "service", userId });
     onNavigate(SERVICE_INBOX_ROUTE);
   };
 
@@ -164,78 +224,79 @@ export function NativeServiceInboxBanner({ userId, accessToken, sessionKey, onNa
       onPress={handlePress}
       style={({ pressed }) => [styles.card, pressed ? styles.pressed : null]}
     >
-      {/* ─ Layer 0: Animated WebP — painted orb + drifting background ─ */}
       <ExpoImage
         cachePolicy="memory-disk"
         contentFit="cover"
-        source={SERVICE_BANNER_ORB}
+        source={hasActiveChats ? SERVICE_BANNER_ORB : SERVICE_BANNER}
         style={StyleSheet.absoluteFill}
       />
 
-      {/* ─ Layer 1: Glass-neu circle on top of the painted orb ─────── */}
-      {/* Whisper-light dome hint: no backdrop blur (would mush the colors),
-         no tint, no border — just a faint top-left highlight gradient suggesting
-         a curved glass surface above the painted orb. The painted colors show through. */}
-      <View pointerEvents="none" style={styles.glassOrbWrap}>
-        <View style={styles.glassOrb}>
-          {/* Top-left soft highlight only — the entire "glass" feel comes from this whisper */}
-          <LinearGradient
-            colors={["rgba(255, 255, 255, 0.12)", "rgba(255, 255, 255, 0)"]}
-            end={{ x: 0.7, y: 0.7 }}
-            pointerEvents="none"
-            start={{ x: 0.1, y: 0.05 }}
+      {hasActiveChats && videoReady && !videoFailed ? (
+        <View pointerEvents="none" style={[StyleSheet.absoluteFill, videoFrameReady ? null : styles.videoLoading]}>
+          <VideoView
+            contentFit="cover"
+            fullscreenOptions={{ enable: false }}
+            nativeControls={false}
+            player={orbPlayer}
             style={StyleSheet.absoluteFill}
           />
         </View>
-      </View>
+      ) : null}
 
-      {/* ─ Layer 2: Top-right chevron affordance ─────────────────── */}
+      {hasActiveChats ? (
+        <>
+          <Animated.View pointerEvents="none" style={[styles.backgroundOrb, backgroundOrbStyle]} />
+          <View pointerEvents="none" style={styles.grainOverlay} />
+        </>
+      ) : null}
+
       <View pointerEvents="none" style={styles.chevronCorner}>
         <Feather color="rgba(255, 255, 255, 0.96)" name="arrow-up-right" size={16} />
       </View>
 
-      {/* ─ Layer 3: Content (avatars + title + subtitle) ─────────── */}
-      <View style={styles.body}>
-        {previewRows.length > 0 ? (
-          <View style={styles.avatarStack}>
-            {previewRows.map((row, index) => (
-              <View
-                key={row.chatId}
-                style={[
-                  styles.avatarRing,
-                  { marginLeft: index === 0 ? 0 : -10, zIndex: previewRows.length - index },
-                ]}
-              >
-                {row.peerAvatarUrl ? (
-                  <ExpoImage cachePolicy="memory-disk" transition={120} source={{ uri: row.peerAvatarUrl }} style={styles.avatar} />
-                ) : (
-                  <View style={[styles.avatar, styles.avatarFallback]}>
-                    <Text style={styles.avatarInitial}>{(row.peerName || "?").slice(0, 1).toUpperCase()}</Text>
-                  </View>
-                )}
-              </View>
-            ))}
-          </View>
-        ) : (
-          <View style={styles.emptyIconWrap}>
-            <Feather color={huddleColors.onPrimary} name="message-circle" size={20} />
-          </View>
-        )}
-
-        <Text numberOfLines={1} style={styles.title}>Care chats</Text>
-
-        <View style={styles.statusLine}>
-          {statusBadge ? (
-            <View style={styles.statusBadge}>
-              <Text numberOfLines={1} style={[styles.statusBadgeText, statusBadge.textStyle]}>{statusBadge.label}</Text>
+      {hasActiveChats ? (
+        <View style={styles.body}>
+          {previewRows.length > 0 ? (
+            <View style={styles.avatarStack}>
+              {previewRows.map((row, index) => (
+                <View
+                  key={row.chatId}
+                  style={[
+                    styles.avatarRing,
+                    { marginLeft: index === 0 ? 0 : -10, zIndex: previewRows.length - index },
+                  ]}
+                >
+                  {row.peerAvatarUrl ? (
+                    <ExpoImage cachePolicy="memory-disk" key={nativeFreshImageKey(row.peerAvatarUrl, row.peerAvatarUrl)} transition={120} source={{ uri: nativeFreshImageUri(row.peerAvatarUrl, row.peerAvatarUrl) }} style={styles.avatar} />
+                  ) : (
+                    <View style={[styles.avatar, styles.avatarFallback]}>
+                      <Text style={styles.avatarInitial}>{(row.peerName || "?").slice(0, 1).toUpperCase()}</Text>
+                    </View>
+                  )}
+                </View>
+              ))}
             </View>
-          ) : null}
-          {statusBadge ? (
-            hasLive ? <Animated.View style={[styles.livePulseDot, livePulseStyle]} /> : <View style={styles.livePulseDot} />
-          ) : null}
-          <Text numberOfLines={1} style={styles.subtitle}>{subtitle}</Text>
+          ) : (
+            <View style={styles.emptyIconWrap}>
+              <Feather color={huddleColors.onPrimary} name="message-circle" size={20} />
+            </View>
+          )}
+
+          <Text numberOfLines={1} style={styles.title}>Care chats</Text>
+
+          <View style={styles.statusLine}>
+            {statusBadge ? (
+              <View style={styles.statusBadge}>
+                <Text numberOfLines={1} style={[styles.statusBadgeText, statusBadge.textStyle]}>{statusBadge.label}</Text>
+              </View>
+            ) : null}
+            {statusBadge ? (
+              hasLive ? <Animated.View style={[styles.livePulseDot, livePulseStyle]} /> : <View style={styles.livePulseDot} />
+            ) : null}
+            <Text numberOfLines={1} style={styles.subtitle}>{subtitle}</Text>
+          </View>
         </View>
-      </View>
+      ) : null}
     </Pressable>
   );
 }
@@ -261,31 +322,56 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
-    backgroundColor: "#E8A8AD", // fallback while the WebP loads
+    backgroundColor: "#FF8F66",
     marginBottom: TIGHT_GAP_PULL,
     ...huddleShadows.polaroidFrame,
   },
   pressed: {
     opacity: 0.94,
   },
-  // ── Glass-neu circle ────────────────────────────────────────────
-  glassOrbWrap: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: "center",
-    justifyContent: "center",
+  skeletonCard: {
+    backgroundColor: "#F2F7FF",
   },
-  glassOrb: {
-    // Matches the painted orb in the WebP exactly:
-    //   In source canvas (600x450): orb radius = 270, diameter = 540
-    //   → 90% of canvas width / aspectRatio 1 makes a perfect circle
-    //   The card crops top/bottom, same as the painted orb does in the WebP — perfect alignment.
-    width: "90%",
+  skeletonGlow: {
+    position: "absolute",
+    top: "18%",
+    left: "10%",
+    right: "10%",
+    height: "52%",
+    borderRadius: huddleRadii.card,
+    backgroundColor: "rgba(255, 255, 255, 0.54)",
+  },
+  skeletonLineWide: {
+    width: "58%",
+    height: 10,
+    borderRadius: 999,
+    backgroundColor: "rgba(33, 69, 207, 0.10)",
+    marginBottom: huddleSpacing.x2,
+  },
+  skeletonLineNarrow: {
+    width: "38%",
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: "rgba(33, 69, 207, 0.08)",
+  },
+  backgroundOrb: {
+    position: "absolute",
+    width: "80%",
     aspectRatio: 1,
     borderRadius: 999,
-    overflow: "hidden",
-    // No border — should blend seamlessly with the painted orb beneath
+    backgroundColor: "rgba(255, 255, 255, 0.48)",
+    shadowColor: "#FFFFFF",
+    shadowOpacity: 0.28,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 0 },
   },
-  // ── Chevron corner ──────────────────────────────────────────────
+  grainOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(255, 255, 255, 0.018)",
+  },
+  videoLoading: {
+    opacity: 0,
+  },
   chevronCorner: {
     position: "absolute",
     top: huddleSpacing.x2,

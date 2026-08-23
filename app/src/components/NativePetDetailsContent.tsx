@@ -1,9 +1,11 @@
 import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
-import { Image as ExpoImage } from "expo-image";
 import { useMemo, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { nativeFreshImageKey, nativeFreshImageUri, nativeMutableImageVersion } from "../lib/nativeImageFreshness";
+import { NativePetImage } from "./NativePetImage";
 import {
   huddleColors,
+  huddleFormFields,
   huddleImageDefaults,
   huddleRadii,
   huddleShadows,
@@ -43,6 +45,7 @@ export type NativePetDetailsData = {
   gender: string | null;
   neutered_spayed: boolean;
   dob: string | null;
+  age_years?: number | null;
   weight: number | string | null;
   weight_unit: string;
   bio: string | null;
@@ -54,7 +57,9 @@ export type NativePetDetailsData = {
   set_reminder: SetReminder | null;
   medications: MedicationRecord[] | null;
   photo_url: string | null;
+  photo_presentation?: { home?: { centerX?: number; centerY?: number; widthPct?: number; sourceAspect?: number } } | null;
   is_active: boolean;
+  updated_at?: string | null;
 };
 
 type HealthRow = {
@@ -224,6 +229,7 @@ export const mapPetRow = (row: Record<string, unknown>): NativePetDetailsData =>
     gender: typeof row.gender === "string" ? row.gender : null,
     neutered_spayed: row.neutered_spayed === true,
     dob: typeof row.dob === "string" ? row.dob : null,
+    age_years: typeof row.age_years === "number" && row.age_years >= 0 ? row.age_years : null,
     weight: typeof row.weight === "number" || typeof row.weight === "string" ? row.weight : null,
     weight_unit: typeof row.weight_unit === "string" ? row.weight_unit : "kg",
     bio: typeof row.bio === "string" ? row.bio : null,
@@ -232,12 +238,14 @@ export const mapPetRow = (row: Record<string, unknown>): NativePetDetailsData =>
     microchip_id: typeof row.microchip_id === "string" ? row.microchip_id : null,
     temperament: Array.isArray(row.temperament) ? row.temperament.filter((entry): entry is string => typeof entry === "string") : null,
     vet_visit_records: vetVisits,
-    set_reminder: parseReminder(row.set_reminder, row.next_vaccination_reminder),
-    medications,
-    photo_url: typeof row.photo_url === "string" ? row.photo_url : null,
-    is_active: row.is_active !== false,
-  };
-};
+	    set_reminder: parseReminder(row.set_reminder, row.next_vaccination_reminder),
+	    medications,
+	    photo_url: typeof row.photo_url === "string" ? row.photo_url : null,
+	    photo_presentation: row.photo_presentation && typeof row.photo_presentation === "object" ? row.photo_presentation as NativePetDetailsData["photo_presentation"] : null,
+	    is_active: row.is_active !== false,
+	    updated_at: typeof row.updated_at === "string" ? row.updated_at : null,
+	  };
+	};
 
 type NativePetDetailsContentProps = {
   pet: NativePetDetailsData;
@@ -252,7 +260,7 @@ export function NativePetDetailsContent({ pet, onPetCardPress }: NativePetDetail
     const species = toTitleCase(pet.species) || "Species";
     const breed = pet.breed?.trim() || "";
     const genderLine = [pet.gender, pet.neutered_spayed ? getSterilizedLabel(pet.gender) : null].filter(Boolean).join("  ·  ");
-    const age = formatPetAge(pet.dob);
+    const age = pet.dob ? formatPetAge(pet.dob) : (typeof pet.age_years === "number" && pet.age_years >= 0 ? `${pet.age_years} yr` : "");
     const weight = pet.weight != null && String(pet.weight).trim() ? `${pet.weight} ${pet.weight_unit || ""}`.trim() : "";
     return { species, breed, genderLine, age, weight };
   }, [pet]);
@@ -296,14 +304,20 @@ export function NativePetDetailsContent({ pet, onPetCardPress }: NativePetDetail
       <View style={styles.badgeSlot} />
       <View style={styles.photoFrame}>
         {pet.photo_url ? (
-          <ExpoImage
-            accessibilityIgnoresInvertColors
-            contentFit="cover"
-            cachePolicy={huddleImageDefaults.cachePolicy}
-            transition={huddleImageDefaults.transition}
-            source={{ uri: pet.photo_url }}
-            style={styles.petImage}
-          />
+          (() => {
+            const photoVersion = nativeMutableImageVersion(pet.photo_url, pet.updated_at);
+            return (
+	          <NativePetImage
+	            accessibilityIgnoresInvertColors
+	            contentFit="cover"
+	            cachePolicy={huddleImageDefaults.cachePolicy}
+	            key={nativeFreshImageKey(pet.photo_url, photoVersion)}
+	            transition={huddleImageDefaults.transition}
+	            uri={nativeFreshImageUri(pet.photo_url, photoVersion)}
+	            style={styles.petImage}
+	          />
+            );
+          })()
         ) : (
           <View style={styles.photoFallback}>
             <Feather color={huddleColors.mutedText} name="camera" size={34} />
@@ -314,8 +328,8 @@ export function NativePetDetailsContent({ pet, onPetCardPress }: NativePetDetail
       <View style={styles.identityBlock}>
         <Text numberOfLines={1} style={styles.petName}>{pet.name}</Text>
         <Text numberOfLines={1} style={styles.petMeta}>{[display.species, display.breed].filter(Boolean).join(" · ")}</Text>
-        {display.genderLine ? <Text style={styles.petSubmeta}>{display.genderLine}</Text> : null}
-        {display.age ? <Text style={styles.petSubmeta}>{display.age}</Text> : null}
+        {display.genderLine ? <Text ellipsizeMode="tail" numberOfLines={1} style={styles.petSubmeta}>{display.genderLine}</Text> : null}
+        {display.age ? <Text ellipsizeMode="tail" numberOfLines={1} style={styles.petSubmeta}>{display.age}</Text> : null}
         <Text style={styles.petIdLabel}>PET ID</Text>
       </View>
     </>
@@ -341,7 +355,7 @@ export function NativePetDetailsContent({ pet, onPetCardPress }: NativePetDetail
 
       {pet.bio?.trim() ? (
         <View style={styles.card}>
-          <Text style={styles.bodyText}>{pet.bio}</Text>
+          <ScrollView nestedScrollEnabled showsVerticalScrollIndicator style={styles.bodyTextScroll}><Text style={styles.bodyText}>{pet.bio}</Text></ScrollView>
         </View>
       ) : null}
 
@@ -356,8 +370,8 @@ export function NativePetDetailsContent({ pet, onPetCardPress }: NativePetDetail
             <View key={`${row.title}-${index}`} style={[styles.detailRow, index > 0 && styles.rowDivider]}>
               <Feather color={huddleColors.subtext} name={row.icon} size={17} />
               <View style={styles.detailCopy}>
-                <Text style={styles.detailTitle}>{row.title}</Text>
-                <Text style={styles.detailSubtitle}>{row.subtitle}</Text>
+                <Text ellipsizeMode="tail" numberOfLines={1} style={styles.detailTitle}>{row.title}</Text>
+                <Text ellipsizeMode="tail" numberOfLines={1} style={styles.detailSubtitle}>{row.subtitle}</Text>
               </View>
             </View>
           ))}
@@ -383,7 +397,7 @@ export function NativePetDetailsContent({ pet, onPetCardPress }: NativePetDetail
           {routine ? (
             <View style={temperament.length > 0 ? styles.routineWithDivider : null}>
               <Text style={styles.sectionMiniLabel}>Daily Routine</Text>
-              <Text style={styles.bodyText}>{routine}</Text>
+              <ScrollView nestedScrollEnabled showsVerticalScrollIndicator style={styles.bodyTextScroll}><Text style={styles.bodyText}>{routine}</Text></ScrollView>
             </View>
           ) : null}
         </DisclosureCard>
@@ -392,7 +406,7 @@ export function NativePetDetailsContent({ pet, onPetCardPress }: NativePetDetail
       {pet.vet_contact?.trim() ? (
         <View style={styles.card}>
           <Text style={styles.sectionMiniLabel}>Vet contact</Text>
-          <Text style={styles.bodyText}>{pet.vet_contact}</Text>
+          <ScrollView nestedScrollEnabled showsVerticalScrollIndicator style={styles.bodyTextScroll}><Text style={styles.bodyText}>{pet.vet_contact}</Text></ScrollView>
         </View>
       ) : null}
     </>
@@ -430,7 +444,7 @@ function DisclosureCard({
     <View style={styles.disclosureCard}>
       <Pressable accessibilityRole="button" accessibilityState={{ expanded: open }} onPress={onPress} style={styles.disclosureHeader}>
         <Feather color={huddleColors.subtext} name={icon} size={17} />
-        <Text style={styles.disclosureTitle}>{title}</Text>
+        <Text ellipsizeMode="tail" numberOfLines={1} style={styles.disclosureTitle}>{title}</Text>
         <Feather color={huddleColors.subtext} name={open ? "chevron-up" : "chevron-down"} size={18} />
       </Pressable>
       {open ? <View style={styles.disclosureBody}>{children}</View> : null}
@@ -578,6 +592,9 @@ const styles = StyleSheet.create({
     fontSize: huddleType.label,
     lineHeight: 21,
     color: huddleColors.subtext,
+  },
+  bodyTextScroll: {
+    maxHeight: huddleFormFields.multilineHeight,
   },
   disclosureCard: {
     marginTop: huddleSpacing.x4,

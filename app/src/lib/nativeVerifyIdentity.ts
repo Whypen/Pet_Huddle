@@ -1,15 +1,22 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { readNativeDisplayCacheKeys } from "./nativeDisplayCacheStorage";
 import * as Device from "expo-device";
 import * as SecureStore from "expo-secure-store";
 import type { Session } from "@supabase/supabase-js";
-import { createNativeFunctionHeaders } from "./nativeFunctionClient";
+import { createFreshNativeFunctionHeaders, createNativeAuthenticatedHeaders, getFreshNativeAccessToken, getFreshNativeSession, isUsableAuthenticatedUserJwt, jwtExp, noteNativeAuthState, refreshNativeSessionOnce } from "./nativeFunctionClient";
 import { fetchNativeProfileSummary } from "./nativeProfileSummary";
+import { invalidateNativePublicProfileCaches } from "./nativePublicProfile";
+import { invalidateNativeDiscoveryRelationshipCache } from "./nativeChat";
 import { supabase, supabaseAnonKey, supabaseUrl } from "./supabase";
+import { fetchNativeResponseWithTimeout as fetch } from "./nativeTimeout";
 import { isNativeVerifiedProfile } from "./nativeVerificationGate";
 
 export type NativeBackendVerificationStatus = "unverified" | "pending" | "verified";
 export type NativeHumanVerificationStatus = "not_started" | "pending" | "passed" | "failed";
 export type NativeCardVerificationStatus = "not_started" | "pending" | "passed" | "failed";
+export type NativeIdentityDocumentStatus = "not_started" | "confirmed";
+export type NativeIdentityDocumentType = "passport" | "id";
+export type NativeIdentityExtractionMethod = "mrz" | "ocr";
 export type NativeVerificationRejectionCode = "blocked_identity" | null;
 export type NativeStripeMode = "test" | "live";
 
@@ -42,6 +49,12 @@ export type NativeVerifyIdentitySnapshot = {
   humanAttemptId: string | null;
   humanAttemptCompletedAt: string | null;
   humanChallenge: NativeHumanChallenge | null;
+  identityDocumentStatus: NativeIdentityDocumentStatus;
+  identityDocumentType: NativeIdentityDocumentType | null;
+  identityDocumentCountry: string | null;
+  identityDocumentDob: string | null;
+  identityDocumentGender: string | null;
+  identityDocumentConfirmedAt: string | null;
 };
 
 export type NativeVerifyIdentityProfileStatus = {
@@ -57,6 +70,42 @@ export type NativeVerifyIdentityProfileStatus = {
   cardBrand: string | null;
   cardLast4: string | null;
   verificationRejectionCode: NativeVerificationRejectionCode;
+  identityDocumentStatus: NativeIdentityDocumentStatus;
+  identityDocumentType: NativeIdentityDocumentType | null;
+  identityDocumentCountry: string | null;
+  identityDocumentDob: string | null;
+  identityDocumentGender: string | null;
+  identityDocumentConfirmedAt: string | null;
+};
+
+const NATIVE_IDENTITY_DOCUMENT_COUNTRY_LABELS: Record<string, string> = {
+  AUS: "Australia",
+  CAN: "Canada",
+  CHN: "China",
+  FRA: "France",
+  GBR: "United Kingdom",
+  HKG: "Hong Kong",
+  JPN: "Japan",
+  KOR: "South Korea",
+  PHL: "Philippines",
+  SGP: "Singapore",
+  THA: "Thailand",
+  TWN: "Taiwan",
+  USA: "United States",
+};
+
+export const formatNativeIdentityDocumentCountry = (value: string | null | undefined) => {
+  const raw = String(value || "").trim();
+  return NATIVE_IDENTITY_DOCUMENT_COUNTRY_LABELS[raw.toUpperCase()] || raw;
+};
+
+export const formatNativeIdentityDocumentGender = (value: string | null | undefined) => {
+  const raw = String(value || "").trim();
+  const normalized = raw.toLowerCase();
+  if (normalized === "f" || normalized === "female" || normalized === "woman") return "Female";
+  if (normalized === "m" || normalized === "male" || normalized === "man") return "Male";
+  if (normalized === "x" || normalized === "non-binary" || normalized === "nonbinary") return "Non-binary";
+  return raw;
 };
 
 export type NativeStartHumanChallengeResult = {
@@ -132,6 +181,34 @@ export type NativeDeviceFingerprintResult = {
   error?: string;
 };
 
+export type NativeConfirmIdentityDocumentPayload = {
+  documentType: NativeIdentityDocumentType;
+  extractionMethod: NativeIdentityExtractionMethod;
+  confidenceScore: number | null;
+  documentExpiresOn?: string | null;
+  documentLast4?: string | null;
+  documentNumber?: string | null;
+  extractedNameEvidence?: string[];
+  originalExtracted: {
+    legalName: string;
+    documentCountry: string;
+    dob: string;
+    documentGender?: string | null;
+  };
+  confirmed: {
+    legalName: string;
+    documentCountry: string;
+    dob: string;
+    documentGender?: string | null;
+  };
+};
+
+export type NativeConfirmIdentityDocumentResult = {
+  ok: boolean;
+  documentStatus: NativeIdentityDocumentStatus;
+  verificationStatus: NativeBackendVerificationStatus;
+};
+
 export type NativeVerifyIdentitySupportIntent = {
   initialMessage: string;
   subject: "Identity verification support";
@@ -139,7 +216,9 @@ export type NativeVerifyIdentitySupportIntent = {
 
 export type NativeVerifyIdentityUpdatedEvent = {
   snapshot?: NativeVerifyIdentitySnapshot | null;
-  source: "snapshot" | "phone" | "human" | "card" | "device_fingerprint" | "manual";
+  userId?: string | null;
+  verified?: boolean;
+  source: "snapshot" | "phone" | "human" | "document" | "card" | "device_fingerprint" | "manual";
 };
 
 export class NativeVerifyIdentityError extends Error {
@@ -170,6 +249,8 @@ type NativeFunctionResult<T> = {
 
 type NativeVerifyIdentitySession = {
   accessToken: string;
+  expiresAt: number | null;
+  refreshToken: string | null;
   userId: string;
 };
 
@@ -208,6 +289,13 @@ type NativeCardStatusResponse = {
   setupIntentId?: unknown;
   publishableKey?: unknown;
   lastSetupError?: NativeCardLastError | null;
+  identity_document_status?: unknown;
+  identity_document_type?: unknown;
+  identity_document_country?: unknown;
+  identity_document_dob?: unknown;
+  identity_document_gender?: unknown;
+  document_sex_marker?: unknown;
+  identity_document_confirmed_at?: unknown;
 };
 
 type NativeCardCreateResponse = {
@@ -239,15 +327,22 @@ type NativeFallbackProfile = {
   stripe_setup_intent_id?: string | null;
   legal_name?: string | null;
   verification_rejection_code?: string | null;
+  identity_document_status?: string | null;
+  identity_document_type?: string | null;
+  identity_document_country?: string | null;
+  identity_document_dob?: string | null;
+  identity_document_gender?: string | null;
+  document_sex_marker?: string | null;
+  identity_document_confirmed_at?: string | null;
 };
 
 const DEVICE_FINGERPRINT_STORAGE_KEY = "huddle_native_verify_identity_install_id_v1";
 const LEGACY_DEVICE_FINGERPRINT_STORAGE_KEY = "huddle_native_verify_identity_device_fingerprint_placeholder_v1";
-const PROFILE_STATUS_CACHE_VERSION = 2;
-const PROFILE_STATUS_CACHE_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+const PROFILE_STATUS_CACHE_VERSION = 3;
 const nativeVerifyIdentityUpdatedListeners = new Set<(event: NativeVerifyIdentityUpdatedEvent) => void>();
-let nativeVerifyIdentitySessionFallback: NativeVerifyIdentitySession | null = null;
+let nativeVerifyIdentityUserId: string | null = null;
 const nativeVerifyIdentityProfileStatusMemory = new Map<string, NativeVerifyIdentityProfileStatusCachePayload>();
+const nativeVerifyIdentityRefreshInFlight = new Map<string, Promise<{ profile: NativeVerifyIdentityProfileStatus; snapshot: NativeVerifyIdentitySnapshot }>>();
 
 type NativeVerifyIdentityProfileStatusCachePayload = NativeVerifyIdentityProfileStatus & {
   cachedAt: number;
@@ -274,6 +369,16 @@ const normalize = (value: unknown) => String(value || "").trim().toLowerCase();
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const normalizeIdentityDocumentSexMarker = (value: unknown): string | null => {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  const normalized = raw.toLowerCase();
+  if (normalized === "f" || normalized === "female" || normalized === "woman") return "Female";
+  if (normalized === "m" || normalized === "male" || normalized === "man") return "Male";
+  if (normalized === "x" || normalized === "non-binary" || normalized === "nonbinary") return "Non-binary";
+  return raw;
+};
+
 const resolveNativeStripeMode = (): NativeStripeMode | null => {
   const value = normalize(process.env.EXPO_PUBLIC_STRIPE_LOCAL_MODE || process.env.VITE_STRIPE_LOCAL_MODE || "");
   if (value === "test" || value === "live") return value;
@@ -299,6 +404,15 @@ const asVerificationRejectionCode = (value: unknown): NativeVerificationRejectio
   return normalize(value) === "blocked_identity" ? "blocked_identity" : null;
 };
 
+const asIdentityDocumentStatus = (value: unknown): NativeIdentityDocumentStatus => {
+  return normalize(value) === "confirmed" ? "confirmed" : "not_started";
+};
+
+const asIdentityDocumentType = (value: unknown): NativeIdentityDocumentType | null => {
+  const v = normalize(value);
+  return v === "passport" || v === "id" ? v : null;
+};
+
 const asNullableString = (value: unknown): string | null => {
   return typeof value === "string" && value.trim() ? value : null;
 };
@@ -306,52 +420,47 @@ const asNullableString = (value: unknown): string | null => {
 const profileStatusSessionKey = (userId: string, sessionKey?: string | null) => String(sessionKey || `${userId}:0`);
 const profileStatusCacheKey = (userId: string, sessionKey?: string | null) =>
   `huddle_native_verify_identity_profile_status:v${PROFILE_STATUS_CACHE_VERSION}:${userId}:${profileStatusSessionKey(userId, sessionKey)}`;
+const PROFILE_STATUS_CACHE_PREFIX = "huddle_native_verify_identity_profile_status:v";
+let persistedProfileStatusSweep: Promise<void> | null = null;
 
-const isFreshProfileStatusCache = (cachedAt: number) => Date.now() - cachedAt <= PROFILE_STATUS_CACHE_MAX_AGE_MS;
+const sweepPersistedNativeVerifyIdentityProfileStatus = (): Promise<void> => {
+  if (persistedProfileStatusSweep) return persistedProfileStatusSweep;
+  persistedProfileStatusSweep = readNativeDisplayCacheKeys()
+    .then((keys) => keys.filter((key) => key.startsWith(PROFILE_STATUS_CACHE_PREFIX)))
+    .then((keys) => (keys.length > 0 ? AsyncStorage.multiRemove(keys) : undefined))
+    .then(() => undefined)
+    .catch(() => {
+      persistedProfileStatusSweep = null;
+    });
+  return persistedProfileStatusSweep;
+};
 
-const isProfileStatusCachePayload = (
-  value: Partial<NativeVerifyIdentityProfileStatusCachePayload>,
-  userId: string,
-  sessionKey: string,
-): value is NativeVerifyIdentityProfileStatusCachePayload => {
-  return (
-    value.version === PROFILE_STATUS_CACHE_VERSION &&
-    value.userId === userId &&
-    value.sessionKey === sessionKey &&
-    typeof value.cachedAt === "number" &&
-    isFreshProfileStatusCache(value.cachedAt) &&
-    (value.phone === null || typeof value.phone === "string") &&
-    (value.phoneVerificationStatus === null || typeof value.phoneVerificationStatus === "string") &&
-    (value.phoneVerifiedAt === null || typeof value.phoneVerifiedAt === "string") &&
-    (value.legalName === null || typeof value.legalName === "string") &&
-    typeof value.isVerified === "boolean"
+const removePersistedNativeVerifyIdentityProfileStatus = async (userId: string, sessionKey: string): Promise<void> => {
+  await sweepPersistedNativeVerifyIdentityProfileStatus();
+  await Promise.all(
+    [2, PROFILE_STATUS_CACHE_VERSION].map((version) =>
+      AsyncStorage.removeItem(
+        `huddle_native_verify_identity_profile_status:v${version}:${userId}:${sessionKey}`,
+      ).catch(() => undefined),
+    ),
   );
 };
 
 export const readCachedNativeVerifyIdentityProfileStatus = async (
   options: { sessionKey?: string | null; userId?: string | null } = {},
 ): Promise<NativeVerifyIdentityProfileStatus | null> => {
-  const session = await getNativeVerifyIdentitySession();
-  const userId = String(options.userId || session.userId).trim();
+  const providedUserId = String(options.userId || "").trim();
+  const session = providedUserId && options.sessionKey ? null : await getNativeVerifyIdentitySession();
+  const userId = String(providedUserId || session?.userId || "").trim();
   const sessionKey = profileStatusSessionKey(userId, options.sessionKey);
   const key = profileStatusCacheKey(userId, sessionKey);
   const memory = nativeVerifyIdentityProfileStatusMemory.get(key);
-  if (memory && isFreshProfileStatusCache(memory.cachedAt)) return memory;
-  if (memory) nativeVerifyIdentityProfileStatusMemory.delete(key);
-  try {
-    const raw = await AsyncStorage.getItem(key);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<NativeVerifyIdentityProfileStatusCachePayload>;
-    if (!isProfileStatusCachePayload(parsed, userId, sessionKey)) {
-      await AsyncStorage.removeItem(key);
-      return null;
-    }
-    nativeVerifyIdentityProfileStatusMemory.set(key, parsed);
-    return parsed;
-  } catch {
-    await AsyncStorage.removeItem(key).catch(() => {});
-    return null;
-  }
+  if (memory) return memory;
+  // Profile status contains legal name and document DOB. Never hydrate it from
+  // plaintext storage. Legacy removal is background hygiene and must never
+  // delay the identity screen's memory decision.
+  void removePersistedNativeVerifyIdentityProfileStatus(userId, sessionKey);
+  return null;
 };
 
 const writeNativeVerifyIdentityProfileStatusCache = async (
@@ -369,7 +478,17 @@ const writeNativeVerifyIdentityProfileStatusCache = async (
     version: PROFILE_STATUS_CACHE_VERSION,
   };
   nativeVerifyIdentityProfileStatusMemory.set(profileStatusCacheKey(userId, sessionKey), payload);
-  await AsyncStorage.setItem(profileStatusCacheKey(userId, sessionKey), JSON.stringify(payload)).catch(() => {});
+  await removePersistedNativeVerifyIdentityProfileStatus(userId, sessionKey);
+};
+
+export const patchNativeVerifyIdentityProfileStatusCache = async (
+  patch: Partial<NativeVerifyIdentityProfileStatus>,
+  options: { sessionKey?: string | null; userId?: string | null } = {},
+) => {
+  const existing = await readCachedNativeVerifyIdentityProfileStatus(options).catch(() => null);
+  if (!existing) return false;
+  await writeNativeVerifyIdentityProfileStatusCache({ ...existing, ...patch }, options);
+  return true;
 };
 
 const asHumanChallenge = (value: unknown): NativeHumanChallenge | null => {
@@ -389,7 +508,7 @@ const mapNativeVerifyIdentityError = (
 ): NativeVerifyIdentityError => {
   const code = normalize(raw) || "unknown_error";
   if (code.includes("auth_required") || code.includes("missing_token") || code.includes("auth_user_missing") || code.includes("unauthorized")) {
-    return new NativeVerifyIdentityError(code, "Your session expired. Please sign in again.", status);
+    return new NativeVerifyIdentityError(code, "Verification is preparing. Try again in a moment.", status);
   }
   if (code.includes("missing_stripe_publishable_key")) {
     return new NativeVerifyIdentityError(code, "Card verification is not configured yet. Please contact support.", status);
@@ -421,11 +540,32 @@ const mapNativeVerifyIdentityError = (
   if (code.includes("invalid_verification_result")) {
     return new NativeVerifyIdentityError(code, "We couldn't confirm your human check. Please try again with your face centered in the oval.", status);
   }
+  if (code.includes("liveness_binding_required")) {
+    return new NativeVerifyIdentityError(code, "Complete the human check before confirming your document.", status);
+  }
+  if (code.includes("human_verification_required")) {
+    return new NativeVerifyIdentityError(code, "We couldn't confirm your human check. Please reopen verification and try again.", status);
+  }
+  if (code.includes("reused_document")) {
+    return new NativeVerifyIdentityError(code, "This document is already linked to another account.", status);
+  }
+  if (code.includes("expired_document")) {
+    return new NativeVerifyIdentityError(code, "This document could not be verified. Please use a valid unexpired document.", status);
+  }
+  if (code.includes("missing_identity_document_fields")) {
+    return new NativeVerifyIdentityError(code, "Confirm all required document details before continuing.", status);
+  }
+  if (code.includes("identity_name_mismatch")) {
+    return new NativeVerifyIdentityError(code, "The name you entered does not match this document. Check the name or scan again.", status);
+  }
+  if (code.includes("passport_mrz_required") || code.includes("missing_document_number") || code.includes("missing_document_expiry")) {
+    return new NativeVerifyIdentityError(code, "We need a complete passport scan before confirming these details.", status);
+  }
   if (code.includes("face_detector_unsupported")) {
     return new NativeVerifyIdentityError(code, "This device does not support the camera verification check.", status);
   }
   if (code.includes("attempt_not_found")) {
-    return new NativeVerifyIdentityError(code, "Verification session expired. Please start again.", status);
+    return new NativeVerifyIdentityError(code, "Verification is preparing. Try again in a moment.", status);
   }
   if (code.includes("card_setup_timeout") || code.includes("stripe_timeout")) {
     return new NativeVerifyIdentityError(code, "Card setup is taking too long. Please try again.", status);
@@ -439,23 +579,60 @@ const mapNativeVerifyIdentityError = (
   return new NativeVerifyIdentityError(code, "We couldn't complete verification. Please retry.", status);
 };
 
-const getNativeVerifyIdentitySession = async (): Promise<NativeVerifyIdentitySession> => {
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-  const accessToken = String(session?.access_token || "").trim();
-  const userId = String(session?.user?.id || "").trim();
-  if (accessToken && userId) return { accessToken, userId };
-  if (nativeVerifyIdentitySessionFallback?.accessToken && nativeVerifyIdentitySessionFallback.userId) {
-    return nativeVerifyIdentitySessionFallback;
+const hashNativeVerifyIdentityValue = async (value: string): Promise<string> => {
+  const normalized = value.trim();
+  const subtle = globalThis.crypto?.subtle;
+  if (subtle) {
+    const input = new TextEncoder().encode(normalized);
+    const digest = await subtle.digest("SHA-256", input);
+    return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
   }
+  let hash = 2166136261;
+  for (let index = 0; index < normalized.length; index += 1) {
+    hash ^= normalized.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `${Math.abs(hash).toString(16).padStart(8, "0")}${normalized.length.toString(16).padStart(8, "0")}`.repeat(2);
+};
+
+const normalizeNativeVerifyIdentitySession = (session: Session | null | undefined): NativeVerifyIdentitySession | null => {
+  const accessToken = String(session?.access_token || "").trim();
+  const refreshToken = String(session?.refresh_token || "").trim();
+  const userId = String(session?.user?.id || "").trim();
+  if (!accessToken || !userId || !isUsableAuthenticatedUserJwt(accessToken)) return null;
+  const accessTokenExp = jwtExp(accessToken);
+  return {
+    accessToken,
+    expiresAt: typeof session?.expires_at === "number" ? session.expires_at : accessTokenExp,
+    refreshToken: refreshToken || null,
+    userId,
+  };
+};
+
+const isNativeVerifyIdentitySessionUsable = (session: NativeVerifyIdentitySession): boolean => (
+  Boolean(session.accessToken && session.userId) &&
+  (!session.expiresAt || session.expiresAt * 1000 > Date.now() + 30000)
+);
+
+const getNativeVerifyIdentitySession = async (): Promise<NativeVerifyIdentitySession> => {
+  const fresh = await getFreshNativeSession();
+  const current = normalizeNativeVerifyIdentitySession(fresh?.session);
+  if (current && isNativeVerifyIdentitySessionUsable(current)) return current;
   throw mapNativeVerifyIdentityError("auth_required", 401);
 };
 
 export const setNativeVerifyIdentitySessionFallback = (session: Session | null | undefined): void => {
-  const accessToken = String(session?.access_token || "").trim();
-  const userId = String(session?.user?.id || "").trim();
-  nativeVerifyIdentitySessionFallback = accessToken && userId ? { accessToken, userId } : null;
+  const nextSession = normalizeNativeVerifyIdentitySession(session);
+  if (!nextSession || nextSession.userId !== nativeVerifyIdentityUserId) {
+    nativeVerifyIdentityProfileStatusMemory.clear();
+  }
+  nativeVerifyIdentityUserId = nextSession?.userId ?? null;
+  noteNativeAuthState(session);
+};
+
+export const getNativeVerifyIdentityAccessToken = async (): Promise<string> => {
+  const session = await getNativeVerifyIdentitySession();
+  return session.accessToken;
 };
 
 const postNativeVerifyIdentityFunction = async <T>(
@@ -463,10 +640,11 @@ const postNativeVerifyIdentityFunction = async <T>(
   body: Record<string, unknown>,
   accessToken: string,
 ): Promise<NativeFunctionResult<T>> => {
+  const normalizedAccessToken = String(accessToken || "").trim();
   try {
     const response = await fetch(`${supabaseUrl}/functions/v1/${functionName}`, {
       method: "POST",
-      headers: createNativeFunctionHeaders(accessToken),
+      headers: await createFreshNativeFunctionHeaders(normalizedAccessToken, { functionName, routeToken: normalizedAccessToken }),
       body: JSON.stringify(body),
     });
     const payload = (await response.json().catch(() => null)) as NativeFunctionEnvelope<T> | null;
@@ -537,10 +715,12 @@ const toCardStatusResult = (data: NativeCardStatusResponse): NativeCardStatusRes
 const profileToCardStatusResponse = (profile: NativeFallbackProfile): NativeCardStatusResponse => ({
   verificationStatus: profile.verification_status ?? "unverified",
   cardStatus: profile.card_verification_status ?? "not_started",
-  cardVerified: Boolean(profile.card_verified),
-  cardBrand: profile.card_brand ?? null,
-  cardLast4: profile.card_last4 ?? null,
-  legalName: profile.legal_name ?? null,
+    cardVerified: Boolean(profile.card_verified),
+    cardBrand: profile.card_brand ?? null,
+    cardLast4: profile.card_last4 ?? null,
+    document_sex_marker: profile.document_sex_marker ?? profile.identity_document_gender ?? null,
+    identity_document_gender: profile.document_sex_marker ?? profile.identity_document_gender ?? null,
+    legalName: profile.legal_name ?? null,
   verificationRejectionCode: profile.verification_rejection_code ?? null,
   blockedIdentity: {
     blocked: profile.verification_rejection_code === "blocked_identity",
@@ -554,13 +734,13 @@ const profileToCardStatusResponse = (profile: NativeFallbackProfile): NativeCard
 });
 
 const fetchVerifyIdentityProfileSnapshot = async (accessToken: string): Promise<NativeFallbackProfile | null> => {
+  const token = await getFreshNativeAccessToken(accessToken);
+  if (!token) throw mapNativeVerifyIdentityError("auth_required", 401);
   const response = await fetch(`${supabaseUrl}/rest/v1/rpc/get_native_verify_identity_profile_snapshot`, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      apikey: supabaseAnonKey,
+    headers: createNativeAuthenticatedHeaders(token, {
       "content-type": "application/json",
-    },
+    }),
     body: "{}",
   });
   const raw = await response.text();
@@ -569,27 +749,18 @@ const fetchVerifyIdentityProfileSnapshot = async (accessToken: string): Promise<
   return parsed as NativeFallbackProfile;
 };
 
-const fetchCardStatusFallbackProfile = async (accessToken: string): Promise<NativeCardStatusResponse | null> => {
-  const data = await fetchVerifyIdentityProfileSnapshot(accessToken);
-  return data ? profileToCardStatusResponse(data) : null;
-};
-
-export const fetchNativeVerifyIdentitySnapshot = async (): Promise<NativeVerifyIdentitySnapshot> => {
-  const { accessToken } = await getNativeVerifyIdentitySession();
-  const stripeMode = resolveNativeStripeMode();
-  const [humanResult, cardResult] = await Promise.all([
+const fetchNativeVerifyIdentitySnapshotWithProfile = async (
+  accessToken: string,
+  profileSnapshotRequest: Promise<NativeFallbackProfile | null>,
+): Promise<NativeVerifyIdentitySnapshot> => {
+  const [humanResult, profileSnapshot] = await Promise.all([
     invokeWithTransient503Retry<NativeHumanSnapshotResponse>("verify-human-challenge", { action: "get" }, accessToken),
-    invokeWithTransient503Retry<NativeCardStatusResponse>("create-identity-setup-intent", { action: "status", stripeMode }, accessToken),
+    profileSnapshotRequest.then((profile) => profile ? profileToCardStatusResponse(profile) : null),
   ]);
 
   if (humanResult.error) throw mapNativeVerifyIdentityError(humanResult.error, humanResult.status);
   const humanData = humanResult.data ?? {};
-  let cardData = cardResult.data ?? {};
-  if (cardResult.error) {
-    const fallback = await fetchCardStatusFallbackProfile(accessToken);
-    if (!fallback) throw mapNativeVerifyIdentityError(cardResult.error, cardResult.status);
-    cardData = fallback;
-  }
+  const cardData = profileSnapshot ?? {};
 
   const card = toCardStatusResult(cardData);
   const humanAttempt = humanData.attempt ?? null;
@@ -611,6 +782,53 @@ export const fetchNativeVerifyIdentitySnapshot = async (): Promise<NativeVerifyI
     humanAttemptId: asNullableString(humanAttempt?.id),
     humanAttemptCompletedAt: asNullableString(humanAttempt?.completed_at),
     humanChallenge: asHumanChallenge(humanAttempt?.challenge_payload),
+  identityDocumentStatus: asIdentityDocumentStatus(cardData.identity_document_status),
+  identityDocumentType: asIdentityDocumentType(cardData.identity_document_type),
+  identityDocumentCountry: asNullableString(cardData.identity_document_country),
+  identityDocumentDob: asNullableString(cardData.identity_document_dob),
+  identityDocumentGender: normalizeIdentityDocumentSexMarker(cardData.document_sex_marker ?? cardData.identity_document_gender),
+  identityDocumentConfirmedAt: asNullableString(cardData.identity_document_confirmed_at),
+  };
+};
+
+export const fetchNativeVerifyIdentitySnapshot = async (): Promise<NativeVerifyIdentitySnapshot> => {
+  const { accessToken } = await getNativeVerifyIdentitySession();
+  return fetchNativeVerifyIdentitySnapshotWithProfile(accessToken, fetchVerifyIdentityProfileSnapshot(accessToken));
+};
+
+const profileSnapshotToNativeVerifyIdentityStatus = (
+  profile: NativeFallbackProfile,
+): NativeVerifyIdentityProfileStatus => {
+  const profileVerified = isNativeVerifiedProfile(profile);
+  const phoneVerificationStatus = profile.phone_verified_at
+    ? "verified"
+    : asNullableString(profile.phone_verification_status);
+  const humanStatus = profile.human_verified_at
+    ? "passed"
+    : asHumanStatus(profile.human_verification_status);
+  const cardVerified = Boolean(profile.card_verified || profile.card_verified_at);
+  const cardStatus = cardVerified
+    ? "passed"
+    : asCardStatus(profile.card_verification_status);
+  return {
+    phone: asNullableString(profile.phone),
+    phoneVerificationStatus,
+    phoneVerifiedAt: asNullableString(profile.phone_verified_at),
+    verificationStatus: profileVerified ? "verified" : asStatus(profile.verification_status),
+    isVerified: profileVerified,
+    legalName: asNullableString(profile.legal_name),
+    humanStatus,
+    cardStatus,
+    cardVerified,
+    cardBrand: asNullableString(profile.card_brand),
+    cardLast4: asNullableString(profile.card_last4),
+    verificationRejectionCode: asVerificationRejectionCode(profile.verification_rejection_code),
+    identityDocumentStatus: asIdentityDocumentStatus(profile.identity_document_status),
+    identityDocumentType: asIdentityDocumentType(profile.identity_document_type),
+    identityDocumentCountry: asNullableString(profile.identity_document_country),
+    identityDocumentDob: asNullableString(profile.identity_document_dob),
+    identityDocumentGender: normalizeIdentityDocumentSexMarker(profile.document_sex_marker ?? profile.identity_document_gender),
+    identityDocumentConfirmedAt: asNullableString(profile.identity_document_confirmed_at),
   };
 };
 
@@ -624,39 +842,106 @@ export const fetchNativeVerifyIdentityProfileStatus = async (
   }
   const profile = await fetchVerifyIdentityProfileSnapshot(accessToken);
   if (!profile) throw mapNativeVerifyIdentityError("profile_not_ready");
-  const profileVerified = isNativeVerifiedProfile(profile);
-  const phoneVerificationStatus = profile.phone_verified_at
-    ? "verified"
-    : asNullableString(profile.phone_verification_status);
-  const humanStatus = profile.human_verified_at
-    ? "passed"
-    : asHumanStatus(profile.human_verification_status);
-  const cardVerified = Boolean(profile.card_verified || profile.card_verified_at);
-  const cardStatus = cardVerified
-    ? "passed"
-    : asCardStatus(profile.card_verification_status);
-  const status = {
-    phone: asNullableString(profile.phone),
-    phoneVerificationStatus,
-    phoneVerifiedAt: asNullableString(profile.phone_verified_at),
-    verificationStatus: profileVerified ? "verified" as const : asStatus(profile.verification_status),
-    isVerified: profileVerified,
-    legalName: asNullableString(profile.legal_name),
-    humanStatus,
-    cardStatus,
-    cardVerified,
-    cardBrand: asNullableString(profile.card_brand),
-    cardLast4: asNullableString(profile.card_last4),
-    verificationRejectionCode: asVerificationRejectionCode(profile.verification_rejection_code),
-  };
+  const status = profileSnapshotToNativeVerifyIdentityStatus(profile);
   await writeNativeVerifyIdentityProfileStatusCache(status, options);
   return status;
+};
+
+export const fetchNativeVerifyIdentityRefreshState = async (
+  options: { sessionKey?: string | null; userId?: string | null } = {},
+): Promise<{ profile: NativeVerifyIdentityProfileStatus; snapshot: NativeVerifyIdentitySnapshot }> => {
+  const key = `${String(options.userId || "").trim()}:${String(options.sessionKey || "").trim()}`;
+  const existing = nativeVerifyIdentityRefreshInFlight.get(key);
+  if (existing) return existing;
+  const request = (async () => {
+    const { accessToken } = await getNativeVerifyIdentitySession();
+    const sharedProfileSnapshot = fetchVerifyIdentityProfileSnapshot(accessToken);
+    const [snapshot, profile] = await Promise.all([
+      fetchNativeVerifyIdentitySnapshotWithProfile(accessToken, sharedProfileSnapshot),
+      sharedProfileSnapshot.then(async (value) => {
+        if (!value) throw mapNativeVerifyIdentityError("profile_not_ready");
+        const status = profileSnapshotToNativeVerifyIdentityStatus(value);
+        await writeNativeVerifyIdentityProfileStatusCache(status, options);
+        return status;
+      }),
+    ]);
+    return { profile, snapshot };
+  })();
+  nativeVerifyIdentityRefreshInFlight.set(key, request);
+  try {
+    return await request;
+  } finally {
+    if (nativeVerifyIdentityRefreshInFlight.get(key) === request) {
+      nativeVerifyIdentityRefreshInFlight.delete(key);
+    }
+  }
+};
+
+export const confirmNativeIdentityDocument = async (
+  payload: NativeConfirmIdentityDocumentPayload,
+): Promise<NativeConfirmIdentityDocumentResult> => {
+  const session = await getNativeVerifyIdentitySession();
+  let functionResult = await invokeWithTransient503Retry<Partial<NativeConfirmIdentityDocumentResult>>(
+    "native-verify-identity-document",
+    {
+      action: "confirm_document",
+      confidenceScore: payload.confidenceScore,
+      confirmed: payload.confirmed,
+      documentExpiresOn: payload.documentExpiresOn ?? null,
+      documentLast4: payload.documentLast4 ?? null,
+      documentNumber: payload.documentNumber ?? null,
+      documentType: payload.documentType,
+      extractionMethod: payload.extractionMethod,
+      extractedNameEvidence: payload.extractedNameEvidence ?? [payload.originalExtracted.legalName].filter(Boolean),
+      originalExtracted: payload.originalExtracted,
+      documentGender: payload.confirmed.documentGender ?? payload.originalExtracted.documentGender ?? null,
+    },
+    session.accessToken,
+  );
+  if (functionResult.status === 401) {
+    const refreshed = normalizeNativeVerifyIdentitySession(await refreshNativeSessionOnce(
+      session.refreshToken ? { refresh_token: session.refreshToken } : null,
+    ));
+    if (refreshed && isNativeVerifyIdentitySessionUsable(refreshed)) {
+      functionResult = await invokeWithTransient503Retry<Partial<NativeConfirmIdentityDocumentResult>>(
+        "native-verify-identity-document",
+        {
+          action: "confirm_document",
+          confidenceScore: payload.confidenceScore,
+          confirmed: payload.confirmed,
+          documentExpiresOn: payload.documentExpiresOn ?? null,
+          documentLast4: payload.documentLast4 ?? null,
+          documentNumber: payload.documentNumber ?? null,
+          documentType: payload.documentType,
+          extractionMethod: payload.extractionMethod,
+          extractedNameEvidence: payload.extractedNameEvidence ?? [payload.originalExtracted.legalName].filter(Boolean),
+          originalExtracted: payload.originalExtracted,
+          documentGender: payload.confirmed.documentGender ?? payload.originalExtracted.documentGender ?? null,
+        },
+        refreshed.accessToken,
+      );
+    }
+  }
+  const result = throwIfFunctionError(
+    functionResult,
+  );
+  return {
+    ok: Boolean(result.ok),
+    documentStatus: asIdentityDocumentStatus(result.documentStatus),
+    verificationStatus: asStatus(result.verificationStatus),
+  };
 };
 
 export const startNativeHumanChallenge = async (): Promise<NativeStartHumanChallengeResult> => {
   const { accessToken } = await getNativeVerifyIdentitySession();
   const data = throwIfFunctionError(
-    await invokeWithTransient503Retry<NativeHumanStartResponse>("verify-human-challenge", { action: "start" }, accessToken),
+    await invokeWithTransient503Retry<NativeHumanStartResponse>(
+      "verify-human-challenge",
+      {
+        action: "start",
+      },
+      accessToken,
+    ),
   );
   const attemptId = asNullableString(data.attempt?.id);
   const challenge = asHumanChallenge(data.attempt?.challenge_payload);
@@ -755,9 +1040,31 @@ export const subscribeNativeVerifyIdentityUpdated = (
 export const refreshNativeVerifyIdentityProfileCache = async (options: { accessToken?: string | null; sessionKey?: string | null; userId?: string | null } = {}): Promise<boolean> => {
   try {
     const userId = String(options.userId || "").trim();
-    const accessToken = String(options.accessToken || "").trim();
+    let accessToken = String(options.accessToken || "").trim();
+    if (!accessToken) {
+      accessToken = (await getNativeVerifyIdentitySession()).accessToken;
+    }
     if (!userId || !accessToken) return false;
     await fetchNativeProfileSummary(userId, { force: true, accessToken, sessionKey: options.sessionKey });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+export const refreshNativeVerifyIdentityVerifiedSurfaces = async (options: { accessToken?: string | null; refetch?: boolean; sessionKey?: string | null; userId?: string | null } = {}): Promise<boolean> => {
+  try {
+    const userId = String(options.userId || "").trim();
+    let accessToken = String(options.accessToken || "").trim();
+    if (options.refetch && !accessToken) {
+      accessToken = (await getNativeVerifyIdentitySession()).accessToken;
+    }
+    if (!userId) return false;
+    await invalidateNativePublicProfileCaches({ userId });
+    invalidateNativeDiscoveryRelationshipCache(userId);
+    if (accessToken) {
+      await fetchNativeProfileSummary(userId, { force: true, accessToken, sessionKey: options.sessionKey });
+    }
     return true;
   } catch {
     return false;

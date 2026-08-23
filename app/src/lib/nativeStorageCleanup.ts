@@ -1,8 +1,8 @@
 import { nativeExactTokenRpc } from "./nativeExactTokenRequest";
 
-export type NativeStorageCleanupBucket = "notices" | "social_album" | "alerts" | "chat_attachments" | "service_care_evidence" | "profile_photos" | "pets" | "avatars";
+export type NativeStorageCleanupBucket = "notices" | "social_album" | "alerts" | "chat_attachments" | "care_attachments" | "service_care_evidence" | "care_agreements" | "profile_photos" | "pets" | "private_pet_photos" | "avatars";
 export type NativeProtectedActionStage = "upload" | "register" | "domain_save" | "cleanup" | "delete" | "unknown";
-export type NativeProtectedActionCleanupResult = "queued" | "not_needed" | "failed";
+export type NativeProtectedActionCleanupResult = "deleted" | "queued" | "not_needed" | "failed";
 
 export type NativeProtectedActionResult<T> = {
   ok: boolean;
@@ -62,13 +62,14 @@ export const getNativeProtectedActionResult = <T = unknown>(error: unknown): Nat
 );
 
 export const logNativeProtectedActionFailure = (scope: string, error: unknown) => {
+  if (!__DEV__) return;
   const result = getNativeProtectedActionResult(error);
   if (result) {
     console.warn(scope, {
       stage: result.stage || "unknown",
       cleanupAttempted: result.cleanupAttempted === true,
       cleanupResult: result.cleanupResult || "not_needed",
-      originalError: stringifyNativeProtectedActionError(result.originalError),
+      errorCategory: result.originalError ? "protected_action_failed" : "unknown_error",
     });
     return;
   }
@@ -76,7 +77,7 @@ export const logNativeProtectedActionFailure = (scope: string, error: unknown) =
     stage: "unknown",
     cleanupAttempted: false,
     cleanupResult: "not_needed",
-    originalError: stringifyNativeProtectedActionError(error),
+    errorCategory: error ? "protected_action_failed" : "unknown_error",
   });
 };
 

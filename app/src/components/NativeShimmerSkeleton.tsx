@@ -22,7 +22,7 @@ import Animated, {
   withRepeat,
   withTiming,
 } from "react-native-reanimated";
-import { huddleColors, huddleRadii, huddleSpacing, huddleShadows } from "../theme/huddleDesignTokens";
+import { huddleColors, huddlePolaroid, huddleRadii, huddleSpacing, huddleShadows } from "../theme/huddleDesignTokens";
 
 const SHIMMER_DURATION_MS = 1400;
 const HIGHLIGHT_WIDTH_RATIO = 0.6;
@@ -53,7 +53,7 @@ export function NativeShimmerSkeleton({ style }: NativeShimmerSkeletonProps) {
   }));
 
   return (
-    <Animated.View style={[styles.base, style]}>
+    <View style={[styles.base, style]}>
       {!reduceMotion ? (
         <Animated.View style={[styles.highlightWrapper, highlightStyle]} pointerEvents="none">
           <LinearGradient
@@ -68,7 +68,7 @@ export function NativeShimmerSkeleton({ style }: NativeShimmerSkeletonProps) {
           />
         </Animated.View>
       ) : null}
-    </Animated.View>
+    </View>
   );
 }
 
@@ -179,5 +179,57 @@ const groupSkeletonStyles = StyleSheet.create({
     height: 11,
     borderRadius: 5,
     width: "40%",
+  },
+});
+
+// ─── Carer (Service) card skeleton ───────────────────────────────────────────
+// Matches the polaroid-style provider card on the Service tab: photo area on
+// top, name + meta caption beneath. Render a grid of these while the Service
+// list is loading.
+export function NativeCarerCardSkeleton() {
+  return (
+    <View style={carerSkeletonStyles.frame}>
+      <NativeShimmerSkeleton style={carerSkeletonStyles.photo} />
+      <View style={carerSkeletonStyles.caption}>
+        <NativeShimmerSkeleton style={carerSkeletonStyles.lineName} />
+        <NativeShimmerSkeleton style={carerSkeletonStyles.lineMeta} />
+      </View>
+    </View>
+  );
+}
+
+const carerSkeletonStyles = StyleSheet.create({
+  frame: {
+    aspectRatio: huddlePolaroid.frame.aspectRatio,
+    borderRadius: huddlePolaroid.frame.radius,
+    backgroundColor: huddlePolaroid.frame.backgroundColor,
+    overflow: "hidden",
+    position: "relative",
+    ...huddleShadows.glassElevation1,
+  },
+  photo: {
+    position: "absolute",
+    top: "5%",
+    left: "5%",
+    right: "5%",
+    bottom: "31%",
+    borderRadius: 2,
+  },
+  caption: {
+    position: "absolute",
+    top: "72%",
+    left: "8%",
+    right: "8%",
+    gap: huddleSpacing.x1,
+  },
+  lineName: {
+    height: 13,
+    borderRadius: 6,
+    width: "75%",
+  },
+  lineMeta: {
+    height: 10,
+    borderRadius: 5,
+    width: "50%",
   },
 });

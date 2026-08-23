@@ -1,7 +1,8 @@
 import "react-native-url-polyfill/auto";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as SecureStore from "expo-secure-store";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, processLock } from "@supabase/supabase-js";
+import { fetchNativeResponseWithTimeout } from "./nativeTimeout";
 
 type StorageValue = string | null;
 
@@ -32,8 +33,9 @@ const REPEAT_WARNING_LIMIT = 5;
 const REPEAT_WARNING_WINDOW_MS = 10_000;
 const SECURE_STORE_CHUNK_SIZE = 1_900;
 
-const chunkManifestKey = (key: string) => `${key}:chunks`;
-const chunkItemKey = (key: string, index: number) => `${key}:chunk:${index}`;
+const chunkManifestKey = (key: string) => `${key}.chunks`;
+const chunkItemKey = (key: string, index: number) => `${key}.chunk.${index}`;
+const ephemeralSecureValues = new Map<string, string>();
 
 const readChunkManifest = async (key: string): Promise<ChunkManifest | null> => {
   const raw = await SecureStore.getItemAsync(chunkManifestKey(key));
@@ -65,8 +67,15 @@ const removeChunkedSecureValue = async (key: string): Promise<void> => {
   await SecureStore.deleteItemAsync(chunkManifestKey(key)).catch(() => undefined);
 };
 
-const secureStorageAdapter = {
+export const getNativeAuthStorageHealth = () => ({
+  ephemeral: ephemeralSecureValues.size > 0,
+  ephemeralEntryCount: ephemeralSecureValues.size,
+});
+
+export const secureStorageAdapter = {
   getItem: async (key: string): Promise<StorageValue> => {
+    const ephemeralValue = ephemeralSecureValues.get(key);
+    if (ephemeralValue !== undefined) return ephemeralValue;
     try {
       const manifest = await readChunkManifest(key);
       if (manifest) {
@@ -75,45 +84,70 @@ const secureStorageAdapter = {
         );
 
         if (chunks.every((chunk): chunk is string => chunk !== null)) {
-          return chunks.join("");
+          const value = chunks.join("");
+          await AsyncStorage.removeItem(key).catch(() => undefined);
+          return value;
         }
 
         await removeChunkedSecureValue(key);
-        return await AsyncStorage.getItem(key).catch(() => null);
+        return null;
       }
 
-      return (await SecureStore.getItemAsync(key)) ?? (await AsyncStorage.getItem(key).catch(() => null));
+      const secureValue = await SecureStore.getItemAsync(key);
+      if (secureValue !== null) {
+        await AsyncStorage.removeItem(key).catch(() => undefined);
+        return secureValue;
+      }
+      const legacyValue = await AsyncStorage.getItem(key).catch(() => null);
+      if (legacyValue !== null) {
+        // Migrate a historical plaintext session once, then delete it. A device
+        // whose keychain is unavailable signs in again instead of retaining a
+        // bearer token in ordinary app storage.
+        await secureStorageAdapter.setItem(key, legacyValue);
+      }
+      return legacyValue;
     } catch {
-      return await AsyncStorage.getItem(key).catch(() => null);
+      return ephemeralSecureValues.get(key) ?? null;
     }
   },
   setItem: async (key: string, value: string): Promise<void> => {
-    let secureStoreSucceeded = false;
+    let attemptedChunkCount = 0;
+    ephemeralSecureValues.set(key, value);
     try {
       await removeChunkedSecureValue(key);
       await SecureStore.deleteItemAsync(key).catch(() => undefined);
 
       if (value.length > SECURE_STORE_CHUNK_SIZE) {
         const chunks = value.match(new RegExp(`.{1,${SECURE_STORE_CHUNK_SIZE}}`, "g")) ?? [""];
+        attemptedChunkCount = chunks.length;
 
         await Promise.all(chunks.map((chunk, index) => SecureStore.setItemAsync(chunkItemKey(key, index), chunk)));
         await SecureStore.setItemAsync(chunkManifestKey(key), JSON.stringify({ version: 1, chunks: chunks.length } satisfies ChunkManifest));
-        secureStoreSucceeded = true;
       } else {
         await SecureStore.setItemAsync(key, value);
-        secureStoreSucceeded = true;
       }
-    } catch {
-      // AsyncStorage keeps auth recoverable on devices/builds where SecureStore
-      // rejects large or temporarily unavailable keychain writes.
-    } finally {
-      await AsyncStorage.setItem(key, value).catch(() => undefined);
-      if (__DEV__ && !secureStoreSucceeded) {
-        console.warn("NATIVE_AUTH_STORAGE_SECURESTORE_FALLBACK", { key });
-      }
+
+      // A successful Keychain/Keystore write makes any historical plaintext
+      // fallback unnecessary. Keep only the secure copy.
+      await AsyncStorage.removeItem(key).catch(() => undefined);
+      ephemeralSecureValues.delete(key);
+    } catch (error) {
+      await removeChunkedSecureValue(key).catch(() => undefined);
+      await Promise.all(
+        Array.from({ length: attemptedChunkCount }, (_, index) =>
+          SecureStore.deleteItemAsync(chunkItemKey(key, index)).catch(() => undefined)
+        )
+      );
+      // Keep the authenticated session alive for this process without ever
+      // writing bearer or refresh tokens to ordinary app storage. A cold launch
+      // will require sign-in if Keychain/Keystore remains unavailable.
+      await AsyncStorage.removeItem(key).catch(() => undefined);
+      if (__DEV__) console.warn("NATIVE_AUTH_STORAGE_EPHEMERAL", { reason: "secure_store_write_failed" });
+      void error;
     }
   },
   removeItem: async (key: string): Promise<void> => {
+    ephemeralSecureValues.delete(key);
     try {
       await removeChunkedSecureValue(key);
       await SecureStore.deleteItemAsync(key);
@@ -223,6 +257,7 @@ const shouldBlockForBudget = () => {
 };
 
 const logFetch = (context: SupabaseFetchContext) => {
+  if (!isDev) return;
   console.log("DATABASE_FETCH_TRIGGERED", {
     time: context.time,
     method: context.method,
@@ -246,7 +281,7 @@ const logFetch = (context: SupabaseFetchContext) => {
 };
 
 const supabaseFetchLogger: typeof fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-  if (shouldBlockForBudget()) {
+  if (isDev && shouldBlockForBudget()) {
     console.warn("SUPABASE_REQUEST_BUDGET_DIAGNOSTIC", {
       reason: "dev request budget exceeded",
       url: typeof input === "string" || input instanceof URL ? String(input) : input instanceof Request ? input.url : String(input),
@@ -269,7 +304,7 @@ const supabaseFetchLogger: typeof fetch = async (input: RequestInfo | URL, init?
     time: nowIso(),
   };
   logFetch(context);
-  return fetch(input, init);
+  return fetchNativeResponseWithTimeout(input, init);
 };
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
@@ -278,8 +313,11 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: false,
+    lock: processLock,
   },
   global: {
-    fetch: supabaseFetchLogger,
+    // Supabase SDK reads, Auth, and Storage share the same bounded native
+    // transport as direct callers. The dev logger remains transparent.
+    fetch: isDev ? supabaseFetchLogger : fetchNativeResponseWithTimeout,
   },
 });

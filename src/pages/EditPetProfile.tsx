@@ -19,6 +19,7 @@ import { resolveCopy } from "@/lib/copy";
 import PhoneInput, { isValidPhoneNumber } from "react-phone-number-input";
 import "react-phone-number-input/style.css";
 import type { Json } from "@/integrations/supabase/types";
+import { takeResolvedAuthReturnTo } from "@/lib/authIntent";
 import { PetDetailsBody, getSterilizedLabel, toTitleCase } from "@/components/pets/PetDetailsBody";
 import {
   SETPET_PREFILL_KEY,
@@ -298,7 +299,9 @@ const parseLegacyVaccinations = (vaccinations: unknown, vaccinationDates: unknow
     : [];
 
   if (!Array.isArray(vaccinations)) {
-    return dates.map((visitDate) => ({ reason: "Vaccination", visitDate: formatDateOnly(visitDate) })).filter((r) => r.visitDate);
+    return dates
+      .map((visitDate): VetVisitRecord => ({ reason: "Vaccination", visitDate: formatDateOnly(visitDate) }))
+      .filter((record) => Boolean(record.visitDate));
   }
 
   vaccinations.forEach((item, index) => {
@@ -1103,7 +1106,7 @@ const EditPetProfile = ({ onboardingMode = false }: EditPetProfileProps) => {
         }
         setSavedPetId(localId);
         toast.success(t("Pet profile saved"));
-        navigate("/", { replace: true });
+        navigate(takeResolvedAuthReturnTo(), { replace: true });
       } catch {
         toast.error("Failed to save pet profile. Please retry.");
       }
@@ -1285,12 +1288,12 @@ const EditPetProfile = ({ onboardingMode = false }: EditPetProfileProps) => {
             const { error: onboardingUpsertError } = await supabase
               .from("profiles")
               .upsert(
-                {
+                ({
                   id: activeUser.id,
                   onboarding_completed: true,
                   email_verified: emailVerifiedByAuth,
                   updated_at: new Date().toISOString(),
-                },
+                } as never),
                 { onConflict: "id" },
               );
             if (onboardingUpsertError) {
@@ -1301,10 +1304,10 @@ const EditPetProfile = ({ onboardingMode = false }: EditPetProfileProps) => {
           await refreshProfile();
           clearOnboardingDraftKeys(activeUser.id);
           toast.success("Welcome to Huddle! Pet care tracking, nearby connections, and all pet community happenings – right in your palm now!");
-          window.location.replace("/");
+          window.location.replace(takeResolvedAuthReturnTo());
           return;
         }
-        navigate("/", { replace: true });
+        navigate(takeResolvedAuthReturnTo(), { replace: true });
       } else {
         navigate(-1);
       }

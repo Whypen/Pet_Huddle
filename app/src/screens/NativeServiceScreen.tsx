@@ -1,10 +1,10 @@
 import { Feather, FontAwesome } from "@expo/vector-icons";
-import type { ReactNode } from "react";
+import type { MutableRefObject, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
-  AppState,
   Dimensions,
+  Easing,
   Image,
   Modal,
   PanResponder,
@@ -16,14 +16,20 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { useReducedMotion } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { NativeLoadingState } from "../components/NativeLoadingState";
+import { NativeEngagementSparkle } from "../components/NativeProfileAvatar";
+import { NativeRatingBadge } from "../components/NativeRatingBadge";
+import { NativeCarerCardSkeleton } from "../components/NativeShimmerSkeleton";
 import { NativeCarerProfileContent } from "../components/service/NativeCarerProfileContent";
 import { NativeServiceProfileImage } from "../components/service/NativeServiceProfileImage";
-import profilePlaceholder from "../../huddle Design System/assets/ProfilePlaceholder.png";
-import { AppBottomSheet, AppBottomSheetHeader, AppConfirmModal, AppModalActionRow, AppModalButton, AppModalIconButton } from "../components/nativeModalPrimitives";
+import profilePlaceholder from "../../assets/ProfilePlaceholder.png";
+import { AppBottomSheet, AppBottomSheetHeader, AppConfirmModal, AppModalActionRow, AppModalButton, AppModalCloseButton, AppModalIconButton } from "../components/nativeModalPrimitives";
 import { nativeModalStyles } from "../components/nativeModalPrimitives.styles";
 import { haptic } from "../lib/nativeHaptics";
+import { useNativeLoadingDeadline } from "../lib/useNativeLoadingDeadline";
+import { useNavMinimizeOnScroll } from "../lib/nativeNavScroll";
 import { createSingleRealtimeChannel } from "../lib/realtimeChannelManager";
 import {
   invalidateNativeChatReadCaches,
@@ -36,22 +42,27 @@ import {
   NATIVE_SERVICE_PET_TYPES,
   NATIVE_SERVICE_TYPES,
   createNativeServiceChat,
+  fetchNativeProviderRatingSummaries,
   fetchNativeServiceProviderDetail,
   fetchNativeServiceProviders,
   filterAndSortNativeServiceProviders,
   incrementNativeServiceProviderView,
   invalidateNativeServiceProviderCaches,
+  isNativeServiceAvailableWithinTwoHours,
   readNativeServiceProvidersAsyncCache,
   readNativeServiceProvidersCache,
   recordNativeServiceAnalytics,
   toggleNativeServiceBookmark,
   writeNativeServiceProvidersCache,
   type NativeServiceFilterState,
+  type NativeProviderRatingSummary,
   type NativeServiceProvider,
   type NativeServiceSortOption,
 } from "../lib/nativeService";
 import { fetchNativeRestrictionsSnapshot } from "../lib/nativeSafetyRestrictions";
-import { resolveNativeViewerScope } from "../lib/nativeViewerScope";
+import { formatNativeCareCurrencySymbol, isVerifiedPublicCredentialLabel } from "../lib/nativeCarerProfile";
+import { nativePetEmojiForLabel } from "../lib/nativePetTaxonomy";
+import { resolveNativeViewerScope, subscribeNativeViewerScope } from "../lib/nativeViewerScope";
 import serviceImage from "../../assets/Notifications/Service.jpg";
 import serviceEmptyImage from "../../assets/Notifications/empty-chat-native.png";
 import { NativeServiceInboxBanner } from "../components/service/NativeServiceInboxBanner";
@@ -59,16 +70,19 @@ import {
   huddleButtons,
   huddleColors,
   huddleFieldStates,
+  huddleGlassControls,
   huddleFormControls,
   huddleLayout,
   huddlePolaroid,
   huddleRadii,
   huddleShadows,
+  huddleSocial,
   huddleSpacing,
   huddleType,
 } from "../theme/huddleDesignTokens";
 
 type NativeServiceScreenProps = {
+  active?: boolean;
   accessToken?: string | null;
   sessionKey?: string | null;
   userId: string | null;
@@ -76,6 +90,7 @@ type NativeServiceScreenProps = {
 };
 
 type Panel = "filters" | "dates" | "sort" | null;
+const SERVICE_TOOLBAR_HEIGHT = huddleLayout.minTouch + huddleSpacing.x4;
 type FilterDropdown = "serviceTypes" | "petTypes" | "dogSizes" | "locationStyles" | null;
 type DateDropdown = "month" | "year" | null;
 type ServiceRestrictionState = Partial<Record<"marketplace_hidden" | "service_disabled", { active?: boolean }>>;
@@ -98,17 +113,8 @@ const toggleString = (list: string[], value: string) => (
 const providerServiceLabel = (provider: NativeServiceProvider, service: string) =>
   service === "Others" && provider.servicesOther.trim() ? provider.servicesOther.trim() : service;
 
-const PUBLIC_BADGE_PRIORITY: Record<string, number> = {
-  "Registry matched": 1,
-  "Certificate matched": 2,
-  "Organization matched": 3,
-  "Directory matched": 4,
-  "Unable to verify online": 5,
-  "Self-declared": 6,
-};
-
 const matchedPublicCredentialBadges = (provider: NativeServiceProvider) =>
-  (provider.publicCredentialBadges ?? []).filter((badge) => (PUBLIC_BADGE_PRIORITY[badge.publicLabel] ?? 99) <= PUBLIC_BADGE_PRIORITY["Directory matched"]);
+  (provider.publicCredentialBadges ?? []).filter((badge) => isVerifiedPublicCredentialLabel(badge.publicLabel));
 
 const formatServicePrice = (price: string | null) => {
   if (!price) return "";
@@ -135,28 +141,119 @@ const fetchNativeServiceRestrictionState = async (userId: string | null) => {
   return normalizeServiceRestrictionState(await fetchNativeRestrictionsSnapshot());
 };
 
+type FeedRevealBus = {
+  listeners: MutableRefObject<Set<(scrollY: number) => void>>;
+  scrollYRef: MutableRefObject<number>;
+  viewportHeight: number;
+};
+
 function ProviderCard({
+  index = 0,
   provider,
+  rating,
+  reveal,
+  wave = 0,
   onOpen,
   onBookmark,
 }: {
+  index?: number;
   provider: NativeServiceProvider;
+  rating?: number;
+  /** Scroll bus: cards fade up the first time they enter the viewport. */
+  reveal?: FeedRevealBus;
+  /** Increments each time the Care tab becomes visible — replays the entrance. */
+  wave?: number;
   onOpen: () => void;
   onBookmark: () => void;
 }) {
   const [imageFailed, setImageFailed] = useState(false);
   const hero = imageFailed ? null : provider.avatarUrl ?? provider.socialAlbumUrls[0] ?? null;
   const services = provider.servicesOffered.map((service) => providerServiceLabel(provider, service)).join(" · ");
-  const showPrice = Boolean(provider.currency && provider.startingPrice && provider.startingPriceRateUnit);
+  const showPrice = Boolean(provider.startingPrice && provider.startingPriceRateUnit);
   const formattedPrice = formatServicePrice(provider.startingPrice);
   const verifiedBadges = matchedPublicCredentialBadges(provider);
   const certified = verifiedBadges.length > 0;
+  const emergencyReady = isNativeServiceAvailableWithinTwoHours(provider);
+  const reduceMotion = useReducedMotion();
+  // Reveal-on-scroll entrance: the card stays mounted the whole time and fades
+  // up (opacity + 12px rise) the FIRST time it crosses into the viewport —
+  // scrolling back up never re-hides it. On each `wave` bump (tab entry) the
+  // reveal state resets, so on-screen cards replay a stagger and below-fold
+  // cards wait for the scroll to reach them.
+  const enter = useRef(new Animated.Value(reduceMotion ? 1 : 0)).current;
+  const contentYRef = useRef<number | null>(null);
+  const revealedRef = useRef(false);
+  const tryRevealRef = useRef<(scrollY: number) => void>(() => undefined);
+  useEffect(() => {
+    if (reduceMotion) {
+      enter.setValue(1);
+      return;
+    }
+    revealedRef.current = false;
+    enter.setValue(0);
+    const listeners = reveal?.listeners.current;
+    // Stagger applies only to the entry wave (cards already on screen);
+    // cards revealed later by scrolling play near-immediately so the feed
+    // never feels laggy mid-scroll.
+    let inStaggerWindow = true;
+    const staggerTimer = setTimeout(() => { inStaggerWindow = false; }, 700);
+    const tryReveal = (scrollY: number) => {
+      if (revealedRef.current) return;
+      const contentY = contentYRef.current;
+      if (contentY === null) return;
+      // Card top must be ~96px into the viewport before it plays.
+      if (!reveal || contentY < scrollY + reveal.viewportHeight - 96) {
+        revealedRef.current = true;
+        listeners?.delete(tryReveal);
+        Animated.timing(enter, {
+          toValue: 1,
+          duration: 280,
+          delay: inStaggerWindow ? Math.min(index, 6) * 70 : (index % 2) * 50,
+          easing: Easing.out(Easing.ease),
+          useNativeDriver: true,
+        }).start();
+      }
+    };
+    tryRevealRef.current = tryReveal;
+    listeners?.add(tryReveal);
+    tryReveal(reveal?.scrollYRef.current ?? 0);
+    return () => {
+      clearTimeout(staggerTimer);
+      listeners?.delete(tryReveal);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- replays per wave/index only
+  }, [index, wave]);
+  // One-shot pop when a bookmark is SAVED (not removed) — the tap gives
+  // something back. Tracks the previous value so server refreshes don't re-pop.
+  const bookmarkPop = useRef(new Animated.Value(1)).current;
+  const wasBookmarked = useRef(provider.isBookmarked);
+  useEffect(() => {
+    if (provider.isBookmarked && !wasBookmarked.current && !reduceMotion) {
+      Animated.sequence([
+        Animated.spring(bookmarkPop, { toValue: 1.35, friction: 4, tension: 320, useNativeDriver: true }),
+        Animated.spring(bookmarkPop, { toValue: 1, friction: 5, tension: 220, useNativeDriver: true }),
+      ]).start();
+    }
+    wasBookmarked.current = provider.isBookmarked;
+  }, [bookmarkPop, provider.isBookmarked, reduceMotion]);
 
   useEffect(() => {
     setImageFailed(false);
   }, [provider.avatarUrl, provider.socialAlbumUrls]);
 
   return (
+    <Animated.View
+      onLayout={(event) => {
+        // Column sits at the top of the scroll content, under feedContent's
+        // paddingTop — close enough for a reveal threshold.
+        contentYRef.current = event.nativeEvent.layout.y + huddleSpacing.x4;
+        tryRevealRef.current(reveal?.scrollYRef.current ?? 0);
+      }}
+      style={{
+        opacity: enter,
+        transform: [{ translateY: enter.interpolate({ inputRange: [0, 1], outputRange: [12, 0] }) }],
+      }}
+    >
     <Pressable accessibilityRole="button" onPress={onOpen} style={({ pressed }) => [styles.providerCardShadow, pressed ? styles.pressed : null]}>
       <View style={styles.providerCardFrame}>
         <View style={styles.providerPhotoWrap}>
@@ -172,25 +269,25 @@ function ProviderCard({
             <Image accessibilityIgnoresInvertColors resizeMode="cover" source={profilePlaceholder} style={styles.providerPhoto} />
           )}
           <View pointerEvents="none" style={styles.badgeStack}>
-            {provider.hasCar ? (
-              <View style={[styles.badgePuck, styles.badgeBlue]}>
-                <Feather color={huddleColors.onPrimary} name="truck" size={13} />
-              </View>
-            ) : null}
             {certified ? (
               <View style={[styles.badgePuck, styles.badgeGreen]}>
                 <Feather color={huddleColors.onPrimary} name="check-circle" size={13} />
               </View>
             ) : null}
-            {provider.emergencyReadiness === true ? (
-              <View style={[styles.badgePuck, styles.badgeRed]}>
+            {emergencyReady ? (
+              <View style={[styles.badgePuck, styles.badgeEmergency]}>
                 <Feather color={huddleColors.onPrimary} name="zap" size={13} />
               </View>
             ) : null}
           </View>
+          {typeof rating === "number" ? (
+            <View pointerEvents="none" style={styles.ratingBadgeTopRight}>
+              <NativeRatingBadge rating={rating} />
+            </View>
+          ) : null}
           {showPrice ? (
             <View style={styles.pricePill}>
-              <Text style={styles.priceMeta}>{provider.currency}</Text>
+              <Text style={styles.priceMeta}>{formatNativeCareCurrencySymbol(provider.currency)}</Text>
               <Text style={styles.priceValue}>{formattedPrice}</Text>
               <Text style={styles.priceMeta}>/{provider.startingPriceRateUnit}</Text>
             </View>
@@ -199,45 +296,69 @@ function ProviderCard({
         <View style={styles.providerCaption}>
           <View style={styles.providerNameRow}>
             <Pressable accessibilityRole="button" accessibilityLabel={provider.isBookmarked ? "Remove bookmark" : "Bookmark provider"} onPress={onBookmark} hitSlop={10} style={({ pressed }) => [styles.bookmarkButton, pressed ? styles.pressed : null]}>
-              <FontAwesome color={provider.isBookmarked ? huddleColors.blue : huddleColors.iconSubtle} name="bookmark" size={14} />
+              <Animated.View style={{ transform: [{ scale: bookmarkPop }] }}>
+                <FontAwesome color={provider.isBookmarked ? huddleColors.blue : huddleColors.iconSubtle} name="bookmark" size={14} />
+              </Animated.View>
             </Pressable>
             <Text numberOfLines={1} style={styles.providerName}>{provider.displayName || "Pet Carer"}</Text>
           </View>
           <Text numberOfLines={2} style={styles.providerServices}>{services}</Text>
         </View>
       </View>
+      {/* Anchored to the outer polaroid frame's own corner (not the inset photo wrap, which clips
+          via overflow:hidden), so the sparkle sits right on the card's corner without being cropped.
+          Only shown for trusted/pillar — the entry-level "active" sparkle is too easy to earn to
+          warrant a badge on the carer marketplace listing itself. */}
+      {provider.engagement && (provider.engagement.tier === "trusted" || provider.engagement.tier === "pillar") ? (
+        <View pointerEvents="none" style={styles.engagementSparkleAnchor}>
+          {/* size=76 -> sparkleSize ~26px (round(76*0.34)), i.e. double the previous ~13px
+              (the component floors sparkleSize at 13, so size=36 alone would not have doubled it). */}
+          <NativeEngagementSparkle engagement={provider.engagement} size={76} />
+        </View>
+      ) : null}
     </Pressable>
+    </Animated.View>
   );
 }
 
 function ServiceEmptyCard({
   body,
   buttonLabel,
+  unframed = false,
   onPress,
 }: {
   body: string;
   buttonLabel?: string;
+  unframed?: boolean;
   onPress?: () => void;
 }) {
-  return (
-    <View style={styles.emptyWrap}>
-      <View style={styles.webEmptyCard}>
-        <Image accessibilityIgnoresInvertColors resizeMode="contain" source={serviceImage} style={styles.webEmptyImage} />
-        <Text style={styles.webEmptyBody}>{body}</Text>
-        {buttonLabel ? (
-          <Pressable onPress={onPress} style={({ pressed }) => [styles.emptySecondaryButton, pressed ? huddleButtons.pressed : null]}>
-            <Feather color={huddleColors.blue} name="sliders" size={16} />
-            <Text style={styles.emptySecondaryButtonText}>{buttonLabel}</Text>
-          </Pressable>
-        ) : null}
+  if (unframed) {
+    return (
+      <View style={styles.socialEmptyState}>
+        <Image accessibilityIgnoresInvertColors resizeMode="contain" source={serviceImage} style={styles.socialEmptyIllustration} />
+        <Text style={styles.socialEmptyText}>{body}</Text>
       </View>
+    );
+  }
+
+  return (
+    <View style={styles.socialEmptyState}>
+      <Image accessibilityIgnoresInvertColors resizeMode="contain" source={serviceImage} style={styles.socialEmptyIllustration} />
+      <Text style={styles.socialEmptyText}>{body}</Text>
+      {buttonLabel ? (
+        <Pressable onPress={onPress} style={({ pressed }) => [styles.emptySecondaryButton, pressed ? huddleButtons.pressed : null]}>
+          <Feather color={huddleColors.blue} name="sliders" size={16} />
+          <Text style={styles.emptySecondaryButtonText}>{buttonLabel}</Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 }
 
-export function NativeServiceScreen({ accessToken, sessionKey, userId, onNavigate }: NativeServiceScreenProps) {
+export function NativeServiceScreen({ active = true, accessToken, sessionKey, userId, onNavigate }: NativeServiceScreenProps) {
   const insets = useSafeAreaInsets();
   const [providers, setProviders] = useState<NativeServiceProvider[]>([]);
+  const [ratingSummaries, setRatingSummaries] = useState<Map<string, NativeProviderRatingSummary>>(new Map());
   const [filters, setFilters] = useState<NativeServiceFilterState>(DEFAULT_NATIVE_SERVICE_FILTERS);
   const [selectedDates, setSelectedDates] = useState<string[]>([]);
   const [filterDraft, setFilterDraft] = useState<NativeServiceFilterState>(DEFAULT_NATIVE_SERVICE_FILTERS);
@@ -251,11 +372,30 @@ export function NativeServiceScreen({ accessToken, sessionKey, userId, onNavigat
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
+  const loadInFlightRef = useRef<Promise<void> | null>(null);
+  const loadAttemptRef = useRef(0);
+  // Backstop: a loading flag still true past the deadline means something
+  // upstream never settled. Fall into this screen's normal retryable error
+  // state rather than spinning forever. See useNativeLoadingDeadline.ts.
+  useNativeLoadingDeadline(loading, {
+    onTrip: () => {
+      loadAttemptRef.current += 1;
+      loadInFlightRef.current = null;
+      setLoading(false);
+      setRefreshing(false);
+      setError("Unable to load care options right now.");
+    },
+  });
+
   const [panel, setPanel] = useState<Panel>(null);
+  const [serviceControlsHidden, setServiceControlsHidden] = useState(false);
+  const serviceControlsProgress = useRef(new Animated.Value(0)).current;
+  const lastServiceScrollOffsetRef = useRef(0);
   const [activeProviderId, setActiveProviderId] = useState<string | null>(null);
   // SS4: pull-down-to-dismiss on provider modal
   const providerDragY = useRef(new Animated.Value(0)).current;
   const providerDragStyle = useMemo(() => ({ transform: [{ translateY: providerDragY }] }), [providerDragY]);
+  const providerBackdropStyle = useMemo(() => ({ opacity: providerDragY.interpolate({ inputRange: [0, 260], outputRange: [1, 0.4], extrapolate: "clamp" as const }) }), [providerDragY]);
   const [activeProvider, setActiveProvider] = useState<NativeServiceProvider | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState("");
@@ -267,13 +407,48 @@ export function NativeServiceScreen({ accessToken, sessionKey, userId, onNavigat
   const feedAnalyticsFiredRef = useRef(false);
   const lastViewedAnalyticsRef = useRef<string | null>(null);
   const sheetScrollRef = useRef<ScrollView | null>(null);
+  const handleNavScroll = useNavMinimizeOnScroll();
+  useEffect(() => {
+    Animated.timing(serviceControlsProgress, {
+      toValue: serviceControlsHidden ? 1 : 0,
+      duration: 180,
+      useNativeDriver: false,
+    }).start();
+  }, [serviceControlsHidden, serviceControlsProgress]);
+  const handleServiceScroll = useCallback((event: Parameters<ReturnType<typeof useNavMinimizeOnScroll>>[0]) => {
+    handleNavScroll(event);
+    const currentOffset = Math.max(0, event.nativeEvent.contentOffset.y);
+    const directionDelta = currentOffset - lastServiceScrollOffsetRef.current;
+    if (currentOffset <= 8) setServiceControlsHidden(false);
+    else if (directionDelta > 5) setServiceControlsHidden(true);
+    else if (directionDelta < -5) setServiceControlsHidden(false);
+    lastServiceScrollOffsetRef.current = currentOffset;
+  }, [handleNavScroll]);
+  const handleFeedScroll = useCallback((event: Parameters<ReturnType<typeof useNavMinimizeOnScroll>>[0]) => {
+    handleServiceScroll(event);
+    const scrollY = event.nativeEvent.contentOffset.y;
+    feedScrollYRef.current = scrollY;
+    feedRevealListenersRef.current.forEach((listener) => listener(scrollY));
+  }, [handleServiceScroll]);
   const serviceContextRef = useRef<{
     anchor: { lat: number; lng: number } | null;
     viewerCountry: string | null;
     viewerScope: Awaited<ReturnType<typeof resolveNativeViewerScope>> | null;
   }>({ anchor: null, viewerCountry: null, viewerScope: null });
-  const lastForegroundLoadRef = useRef(0);
-  const loadInFlightRef = useRef<Promise<void> | null>(null);
+  const wasActiveRef = useRef(active);
+  const [entranceWave, setEntranceWave] = useState(0);
+  // Scroll-reveal plumbing: cards register a listener and fade up the first
+  // time they cross into the viewport. Refs (not state) so scroll never
+  // re-renders the feed.
+  const feedScrollYRef = useRef(0);
+  const feedRevealListenersRef = useRef(new Set<(scrollY: number) => void>());
+  const feedReveal = useMemo(() => ({
+    listeners: feedRevealListenersRef,
+    scrollYRef: feedScrollYRef,
+    viewportHeight: Dimensions.get("window").height,
+  }), []);
+  const realtimeRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const realtimeDirtyRef = useRef(false);
   const activeProviderIdRef = useRef<string | null>(activeProviderId);
   const serviceSessionKeyRef = useRef(sessionKey || (userId ? `${userId}:0` : "anon:0"));
   const currentServiceSessionKey = sessionKey || (userId ? `${userId}:0` : "anon:0");
@@ -281,28 +456,47 @@ export function NativeServiceScreen({ accessToken, sessionKey, userId, onNavigat
   serviceSessionKeyRef.current = currentServiceSessionKey;
 
   const load = useCallback(async (background = false, force = false) => {
-    if (!force && loadInFlightRef.current) return loadInFlightRef.current;
+    if (loadInFlightRef.current) return loadInFlightRef.current;
+    const attempt = ++loadAttemptRef.current;
+    const isCurrentAttempt = () => loadAttemptRef.current === attempt;
     if (!background) setLoading(true);
     setError("");
     const request: Promise<void> = (async () => {
       const nextEffectiveUserId = userId;
       const requestSessionKey = currentServiceSessionKey;
       setEffectiveUserId(nextEffectiveUserId);
-      const viewerScope = nextEffectiveUserId ? await resolveNativeViewerScope({ userId: nextEffectiveUserId, accessToken }) : null;
-      if (serviceSessionKeyRef.current !== requestSessionKey) return;
-      const anchor = viewerScope?.primaryPoint ?? null;
-      const viewerCountry = viewerScope?.country ?? null;
-      serviceContextRef.current = { anchor, viewerCountry, viewerScope };
-      const cached = readNativeServiceProvidersCache({ userId: nextEffectiveUserId, sessionKey: requestSessionKey, anchor, viewerCountry, viewerScope });
+      const viewerScope = nextEffectiveUserId
+        ? await resolveNativeViewerScope({ userId: nextEffectiveUserId, accessToken, sessionKey: requestSessionKey })
+        : null;
+      if (!isCurrentAttempt() || serviceSessionKeyRef.current !== requestSessionKey) return;
+      const viewerCountry = viewerScope?.countryName || viewerScope?.country || viewerScope?.profileCountryName || viewerScope?.profileCountry || null;
+      const accountAnchor = viewerScope?.primaryPoint ?? viewerScope?.profilePoint ?? null;
+      const careViewerScope = viewerScope ? {
+        ...viewerScope,
+        city: viewerScope.city ?? viewerScope.profileLocationName ?? null,
+        country: viewerCountry,
+        countryCode: viewerScope.countryCode ?? viewerScope.profileCountryCode ?? null,
+        countryName: viewerCountry,
+        district: viewerScope.district ?? viewerScope.profileDistrict ?? null,
+        primaryPoint: accountAnchor,
+      } : null;
+      const anchor = careViewerScope?.primaryPoint ?? null;
+      serviceContextRef.current = { anchor, viewerCountry, viewerScope: careViewerScope };
+      const providerCacheHasSelf = (providers: NativeServiceProvider[]) => Boolean(
+        nextEffectiveUserId && providers.some((provider) => provider.userId === nextEffectiveUserId),
+      );
+      const cached = readNativeServiceProvidersCache({ userId: nextEffectiveUserId, sessionKey: requestSessionKey, anchor, viewerCountry, viewerScope: careViewerScope });
       if (cached && !force) {
-        if (serviceSessionKeyRef.current !== requestSessionKey) return;
-        setProviders(cached.providers);
-        setError("");
-        if (!background) setLoading(false);
+        if (!isCurrentAttempt() || serviceSessionKeyRef.current !== requestSessionKey) return;
+        if (!providerCacheHasSelf(cached.providers)) {
+          setProviders(cached.providers);
+          setError("");
+          if (!background) setLoading(false);
+        }
       } else if (!force) {
-        const asyncCached = await readNativeServiceProvidersAsyncCache({ userId: nextEffectiveUserId, sessionKey: requestSessionKey, anchor, viewerCountry, viewerScope });
-        if (serviceSessionKeyRef.current !== requestSessionKey) return;
-        if (asyncCached) {
+        const asyncCached = await readNativeServiceProvidersAsyncCache({ userId: nextEffectiveUserId, sessionKey: requestSessionKey, anchor, viewerCountry, viewerScope: careViewerScope });
+        if (!isCurrentAttempt() || serviceSessionKeyRef.current !== requestSessionKey) return;
+        if (asyncCached && !providerCacheHasSelf(asyncCached.providers)) {
           setProviders(asyncCached.providers);
           setError("");
           if (!background) setLoading(false);
@@ -315,25 +509,26 @@ export function NativeServiceScreen({ accessToken, sessionKey, userId, onNavigat
           sessionKey: requestSessionKey,
           anchor,
           viewerCountry,
-          viewerScope,
-          force: true,
-          cacheWriteGuard: () => loadInFlightRef.current === request && serviceSessionKeyRef.current === requestSessionKey,
+          viewerScope: careViewerScope,
+          force,
+          cacheWriteGuard: () => isCurrentAttempt() && loadInFlightRef.current === request && serviceSessionKeyRef.current === requestSessionKey,
         }),
         fetchNativeServiceRestrictionState(nextEffectiveUserId),
       ]);
-      if (serviceSessionKeyRef.current !== requestSessionKey) return;
+      if (!isCurrentAttempt() || serviceSessionKeyRef.current !== requestSessionKey) return;
       setProviders(nextProviders);
       const restrictionData = normalizeServiceRestrictionState(restrictions);
       setServiceDisabled(restrictionData.service_disabled?.active === true);
       setMarketplaceHidden(restrictionData.marketplace_hidden?.active === true);
-      lastForegroundLoadRef.current = Date.now();
     })()
       .catch((err) => {
-        if (__DEV__) console.warn("[native.service] load_failed", err);
+        if (!isCurrentAttempt()) return;
+        if (__DEV__) console.warn("[native.service] load_failed", String((err as { message?: unknown })?.message || err || "unknown"));
         setError("Unable to load care options right now.");
       })
       .finally(() => {
         if (loadInFlightRef.current === request) loadInFlightRef.current = null;
+        if (!isCurrentAttempt()) return;
         setLoading(false);
         setRefreshing(false);
       });
@@ -342,19 +537,113 @@ export function NativeServiceScreen({ accessToken, sessionKey, userId, onNavigat
   }, [accessToken, currentServiceSessionKey, userId]);
 
   useEffect(() => {
-    lastForegroundLoadRef.current = Date.now();
+    if (!active) return;
     void load();
-  }, [load]);
+  }, [active, load]);
 
   useEffect(() => {
-    const subscription = AppState.addEventListener("change", (state) => {
-      if (state !== "active") return;
-      if (Date.now() - lastForegroundLoadRef.current < 24 * 60 * 60 * 1000) return;
-      lastForegroundLoadRef.current = Date.now();
-      void load(true);
+    if (!userId) return undefined;
+    let cancelled = false;
+    let refreshInFlight = false;
+    const unsubscribe = subscribeNativeViewerScope(userId, () => {
+      if (refreshInFlight) return;
+      refreshInFlight = true;
+      void (async () => {
+        await invalidateNativeServiceProviderCaches(userId);
+        await loadInFlightRef.current?.catch(() => undefined);
+        if (!cancelled) await load(true, true);
+      })().finally(() => {
+        refreshInFlight = false;
+      });
+    }, { sessionKey: currentServiceSessionKey });
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [currentServiceSessionKey, load, userId]);
+
+  useEffect(() => {
+    const becameActive = active && !wasActiveRef.current;
+    wasActiveRef.current = active;
+    if (!active) {
+      setPanel(null);
+      setActiveProviderId(null);
+      setActiveProvider(null);
+      setCarePopup(null);
+      return;
+    }
+    if (!becameActive) return;
+    setPanel(null);
+    setActiveProviderId(null);
+    // Replay the card entrance wave on every tab entry — tabs stay mounted
+    // once visited, so a mount-only entrance would play exactly once per
+    // session, usually while the tab is hidden.
+    setEntranceWave((wave) => wave + 1);
+    if (realtimeDirtyRef.current) {
+      realtimeDirtyRef.current = false;
+      void load(true, true);
+    }
+    // The committed provider list remains authoritative for ordinary returns.
+    // Realtime invalidations, explicit refresh and completed mutations own
+    // reconciliation; navigation itself never starts network work.
+  }, [active, load]);
+
+  // Provider review averages for the "4.9★" card badge. Keyed off the loaded
+  // provider id set so it refetches whenever the list changes.
+  const providerIdKey = providers.map((item) => item.userId).join(",");
+  useEffect(() => {
+    if (!active) return;
+    if (!accessToken || providers.length === 0) {
+      setRatingSummaries(new Map());
+      return;
+    }
+    let alive = true;
+    void fetchNativeProviderRatingSummaries(providers.map((item) => item.userId), accessToken)
+      .then((summaries) => { if (alive) setRatingSummaries(summaries); })
+      .catch(() => { if (alive) setRatingSummaries(new Map()); });
+    return () => { alive = false; };
+  }, [accessToken, active, providerIdKey]);
+
+  useEffect(() => {
+    if (!effectiveUserId) return;
+    const requestSessionKey = currentServiceSessionKey;
+    const visibleProviderIds = providerIdKey.split(",").filter(Boolean);
+    const refreshCards = () => {
+      if (!active) {
+        realtimeDirtyRef.current = true;
+        return;
+      }
+      if (realtimeRefreshTimerRef.current) clearTimeout(realtimeRefreshTimerRef.current);
+      realtimeRefreshTimerRef.current = setTimeout(() => {
+        realtimeRefreshTimerRef.current = null;
+        if (serviceSessionKeyRef.current !== requestSessionKey) return;
+        void invalidateNativeServiceProviderCaches(effectiveUserId);
+        void load(true, true);
+      }, 650);
+    };
+    const handle = createSingleRealtimeChannel(`native-service-cards:${effectiveUserId}:${providerIdKey || "none"}`, (baseChannel) => {
+      // Scope provider-card realtime to the providers currently visible on screen.
+      // Previously this subscribed to every pet_care_profiles / service_reviews
+      // change system-wide, so unrelated marketplace activity (any provider edit,
+      // any review anywhere) would reload the whole card list.
+      let channel = baseChannel
+        .on("postgres_changes", { event: "*", schema: "public", table: "service_bookmarks", filter: `user_id=eq.${effectiveUserId}` }, refreshCards);
+      for (const providerId of visibleProviderIds) {
+        channel = channel
+          .on("postgres_changes", { event: "UPDATE", schema: "public", table: "profiles", filter: `id=eq.${providerId}` }, refreshCards)
+          .on("postgres_changes", { event: "*", schema: "public", table: "pet_care_profiles", filter: `user_id=eq.${providerId}` }, refreshCards)
+          .on("postgres_changes", { event: "*", schema: "public", table: "service_reviews", filter: `provider_id=eq.${providerId}` }, refreshCards);
+      }
+      return channel;
     });
-    return () => subscription.remove();
-  }, [load]);
+    return () => {
+      if (realtimeRefreshTimerRef.current) {
+        clearTimeout(realtimeRefreshTimerRef.current);
+        realtimeRefreshTimerRef.current = null;
+      }
+      void handle.dispose();
+    };
+  }, [active, currentServiceSessionKey, effectiveUserId, load, providerIdKey]);
 
   useEffect(() => {
     if (!effectiveUserId) {
@@ -363,6 +652,10 @@ export function NativeServiceScreen({ accessToken, sessionKey, userId, onNavigat
       return;
     }
     const refreshRestrictions = () => {
+      if (!active) {
+        realtimeDirtyRef.current = true;
+        return;
+      }
       void fetchNativeServiceRestrictionState(effectiveUserId).then((next) => {
         setServiceDisabled(next.service_disabled?.active === true);
         setMarketplaceHidden(next.marketplace_hidden?.active === true);
@@ -376,20 +669,19 @@ export function NativeServiceScreen({ accessToken, sessionKey, userId, onNavigat
     return () => {
       void handle.dispose();
     };
-  }, [effectiveUserId]);
+  }, [active, effectiveUserId]);
 
   const visibleProviders = useMemo(() => filterAndSortNativeServiceProviders(providers, filters), [filters, providers]);
-  const providerColumns = useMemo(() => {
+  // Staggered masonry: two independent columns flow at their own height. Even-ranked
+  // providers fill the left column; the right column is headed by the Care-chats inbox
+  // banner, then the odd-ranked providers. Columns are NOT row-aligned, so cards stagger.
+  const { leftProviders, rightProviders } = useMemo(() => {
     const left: NativeServiceProvider[] = [];
     const right: NativeServiceProvider[] = [];
     visibleProviders.forEach((provider, index) => {
-      if (index % 2 === 0) {
-        left.push(provider);
-      } else {
-        right.push(provider);
-      }
+      (index % 2 === 0 ? left : right).push(provider);
     });
-    return { left, right };
+    return { leftProviders: left, rightProviders: right };
   }, [visibleProviders]);
 
   useEffect(() => {
@@ -402,7 +694,7 @@ export function NativeServiceScreen({ accessToken, sessionKey, userId, onNavigat
       top10_gold: top10.filter((provider) => provider.serviceRankWeight === 20).length,
       top10_plus: top10.filter((provider) => provider.serviceRankWeight === 10).length,
       top10_free: top10.filter((provider) => provider.serviceRankWeight === 0).length,
-    }, accessToken).catch(() => undefined);
+    }, { accessToken, sessionKey: currentServiceSessionKey, userId }).catch(() => undefined);
   }, [accessToken, filters.sort, loading, userId, visibleProviders]);
 
   const updateFilter = (patch: Partial<NativeServiceFilterState>) => setFilters((prev) => ({ ...prev, ...patch }));
@@ -494,7 +786,7 @@ export function NativeServiceScreen({ accessToken, sessionKey, userId, onNavigat
     const effectiveUserId = userId;
     if (!effectiveUserId) {
       haptic.error();
-      setCarePopup({ title: "Huddle Care", body: "Please sign in to bookmark providers." });
+      setCarePopup({ title: "huddle Care", body: "Please sign in to bookmark providers." });
       return;
     }
     bookmarkInFlightRef.current.add(providerUserId);
@@ -503,7 +795,7 @@ export function NativeServiceScreen({ accessToken, sessionKey, userId, onNavigat
     if (willBookmark) haptic.success(); else haptic.selectTab();
     const previous = providers;
     try {
-      const next = await toggleNativeServiceBookmark(effectiveUserId, previous, providerUserId, accessToken);
+      const next = await toggleNativeServiceBookmark(effectiveUserId, previous, providerUserId, { accessToken, sessionKey: currentServiceSessionKey });
       setProviders(next);
       writeNativeServiceProvidersCache({
         userId: effectiveUserId,
@@ -520,30 +812,34 @@ export function NativeServiceScreen({ accessToken, sessionKey, userId, onNavigat
       })?.updatedAt ?? Date.now());
     } catch {
       setProviders(previous);
-      setCarePopup({ title: "Huddle Care", body: "Unable to update bookmark right now." });
+      setCarePopup({ title: "huddle Care", body: "Unable to update bookmark right now." });
     } finally {
       bookmarkInFlightRef.current.delete(providerUserId);
     }
   };
 
-  const closeProvider = () => {
+  const closeProvider = useCallback(() => {
     activeProviderIdRef.current = null;
     providerDragY.setValue(0);
     setActiveProviderId(null);
     setActiveProvider(null);
     setDetailLoading(false);
     setDetailError("");
-  };
+  }, [providerDragY]);
 
   const providerPullDownResponder = useMemo(
     () => PanResponder.create({
       onMoveShouldSetPanResponder: (_, gestureState) => gestureState.dy > 8 && Math.abs(gestureState.dx) < 18,
       onPanResponderMove: (_, gestureState) => {
-        providerDragY.setValue(Math.max(0, gestureState.dy));
+        const dy = Math.max(0, gestureState.dy);
+        const SOFT_LIMIT = 220;
+        providerDragY.setValue(dy <= SOFT_LIMIT ? dy : SOFT_LIMIT + (dy - SOFT_LIMIT) * 0.35);
       },
       onPanResponderRelease: (_, gestureState) => {
         if (gestureState.dy > 120 || gestureState.vy > 0.9) {
-          Animated.spring(providerDragY, { toValue: 600, damping: 20, stiffness: 300, useNativeDriver: true }).start(closeProvider);
+          providerDragY.stopAnimation();
+          providerDragY.setValue(0);
+          closeProvider();
           return;
         }
         Animated.spring(providerDragY, { toValue: 0, damping: 20, stiffness: 300, useNativeDriver: true }).start();
@@ -552,7 +848,7 @@ export function NativeServiceScreen({ accessToken, sessionKey, userId, onNavigat
         Animated.spring(providerDragY, { toValue: 0, damping: 20, stiffness: 300, useNativeDriver: true }).start();
       },
     }),
-    [providerDragY],
+    [closeProvider, providerDragY],
   );
 
   const openProvider = async (provider: NativeServiceProvider) => {
@@ -567,7 +863,7 @@ export function NativeServiceScreen({ accessToken, sessionKey, userId, onNavigat
       void recordNativeServiceAnalytics("service_profile_viewed", {
         provider_user_id: provider.userId,
         sort: filters.sort,
-      }, accessToken).catch(() => undefined);
+      }, { accessToken, sessionKey: requestSessionKey, userId }).catch(() => undefined);
     }
     try {
       const freshProvider = await fetchNativeServiceProviderDetail({
@@ -579,7 +875,7 @@ export function NativeServiceScreen({ accessToken, sessionKey, userId, onNavigat
         force: true,
         cacheWriteGuard: () => serviceSessionKeyRef.current === requestSessionKey && activeProviderIdRef.current === provider.userId,
         onCachedProvider: (cachedProvider) => {
-          if (serviceSessionKeyRef.current === requestSessionKey && activeProviderIdRef.current === provider.userId) setActiveProvider(cachedProvider);
+          if (provider.userId !== userId && serviceSessionKeyRef.current === requestSessionKey && activeProviderIdRef.current === provider.userId) setActiveProvider(cachedProvider);
         },
       });
       if (serviceSessionKeyRef.current !== requestSessionKey || activeProviderIdRef.current !== provider.userId) return;
@@ -588,7 +884,7 @@ export function NativeServiceScreen({ accessToken, sessionKey, userId, onNavigat
         return;
       }
       setActiveProvider(freshProvider);
-      void incrementNativeServiceProviderView(freshProvider.userId, userId, accessToken).catch(() => undefined);
+      void incrementNativeServiceProviderView(freshProvider.userId, userId, { accessToken, sessionKey: requestSessionKey }).catch(() => undefined);
     } catch {
       setDetailError("Unable to load provider profile.");
     } finally {
@@ -599,7 +895,7 @@ export function NativeServiceScreen({ accessToken, sessionKey, userId, onNavigat
   const requestService = async (providerUserId: string) => {
     const effectiveUserId = userId;
     if (!effectiveUserId) {
-      setCarePopup({ title: "Huddle Care", body: "Please sign in to request care." });
+      setCarePopup({ title: "huddle Care", body: "Please sign in to request care." });
       return;
     }
     try {
@@ -609,45 +905,54 @@ export function NativeServiceScreen({ accessToken, sessionKey, userId, onNavigat
       setServiceDisabled(nextServiceDisabled);
       setMarketplaceHidden(nextMarketplaceHidden);
       if (nextServiceDisabled) {
-        setCarePopup({ title: "Huddle Care", body: "Your booking access has been placed on hold due to recent account activity that does not meet our community safety standards." });
+        setCarePopup({ title: "huddle Care", body: "Your booking access has been placed on hold due to recent account activity that does not meet our community safety standards." });
         return;
       }
     } catch {
       if (serviceDisabled) {
-        setCarePopup({ title: "Huddle Care", body: "Your booking access has been placed on hold due to recent account activity that does not meet our community safety standards." });
+        setCarePopup({ title: "huddle Care", body: "Your booking access has been placed on hold due to recent account activity that does not meet our community safety standards." });
         return;
       }
     }
     try {
-      const chatId = await createNativeServiceChat(providerUserId, accessToken);
-      await markNativeServiceTabHasDialogues(effectiveUserId);
-      await invalidateNativeChatReadCaches(effectiveUserId);
-      await invalidateNativeServiceProviderCaches(effectiveUserId);
+      const chatId = await createNativeServiceChat(providerUserId, { accessToken, sessionKey: currentServiceSessionKey, userId: effectiveUserId });
       setProviders((current) => current.filter((provider) => provider.userId !== providerUserId));
       setActiveProviderId(null);
       setActiveProvider(null);
       onNavigate(`/service-chat?room=${encodeURIComponent(chatId)}&request=1&returnTo=${encodeURIComponent("/chats?tab=service")}`);
+      // The server write is authoritative and navigation must not wait for
+      // AsyncStorage/cache housekeeping. Those operations are best-effort and
+      // can be slow on a cache-heavy installation.
+      void Promise.allSettled([
+        markNativeServiceTabHasDialogues(effectiveUserId),
+        invalidateNativeChatReadCaches(effectiveUserId),
+        invalidateNativeServiceProviderCaches(effectiveUserId),
+      ]);
     } catch (err) {
       const message = String((err as { message?: string })?.message || "");
       const details = String((err as { details?: string })?.details || "");
       const hint = String((err as { hint?: string })?.hint || "");
       const reason = `${message} ${details} ${hint}`.toLowerCase();
       if (reason.includes("provider_not_requestable")) {
-        setCarePopup({ title: "Huddle Care", body: "This provider cannot receive care requests yet." });
+        setProviders((current) => current.filter((provider) => provider.userId !== providerUserId));
+        setActiveProviderId(null);
+        setActiveProvider(null);
+        void invalidateNativeServiceProviderCaches(effectiveUserId);
+        setCarePopup({ title: "huddle Care", body: "This provider cannot receive care requests yet." });
       } else if (reason.includes("service_access_disabled")) {
-        setCarePopup({ title: "Huddle Care", body: "Your booking access has been placed on hold due to recent account activity that does not meet our community safety standards." });
+        setCarePopup({ title: "huddle Care", body: "Your booking access has been placed on hold due to recent account activity that does not meet our community safety standards." });
       } else if (reason.includes("provider_profile_missing")) {
-        setCarePopup({ title: "Huddle Care", body: "This provider profile is incomplete and can't receive requests yet." });
+        setCarePopup({ title: "huddle Care", body: "This provider profile is incomplete and can't receive requests yet." });
       } else if (reason.includes("requester_profile_missing")) {
-        setCarePopup({ title: "Huddle Care", body: "Your profile setup is incomplete. Please complete profile setup first." });
+        setCarePopup({ title: "huddle Care", body: "Your profile setup is incomplete. Please complete profile setup first." });
       } else if (reason.includes("not_authenticated")) {
-        setCarePopup({ title: "Huddle Care", body: "Please sign in again." });
+        setCarePopup({ title: "huddle Care", body: "Please sign in again." });
       } else if (reason.includes("cannot_create_service_chat_with_self")) {
-        setCarePopup({ title: "Huddle Care", body: "You can't request care from yourself." });
+        setCarePopup({ title: "huddle Care", body: "You can't request care from yourself." });
       } else if (reason.includes("already matched")) {
-        setCarePopup({ title: "Huddle Care", body: "You already have a care chat with this provider." });
+        setCarePopup({ title: "huddle Care", body: "You already have a care chat with this provider." });
       } else {
-        setCarePopup({ title: "Huddle Care", body: "Unable to start a conversation right now. Please try again later" });
+        setCarePopup({ title: "huddle Care", body: "Unable to start a conversation right now. Please try again later" });
       }
     }
   };
@@ -659,10 +964,22 @@ export function NativeServiceScreen({ accessToken, sessionKey, userId, onNavigat
           <Text style={styles.restrictionBannerText}>Your profile visibility is currently restricted due to recent account activity that does not meet our community safety standards.</Text>
         </View>
       ) : null}
+      <Animated.View
+        pointerEvents={serviceControlsHidden ? "none" : "auto"}
+        style={[styles.toolbarReveal, {
+          height: serviceControlsProgress.interpolate({ inputRange: [0, 1], outputRange: [SERVICE_TOOLBAR_HEIGHT, 0] }),
+          opacity: serviceControlsProgress.interpolate({ inputRange: [0, 0.7, 1], outputRange: [1, 0, 0] }),
+          transform: [{ translateY: serviceControlsProgress.interpolate({ inputRange: [0, 1], outputRange: [0, -8] }) }],
+        }]}
+      >
       <View style={styles.toolbar}>
         <View style={styles.searchBox}>
           <Feather color={huddleColors.iconSubtle} name="search" size={17} />
           <TextInput
+                multiline={false}
+                scrollEnabled
+                numberOfLines={1} lineBreakModeIOS="tail" lineBreakStrategyIOS="none"
+                textBreakStrategy="simple"
             accessibilityLabel="Search care"
             onChangeText={(search) => updateFilter({ search })}
             placeholder=""
@@ -681,56 +998,88 @@ export function NativeServiceScreen({ accessToken, sessionKey, userId, onNavigat
           <Feather color={huddleColors.iconMuted} name="arrow-down" size={20} />
         </Pressable>
       </View>
+      </Animated.View>
 
       {loading ? (
-        <NativeLoadingState />
+        <ScrollView contentContainerStyle={styles.feedContent} style={styles.feedScroller} showsVerticalScrollIndicator={false} onScroll={handleServiceScroll} scrollEventThrottle={16}>
+          <View style={styles.providerGrid}>
+            <View style={styles.providerColumn}>
+              <NativeCarerCardSkeleton />
+              <NativeCarerCardSkeleton />
+              <NativeCarerCardSkeleton />
+            </View>
+            <View style={[styles.providerColumn, styles.providerColumnOffset]}>
+              <NativeCarerCardSkeleton />
+              <NativeCarerCardSkeleton />
+              <NativeCarerCardSkeleton />
+            </View>
+          </View>
+        </ScrollView>
       ) : error ? (
         <View style={styles.serviceErrorState}>
           <Image accessibilityIgnoresInvertColors resizeMode="contain" source={serviceEmptyImage} style={styles.serviceErrorImage} />
           <Text style={styles.serviceErrorText}>Unable to load Care for now. Please try again later</Text>
-          <Pressable onPress={() => void load()} style={styles.primaryButton}>
+          <Pressable onPress={() => void load(false, true)} style={styles.primaryButton}>
             <Text style={styles.primaryButtonText}>Retry</Text>
           </Pressable>
         </View>
       ) : (
-        <ScrollView
-          contentContainerStyle={styles.feedContent}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={huddleColors.blue} />}
-          style={styles.feedScroller}
-        >
-          {visibleProviders.length === 0 ? (
-            providers.length === 0 ? (
-              <ServiceEmptyCard body="No local pros nearby to offer care yet. Be the first to provide care support!" />
+        visibleProviders.length === 0 ? (
+          <ScrollView
+            contentContainerStyle={styles.feedContent}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={huddleColors.blue} colors={[huddleColors.blue]} />}
+            style={styles.feedScroller}
+            onScroll={handleServiceScroll}
+            scrollEventThrottle={16}
+          >
+            {providers.length === 0 ? (
+              <ServiceEmptyCard body="No local pros nearby to offer care yet. Be the first to provide care support!" unframed />
             ) : (
               <ServiceEmptyCard body="No providers match these filters." buttonLabel="Expand Filter" onPress={() => openPanel("filters")} />
-            )
-          ) : (
+            )}
+          </ScrollView>
+        ) : (
+          <ScrollView
+            contentContainerStyle={styles.feedContent}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={huddleColors.blue} colors={[huddleColors.blue]} />}
+            showsVerticalScrollIndicator={false}
+            style={styles.feedScroller}
+            onScroll={handleFeedScroll}
+            scrollEventThrottle={16}
+          >
             <View style={styles.providerGrid}>
               <View style={styles.providerColumn}>
-                {providerColumns.left.map((item) => (
+                {leftProviders.map((item, itemIndex) => (
                   <ProviderCard
                     key={item.userId}
+                    index={itemIndex * 2}
                     provider={item}
+                    rating={ratingSummaries.get(item.userId)?.avgRating}
+                    reveal={feedReveal}
+                    wave={entranceWave}
                     onOpen={() => void openProvider(item)}
                     onBookmark={() => void handleBookmark(item.userId)}
                   />
                 ))}
               </View>
               <View style={styles.providerColumn}>
-                {/* Service inbox banner — polaroid-shaped peer card that fills the staggered top-right slot */}
                 <NativeServiceInboxBanner accessToken={accessToken} onNavigate={onNavigate} sessionKey={sessionKey} userId={effectiveUserId} />
-                {providerColumns.right.map((item) => (
+                {rightProviders.map((item, itemIndex) => (
                   <ProviderCard
                     key={item.userId}
+                    index={itemIndex * 2 + 1}
                     provider={item}
+                    rating={ratingSummaries.get(item.userId)?.avgRating}
+                    reveal={feedReveal}
+                    wave={entranceWave}
                     onOpen={() => void openProvider(item)}
                     onBookmark={() => void handleBookmark(item.userId)}
                   />
                 ))}
               </View>
             </View>
-          )}
-        </ScrollView>
+          </ScrollView>
+        )
       )}
 
       <Modal presentationStyle="overFullScreen" animationType="fade" transparent visible={panel === "sort"} onRequestClose={closePanel}>
@@ -744,7 +1093,7 @@ export function NativeServiceScreen({ accessToken, sessionKey, userId, onNavigat
                     onPress={() => { updateFilter({ sort: option.value }); closePanel(); }}
                     style={({ pressed }) => [styles.dropdownOption, filters.sort === option.value ? styles.dropdownOptionActive : null, pressed ? styles.pressed : null]}
                   >
-                    <Text style={styles.dropdownText}>{option.label}</Text>
+                    <Text ellipsizeMode="tail" numberOfLines={1} style={styles.dropdownText}>{option.label}</Text>
                     {filters.sort === option.value ? <Feather color={huddleColors.blue} name="check" size={16} /> : <View style={styles.checkSlot} />}
                   </Pressable>
                 ))}
@@ -760,12 +1109,8 @@ export function NativeServiceScreen({ accessToken, sessionKey, userId, onNavigat
           <View pointerEvents="box-none" style={nativeModalStyles.appBottomSheetEventBoundary}>
           <AppBottomSheet onClose={closePanel}>
             <AppBottomSheetHeader>
-              <View style={styles.sheetHeaderRow}>
-                <Text style={styles.sheetTitle}>{panel === "dates" ? "Care date" : "Filters"}</Text>
-                <Pressable accessibilityLabel="Close filters" accessibilityRole="button" onPress={closePanel} style={({ pressed }) => [styles.sheetInlineClose, pressed ? styles.pressed : null]}>
-                  <Feather color={huddleColors.iconMuted} name="x" size={20} />
-                </Pressable>
-              </View>
+              <Text style={styles.sheetTitle}>{panel === "dates" ? "Care date" : "Filters"}</Text>
+              <AppModalCloseButton onPress={closePanel} />
             </AppBottomSheetHeader>
             <ScrollView
               ref={sheetScrollRef}
@@ -778,48 +1123,48 @@ export function NativeServiceScreen({ accessToken, sessionKey, userId, onNavigat
             >
               {panel === "filters" ? (
                 <View style={styles.filterStack}>
-                  <View style={styles.toggleGroup}>
+                  <View style={styles.filterScopeGroup}>
+                    <Text style={styles.filterGroupTitle}>CARE SCOPE</Text>
+                    <FilterDropdownField
+                      label="Care Type"
+                      value={filterDraft.serviceTypes}
+                      open={filterDropdown === "serviceTypes"}
+                      onPress={() => toggleFilterDropdown("serviceTypes", 132)}
+                    >
+                      <OptionList options={NATIVE_SERVICE_TYPES} selected={filterDraft.serviceTypes} onToggle={(serviceTypes) => setFilterDraft((prev) => ({ ...prev, serviceTypes }))} />
+                    </FilterDropdownField>
+                    <FilterDropdownField
+                      label="Pet Type"
+                      value={filterDraft.petTypes}
+                      open={filterDropdown === "petTypes"}
+                      onPress={() => toggleFilterDropdown("petTypes", 250)}
+                    >
+                      <OptionList getOptionIcon={nativePetEmojiForLabel} options={NATIVE_SERVICE_PET_TYPES} selected={filterDraft.petTypes} onToggle={(petTypes) => setFilterDraft((prev) => ({ ...prev, petTypes }))} />
+                    </FilterDropdownField>
+                    <FilterDropdownField
+                      label="Pet Size"
+                      value={filterDraft.dogSizes}
+                      open={filterDropdown === "dogSizes"}
+                      onPress={() => toggleFilterDropdown("dogSizes", 368)}
+                    >
+                      <OptionList options={NATIVE_SERVICE_DOG_SIZES} selected={filterDraft.dogSizes} onToggle={(dogSizes) => setFilterDraft((prev) => ({ ...prev, dogSizes }))} />
+                    </FilterDropdownField>
+                    <FilterDropdownField
+                      label="Care Location"
+                      value={filterDraft.locationStyles}
+                      open={filterDropdown === "locationStyles"}
+                      onPress={() => toggleFilterDropdown("locationStyles", 486)}
+                    >
+                      <OptionList options={NATIVE_SERVICE_LOCATION_STYLES} selected={filterDraft.locationStyles} onToggle={(locationStyles) => setFilterDraft((prev) => ({ ...prev, locationStyles }))} />
+                    </FilterDropdownField>
+                  </View>
+                  <View style={styles.filterScopeGroup}>
+                    <Text style={styles.filterGroupTitle}>OPTIONS</Text>
                     <ToggleRow label="Bookmark" value={filterDraft.bookmarkedOnly} onChange={(bookmarkedOnly) => setFilterDraft((prev) => ({ ...prev, bookmarkedOnly }))} />
                     <ToggleRow label="Professional" value={filterDraft.verifiedLicensedOnly} onChange={(verifiedLicensedOnly) => setFilterDraft((prev) => ({ ...prev, verifiedLicensedOnly }))} />
                     <ToggleRow label="Available in 2 hours" value={filterDraft.emergencyReadyOnly} onChange={(emergencyReadyOnly) => setFilterDraft((prev) => ({ ...prev, emergencyReadyOnly }))} />
                     <ToggleRow label="Volunteer" value={filterDraft.volunteerOnly} onChange={(volunteerOnly) => setFilterDraft((prev) => ({ ...prev, volunteerOnly }))} />
                   </View>
-                  <FilterDropdownField
-                    label="Care type"
-                    placeholder="Select care types"
-                    value={filterDraft.serviceTypes}
-                    open={filterDropdown === "serviceTypes"}
-                    onPress={() => toggleFilterDropdown("serviceTypes", 132)}
-                  >
-                    <OptionList options={NATIVE_SERVICE_TYPES} selected={filterDraft.serviceTypes} onToggle={(serviceTypes) => setFilterDraft((prev) => ({ ...prev, serviceTypes }))} />
-                  </FilterDropdownField>
-                  <FilterDropdownField
-                    label="Pet type"
-                    placeholder="Select pet types"
-                    value={filterDraft.petTypes}
-                    open={filterDropdown === "petTypes"}
-                    onPress={() => toggleFilterDropdown("petTypes", 250)}
-                  >
-                    <OptionList options={NATIVE_SERVICE_PET_TYPES} selected={filterDraft.petTypes} onToggle={(petTypes) => setFilterDraft((prev) => ({ ...prev, petTypes }))} />
-                  </FilterDropdownField>
-                  <FilterDropdownField
-                    label="Pet size"
-                    placeholder="Select pet sizes"
-                    value={filterDraft.dogSizes}
-                    open={filterDropdown === "dogSizes"}
-                    onPress={() => toggleFilterDropdown("dogSizes", 368)}
-                  >
-                    <OptionList options={NATIVE_SERVICE_DOG_SIZES} selected={filterDraft.dogSizes} onToggle={(dogSizes) => setFilterDraft((prev) => ({ ...prev, dogSizes }))} />
-                  </FilterDropdownField>
-                  <FilterDropdownField
-                    label="Care location"
-                    placeholder="Select care locations"
-                    value={filterDraft.locationStyles}
-                    open={filterDropdown === "locationStyles"}
-                    onPress={() => toggleFilterDropdown("locationStyles", 486)}
-                  >
-                    <OptionList options={NATIVE_SERVICE_LOCATION_STYLES} selected={filterDraft.locationStyles} onToggle={(locationStyles) => setFilterDraft((prev) => ({ ...prev, locationStyles }))} />
-                  </FilterDropdownField>
                 </View>
               ) : null}
               {panel === "dates" ? (
@@ -937,7 +1282,7 @@ export function NativeServiceScreen({ accessToken, sessionKey, userId, onNavigat
                     closePanel();
                   }}
                 >
-                  <Text style={styles.primaryButtonText}>Apply</Text>
+                  <Text style={styles.primaryButtonText}>Apply Filters</Text>
                 </AppModalButton>
               </AppModalActionRow>
             </View>
@@ -947,18 +1292,16 @@ export function NativeServiceScreen({ accessToken, sessionKey, userId, onNavigat
       </Modal>
 
       <Modal animationType="slide" presentationStyle="overFullScreen" transparent visible={Boolean(activeProviderId)} onRequestClose={closeProvider}>
-        <View style={[nativeModalStyles.appModalBackdrop, nativeModalStyles.appModalSafeArea, styles.profileModalSafeArea, { paddingTop: insets.top + huddleSpacing.x6, paddingBottom: insets.bottom }]}>
+        <View style={[nativeModalStyles.appModalBackdrop, nativeModalStyles.appModalSafeArea, styles.profileModalSafeArea, { backgroundColor: "transparent", paddingTop: insets.top + huddleSpacing.x6, paddingBottom: insets.bottom }]}>
+          <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.providerDim, providerBackdropStyle]} />
           <Pressable accessibilityLabel="Close provider profile" accessibilityRole="button" onPress={closeProvider} style={StyleSheet.absoluteFill} />
           <Animated.View style={[styles.profileModalCard, providerDragStyle]}>
-              <View collapsable={false} style={styles.profileModalHeader} {...providerPullDownResponder.panHandlers}>
-                <View style={styles.headerCopy}>
-                  <Text adjustsFontSizeToFit minimumFontScale={0.78} numberOfLines={1} style={styles.detailTitle}>Pet Carer Profile</Text>
-                </View>
-                <View style={styles.headerActions}>
-                  <AppModalIconButton accessibilityLabel="Close provider profile" onPress={closeProvider}>
-                    <Feather color={huddleColors.text} name="x" size={24} />
-                  </AppModalIconButton>
-                </View>
+              <View style={styles.providerGrabber} {...providerPullDownResponder.panHandlers} />
+              <View collapsable={false} {...providerPullDownResponder.panHandlers}>
+                <AppBottomSheetHeader>
+                  <Text numberOfLines={1} style={nativeModalStyles.appModalSheetTitle}>Pet Carer Profile</Text>
+                  <AppModalCloseButton onPress={closeProvider} />
+                </AppBottomSheetHeader>
               </View>
             <ScrollView
               bounces={false}
@@ -972,7 +1315,7 @@ export function NativeServiceScreen({ accessToken, sessionKey, userId, onNavigat
                   <Text style={styles.stateText}>{detailError}</Text>
                 </View>
               ) : activeProvider ? (
-                <NativeCarerProfileContent provider={activeProvider} showRequestAction canRequestService={!serviceDisabled} onRequestService={() => void requestService(activeProvider.userId)} />
+                <NativeCarerProfileContent provider={activeProvider} accessToken={accessToken} showRequestAction canRequestService={!serviceDisabled} onRequestService={() => void requestService(activeProvider.userId)} />
               ) : detailLoading ? (
                 <View style={styles.detailState}>
                   <NativeLoadingState variant="inline" />
@@ -993,13 +1336,13 @@ export function NativeServiceScreen({ accessToken, sessionKey, userId, onNavigat
         onCancel={() => setCarePopup(null)}
         onConfirm={() => setCarePopup(null)}
         open={Boolean(carePopup)}
-        title={carePopup?.title || "Huddle Care"}
+        title={carePopup?.title || "huddle Care"}
       />
     </View>
   );
 }
 
-function OptionList({ options, selected, onToggle, maxHeight }: { options: readonly string[]; selected: string[]; onToggle: (next: string[]) => void; maxHeight?: number }) {
+function OptionList({ getOptionIcon, options, selected, onToggle, maxHeight }: { getOptionIcon?: (option: string) => string | null; options: readonly string[]; selected: string[]; onToggle: (next: string[]) => void; maxHeight?: number }) {
   return (
     <ScrollView
       keyboardShouldPersistTaps="handled"
@@ -1016,7 +1359,7 @@ function OptionList({ options, selected, onToggle, maxHeight }: { options: reado
             onPress={() => onToggle(toggleString(selected, option))}
             style={({ pressed }) => [styles.dropdownOption, active ? styles.dropdownOptionActive : null, pressed ? styles.pressed : null]}
           >
-            <Text style={styles.dropdownText}>{option}</Text>
+            <Text ellipsizeMode="tail" numberOfLines={1} style={styles.dropdownText}>{getOptionIcon ? `${getOptionIcon(option) || ""} ${option}`.trim() : option}</Text>
             {active ? <Feather color={huddleColors.blue} name="check" size={16} /> : <View style={styles.checkSlot} />}
           </Pressable>
         );
@@ -1056,24 +1399,25 @@ function FilterDropdownField({
   label,
   onPress,
   open,
-  placeholder,
   value,
 }: {
   children: ReactNode;
   label: string;
   onPress: () => void;
   open: boolean;
-  placeholder: string;
   value: string[];
 }) {
+  const summary = value.length > 0 ? value.join(", ") : "All";
   return (
     <View style={styles.filterFieldGroup}>
-      <Text style={styles.filterLabel}>{label}</Text>
-      <Pressable onPress={onPress} style={({ pressed }) => [styles.filterSelectButton, open ? styles.fieldFocused : null, pressed ? styles.pressed : null]}>
-        <Text numberOfLines={1} style={[styles.filterSelectText, value.length === 0 ? styles.filterSelectPlaceholder : null]}>
-          {value.length > 0 ? value.join(", ") : placeholder}
-        </Text>
-        <Feather color={huddleColors.iconSubtle} name="chevron-down" size={16} />
+      <Pressable onPress={onPress} style={({ pressed }) => [styles.filterListRow, open ? styles.filterListRowFocused : null, pressed ? styles.pressed : null]}>
+        <Text numberOfLines={1} style={styles.filterRowLabel}>{label}</Text>
+        <View style={styles.filterRowValueWrap}>
+          <Text numberOfLines={1} style={[styles.filterRowValue, value.length === 0 ? styles.filterRowValueMuted : null]}>
+            {summary}
+          </Text>
+          <Feather color={huddleColors.iconSubtle} name={open ? "chevron-up" : "chevron-down"} size={16} />
+        </View>
       </Pressable>
       {open ? children : null}
     </View>
@@ -1082,8 +1426,8 @@ function FilterDropdownField({
 
 function ToggleRow({ label, value, onChange }: { label: string; value: boolean; onChange: (value: boolean) => void }) {
   return (
-    <Pressable onPress={() => onChange(!value)} style={styles.toggleRow}>
-      <Text style={styles.toggleLabel}>{label}</Text>
+    <Pressable accessibilityRole="switch" accessibilityLabel={label} accessibilityState={{ checked: value }} onPress={() => onChange(!value)} style={styles.toggleRow}>
+      <Text style={styles.filterRowLabel}>{label}</Text>
       <View style={[styles.toggleTrack, value ? styles.toggleTrackActive : null]}>
         <View style={[styles.toggleThumb, value ? styles.toggleThumbActive : null]} />
       </View>
@@ -1094,11 +1438,10 @@ function ToggleRow({ label, value, onChange }: { label: string; value: boolean; 
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    paddingTop: huddleLayout.headerHeight,
     backgroundColor: huddleColors.canvas,
   },
   toolbar: {
-    minHeight: huddleLayout.minTouch + huddleSpacing.x4,
+    height: SERVICE_TOOLBAR_HEIGHT,
     flexDirection: "row",
     alignItems: "center",
     gap: huddleSpacing.x2,
@@ -1107,6 +1450,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: huddleColors.divider,
     backgroundColor: huddleColors.canvas,
+  },
+  toolbarReveal: {
+    overflow: "hidden",
   },
   restrictionBanner: {
     marginHorizontal: huddleSpacing.x4,
@@ -1132,15 +1478,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: huddleSpacing.x2,
     paddingHorizontal: huddleSpacing.x3,
-    borderRadius: huddleRadii.pill,
+    borderRadius: huddleRadii.button,
     borderWidth: 1,
     borderColor: huddleColors.fieldBorderSoft,
     backgroundColor: huddleColors.canvas,
-    ...huddleShadows.glassElevation1,
   },
   searchInput: {
     flex: 1,
     minWidth: 0,
+    flexShrink: 1,
     height: huddleSpacing.x6,
     paddingTop: 0,
     paddingBottom: 0,
@@ -1150,6 +1496,7 @@ const styles = StyleSheet.create({
     includeFontPadding: false,
     textAlignVertical: "center",
     color: huddleColors.text,
+    overflow: "hidden",
   },
   iconButton: {
     width: 32,
@@ -1170,6 +1517,13 @@ const styles = StyleSheet.create({
     backgroundColor: huddleColors.canvas,
     flexDirection: "row",
     gap: huddleSpacing.x3,
+  },
+  providerGridRow: {
+    gap: huddleSpacing.x3,
+  },
+  providerGridCell: {
+    flex: 1,
+    marginBottom: 34,
   },
   providerColumn: {
     backgroundColor: huddleColors.canvas,
@@ -1213,6 +1567,18 @@ const styles = StyleSheet.create({
     top: huddlePolaroid.badge.top,
     gap: 0.5,
   },
+  ratingBadgeTopRight: {
+    position: "absolute",
+    right: huddlePolaroid.badge.left,
+    top: huddlePolaroid.badge.top,
+  },
+  engagementSparkleAnchor: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    width: 0,
+    height: 0,
+  },
   badgePuck: {
     width: huddlePolaroid.badge.size,
     height: huddlePolaroid.badge.size,
@@ -1225,7 +1591,7 @@ const styles = StyleSheet.create({
   },
   badgeBlue: { backgroundColor: huddleColors.blue },
   badgeGreen: { backgroundColor: huddleColors.success },
-  badgeRed: { backgroundColor: huddleColors.validationRed },
+  badgeEmergency: { backgroundColor: huddleColors.tierBadgePlus },
   pricePill: {
     position: "absolute",
     right: "2%",
@@ -1298,9 +1664,10 @@ const styles = StyleSheet.create({
   serviceErrorState: {
     flex: 1,
     alignItems: "center",
-    justifyContent: "center",
+    justifyContent: "flex-start",
     gap: huddleSpacing.x3,
     paddingHorizontal: huddleSpacing.x5,
+    paddingTop: huddleSpacing.x8,
     backgroundColor: huddleColors.canvas,
   },
   serviceErrorImage: {
@@ -1334,33 +1701,25 @@ const styles = StyleSheet.create({
     paddingHorizontal: huddleSpacing.x4,
     paddingTop: huddleSpacing.x7,
   },
-  webEmptyCard: {
+  socialEmptyState: {
     width: "100%",
-    maxWidth: 360,
-    minHeight: 360,
     alignItems: "center",
-    justifyContent: "center",
-    gap: huddleSpacing.x3,
     paddingHorizontal: huddleSpacing.x5,
-    paddingVertical: huddleSpacing.x6,
-    borderRadius: huddleRadii.glass,
-    backgroundColor: huddleColors.canvas,
-    borderWidth: 1,
-    borderColor: huddleColors.cardBorderSoft,
-    ...huddleShadows.glassElevation1,
+    paddingVertical: huddleSpacing.x7,
   },
-  webEmptyImage: {
-    width: "100%",
-    height: 220,
+  socialEmptyIllustration: {
+    width: huddleSocial.emptyAssetWidth,
+    maxWidth: "100%",
+    height: huddleSocial.emptyAssetHeight,
   },
-  webEmptyBody: {
-    marginTop: huddleSpacing.x2,
-    paddingHorizontal: huddleSpacing.x2,
+  socialEmptyText: {
+    maxWidth: 320,
+    marginTop: huddleSpacing.x4,
     textAlign: "center",
-    fontFamily: "Urbanist-500",
-    fontSize: huddleType.body,
-    lineHeight: 24,
-    color: huddleColors.subtext,
+    fontFamily: "Urbanist-400",
+    fontSize: huddleSocial.emptyTextSize,
+    lineHeight: huddleSocial.emptyTextLineHeight,
+    color: huddleColors.caption,
   },
   emptySecondaryButton: {
     minHeight: 44,
@@ -1371,7 +1730,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: huddleSpacing.x2,
-    borderRadius: huddleRadii.pill,
+    borderRadius: huddleRadii.button,
     paddingHorizontal: huddleSpacing.x5,
     backgroundColor: huddleColors.canvas,
     borderWidth: 1,
@@ -1407,20 +1766,6 @@ const styles = StyleSheet.create({
     lineHeight: huddleType.h4Line,
     color: huddleColors.text,
   },
-  sheetHeaderRow: {
-    minHeight: huddleLayout.minTouch,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "flex-start",
-    gap: huddleSpacing.x3,
-  },
-  sheetInlineClose: {
-    width: huddleLayout.minTouch,
-    height: huddleLayout.minTouch,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: huddleRadii.pill,
-  },
   sheetScroll: {
     maxHeight: SERVICE_SHEET_SCROLL_MAX_HEIGHT,
   },
@@ -1429,7 +1774,7 @@ const styles = StyleSheet.create({
   },
   sheetScrollContent: {
     paddingHorizontal: huddleSpacing.x6,
-    paddingTop: huddleSpacing.x5,
+    paddingTop: huddleSpacing.x7,
     paddingBottom: huddleSpacing.x4,
   },
   sheetFooter: {
@@ -1444,14 +1789,21 @@ const styles = StyleSheet.create({
     backgroundColor: huddleColors.canvas,
   },
   filterStack: {
-    gap: huddleSpacing.x4,
+    gap: huddleSpacing.x6,
   },
-  toggleGroup: {
-    gap: huddleSpacing.x2,
-    paddingBottom: huddleSpacing.x1,
+  filterScopeGroup: {
+    gap: 0,
   },
   filterFieldGroup: {
-    gap: huddleSpacing.x2,
+    gap: 0,
+  },
+  filterGroupTitle: {
+    fontFamily: "Urbanist-700",
+    fontSize: huddleType.helper,
+    lineHeight: huddleType.helperLine,
+    letterSpacing: 1,
+    color: huddleColors.mutedText,
+    marginBottom: huddleSpacing.x3,
   },
   filterLabel: {
     fontFamily: "Urbanist-700",
@@ -1459,21 +1811,47 @@ const styles = StyleSheet.create({
     lineHeight: huddleType.helperLine,
     color: huddleColors.text,
   },
-  filterSelectButton: {
-    minHeight: 44,
+  filterListRow: {
+    minHeight: 58,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     gap: huddleSpacing.x3,
-    paddingHorizontal: huddleSpacing.x4,
-    borderWidth: 1,
-    borderColor: huddleColors.fieldBorderSoft,
-    borderRadius: huddleRadii.field,
-    backgroundColor: huddleColors.canvas,
-    ...huddleShadows.glassElevation1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: huddleColors.divider,
+  },
+  filterListRowFocused: {
+    borderBottomColor: huddleColors.divider,
   },
   fieldFocused: {
     ...huddleFieldStates.focused,
+  },
+  filterRowLabel: {
+    flex: 1,
+    fontFamily: "Urbanist-700",
+    fontSize: huddleType.label,
+    lineHeight: huddleType.labelLine,
+    color: huddleColors.text,
+  },
+  filterRowValueWrap: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: huddleSpacing.x2,
+  },
+  filterRowValue: {
+    flexShrink: 1,
+    minWidth: 0,
+    textAlign: "right",
+    fontFamily: "Urbanist-600",
+    fontSize: huddleType.label,
+    lineHeight: huddleType.labelLine,
+    color: huddleColors.text,
+  },
+  filterRowValueMuted: {
+    color: huddleColors.mutedText,
   },
   filterSelectText: {
     flex: 1,
@@ -1487,9 +1865,10 @@ const styles = StyleSheet.create({
   },
   dropdownMenu: {
     maxHeight: huddleFormControls.select.menuMaxHeight,
+    marginTop: huddleSpacing.x1,
     borderRadius: huddleFormControls.select.menuRadius,
     borderWidth: 1,
-    borderColor: huddleColors.fieldBorderSoft,
+    borderColor: huddleColors.glassBorder,
     backgroundColor: huddleColors.canvas,
     ...huddleShadows.glassElevation1,
   },
@@ -1507,7 +1886,7 @@ const styles = StyleSheet.create({
     borderRadius: huddleFormControls.select.optionRadius,
   },
   dropdownOptionActive: {
-    backgroundColor: huddleColors.primarySoftFill,
+    backgroundColor: huddleColors.glassControl,
   },
   dropdownText: {
     flex: 1,
@@ -1520,16 +1899,13 @@ const styles = StyleSheet.create({
     width: huddleFormControls.select.checkSlot,
   },
   toggleRow: {
-    minHeight: huddleLayout.minTouch,
+    minHeight: 58,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     gap: huddleSpacing.x3,
-    paddingHorizontal: huddleSpacing.x4,
-    borderRadius: huddleRadii.field,
-    borderWidth: 0,
-    backgroundColor: huddleColors.canvas,
-    ...huddleShadows.glassElevation1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: huddleColors.divider,
   },
   toggleLabel: {
     flex: 1,
@@ -1539,20 +1915,13 @@ const styles = StyleSheet.create({
     color: huddleColors.text,
   },
   toggleTrack: {
+    ...huddleGlassControls.toggleSurface,
     width: 50,
     height: 28,
     flexShrink: 0,
     justifyContent: "center",
     paddingHorizontal: 3,
-    borderWidth: 1,
-    borderColor: huddleColors.fieldBorderSoft,
     borderRadius: huddleRadii.pill,
-    backgroundColor: huddleColors.mutedCanvas,
-    shadowColor: huddleColors.neutralShadow,
-    shadowOpacity: 0.22,
-    shadowRadius: 8,
-    shadowOffset: { width: 2, height: 3 },
-    elevation: 2,
   },
   toggleTrackActive: {
     borderColor: huddleColors.blue,
@@ -1586,7 +1955,7 @@ const styles = StyleSheet.create({
   },
   secondaryButtonText: {
     ...huddleButtons.label,
-    color: huddleColors.blue,
+    color: huddleColors.text,
   },
   dateStack: {
     gap: huddleSpacing.x3,
@@ -1662,7 +2031,7 @@ const styles = StyleSheet.create({
     backgroundColor: huddleColors.mutedCanvas,
   },
   calendarCellToday: {
-    backgroundColor: huddleColors.primarySoftFill,
+    backgroundColor: huddleColors.glassControl,
   },
   calendarCellActive: {
     backgroundColor: huddleColors.blue,
@@ -1685,6 +2054,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: 0,
   },
+  providerDim: {
+    backgroundColor: huddleColors.backdrop,
+  },
+  providerGrabber: {
+    alignSelf: "center",
+    width: 36,
+    height: 4,
+    borderRadius: huddleRadii.pill,
+    backgroundColor: huddleColors.sectionDividerStrong,
+    marginTop: huddleSpacing.x2,
+  },
   profileModalCard: {
     width: "100%",
     height: "100%",
@@ -1697,35 +2077,12 @@ const styles = StyleSheet.create({
     backgroundColor: huddleColors.canvas,
     ...huddleShadows.glassElevation2,
   },
-  profileModalHeader: {
-    minHeight: 70,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: huddleSpacing.x1,
-    paddingHorizontal: huddleSpacing.x4,
-    paddingTop: huddleSpacing.x4,
-    paddingBottom: huddleSpacing.x3,
-  },
-  headerCopy: {
-    flex: 1,
-    minWidth: 0,
-    gap: 2,
-  },
   headerActions: {
     flexShrink: 0,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "flex-end",
     gap: huddleSpacing.x1,
-  },
-  detailTitle: {
-    flexShrink: 1,
-    maxWidth: "86%",
-    fontFamily: "Urbanist-700",
-    fontSize: huddleType.body,
-    lineHeight: huddleType.labelLine,
-    color: huddleColors.text,
   },
   profileModalScroll: {
     flex: 1,

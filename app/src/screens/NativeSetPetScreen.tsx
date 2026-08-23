@@ -1,8 +1,7 @@
 import { Feather } from "@expo/vector-icons";
-import * as ImagePicker from "expo-image-picker";
+import { fetchNativeResponseWithTimeout as fetch } from "../lib/nativeTimeout";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator,
   Alert,
   Animated,
   Image,
@@ -18,22 +17,46 @@ import {
   TextInput,
   UIManager,
   View,
+  type KeyboardEvent,
 } from "react-native";
-import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { NativeLoadingState } from "../components/NativeLoadingState";
+import { NativeSpinner } from "../components/NativeSpinner";
 import {
   NativePetDetailsContent,
   type NativePetDetailsData,
 } from "../components/NativePetDetailsContent";
-import { AppDestructiveSlideConfirm } from "../components/nativeModalPrimitives";
+import { AppDestructiveSlideConfirm, AppKeyboardAvoidingView as KeyboardAvoidingView } from "../components/nativeModalPrimitives";
+import { NativeFormChoiceField, NativeFormTextField } from "../components/NativeFormField";
 import { NativePhoneField, findNativePhoneCountry } from "../components/NativePhoneField";
+import { NativeHeroPhotoPicker } from "../components/NativeHeroPhotoPicker";
+import { NativeCollapsibleSection } from "../components/profile/NativeCollapsibleSection";
+import { NativeMediaImageCropper, type NativePresentationCrop } from "../components/profile/NativeProfilePhotoCropper";
+import { loadNativeProfilePhotoForEditing, pickNativeProfilePhoto } from "../components/profile/NativeProfilePhotoPicker";
+import { NativeProfileProgressTrack } from "../components/profile/NativeProfileProgressTrack";
+import { cleanupNativeProfilePhotoTemporaryAsset, type NativeProfileUploadAsset } from "../lib/nativeProfilePhotos";
+import { useGuidedSections } from "../components/profile/useGuidedSections";
 import { haptic } from "../lib/nativeHaptics";
-import { useShakeAnimation } from "../lib/nativeAnimations";
+import { nativeSafeErrorCopy } from "../lib/nativeSafeErrorCopy";
+import { useNativeLoadingDeadline } from "../lib/useNativeLoadingDeadline";
+import { allowValidatedWrite } from "../lib/nativeAsyncRace";
+import { nativePetEmojiForLabel } from "../lib/nativePetTaxonomy";
+import { useErrorShake } from "../components/motion/useErrorShake";
 import {
   fetchNativeProfileSummary,
-  readCachedNativeProfileSummary,
+  clearNativeProfileSummaryCache,
   type NativeProfileSummary,
 } from "../lib/nativeProfileSummary";
+import { invalidateNativePublicProfileCaches } from "../lib/nativePublicProfile";
+import { freshnessRegistry } from "../lib/nativeFreshnessRegistry";
+import { nativeFreshImageKey, nativeFreshImageUri, nativeMutableImageVersion } from "../lib/nativeImageFreshness";
+import { publishNativePetMutation } from "../lib/nativeMutationTruth";
+import { fetchNativeFamilyPetContext, removeNativeFamilySharedPet, type NativeFamilyPetContext } from "../lib/nativeFamilyPets";
+import { invalidateCachedSignedStorageUrl, parseNativePetImageStorageRef, resolveNativePetImageUrlAsync } from "../lib/nativeStorageUrlCache";
+import { clearNativeHomePetsCache } from "./NativeHomeScreen";
+import { createNativeAuthenticatedHeaders, getFreshNativeAccessToken } from "../lib/nativeFunctionClient";
+import { isCurrentNativeSessionKey, nativeSafeWriteErrorMessage, requireCurrentNativeSession } from "../lib/nativeSessionGuard";
+import { readNativeLocalMediaFile, uploadNativeLocalMediaToSupabase, type NativeLocalMediaMeta } from "../lib/nativeLocalMediaUpload";
 import { createNativeProtectedActionError, getNativeProtectedActionResult, logNativeProtectedActionFailure, requestNativeStorageCleanupResult } from "../lib/nativeStorageCleanup";
 import { supabaseAnonKey, supabaseUrl } from "../lib/supabase";
 import { huddleModalTokens } from "../components/nativeModalPrimitives.styles";
@@ -41,8 +64,11 @@ import {
   huddleButtons,
   huddleColors,
   huddleFieldStates,
+  huddleGlassControls,
+  huddleFormFields,
   huddleFormControls,
   huddleLayout,
+  huddlePetPhoto,
   huddleRadii,
   huddleShadows,
   huddleSpacing,
@@ -79,6 +105,7 @@ type PetFormData = {
   species: string;
   customSpecies: string;
   breed: string;
+  petSize: string;
   gender: string;
   neuteredSpayed: boolean;
   dob: string;
@@ -96,6 +123,7 @@ type PetFormData = {
   medications: MedicationRecord[];
   isActive: boolean;
   isPublic: boolean;
+  shareWithFamily: boolean;
 };
 
 const PET_FORM_SELECT = [
@@ -104,6 +132,7 @@ const PET_FORM_SELECT = [
   "name",
   "species",
   "breed",
+  "pet_size",
   "gender",
   "neutered_spayed",
   "dob",
@@ -123,8 +152,11 @@ const PET_FORM_SELECT = [
   "next_vaccination_reminder",
   "medications",
   "photo_url",
+  "photo_presentation",
   "is_active",
   "is_public",
+  "share_with_family",
+  "updated_at",
 ].join(", ");
 
 type NativeSetPetScreenProps = {
@@ -133,40 +165,41 @@ type NativeSetPetScreenProps = {
   onGoBack?: () => void;
   onboardingMode?: boolean;
   petId?: string | null;
+  sessionKey?: string | null;
   userId: string | null;
 };
 
-const cleanAccessToken = (accessToken?: string | null) => String(accessToken || "").trim();
-
-const decodeJwtSubject = (accessToken?: string | null) => {
-  const token = cleanAccessToken(accessToken);
-  const payload = token.split(".")[1];
-  if (!payload) return null;
-  try {
-    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
-    const padded = normalized.padEnd(normalized.length + ((4 - (normalized.length % 4)) % 4), "=");
-    const decoded = globalThis.atob(padded);
-    const parsed = JSON.parse(decoded) as { sub?: unknown };
-    return typeof parsed.sub === "string" && parsed.sub.trim() ? parsed.sub.trim() : null;
-  } catch {
-    return null;
-  }
+const PET_REQUIRED_MESSAGES = {
+  name: "Don't skip this one!",
+  species: "We'll need this part.",
+  customSpecies: "Gotta have this!",
+  petSize: "Choose your dog's size.",
+} as const;
+const PET_ERROR_SCROLL_ORDER: Array<keyof PetFormData | "visit" | "reminder" | "medication"> = [
+  "name",
+  "species",
+  "customSpecies",
+  "petSize",
+  "dob",
+  "weight",
+  "visit",
+  "reminder",
+  "medication",
+];
+const PET_ERROR_FIELD_TARGETS: Partial<Record<keyof PetFormData | "visit" | "reminder" | "medication", string>> = {
+  customSpecies: "customSpecies",
+  dob: "dob",
+  medication: "medicationName",
+  name: "name",
+  petSize: "petSize",
+  reminder: "reminderDate",
+  species: "species",
+  visit: "visitDate",
+  weight: "weight",
 };
 
-const requireActivePetSession = (accessToken?: string | null, userId?: string | null) => {
-  const token = cleanAccessToken(accessToken);
-  if (!token) throw new Error("Please sign in again to save your pet profile.");
-  const sessionUserId = decodeJwtSubject(token) || String(userId || "").trim();
-  if (!sessionUserId) throw new Error("Please sign in again to save your pet profile.");
-  if (userId && sessionUserId !== userId) throw new Error("Please sign in again to save your pet profile.");
-  return { token, userId: sessionUserId };
-};
-
-const petRestHeaders = (accessToken: string, extra?: Record<string, string>) => ({
-  Authorization: `Bearer ${accessToken}`,
-  apikey: supabaseAnonKey,
-  ...extra,
-});
+const petRestHeaders = (accessToken: string, extra?: Record<string, string>) =>
+  createNativeAuthenticatedHeaders(accessToken, extra);
 
 const parseRestJson = async (response: Response) => {
   const raw = await response.text();
@@ -180,18 +213,27 @@ const parseRestJson = async (response: Response) => {
 
 const restErrorMessage = (parsed: unknown, fallback: string) => {
   if (parsed && typeof parsed === "object" && "message" in parsed) {
-    return String((parsed as { message?: unknown }).message || fallback);
+    return nativeSafeErrorCopy((parsed as { message?: unknown }).message, fallback);
   }
-  return typeof parsed === "string" && parsed ? parsed : fallback;
+  return nativeSafeErrorCopy(parsed, fallback);
+};
+
+const petUserFacingErrorMessage = (error: unknown, fallback: string) => {
+  const raw = error instanceof Error ? error.message : String(error || "");
+  const normalized = raw.toLowerCase();
+  if (normalized.includes("pets_weight_lt_100")) return "Oops...This input seems invalid.";
+  if (nativeSafeWriteErrorMessage(error, "") || normalized.includes("native_session_")) {
+    return "We couldn't save this pet profile. Please sign in again and retry.";
+  }
+  return fallback;
 };
 
 const petRestUrl = (table: string) => new URL(`${supabaseUrl}/rest/v1/${table}`);
 
-const fetchPetRowWithToken = async (petId: string, ownerId: string, accessToken: string) => {
+const fetchPetRowWithToken = async (petId: string, accessToken: string) => {
   const url = petRestUrl("pets");
   url.searchParams.set("select", PET_FORM_SELECT);
   url.searchParams.set("id", `eq.${petId}`);
-  url.searchParams.set("owner_id", `eq.${ownerId}`);
   url.searchParams.set("limit", "1");
   const response = await fetch(url.toString(), {
     headers: petRestHeaders(accessToken, { accept: "application/json" }),
@@ -213,7 +255,6 @@ const savePetRowWithToken = async (
     url.searchParams.set("on_conflict", "id");
   } else {
     url.searchParams.set("id", `eq.${petId}`);
-    url.searchParams.set("owner_id", `eq.${ownerId}`);
   }
   const response = await fetch(url.toString(), {
     method: isNewPet ? "POST" : "PATCH",
@@ -243,62 +284,45 @@ const deletePetRowWithToken = async (
   if (!response.ok) throw new Error(restErrorMessage(parsed, response.statusText));
 };
 
-const updateProfileOnboardingWithToken = async (ownerId: string, payload: Record<string, unknown>, accessToken: string) => {
-  const patchUrl = petRestUrl("profiles");
-  patchUrl.searchParams.set("id", `eq.${ownerId}`);
-  const patchResponse = await fetch(patchUrl.toString(), {
-    method: "PATCH",
-    headers: petRestHeaders(accessToken, { "content-type": "application/json", prefer: "return=representation" }),
-    body: JSON.stringify(payload),
-  });
-  const patchParsed = await parseRestJson(patchResponse);
-  if (!patchResponse.ok) throw new Error(restErrorMessage(patchParsed, patchResponse.statusText));
-  if (Array.isArray(patchParsed) && patchParsed.length > 0) return;
+type PetPhotoStorageBucket = "pets" | "private_pet_photos";
+type PetPhotoStorageObject = { bucket: PetPhotoStorageBucket; path: string };
 
-  const upsertUrl = petRestUrl("profiles");
-  upsertUrl.searchParams.set("on_conflict", "id");
-  const upsertResponse = await fetch(upsertUrl.toString(), {
-    method: "POST",
-    headers: petRestHeaders(accessToken, {
-      "content-type": "application/json",
-      prefer: "resolution=merge-duplicates,return=minimal",
-    }),
-    body: JSON.stringify({ id: ownerId, ...payload }),
-  });
-  const upsertParsed = await parseRestJson(upsertResponse);
-  if (!upsertResponse.ok) throw new Error(restErrorMessage(upsertParsed, upsertResponse.statusText));
+const extractPetStorageObject = (value: string | null | undefined): PetPhotoStorageObject | null => {
+  const ref = parseNativePetImageStorageRef(value);
+  return ref?.kind === "storage" ? { bucket: ref.bucket, path: ref.objectPath } : null;
 };
 
-const postPetProfileCompleted = async (ownerId: string, accessToken: string) => {
-  const response = await fetch(`${supabaseUrl}/functions/v1/brevo-sync`, {
+const petPhotoReference = (bucket: PetPhotoStorageBucket, path: string) => (
+  bucket === "private_pet_photos"
+    ? `${bucket}/${path}`
+    : `${supabaseUrl}/storage/v1/object/public/pets/${path.split("/").map((part) => encodeURIComponent(part)).join("/")}`
+);
+
+const copyPetPhotoWithToken = async (source: PetPhotoStorageObject, destinationBucket: PetPhotoStorageBucket, accessToken: string) => {
+  const response = await fetch(`${supabaseUrl}/storage/v1/object/copy`, {
     method: "POST",
     headers: petRestHeaders(accessToken, { "content-type": "application/json" }),
-    body: JSON.stringify({ event: "pet_profile_completed", user_id: ownerId }),
+    body: JSON.stringify({
+      bucketId: source.bucket,
+      sourceKey: source.path,
+      destinationBucket,
+      destinationKey: source.path,
+    }),
   });
-  if (!response.ok && __DEV__) {
-    console.warn("[brevo-sync] pet_profile_completed failed silently", response.status);
-  }
+  if (!response.ok) throw new Error((await response.text().catch(() => "")) || `pet_photo_copy_failed_${response.status}`);
 };
 
-const extractPetObjectPathFromUrl = (value: string | null | undefined) => {
-  const raw = String(value || "").trim();
-  if (!raw) return null;
-  try {
-    const url = new URL(raw);
-    const pathname = decodeURIComponent(url.pathname || "");
-    const match = pathname.match(/\/storage\/v1\/object\/public\/pets\/(.+)$/);
-    return match?.[1] ? match[1].replace(/^\/+/, "") : null;
-  } catch {
-    return null;
-  }
+const makePetPhotoObjectPath = (userId: string, petId: string, variant: "portrait", extension: string) => {
+  const uploadId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  return `${userId}/${petId}/${variant}-${uploadId}.${extension}`;
 };
 
-const registerPetMediaAssetWithToken = async (petId: string, objectPath: string, accessToken: string) => {
+const registerPetMediaAssetWithToken = async (petId: string, bucket: PetPhotoStorageBucket, objectPath: string, accessToken: string) => {
   const response = await fetch(`${supabaseUrl}/rest/v1/rpc/register_native_media_asset`, {
     method: "POST",
     headers: petRestHeaders(accessToken, { "content-type": "application/json" }),
     body: JSON.stringify({
-      p_bucket: "pets",
+      p_bucket: bucket,
       p_content_id: petId,
       p_content_type: "pet_photo",
       p_expires_at: null,
@@ -309,8 +333,29 @@ const registerPetMediaAssetWithToken = async (petId: string, objectPath: string,
   if (!response.ok) throw new Error(restErrorMessage(parsed, response.statusText));
 };
 
+const registerFamilyPetMediaAssetWithToken = async (petId: string, bucket: PetPhotoStorageBucket, objectPath: string, accessToken: string) => {
+  const response = await fetch(`${supabaseUrl}/rest/v1/rpc/register_native_family_pet_media_asset`, {
+    method: "POST",
+    headers: petRestHeaders(accessToken, { "content-type": "application/json" }),
+    body: JSON.stringify({ p_bucket: bucket, p_object_path: objectPath, p_pet_id: petId }),
+  });
+  const parsed = await parseRestJson(response);
+  if (!response.ok) throw new Error(restErrorMessage(parsed, response.statusText));
+};
+
+const requestFamilyPetStorageCleanup = async (petId: string, bucket: PetPhotoStorageBucket, objectPath: string, reason: string, accessToken: string) => {
+  const response = await fetch(`${supabaseUrl}/rest/v1/rpc/request_native_family_pet_storage_cleanup`, {
+    method: "POST",
+    headers: petRestHeaders(accessToken, { "content-type": "application/json" }),
+    body: JSON.stringify({ p_bucket: bucket, p_object_path: objectPath, p_reason: reason, p_pet_id: petId }),
+  });
+  return response.ok;
+};
+
 type DateTarget = "dob" | "visitDate" | "reminderDate";
-type SelectTarget = "breed" | "temperament" | "visitReason" | "vaccine" | "reminderReason" | "doseUnit" | "frequencyUnit";
+type SelectTarget = "species" | "breed" | "petSize" | "temperament" | "visitReason" | "vaccine" | "reminderReason" | "doseUnit" | "frequencyUnit";
+const petSizeOptions = ["Small", "Medium", "Large", "Giant"] as const;
+const petAccordionSectionTitles = ["Basics", "About", "Vet & Health"] as const;
 const speciesOptions = [
   { id: "dog", label: "Dogs" },
   { id: "cat", label: "Cats" },
@@ -477,6 +522,7 @@ const emptyForm: PetFormData = {
   species: "",
   customSpecies: "",
   breed: "",
+  petSize: "",
   gender: "",
   neuteredSpayed: false,
   dob: "",
@@ -494,6 +540,7 @@ const emptyForm: PetFormData = {
   medications: [],
   isActive: true,
   isPublic: false,
+  shareWithFamily: false,
 };
 
 const parseDecimalInput = (value: string): number | null => {
@@ -546,8 +593,16 @@ const formatDateOnly = (value: unknown) => {
   return value.slice(0, 10);
 };
 
-const isIsoDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value.trim());
 const pad2 = (value: number) => String(value).padStart(2, "0");
+const daysInMonth = (year: number, month: number) => new Date(year, month, 0).getDate();
+const isoFromParts = (year: number, month: number, day: number) => `${year}-${pad2(month)}-${pad2(Math.min(day, daysInMonth(year, month)))}`;
+const isIsoDate = (value: string) => {
+  const text = value.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return false;
+  const [year, month, day] = text.split("-").map(Number);
+  if (month < 1 || month > 12 || day < 1 || day > daysInMonth(year, month)) return false;
+  return isoFromParts(year, month, day) === text;
+};
 
 const datePartsFromIso = (value: string) => {
   const fallback = new Date();
@@ -561,9 +616,6 @@ const datePartsFromIso = (value: string) => {
   const [year, month, day] = value.split("-").map(Number);
   return { year, month, day };
 };
-
-const daysInMonth = (year: number, month: number) => new Date(year, month, 0).getDate();
-const isoFromParts = (year: number, month: number, day: number) => `${year}-${pad2(month)}-${pad2(Math.min(day, daysInMonth(year, month)))}`;
 
 const todayAtMidnight = () => {
   const date = new Date();
@@ -686,10 +738,11 @@ const parseMedication = (item: unknown): MedicationRecord | null => {
   };
 };
 
-const toPetPayload = (form: PetFormData, photoUrl: string | null) => ({
+const toPetPayload = (form: PetFormData, photoUrl: string | null, homeCrop: NativePresentationCrop | null) => ({
 	  name: form.name,
 	  species: form.species === "others" ? form.customSpecies : form.species,
 	  breed: form.breed || null,
+	  pet_size: form.species === "dog" ? form.petSize || null : null,
   gender: form.gender || null,
   neutered_spayed: form.neuteredSpayed,
   dob: form.dob || null,
@@ -708,7 +761,9 @@ const toPetPayload = (form: PetFormData, photoUrl: string | null) => ({
   medications: form.medications.length > 0 ? form.medications : [],
   is_active: form.isActive,
   is_public: form.isPublic,
+  share_with_family: form.shareWithFamily,
   photo_url: photoUrl,
+  photo_presentation: homeCrop ? { home: homeCrop } : {},
   updated_at: new Date().toISOString(),
 });
 
@@ -773,10 +828,11 @@ function Chip({
   return (
     <Pressable
       accessibilityRole="button"
+      accessibilityState={{ selected }}
       onPress={onPress}
       style={({ pressed }) => [styles.chip, selected ? styles.chipSelected : null, pressed ? styles.pressed : null]}
     >
-      <Text style={[styles.chipText, selected ? styles.chipTextSelected : null]}>{label}</Text>
+      <Text numberOfLines={1} style={[styles.chipText, selected ? styles.chipTextSelected : null]}>{label}</Text>
     </Pressable>
   );
 }
@@ -785,28 +841,33 @@ function GenderChip({ label, selected, onPress }: { label: string; selected: boo
   return (
     <Pressable
       accessibilityRole="button"
+      accessibilityState={{ selected }}
       onPress={onPress}
       style={({ pressed }) => [styles.genderChip, selected ? styles.chipSelected : null, pressed ? styles.pressed : null]}
     >
-      <Text style={[styles.chipText, selected ? styles.chipTextSelected : null]}>{label}</Text>
+      <Text numberOfLines={1} style={[styles.chipText, selected ? styles.chipTextSelected : null]}>{label}</Text>
     </Pressable>
   );
 }
 
-function InlineToggle({ checked, onPress }: { checked: boolean; onPress: () => void }) {
+function InlineToggle({ checked, disabled = false, onPress }: { checked: boolean; disabled?: boolean; onPress: () => void }) {
   return (
-    <Pressable accessibilityRole="switch" accessibilityState={{ checked }} onPress={onPress} style={[styles.webToggleTrack, checked ? styles.webToggleTrackChecked : null]}>
+    <Pressable accessibilityRole="switch" accessibilityState={{ checked, disabled }} disabled={disabled} onPress={onPress} style={[styles.webToggleTrack, checked ? styles.webToggleTrackChecked : null, disabled ? styles.disabled : null]}>
       <View style={[styles.webToggleThumb, checked ? styles.webToggleThumbChecked : null]} />
     </Pressable>
   );
 }
 
 function InlineSelectMenu({
+  borderless,
+  getOptionIcon,
   options,
   onSelect,
   selectedValues,
   visible,
 }: {
+  borderless?: boolean;
+  getOptionIcon?: (option: string) => string | null;
   options: string[];
   onSelect: (value: string) => void;
   selectedValues?: string[];
@@ -814,19 +875,26 @@ function InlineSelectMenu({
 }) {
   if (!visible) return null;
   return (
-    <View style={styles.inlinePopover}>
+    <View style={[styles.inlinePopover, borderless ? styles.inlinePopoverBorderless : null]}>
       <ScrollView nestedScrollEnabled showsVerticalScrollIndicator={false} style={styles.inlinePopoverScroll}>
         <View style={styles.inlineOptions}>
-          {options.map((option) => (
-            <Pressable
-              key={option}
-              onPress={() => onSelect(option)}
-              style={({ pressed }) => [styles.optionRow, selectedValues?.includes(option) ? styles.optionRowSelected : null, pressed ? styles.pressed : null]}
-            >
-              <Text style={[styles.optionText, selectedValues?.includes(option) ? styles.optionTextSelected : null]}>{option}</Text>
-              {selectedValues?.includes(option) ? <Feather color={huddleColors.blue} name="check" size={14} /> : <View style={styles.optionCheckSpacer} />}
-            </Pressable>
-          ))}
+          {options.map((option) => {
+            const icon = getOptionIcon?.(option);
+            const selected = selectedValues?.includes(option) ?? false;
+            return (
+              <Pressable
+                key={option}
+                onPress={() => onSelect(option)}
+                style={({ pressed }) => [styles.optionRow, selected ? styles.optionRowSelected : null, pressed ? styles.pressed : null]}
+              >
+                <View style={styles.optionLabelRow}>
+                  {icon ? <Text style={styles.optionEmoji}>{icon}</Text> : null}
+                  <Text style={[styles.optionText, selected ? styles.optionTextSelected : null]}>{option}</Text>
+                </View>
+                {selected ? <Feather color={huddleColors.blue} name="check" size={14} /> : <View style={styles.optionCheckSpacer} />}
+              </Pressable>
+            );
+          })}
         </View>
       </ScrollView>
     </View>
@@ -838,6 +906,7 @@ function DateField({
   focused,
   onBlur,
   onChangeText,
+  onFocus,
   onToggle,
   value,
 }: {
@@ -845,20 +914,26 @@ function DateField({
   focused?: boolean;
   onBlur?: () => void;
   onChangeText: (value: string) => void;
+  onFocus?: () => void;
   onToggle: () => void;
   value: string;
 }) {
   return (
-    <View style={[styles.dateField, error ? styles.inputError : null, focused ? styles.inputFocused : null]}>
+    <View style={[styles.dateField, error ? styles.inputError : null, focused ? styles.fieldFocusedOutline : null]}>
       <TextInput
+                multiline={false}
+                scrollEnabled
+                numberOfLines={1} lineBreakModeIOS="tail" lineBreakStrategyIOS="none"
+                textBreakStrategy="simple"
         autoCapitalize="none"
         autoCorrect={false}
         onBlur={onBlur}
         onChangeText={onChangeText}
-        onFocus={onToggle}
+        onFocus={onFocus}
         placeholder="YYYY-MM-DD"
         placeholderTextColor={huddleColors.mutedText}
-        showSoftInputOnFocus={false}
+        returnKeyType="done"
+        onSubmitEditing={Keyboard.dismiss}
         style={styles.dateFieldInput}
         value={value}
       />
@@ -938,6 +1013,7 @@ export function NativeSetPetScreen({
   onGoBack,
   onboardingMode = true,
   petId = null,
+  sessionKey,
   userId,
 }: NativeSetPetScreenProps) {
   const insets = useSafeAreaInsets();
@@ -945,21 +1021,71 @@ export function NativeSetPetScreen({
   const [form, setForm] = useState<PetFormData>(emptyForm);
   const [profileMode, setProfileMode] = useState<"edit" | "view">("edit");
   const [photoUri, setPhotoUri] = useState<string | null>(null);
+  const [homeCrop, setHomeCrop] = useState<NativePresentationCrop | null>(null);
+  const [petCropAsset, setPetCropAsset] = useState<(NativeProfileUploadAsset & { width?: number | null; height?: number | null }) | null>(null);
+  const [editingExistingPetPhoto, setEditingExistingPetPhoto] = useState(false);
+  const [photoAssetMeta, setPhotoAssetMeta] = useState<NativeLocalMediaMeta | null>(null);
+  const [petPhotoUpdatedAt, setPetPhotoUpdatedAt] = useState<string | null>(null);
   const [savedPetId, setSavedPetId] = useState<string | null>(petId);
   const [isNewPet, setIsNewPet] = useState(onboardingMode || !petId);
+  const [petOwnerId, setPetOwnerId] = useState<string | null>(userId);
+  const [familyPetContext, setFamilyPetContext] = useState<NativeFamilyPetContext | null>(null);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+
+  useNativeLoadingDeadline(loading, {
+    onTrip: () => {
+      setLoading(false);
+      setMessage("Pet details are taking too long to load. Please try again.");
+    },
+  });
+
   const [removePetConfirmOpen, setRemovePetConfirmOpen] = useState(false);
-  const [saveShakeAnim, triggerSaveShake] = useShakeAnimation();
+  const { shake: triggerSaveShake, shakeStyle: saveShakeStyle } = useErrorShake();
   const [errors, setErrors] = useState<Partial<Record<keyof PetFormData | "visit" | "reminder" | "medication", string>>>({});
   const [selectTarget, setSelectTarget] = useState<SelectTarget | null>(null);
   const [dateTarget, setDateTarget] = useState<DateTarget | null>(null);
   const [focusedField, setFocusedField] = useState<string | null>(null);
   const editScrollRef = useRef<ScrollView | null>(null);
   const scrollYRef = useRef(0);
+  const nextAutoExpandScrollYRef = useRef(huddleSpacing.x8);
   const scrollViewportHeightRef = useRef(0);
+  const keyboardHeightRef = useRef(0);
   const fieldRefs = useRef<Record<string, View | null>>({});
   const preferredVetInputRef = useRef<TextInput>(null);
+  const weightInputRef = useRef<TextInput>(null);
+  // Every section is a collapsible card with guided flow (all modes): opens the
+  // first incomplete section and auto-follows forward as sections complete;
+  // stops the moment the user opens a section themselves. See useGuidedSections.
+  const petAccordion = true;
+  const [autoExpandedPetSections, setAutoExpandedPetSections] = useState<Set<string>>(() => new Set());
+  const isPetSectionComplete = (title: string): boolean => {
+    switch (title) {
+      case "Basics":
+        return Boolean(form.name.trim() && form.species && (form.species !== "others" || form.customSpecies.trim()));
+      case "About":
+        return Boolean(form.bio.trim() || form.temperament.length > 0 || form.routine.trim());
+      default:
+        return false; // Vet & Health is last.
+    }
+  };
+  const { openSection: openPetSection, toggleSection: togglePetSection, openSectionManually: openPetSectionManually, progress: petProgress } = useGuidedSections(
+    [...petAccordionSectionTitles],
+    isPetSectionComplete,
+  );
+  const isPetSectionOpen = (title: string) => !petAccordion || openPetSection === title || autoExpandedPetSections.has(title);
+  const togglePetProfileSection = (title: string) => {
+    if (!autoExpandedPetSections.has(title)) {
+      togglePetSection(title);
+      return;
+    }
+    setAutoExpandedPetSections((current) => {
+      const next = new Set(current);
+      next.delete(title);
+      return next;
+    });
+    if (openPetSection === title) togglePetSection(title);
+  };
   const [defaultPhoneCountryCode, setDefaultPhoneCountryCode] = useState<string | null>(null);
   const [visitDraft, setVisitDraft] = useState<VetVisitRecord>({ reason: "", customReason: "", visitDate: "", vaccine: "" });
   const [visitEditIndex, setVisitEditIndex] = useState<number | null>(null);
@@ -976,10 +1102,53 @@ export function NativeSetPetScreen({
   });
   const [medicationEditIndex, setMedicationEditIndex] = useState<number | null>(null);
   const [showMedicationEditor, setShowMedicationEditor] = useState(false);
+  const sessionKeyRef = useRef<string | null>(sessionKey ?? null);
+  const persistedPetPhotoObjectPathRef = useRef<string | null>(null);
+  const persistedPetPhotoBucketRef = useRef<PetPhotoStorageBucket | null>(null);
+
+  useEffect(() => {
+    sessionKeyRef.current = sessionKey ?? null;
+  }, [sessionKey]);
+
+  const requirePetSession = useCallback(() => (
+    requireCurrentNativeSession({ accessToken, expectedUserId: userId, sessionKey })
+  ), [accessToken, sessionKey, userId]);
+
+  useEffect(() => {
+    setForm(emptyForm);
+    setPhotoUri(null);
+    setHomeCrop(null);
+    setPhotoAssetMeta(null);
+    setPetPhotoUpdatedAt(null);
+    persistedPetPhotoObjectPathRef.current = null;
+    persistedPetPhotoBucketRef.current = null;
+    setSavedPetId(petId);
+    setIsNewPet(onboardingMode || !petId);
+    setPetOwnerId(userId);
+    setFamilyPetContext(null);
+    setSaving(false);
+    setMessage(null);
+    setRemovePetConfirmOpen(false);
+    setErrors({});
+    setSelectTarget(null);
+    setDateTarget(null);
+    setFocusedField(null);
+    setVisitDraft({ reason: "", customReason: "", visitDate: "", vaccine: "" });
+    setVisitEditIndex(null);
+    setShowVisitEditor(false);
+    setReminderDraft({ reason: "", customReason: "", reminderDate: "" });
+    setReminderEditIndex(null);
+    setShowReminderEditor(false);
+    setMedicationDraft({ name: "", dose_amount: null, dose_unit: null, frequency_value: null, frequency_unit: null });
+    setMedicationEditIndex(null);
+    setShowMedicationEditor(false);
+    setLoading(Boolean(petId));
+  }, [onboardingMode, petId, sessionKey, userId]);
 
   const speciesForVaccines = useMemo(() => normalizeSpeciesKey(form.species === "others" ? form.customSpecies : form.species), [form.customSpecies, form.species]);
   const vaccineOptions = vaccinesBySpecies[speciesForVaccines] ?? null;
   const breedOptions = form.species !== "others" ? speciesBreeds[form.species] ?? ["Others"] : [];
+  const selectedSpeciesOption = speciesOptions.find((option) => option.id === form.species) ?? null;
 
   const setFieldRef = useCallback(
     (fieldName: string) => (node: View | null) => {
@@ -989,11 +1158,18 @@ export function NativeSetPetScreen({
   );
 
   const handleEditScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    scrollYRef.current = event.nativeEvent.contentOffset.y;
-  }, []);
+    const scrollY = event.nativeEvent.contentOffset.y;
+    scrollYRef.current = scrollY;
+    if (scrollY < nextAutoExpandScrollYRef.current) return;
+    nextAutoExpandScrollYRef.current = scrollY + huddleSpacing.x9;
+    setAutoExpandedPetSections((current) => {
+      const next = petAccordionSectionTitles.find((title) => title !== openPetSection && !current.has(title));
+      return next ? new Set([...current, next]) : current;
+    });
+  }, [openPetSection]);
 
   const scrollFieldIntoView = useCallback(
-    (fieldName: string) => {
+    (fieldName: string, keyboardAware = false) => {
       const node = fieldRefs.current[fieldName];
       const scrollView = editScrollRef.current;
       if (!node || !scrollView || profileMode !== "edit") return;
@@ -1011,7 +1187,10 @@ export function NativeSetPetScreen({
             const relativeTop = y - scrollY;
             const relativeBottom = relativeTop + height;
             const topLimit = huddleSpacing.x3;
-            const bottomLimit = viewportHeight - huddleSpacing.x3;
+            const keyboardSafeInset = keyboardAware
+              ? Math.min(Math.max(keyboardHeightRef.current || 300, 260), Math.round(viewportHeight * 0.5))
+              : huddleSpacing.x3;
+            const bottomLimit = viewportHeight - keyboardSafeInset - huddleSpacing.x4;
             const overflowBottom = relativeBottom - bottomLimit;
             const overflowTop = relativeTop - topLimit;
             const nextY = overflowBottom > 0
@@ -1030,12 +1209,30 @@ export function NativeSetPetScreen({
     [profileMode],
   );
 
+  useEffect(() => {
+    const handleKeyboardShow = (event: KeyboardEvent) => {
+      keyboardHeightRef.current = Math.max(0, event.endCoordinates.height || 0);
+      if (focusedField) {
+        window.setTimeout(() => scrollFieldIntoView(focusedField, true), 40);
+      }
+    };
+    const handleKeyboardHide = () => {
+      keyboardHeightRef.current = 0;
+    };
+    const showSubscription = Keyboard.addListener(Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow", handleKeyboardShow);
+    const hideSubscription = Keyboard.addListener(Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide", handleKeyboardHide);
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, [focusedField, scrollFieldIntoView]);
+
   const focusField = useCallback(
     (fieldName: string) => {
       setSelectTarget(null);
       setDateTarget(null);
       setFocusedField(fieldName);
-      scrollFieldIntoView(fieldName);
+      scrollFieldIntoView(fieldName, true);
     },
     [scrollFieldIntoView],
   );
@@ -1097,8 +1294,9 @@ export function NativeSetPetScreen({
       medications: form.medications.length > 0 ? form.medications : null,
       photo_url: photoUri,
       is_active: form.isActive,
+      updated_at: petPhotoUpdatedAt,
     };
-  }, [form, petId, photoUri, savedPetId, userId]);
+  }, [form, petId, petPhotoUpdatedAt, photoUri, savedPetId, userId]);
 
   const updateForm = useCallback((patch: Partial<PetFormData>) => {
     setForm((current) => ({ ...current, ...patch }));
@@ -1114,33 +1312,38 @@ export function NativeSetPetScreen({
       if (!country) return;
       setDefaultPhoneCountryCode(country.code);
     };
-    void readCachedNativeProfileSummary(userId).then((cached) => applyProfileCountry(cached?.profile), () => {});
-    void fetchNativeProfileSummary(userId, { force: false, accessToken }).then((snapshot) => applyProfileCountry(snapshot.profile), () => {});
+    void fetchNativeProfileSummary(userId, { accessToken, sessionKey }).then((snapshot) => applyProfileCountry(snapshot.profile), () => {});
     return () => {
       active = false;
     };
-  }, [accessToken, defaultPhoneCountryCode, userId]);
+  }, [accessToken, defaultPhoneCountryCode, sessionKey, userId]);
 
   const fetchPet = useCallback(async () => {
     if (!petId) {
+      void fetchNativeFamilyPetContext(null, accessToken).then(setFamilyPetContext).catch(() => setFamilyPetContext(null));
       setLoading(false);
       return;
     }
     setLoading(true);
     try {
-      const session = requireActivePetSession(accessToken, userId);
-      const data = await fetchPetRowWithToken(petId, session.userId, session.token);
+      const session = requirePetSession();
+      const freshAccessToken = await getFreshNativeAccessToken(session.accessToken);
+      if (!freshAccessToken) throw new Error("auth_required");
+      const requestSessionKey = session.sessionKey;
+      const [data, petContext] = await Promise.all([
+        fetchPetRowWithToken(petId, freshAccessToken),
+        fetchNativeFamilyPetContext(petId, freshAccessToken),
+      ]);
+      if (!isCurrentNativeSessionKey(sessionKeyRef.current, requestSessionKey)) return;
       if (!data) {
-        setMessage("Failed to load pet");
+        setMessage("Couldn't load this pet.");
         setLoading(false);
         return;
       }
 
       const row = data as unknown as Record<string, unknown>;
-      if (row.owner_id && row.owner_id !== session.userId) {
-        onNavigate(`/pet-details?id=${petId}`);
-        return;
-      }
+      setPetOwnerId(typeof row.owner_id === "string" ? row.owner_id : session.userId);
+      setFamilyPetContext(petContext);
 
       const species = typeof row.species === "string" ? row.species : "";
       const isKnownSpecies = speciesOptions.some((option) => option.id === species);
@@ -1159,6 +1362,7 @@ export function NativeSetPetScreen({
         species: isKnownSpecies ? species : "others",
         customSpecies: isKnownSpecies ? "" : species || "",
         breed: typeof row.breed === "string" ? row.breed : "",
+        petSize: species === "dog" && petSizeOptions.includes(String(row.pet_size || "") as typeof petSizeOptions[number]) ? String(row.pet_size) : "",
         gender: typeof row.gender === "string" ? row.gender : "",
         neuteredSpayed: row.neutered_spayed === true,
         dob: typeof row.dob === "string" ? row.dob : "",
@@ -1175,6 +1379,7 @@ export function NativeSetPetScreen({
         reminders: parsedReminders,
         medications: parsedMedications,
         isActive: row.is_active !== false,
+        shareWithFamily: row.share_with_family === true,
         isPublic:
           typeof row.is_public === "boolean"
             ? row.is_public
@@ -1201,45 +1406,110 @@ export function NativeSetPetScreen({
       };
 
       setForm(nextForm);
-      setPhotoUri(typeof row.photo_url === "string" ? row.photo_url : null);
+      const persistedPhotoUrl = typeof row.photo_url === "string" ? row.photo_url : null;
+      const resolvedPersistedPhotoUrl = persistedPhotoUrl
+        ? await resolveNativePetImageUrlAsync(persistedPhotoUrl).catch(() => null)
+        : null;
+      setPhotoUri(resolvedPersistedPhotoUrl);
+      const presentation = row.photo_presentation && typeof row.photo_presentation === "object" && !Array.isArray(row.photo_presentation)
+        ? row.photo_presentation as { home?: Partial<NativePresentationCrop> }
+        : null;
+      const nextHomeCrop = presentation?.home;
+      setHomeCrop(typeof nextHomeCrop?.centerX === "number" && typeof nextHomeCrop?.centerY === "number"
+        ? { centerX: nextHomeCrop.centerX, centerY: nextHomeCrop.centerY, widthPct: typeof nextHomeCrop.widthPct === "number" ? nextHomeCrop.widthPct : 100 }
+        : null);
+      setPetPhotoUpdatedAt(typeof row.updated_at === "string" ? row.updated_at : null);
+      const persistedPhotoObject = extractPetStorageObject(persistedPhotoUrl);
+      persistedPetPhotoObjectPathRef.current = persistedPhotoObject?.path ?? null;
+      persistedPetPhotoBucketRef.current = persistedPhotoObject?.bucket ?? null;
+      setPhotoAssetMeta(null);
       setSavedPetId(petId);
       setIsNewPet(false);
     } catch {
-      setMessage("Failed to load pet");
+      setMessage("Couldn't load this pet.");
     } finally {
-      setLoading(false);
+      if (isCurrentNativeSessionKey(sessionKeyRef.current, sessionKey)) setLoading(false);
     }
-  }, [accessToken, onNavigate, petId, userId]);
+  }, [accessToken, petId, requirePetSession, sessionKey]);
 
   useEffect(() => {
     void fetchPet();
   }, [fetchPet]);
 
   const pickPhoto = async () => {
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      setMessage("Photo library permission is required to add a pet photo.");
+    try {
+      // Use the same picker as profile/signup — it presents PHPicker regardless of
+      // permission state (no hard block on "Limited Access"/denied) — then hand off
+      // to the banner-first cropper.
+      const picked = await pickNativeProfilePhoto({});
+      const asset = picked?.asset;
+      if (!asset?.uri) return;
+      setEditingExistingPetPhoto(false);
+      setPetCropAsset({
+        uri: asset.uri,
+        fileName: asset.fileName ?? null,
+        mimeType: asset.mimeType ?? null,
+        fileSize: typeof asset.fileSize === "number" ? asset.fileSize : null,
+        width: typeof asset.width === "number" ? asset.width : null,
+        height: typeof asset.height === "number" ? asset.height : null,
+      });
+    } catch (error) {
+      setMessage(nativeSafeErrorCopy(error, "Couldn't open your photo library. Try again."));
+    }
+  };
+
+  const editCurrentPhoto = async () => {
+    if (!photoUri) {
+      await pickPhoto();
       return;
     }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      allowsEditing: false,
-      mediaTypes: ["images"],
-      quality: 0.82,
-    });
-    if (result.canceled || !result.assets[0]?.uri) return;
-    setPhotoUri(result.assets[0].uri);
+    try {
+      setEditingExistingPetPhoto(true);
+      setPetCropAsset(await loadNativeProfilePhotoForEditing(photoUri));
+    } catch (error) {
+      setMessage(nativeSafeErrorCopy(error, "Couldn't prepare that photo for editing. Try choosing it again."));
+    }
+  };
+
+  const removePhoto = () => {
+    setPhotoUri(null);
+    setHomeCrop(null);
+    setPhotoAssetMeta(null);
+    setPetPhotoUpdatedAt(null);
+    setPetCropAsset(null);
+    setEditingExistingPetPhoto(false);
+  };
+
+  const handlePetPhotoCropped = async (cropped: NativeProfileUploadAsset, _aspect: unknown, presentationCrop?: NativePresentationCrop) => {
+    if (editingExistingPetPhoto) {
+      setHomeCrop(presentationCrop ?? null);
+      setPetCropAsset(null);
+      setEditingExistingPetPhoto(false);
+      return;
+    }
+    const uri = cropped.uri || "";
+    if (!uri) {
+      setPetCropAsset(null);
+      return;
+    }
+    setPhotoUri(uri);
+    setHomeCrop(presentationCrop ?? null);
+    setPetPhotoUpdatedAt(`${uri}:${Date.now()}`);
+    setPhotoAssetMeta({ fileName: cropped.fileName ?? null, mimeType: cropped.mimeType ?? null });
+    setPetCropAsset(null);
   };
 
   const validateBaseForm = (draftOnly: boolean) => {
     const nextErrors: Partial<Record<keyof PetFormData | "visit" | "reminder" | "medication", string>> = {};
     if (!draftOnly) {
-      if (!form.name.trim()) nextErrors.name = "Pet name is required";
-      if (!form.species && !form.customSpecies.trim()) nextErrors.species = "Species is required";
-      if (form.species === "others" && !form.customSpecies.trim()) nextErrors.customSpecies = "Species is required";
+      if (!form.name.trim()) nextErrors.name = PET_REQUIRED_MESSAGES.name;
+      if (!form.species && !form.customSpecies.trim()) nextErrors.species = PET_REQUIRED_MESSAGES.species;
+      if (form.species === "others" && !form.customSpecies.trim()) nextErrors.customSpecies = PET_REQUIRED_MESSAGES.customSpecies;
+      if (form.species === "dog" && !form.petSize) nextErrors.petSize = PET_REQUIRED_MESSAGES.petSize;
     }
     if (form.dob) {
       if (!isIsoDate(form.dob)) {
-        nextErrors.dob = "Use YYYY-MM-DD";
+        nextErrors.dob = "Use a valid calendar date.";
       } else if (new Date(`${form.dob}T00:00:00`) > todayAtMidnight()) {
         nextErrors.dob = "Pet DOB cannot be in the future";
       }
@@ -1252,37 +1522,64 @@ export function NativeSetPetScreen({
     const invalidReminder = form.reminders.find((entry) => new Date(`${entry.reminderDate}T00:00:00`) <= todayAtMidnight());
     if (invalidReminder) nextErrors.reminder = "Reminder date must be in the future";
     setErrors(nextErrors);
-    return Object.keys(nextErrors).length === 0;
+    const firstErrorKey = PET_ERROR_SCROLL_ORDER.find((key) => Boolean(nextErrors[key]));
+    return {
+      firstErrorField: firstErrorKey ? PET_ERROR_FIELD_TARGETS[firstErrorKey] || String(firstErrorKey) : null,
+      valid: !firstErrorKey,
+    };
   };
 
-  const uploadPhoto = async (petId: string, activeUserId: string, activeAccessToken: string): Promise<{ objectPath: string | null; url: string | null }> => {
-    if (!photoUri || photoUri.startsWith("http")) return { objectPath: null, url: photoUri };
-    const extension = photoUri.split(".").pop()?.split("?")[0] || "jpg";
-    const cleanExtension = extension.replace(/[^a-z0-9]/gi, "").toLowerCase() || "jpg";
-    const fileName = `${activeUserId}/${petId}.${cleanExtension}`;
-    const response = await fetch(photoUri);
-    const blob = await response.blob();
-    const uploadUrl = `${supabaseUrl}/storage/v1/object/pets/${fileName.split("/").map((part) => encodeURIComponent(part)).join("/")}`;
+  const validateBeforePetWrite = (draftOnly: boolean) => {
+    const validation = validateBaseForm(draftOnly);
+    return allowValidatedWrite(validation, () => {
+      triggerSaveShake();
+      if (!validation.firstErrorField) return;
+      const field = validation.firstErrorField;
+      openPetSectionManually(field === "medicationName" || field === "visitDate" || field === "reminderDate" ? "Vet & Health" : "Basics");
+      setFocusedField(field);
+      scrollFieldIntoView(field);
+    });
+  };
+
+  const uploadPetPhotoAsset = async (petId: string, activeUserId: string, activeAccessToken: string, uri: string, meta: NativeLocalMediaMeta | null, variant: "portrait") => {
     try {
-      const uploadResponse = await fetch(uploadUrl, {
-        method: "POST",
-        headers: petRestHeaders(activeAccessToken, {
-          "cache-control": "3600",
-          "content-type": cleanExtension === "png" ? "image/png" : "image/jpeg",
-          "x-upsert": "true",
-        }),
-        body: blob,
+      const bucket: PetPhotoStorageBucket = form.isPublic ? "pets" : "private_pet_photos";
+      const file = await readNativeLocalMediaFile(uri, meta, { fallbackContentType: "image/jpeg", fallbackExtension: "jpg" });
+      const fileName = makePetPhotoObjectPath(activeUserId, petId, variant, file.extension);
+      await uploadNativeLocalMediaToSupabase({
+        accessToken: activeAccessToken,
+        body: file.body,
+        bucket,
+        contentType: file.contentType,
+        path: fileName,
+        upsert: true,
       });
-      const uploadParsed = await parseRestJson(uploadResponse);
-      if (!uploadResponse.ok) {
+      try {
+        if (familyPetContext?.is_family_shared) {
+          await registerFamilyPetMediaAssetWithToken(petId, bucket, fileName, activeAccessToken);
+        } else {
+          await registerPetMediaAssetWithToken(petId, bucket, fileName, activeAccessToken);
+        }
+      } catch (registrationError) {
+        const cleanupResult = familyPetContext?.is_family_shared
+          ? await requestFamilyPetStorageCleanup(petId, bucket, fileName, "register_pet_photo_media_failed", activeAccessToken).then((queued) => queued ? "queued" as const : "failed" as const)
+          : await requestNativeStorageCleanupResult(bucket, fileName, "register_pet_photo_media_failed", activeAccessToken);
         throw createNativeProtectedActionError({
           ok: false,
-          stage: "upload",
-          originalError: new Error(restErrorMessage(uploadParsed, `Pet photo upload failed (${uploadResponse.status}).`)),
-          cleanupAttempted: false,
-          cleanupResult: "not_needed",
+          stage: "register",
+          originalError: registrationError,
+          cleanupAttempted: true,
+          cleanupResult,
         });
       }
+      if (__DEV__) {
+        console.log("STORAGE_URL_PET_REFERENCE", { bucket, path: fileName });
+      }
+      return {
+        bucket,
+        objectPath: fileName,
+        url: petPhotoReference(bucket, fileName),
+      };
     } catch (error) {
       if (getNativeProtectedActionResult(error)) throw error;
       throw createNativeProtectedActionError({
@@ -1293,56 +1590,147 @@ export function NativeSetPetScreen({
         cleanupResult: "not_needed",
       });
     }
-    try {
-      await registerPetMediaAssetWithToken(petId, fileName, activeAccessToken);
-    } catch (registrationError) {
-      const cleanupResult = await requestNativeStorageCleanupResult("pets", fileName, "register_pet_photo_media_failed", activeAccessToken);
-      throw createNativeProtectedActionError({
-        ok: false,
-        stage: "register",
-        originalError: registrationError,
-        cleanupAttempted: true,
-        cleanupResult,
-      });
-    }
-    if (__DEV__) {
-      console.log("STORAGE_URL_GET_PUBLIC", { bucket: "pets", path: fileName });
-    }
-    return {
-      objectPath: fileName,
-      url: `${supabaseUrl}/storage/v1/object/public/pets/${fileName.split("/").map((part) => encodeURIComponent(part)).join("/")}`,
-    };
   };
 
+  const uploadPhoto = async (petId: string, activeUserId: string, activeAccessToken: string): Promise<{
+    bucket: PetPhotoStorageBucket | null;
+    portraitObjectPath: string | null;
+    portraitUrl: string | null;
+  }> => {
+    if (!photoUri) return { bucket: null, portraitObjectPath: null, portraitUrl: null };
+    if (photoUri.startsWith("http")) {
+      return {
+        bucket: null,
+        portraitObjectPath: null,
+        portraitUrl: photoUri,
+      };
+    }
+    const portrait = await uploadPetPhotoAsset(petId, activeUserId, activeAccessToken, photoUri, photoAssetMeta, "portrait");
+    return { bucket: portrait.bucket, portraitObjectPath: portrait.objectPath, portraitUrl: portrait.url };
+  };
+
+  const cleanupPetPhotoObject = async (petId: string, object: PetPhotoStorageObject, reason: string, activeAccessToken: string) => (
+    familyPetContext?.is_family_shared
+      ? requestFamilyPetStorageCleanup(petId, object.bucket, object.path, reason, activeAccessToken).then((queued) => queued ? "queued" as const : "failed" as const)
+      : requestNativeStorageCleanupResult(object.bucket, object.path, reason, activeAccessToken)
+  );
+
   const savePet = async (draftOnly: boolean) => {
-    let session: { token: string; userId: string };
+    let session: ReturnType<typeof requireCurrentNativeSession>;
     try {
-      session = requireActivePetSession(accessToken, userId);
+      session = requirePetSession();
     } catch {
       setMessage("Please sign in again to save your pet profile.");
       return;
     }
-    if (!validateBaseForm(draftOnly)) {
-      haptic.error();
-      triggerSaveShake();
-      return;
-    }
+    if (!validateBeforePetWrite(draftOnly)) return;
     setSaving(true);
     setMessage(null);
-    let uploadedPetPhotoPath: string | null = null;
+    let uploadedPetPhotoObjects: PetPhotoStorageObject[] = [];
+    const targetPetId = savedPetId || petId || makeUuid();
+    let cleanupAccessToken = session.accessToken;
     try {
-      const targetPetId = savedPetId || petId || makeUuid();
-      const photoUpload = await uploadPhoto(targetPetId, session.userId, session.token);
-      uploadedPetPhotoPath = photoUpload.objectPath;
-      const photoUrl = photoUpload.url;
-      const payload = toPetPayload(form, photoUrl);
+      const freshAccessToken = await getFreshNativeAccessToken(session.accessToken);
+      if (!freshAccessToken) throw new Error("auth_required");
+      cleanupAccessToken = freshAccessToken;
+      const targetOwnerId = isNewPet ? session.userId : petOwnerId || session.userId;
+      const previousPetPhotoPath = persistedPetPhotoObjectPathRef.current;
+      const previousPetPhotoBucket = persistedPetPhotoBucketRef.current;
+      const previousPetPhotoObject = previousPetPhotoPath && previousPetPhotoBucket
+        ? { bucket: previousPetPhotoBucket, path: previousPetPhotoPath } satisfies PetPhotoStorageObject
+        : null;
+      const desiredPetPhotoBucket: PetPhotoStorageBucket = form.isPublic ? "pets" : "private_pet_photos";
+      let photoUpload = await uploadPhoto(targetPetId, targetOwnerId, freshAccessToken);
+      if (!photoUpload.portraitObjectPath && previousPetPhotoObject && photoUri) {
+        if (previousPetPhotoObject.bucket !== desiredPetPhotoBucket) {
+          await copyPetPhotoWithToken(previousPetPhotoObject, desiredPetPhotoBucket, freshAccessToken);
+          uploadedPetPhotoObjects = [{ bucket: desiredPetPhotoBucket, path: previousPetPhotoObject.path }];
+          if (familyPetContext?.is_family_shared) {
+            await registerFamilyPetMediaAssetWithToken(targetPetId, desiredPetPhotoBucket, previousPetPhotoObject.path, freshAccessToken);
+          } else {
+            await registerPetMediaAssetWithToken(targetPetId, desiredPetPhotoBucket, previousPetPhotoObject.path, freshAccessToken);
+          }
+        }
+        photoUpload = {
+          bucket: desiredPetPhotoBucket,
+          portraitObjectPath: previousPetPhotoObject.path,
+          portraitUrl: petPhotoReference(desiredPetPhotoBucket, previousPetPhotoObject.path),
+        };
+      } else if (photoUpload.bucket && photoUpload.portraitObjectPath) {
+        uploadedPetPhotoObjects = [{ bucket: photoUpload.bucket, path: photoUpload.portraitObjectPath }];
+      }
+      if (!isCurrentNativeSessionKey(sessionKeyRef.current, session.sessionKey)) {
+        await Promise.allSettled(uploadedPetPhotoObjects.map((object) => cleanupPetPhotoObject(targetPetId, object, "stale_pet_photo_upload", freshAccessToken)));
+        return;
+      }
+      const photoUrl = photoUpload.portraitUrl;
+      const payload = toPetPayload(form, photoUrl, homeCrop);
+      const savedUpdatedAt = typeof payload.updated_at === "string" ? payload.updated_at : new Date().toISOString();
       await savePetRowWithToken(targetPetId, session.userId, {
         ...payload,
         ...(isNewPet ? { name: payload.name || "", species: payload.species || "", created_at: new Date().toISOString() } : {}),
-      }, isNewPet, session.token);
+      }, isNewPet, freshAccessToken);
+      if (!isCurrentNativeSessionKey(sessionKeyRef.current, session.sessionKey)) return;
       setSavedPetId(targetPetId);
       setIsNewPet(false);
-      if (photoUrl) setPhotoUri(photoUrl);
+      setPetPhotoUpdatedAt(savedUpdatedAt);
+      if (photoUrl) {
+        setPhotoUri(await resolveNativePetImageUrlAsync(photoUrl).catch(() => photoUrl));
+        const savedPhotoObject = photoUpload.bucket && photoUpload.portraitObjectPath
+          ? { bucket: photoUpload.bucket, path: photoUpload.portraitObjectPath }
+          : extractPetStorageObject(photoUrl);
+        persistedPetPhotoObjectPathRef.current = savedPhotoObject?.path ?? null;
+        persistedPetPhotoBucketRef.current = savedPhotoObject?.bucket ?? null;
+      } else {
+        setPhotoUri(null);
+        persistedPetPhotoObjectPathRef.current = null;
+        persistedPetPhotoBucketRef.current = null;
+      }
+      publishNativePetMutation({
+        petId: targetPetId,
+        sessionKey: session.sessionKey,
+        userId: session.userId,
+        pet: {
+          ...payload,
+          id: targetPetId,
+          is_active: payload.is_active ?? true,
+          photo_url: photoUrl ?? payload.photo_url ?? photoUri ?? null,
+          photo_presentation: payload.photo_presentation,
+          updated_at: savedUpdatedAt,
+        },
+      });
+      if (photoUpload.bucket && photoUpload.portraitObjectPath) {
+        invalidateCachedSignedStorageUrl(photoUpload.bucket, photoUpload.portraitObjectPath);
+      }
+      await Promise.allSettled([
+        clearNativeHomePetsCache(session.userId),
+        clearNativeProfileSummaryCache(session.userId),
+        invalidateNativePublicProfileCaches({ petId: targetPetId, userId: session.userId }),
+      ]);
+      freshnessRegistry.invalidate(session.sessionKey, ["active_pets", "profile_summary", "public_profile", "pet_detail"]);
+      const nextPetPhotoObject = photoUpload.bucket && photoUpload.portraitObjectPath
+        ? { bucket: photoUpload.bucket, path: photoUpload.portraitObjectPath } satisfies PetPhotoStorageObject
+        : extractPetStorageObject(photoUrl);
+      const replacedObjects = previousPetPhotoObject && (
+        !nextPetPhotoObject
+        || previousPetPhotoObject.bucket !== nextPetPhotoObject.bucket
+        || previousPetPhotoObject.path !== nextPetPhotoObject.path
+      ) ? [previousPetPhotoObject] : [];
+      await Promise.allSettled(replacedObjects.map(async (object) => {
+        const cleanupReason = nextPetPhotoObject ? "replace_pet_photo" : "remove_pet_photo";
+        const cleanupResult = familyPetContext?.is_family_shared
+          ? await requestFamilyPetStorageCleanup(targetPetId, object.bucket, object.path, cleanupReason, freshAccessToken).then((queued) => queued ? "queued" as const : "failed" as const)
+          : await requestNativeStorageCleanupResult(object.bucket, object.path, cleanupReason, freshAccessToken);
+        if (cleanupResult === "failed") {
+          logNativeProtectedActionFailure("[native.pet] pet_photo_cleanup_failed", createNativeProtectedActionError({
+            ok: false,
+            stage: "cleanup",
+            originalError: new Error("pet_photo_cleanup_failed"),
+            cleanupAttempted: true,
+            cleanupResult,
+          }));
+        }
+      }));
       if (draftOnly) {
         haptic.success();
         setMessage("Draft saved");
@@ -1351,43 +1739,40 @@ export function NativeSetPetScreen({
 
       if (!onboardingMode) {
         haptic.success();
-        onGoBack?.();
-        if (!onGoBack) onNavigate("/");
+        onNavigate(`/pet-details?id=${targetPetId}`);
         return;
       }
 
-      await updateProfileOnboardingWithToken(session.userId, {
-        onboarding_completed: true,
-        updated_at: new Date().toISOString(),
-      }, session.token);
-      void postPetProfileCompleted(session.userId, session.token).catch((err) => console.warn("[brevo-sync] pet_profile_completed failed silently", err));
       haptic.success();
       Alert.alert(
-        "Welcome to Huddle!",
+        "Welcome to huddle!",
         "Pet care tracking, nearby connections, and all pet community happenings – right in your palm now!",
         [{ text: "Continue", onPress: () => onNavigate("/", { refreshOnboarding: true }) }],
       );
     } catch (error) {
       let failure = getNativeProtectedActionResult(error);
       if (!failure) {
-        const cleanupResult = uploadedPetPhotoPath
-          ? await requestNativeStorageCleanupResult("pets", uploadedPetPhotoPath, "pet_photo_save_failed", session.token)
-          : "not_needed";
+        const cleanupResults = await Promise.all(uploadedPetPhotoObjects.map((object) => cleanupPetPhotoObject(targetPetId, object, "pet_photo_save_failed", cleanupAccessToken)));
+        const cleanupResult = cleanupResults.includes("failed")
+          ? "failed"
+          : cleanupResults.includes("queued")
+            ? "queued"
+            : uploadedPetPhotoObjects.length
+              ? "deleted"
+              : "not_needed";
         failure = {
           ok: false,
           stage: "domain_save",
           originalError: error,
-          cleanupAttempted: Boolean(uploadedPetPhotoPath),
+          cleanupAttempted: uploadedPetPhotoObjects.length > 0,
           cleanupResult,
         };
       }
       logNativeProtectedActionFailure("[native.pet] save_failed", error instanceof Error && getNativeProtectedActionResult(error) ? error : createNativeProtectedActionError(failure));
-      const raw = failure.originalError instanceof Error ? failure.originalError.message : String(failure.originalError || "");
-      const messageText = raw.includes("pets_weight_lt_100") ? "Oops...This input seems invalid." : raw || "Failed to save pet profile. Please retry.";
       haptic.error();
-      setMessage(messageText);
+      setMessage(petUserFacingErrorMessage(failure.originalError, "Couldn't save this pet's profile. Please try again."));
     } finally {
-      setSaving(false);
+      if (isCurrentNativeSessionKey(sessionKeyRef.current, session.sessionKey)) setSaving(false);
     }
   };
 
@@ -1396,11 +1781,28 @@ export function NativeSetPetScreen({
     setRemovePetConfirmOpen(true);
   };
 
+  const removeSharedPet = async () => {
+    if (!savedPetId || !familyPetContext?.is_family_shared || saving) return;
+    setSaving(true);
+    setMessage(null);
+    try {
+      await removeNativeFamilySharedPet(savedPetId, accessToken);
+      if (userId) await clearNativeHomePetsCache(userId);
+      haptic.success();
+      onNavigate("/");
+    } catch (error) {
+      haptic.error();
+      setMessage(nativeSafeErrorCopy(error, "Please try again."));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const removePet = async () => {
     if (onboardingMode || !savedPetId || isNewPet) return;
-    let session: { token: string; userId: string };
+    let session: ReturnType<typeof requireCurrentNativeSession>;
     try {
-      session = requireActivePetSession(accessToken, userId);
+      session = requirePetSession();
     } catch {
       setRemovePetConfirmOpen(false);
       setMessage("Please sign in again to update your pet profile.");
@@ -1409,31 +1811,49 @@ export function NativeSetPetScreen({
     setSaving(true);
     setMessage(null);
     try {
-      const petPhotoObjectPath = extractPetObjectPathFromUrl(photoUri);
-      await deletePetRowWithToken(savedPetId, session.userId, session.token);
-      if (petPhotoObjectPath) {
-        await requestNativeStorageCleanupResult("pets", petPhotoObjectPath, "delete_pet_photo", session.token);
+      const freshAccessToken = await getFreshNativeAccessToken(session.accessToken);
+      if (!freshAccessToken) throw new Error("auth_required");
+      const petPhotoObject = persistedPetPhotoBucketRef.current && persistedPetPhotoObjectPathRef.current
+        ? { bucket: persistedPetPhotoBucketRef.current, path: persistedPetPhotoObjectPathRef.current } satisfies PetPhotoStorageObject
+        : extractPetStorageObject(photoUri);
+      await deletePetRowWithToken(savedPetId, session.userId, freshAccessToken);
+      if (!isCurrentNativeSessionKey(sessionKeyRef.current, session.sessionKey)) return;
+      if (petPhotoObject) {
+        await requestNativeStorageCleanupResult(petPhotoObject.bucket, petPhotoObject.path, "delete_pet_photo", freshAccessToken);
       }
+      publishNativePetMutation({ deleted: true, petId: savedPetId, sessionKey: session.sessionKey, userId: session.userId });
+      await Promise.allSettled([
+        clearNativeHomePetsCache(session.userId),
+        clearNativeProfileSummaryCache(session.userId),
+        invalidateNativePublicProfileCaches({ petId: savedPetId, userId: session.userId }),
+      ]);
+      freshnessRegistry.invalidate(session.sessionKey, ["active_pets", "profile_summary", "public_profile", "pet_detail"]);
       haptic.success();
       setRemovePetConfirmOpen(false);
-      onGoBack?.();
-      if (!onGoBack) onNavigate("/");
+      onNavigate("/");
     } catch (error) {
       haptic.error();
-      setMessage(error instanceof Error ? error.message : "Failed to remove pet.");
+      setMessage(nativeSafeErrorCopy(error, "Couldn't remove this pet."));
     } finally {
-      setSaving(false);
+      if (isCurrentNativeSessionKey(sessionKeyRef.current, session.sessionKey)) setSaving(false);
     }
   };
 
   const silentSave = async () => {
-    if (!savedPetId || isNewPet) return;
+    if (!savedPetId || isNewPet) return true;
+    if (!validateBeforePetWrite(false)) return false;
     try {
-      const session = requireActivePetSession(accessToken, userId);
-      const { photo_url: _photoUrl, ...payload } = toPetPayload(form, null);
-      await savePetRowWithToken(savedPetId, session.userId, payload, false, session.token);
+      const session = requirePetSession();
+      const freshAccessToken = await getFreshNativeAccessToken(session.accessToken);
+      if (!freshAccessToken) throw new Error("auth_required");
+      const { photo_url: _photoUrl, ...payload } = toPetPayload(form, null, homeCrop);
+      if (!isCurrentNativeSessionKey(sessionKeyRef.current, session.sessionKey)) return false;
+      await savePetRowWithToken(savedPetId, session.userId, payload, false, freshAccessToken);
+      if (!isCurrentNativeSessionKey(sessionKeyRef.current, session.sessionKey)) return false;
+      return true;
     } catch (err) {
-      console.warn("[NativeSetPetScreen.silentSave]", err);
+      logNativeProtectedActionFailure("[NativeSetPetScreen.silentSave]", err);
+      return false;
     }
   };
 
@@ -1518,6 +1938,7 @@ export function NativeSetPetScreen({
     if (selectTarget === "reminderReason") setReminderDraft((current) => ({ ...current, reason: value as VetVisitReason, customReason: value === "Others" ? current.customReason : "" }));
     if (selectTarget === "doseUnit") setMedicationDraft((current) => ({ ...current, dose_unit: value as MedicationRecord["dose_unit"] }));
 	    if (selectTarget === "frequencyUnit") setMedicationDraft((current) => ({ ...current, frequency_unit: value as MedicationRecord["frequency_unit"] }));
+	    if (selectTarget === "petSize") updateForm({ petSize: value });
     setSelectTarget((current) => (current === "temperament" ? current : null));
 	  };
 
@@ -1531,23 +1952,20 @@ export function NativeSetPetScreen({
   if (loading) {
     return (
       <View style={styles.screen}>
-        <View style={styles.loadingState}>
-          <ActivityIndicator color={huddleColors.blue} size="small" />
-          <Text style={styles.stateText}>Loading pet details...</Text>
-        </View>
+        <NativeLoadingState variant="centered" />
       </View>
     );
   }
 
   return (
     <SafeAreaView edges={["left", "right"]} style={styles.screen}>
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.keyboard}>
-        <View style={[styles.header, { marginTop: 0, paddingTop: huddleLayout.headerHeight + huddleSpacing.x3 }]}>
+      <KeyboardAvoidingView behavior="padding" style={styles.keyboard}>
+        <View style={styles.header}>
           <Pressable
             accessibilityLabel="Back"
             onPress={() => {
               if (onboardingMode) {
-                onNavigate("/set-profile");
+                onNavigate("/edit-profile");
                 return;
               }
                 if (onGoBack) {
@@ -1574,7 +1992,7 @@ export function NativeSetPetScreen({
               (saving || profileMode !== "edit") ? styles.disabled : null,
             ]}
           >
-            {saving ? <ActivityIndicator color={huddleColors.text} size="small" /> : <Feather color={huddleColors.text} name="save" size={20} />}
+            {saving ? <NativeSpinner tone="secondary" /> : <Feather color={huddleColors.text} name="save" size={20} />}
           </Pressable>
         </View>
 
@@ -1589,8 +2007,9 @@ export function NativeSetPetScreen({
           <Pressable
             accessibilityRole="button"
             onPress={() => {
-              void silentSave();
-              setProfileMode("view");
+              void silentSave().then((saved) => {
+                if (saved) setProfileMode("view");
+              });
             }}
             style={[styles.tabButton, profileMode === "view" ? styles.tabButtonActive : null]}
           >
@@ -1602,6 +2021,9 @@ export function NativeSetPetScreen({
           ref={editScrollRef}
           contentContainerStyle={[
             styles.content,
+            // View mode renders NativePetDetailsContent, whose sections already space
+            // themselves via card marginTop; drop the form gap so it matches /pet-details.
+            profileMode === "view" ? styles.petViewContent : null,
             { paddingBottom: insets.bottom + (onboardingMode && profileMode === "edit" ? 132 : 24) },
           ]}
           keyboardShouldPersistTaps="handled"
@@ -1616,22 +2038,35 @@ export function NativeSetPetScreen({
             <NativePetDetailsContent pet={draftPetDetails} />
           ) : (
             <>
-          <Pressable accessibilityRole="button" onPress={pickPhoto} style={styles.photoWrap}>
-            {photoUri ? (
-              <Image source={{ uri: photoUri }} style={styles.photo} />
-            ) : (
-              <View style={styles.photoPlaceholder}>
-                <Feather color={huddleColors.mutedText} name="camera" size={34} />
-              </View>
-            )}
-            <View style={styles.photoBadge}>
-              <Feather color={huddleColors.onPrimary} name="camera" size={16} />
-            </View>
-          </Pressable>
+          <NativeProfileProgressTrack progress={petProgress} />
+          <View style={styles.photoWrap}>
+            <NativeHeroPhotoPicker
+              uri={photoUri}
+              version={photoUri ? nativeMutableImageVersion(photoUri, petPhotoUpdatedAt) : null}
+              onPick={pickPhoto}
+              onEdit={() => void editCurrentPhoto()}
+              onRemove={removePhoto}
+              badgeLabel="Pet Photo"
+              emptyTitle="Add a pet photo"
+              emptyHelper="A clear, well-lit photo of your pet."
+            />
+          </View>
 
+          <NativeCollapsibleSection
+            title="Basics"
+            bodyStyle={styles.sectionBody}
+            collapsible={petAccordion}
+            open={isPetSectionOpen("Basics")}
+            onToggle={() => togglePetProfileSection("Basics")}
+          >
+          <View style={styles.identityFieldGroup}>
           <View ref={setFieldRef("name")} style={styles.section}>
             <FieldLabel>Pet Name</FieldLabel>
             <TextInput
+                multiline={false}
+                scrollEnabled
+                numberOfLines={1} lineBreakModeIOS="tail" lineBreakStrategyIOS="none"
+                textBreakStrategy="simple"
               onChangeText={(name) => updateForm({ name })}
               onBlur={() => {
                 setFocusedField(null);
@@ -1641,28 +2076,58 @@ export function NativeSetPetScreen({
               placeholder="Pet's name"
               placeholderTextColor={huddleColors.mutedText}
               returnKeyType="done"
+              onSubmitEditing={Keyboard.dismiss}
               style={[styles.input, focusedField === "name" ? styles.inputFocused : null, errors.name ? styles.inputError : null]}
               value={form.name}
             />
             {errors.name ? <ErrorText>{errors.name}</ErrorText> : null}
           </View>
 
-          <View style={styles.section}>
-            <FieldLabel>Species</FieldLabel>
-            <View style={styles.chipGrid}>
-              {speciesOptions.map((species) => (
-                <Chip
-                  key={species.id}
-                  label={species.label}
-                  selected={form.species === species.id}
-                  onPress={() => updateForm({ species: species.id, breed: species.id === "others" ? "" : form.breed })}
-                />
-              ))}
-            </View>
-            {errors.species ? <ErrorText>{errors.species}</ErrorText> : null}
+          <View ref={setFieldRef("species")} style={styles.section}>
+            <NativeFormChoiceField error={errors.species} focused={selectTarget === "species" || focusedField === "species"} label="">
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => toggleSelectField("species")}
+                style={styles.petTypeSelectTrigger}
+              >
+                <View style={styles.petTypeSelectValueRow}>
+                  {selectedSpeciesOption ? <Text style={styles.petTypeEmoji}>{nativePetEmojiForLabel(selectedSpeciesOption.label)}</Text> : null}
+                  <Text numberOfLines={1} style={[styles.petTypeSelectValue, !selectedSpeciesOption ? styles.placeholder : null]}>
+                    {selectedSpeciesOption?.label || "Species"}
+                  </Text>
+                </View>
+                <Feather color={huddleColors.mutedText} name={selectTarget === "species" ? "chevron-up" : "chevron-down"} size={18} />
+              </Pressable>
+              <InlineSelectMenu
+                borderless
+                getOptionIcon={nativePetEmojiForLabel}
+                onSelect={(value) => {
+                  const nextSpecies = speciesOptions.find((option) => option.label === value);
+                  if (!nextSpecies) return;
+                  updateForm({
+                    species: nextSpecies.id,
+                    breed: "",
+                    petSize: nextSpecies.id === "dog" ? form.petSize : "",
+                  });
+                  setErrors((current) => ({
+                    ...current,
+                    species: "",
+                    customSpecies: nextSpecies.id === "others" ? current.customSpecies : "",
+                  }));
+                  setSelectTarget(null);
+                }}
+                options={speciesOptions.map((option) => option.label)}
+                selectedValues={selectedSpeciesOption ? [selectedSpeciesOption.label] : []}
+                visible={selectTarget === "species"}
+              />
+            </NativeFormChoiceField>
             {form.species === "others" ? (
               <View ref={setFieldRef("customSpecies")} style={styles.fieldStack}>
                 <TextInput
+                multiline={false}
+                scrollEnabled
+                numberOfLines={1} lineBreakModeIOS="tail" lineBreakStrategyIOS="none"
+                textBreakStrategy="simple"
                   onChangeText={(customSpecies) => updateForm({ customSpecies })}
                   onBlur={() => {
                     setFocusedField(null);
@@ -1672,6 +2137,7 @@ export function NativeSetPetScreen({
                   placeholder="Enter species..."
                   placeholderTextColor={huddleColors.mutedText}
                   returnKeyType="done"
+                  onSubmitEditing={Keyboard.dismiss}
                   style={[styles.input, focusedField === "customSpecies" ? styles.inputFocused : null, errors.customSpecies ? styles.inputError : null]}
                   value={form.customSpecies}
                 />
@@ -1682,9 +2148,8 @@ export function NativeSetPetScreen({
 
           {form.species !== "others" ? (
             <View ref={setFieldRef("breed")} style={styles.section}>
-              <FieldLabel>Breed</FieldLabel>
-              <Pressable onPress={() => toggleSelectField("breed")} style={[styles.selectField, selectTarget === "breed" || focusedField === "breed" ? styles.inputFocused : null]}>
-                <Text style={[styles.selectText, !form.breed ? styles.placeholder : null]}>{form.breed || "Select"}</Text>
+              <Pressable onPress={() => toggleSelectField("breed")} style={[styles.selectField, selectTarget === "breed" || focusedField === "breed" ? styles.fieldFocusedOutline : null]}>
+                <Text ellipsizeMode="tail" numberOfLines={1} style={[styles.selectText, !form.breed ? styles.placeholder : null]}>{form.breed || "Breed"}</Text>
                 <Feather color={huddleColors.mutedText} name="chevron-down" size={18} />
               </Pressable>
               <InlineSelectMenu
@@ -1698,6 +2163,27 @@ export function NativeSetPetScreen({
               />
             </View>
           ) : null}
+          {form.species === "dog" ? (
+            <View ref={setFieldRef("petSize")} style={[styles.section, styles.petSizeField]}>
+              <FieldLabel>Pet Size</FieldLabel>
+              <Pressable onPress={() => toggleSelectField("petSize")} style={[styles.selectField, selectTarget === "petSize" || focusedField === "petSize" ? styles.fieldFocusedOutline : null, errors.petSize ? styles.inputError : null]}>
+                <Text ellipsizeMode="tail" numberOfLines={1} style={[styles.selectText, !form.petSize ? styles.placeholder : null]}>{form.petSize || "Select size"}</Text>
+                <Feather color={huddleColors.mutedText} name="chevron-down" size={18} />
+              </Pressable>
+              <InlineSelectMenu
+                onSelect={(value) => {
+                  updateForm({ petSize: value });
+                  setErrors((current) => ({ ...current, petSize: "" }));
+                  setSelectTarget(null);
+                }}
+                options={[...petSizeOptions]}
+                selectedValues={form.petSize ? [form.petSize] : []}
+                visible={selectTarget === "petSize"}
+              />
+              {errors.petSize ? <ErrorText>{errors.petSize}</ErrorText> : null}
+            </View>
+          ) : null}
+          </View>
 
 	          <View style={styles.genderTwoColumn}>
 	            <View style={[styles.flexOne, styles.fieldStack]}>
@@ -1716,8 +2202,8 @@ export function NativeSetPetScreen({
             </Pressable>
           </View>
 
-          <View style={styles.twoColumn}>
-	            <View ref={setFieldRef("dob")} style={[styles.flexOne, styles.fieldStack]}>
+          <View style={[styles.twoColumn, styles.dateWeightRow]}>
+	            <View ref={setFieldRef("dob")} style={[styles.dateOfBirthColumn, styles.fieldStack]}>
 	              <FieldLabel>Date of Birth</FieldLabel>
 	              <DateField
                   error={Boolean(errors.dob)}
@@ -1731,7 +2217,7 @@ export function NativeSetPetScreen({
                     if (dob.trim().length >= 10) {
                       setErrors((current) => ({
                         ...current,
-                        dob: !isIsoDate(dob) ? "Use YYYY-MM-DD" : "",
+                        dob: !isIsoDate(dob) ? "Use a valid calendar date." : "",
                       }));
                     } else {
                       setErrors((current) => ({ ...current, dob: "" }));
@@ -1744,57 +2230,68 @@ export function NativeSetPetScreen({
                     const petDob = new Date(`${form.dob}T00:00:00`);
                     setErrors((current) => ({
                       ...current,
-                      dob: petDob > todayAtMidnight() ? "Pet DOB cannot be in the future" : !isIsoDate(form.dob) ? "Use YYYY-MM-DD" : "",
+                      dob: petDob > todayAtMidnight() ? "Pet DOB cannot be in the future" : !isIsoDate(form.dob) ? "Use a valid calendar date." : "",
                     }));
                   }}
+                  onFocus={() => focusField("dob")}
                   onToggle={() => toggleDateField("dob")}
                   value={form.dob}
                 />
                 <InlineDatePicker onChange={handleDateSelect} value={activeDateValue} visible={dateTarget === "dob"} />
 	              {errors.dob ? <ErrorText>{errors.dob}</ErrorText> : null}
-	            </View>
-            <View ref={setFieldRef("weight")} style={[styles.flexOne, styles.fieldStack]}>
-              <FieldLabel>Weight</FieldLabel>
-              <View style={[styles.inputWithUnit, focusedField === "weight" ? styles.inputFocused : null, errors.weight ? styles.inputError : null]}>
-	                <TextInput
-	                  keyboardType="decimal-pad"
-                    onBlur={() => setFocusedField(null)}
-	                  onChangeText={(weight) => {
-	                    if (!/^\d*(?:[.,]\d*)?$/.test(weight)) return;
-	                    updateForm({ weight });
-	                    const parsed = parseDecimalInput(weight);
-	                    const maxWeight = maxWeightByUnit(form.weightUnit);
-	                    setErrors((current) => ({
-	                      ...current,
-	                      weight: weight && (parsed == null || parsed < 1 || parsed > maxWeight) ? "Oops...This input seems invalid." : "",
-	                    }));
-	                  }}
-                    onFocus={() => focusField("weight")}
-                  placeholder="0"
-                  placeholderTextColor={huddleColors.mutedText}
-                  style={styles.unitInput}
-                  value={form.weight}
-                />
-	                <Pressable
-	                  onPress={() => {
-	                    const weightUnit = form.weightUnit === "kg" ? "lb" : "kg";
-	                    updateForm({ weightUnit });
-	                    const parsed = parseDecimalInput(form.weight);
-	                    const maxWeight = maxWeightByUnit(weightUnit);
-	                    setErrors((current) => ({
-	                      ...current,
-	                      weight: form.weight && (parsed == null || parsed < 1 || parsed > maxWeight) ? "Oops...This input seems invalid." : "",
-	                    }));
-	                  }}
-	                  style={styles.unitPill}
-	                >
-	                  <Text style={styles.unitText}>{form.weightUnit}</Text>
-	                </Pressable>
-              </View>
-              {errors.weight ? <ErrorText>{errors.weight}</ErrorText> : null}
+            </View>
+            <View ref={setFieldRef("weight")} style={[styles.weightColumn, styles.fieldStack]}>
+              <NativeFormTextField
+                ref={weightInputRef}
+                error={errors.weight}
+                fieldAccessory={(
+                  <Pressable
+                    onPress={() => {
+                      Keyboard.dismiss();
+                      const weightUnit = form.weightUnit === "kg" ? "lb" : "kg";
+                      updateForm({ weightUnit });
+                      const parsed = parseDecimalInput(form.weight);
+                      const maxWeight = maxWeightByUnit(weightUnit);
+                      setErrors((current) => ({
+                        ...current,
+                        weight: form.weight && (parsed == null || parsed < 1 || parsed > maxWeight) ? "Oops...This input seems invalid." : "",
+                      }));
+                    }}
+                    style={styles.unitPill}
+                  >
+                    <Text style={styles.unitText}>{form.weightUnit}</Text>
+                  </Pressable>
+                )}
+                keyboardType="decimal-pad"
+                label="Weight"
+                onBlur={() => setFocusedField(null)}
+                onChangeText={(weight) => {
+                  if (!/^\d*(?:[.,]\d*)?$/.test(weight)) return;
+                  updateForm({ weight });
+                  const parsed = parseDecimalInput(weight);
+                  const maxWeight = maxWeightByUnit(form.weightUnit);
+                  setErrors((current) => ({
+                    ...current,
+                    weight: weight && (parsed == null || parsed < 1 || parsed > maxWeight) ? "Oops...This input seems invalid." : "",
+                  }));
+                }}
+                onFocus={() => focusField("weight")}
+                onSubmitEditing={Keyboard.dismiss}
+                placeholder="0"
+                returnKeyType="done"
+                value={form.weight}
+              />
             </View>
           </View>
+          </NativeCollapsibleSection>
 
+          <NativeCollapsibleSection
+            title="About"
+            bodyStyle={styles.sectionBody}
+            collapsible={petAccordion}
+            open={isPetSectionOpen("About")}
+            onToggle={() => togglePetProfileSection("About")}
+          >
           <View ref={setFieldRef("bio")} style={styles.section}>
             <FieldLabel>Pet Bio</FieldLabel>
             <TextInput
@@ -1804,14 +2301,14 @@ export function NativeSetPetScreen({
               onFocus={() => focusField("bio")}
               placeholder="Tell us about your pet"
               placeholderTextColor={huddleColors.mutedText}
+              scrollEnabled
               style={[styles.input, styles.textArea, focusedField === "bio" ? styles.inputFocused : null]}
               value={form.bio}
             />
           </View>
 
           <View ref={setFieldRef("temperament")} style={styles.section}>
-            <FieldLabel>Temperament</FieldLabel>
-            <Pressable onPress={() => toggleSelectField("temperament")} style={[styles.selectField, selectTarget === "temperament" || focusedField === "temperament" ? styles.inputFocused : null]}>
+            <Pressable onPress={() => toggleSelectField("temperament")} style={[styles.selectField, selectTarget === "temperament" || focusedField === "temperament" ? styles.fieldFocusedOutline : null]}>
               <Text numberOfLines={1} style={[styles.selectText, form.temperament.length === 0 ? styles.placeholder : null]}>
                 {form.temperament.length > 0 ? form.temperament.join(", ") : "Select temperament"}
               </Text>
@@ -1829,14 +2326,27 @@ export function NativeSetPetScreen({
               onFocus={() => focusField("routine")}
               placeholder="Feeding times, walks, play schedule"
               placeholderTextColor={huddleColors.mutedText}
+              scrollEnabled
               style={[styles.input, styles.textAreaSmall, focusedField === "routine" ? styles.inputFocused : null]}
               value={form.routine}
             />
           </View>
+          </NativeCollapsibleSection>
 
+          <NativeCollapsibleSection
+            title="Vet & Health"
+            bodyStyle={styles.sectionBody}
+            collapsible={petAccordion}
+            open={isPetSectionOpen("Vet & Health")}
+            onToggle={() => togglePetProfileSection("Vet & Health")}
+          >
           <View ref={setFieldRef("microchipId")} style={styles.section}>
             <FieldLabel>Microchip ID</FieldLabel>
             <TextInput
+                multiline={false}
+                scrollEnabled
+                numberOfLines={1} lineBreakModeIOS="tail" lineBreakStrategyIOS="none"
+                textBreakStrategy="simple"
               autoCorrect={false}
               keyboardType="number-pad"
               onFocus={() => focusField("microchipId")}
@@ -1854,30 +2364,40 @@ export function NativeSetPetScreen({
           </View>
 
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>VET CONTACT</Text>
-            <View ref={setFieldRef("clinicName")}>
-              <TextInput onBlur={() => setFocusedField(null)} onChangeText={(clinicName) => updateForm({ clinicName })} onFocus={() => focusField("clinicName")} onSubmitEditing={() => preferredVetInputRef.current?.focus()} placeholder="Clinic name" placeholderTextColor={huddleColors.mutedText} returnKeyType="next" style={[styles.input, focusedField === "clinicName" ? styles.inputFocused : null]} value={form.clinicName} />
-            </View>
-            <View ref={setFieldRef("preferredVet")}>
-              <TextInput ref={preferredVetInputRef} onBlur={() => setFocusedField(null)} onChangeText={(preferredVet) => updateForm({ preferredVet })} onFocus={() => focusField("preferredVet")} placeholder="Preferred vet" placeholderTextColor={huddleColors.mutedText} returnKeyType="done" style={[styles.input, focusedField === "preferredVet" ? styles.inputFocused : null]} value={form.preferredVet} />
-            </View>
-            <View ref={setFieldRef("phoneNo")}>
-              <NativePhoneField
-                defaultCountryCode={defaultPhoneCountryCode}
-                onChangeText={(phoneNo) => updateForm({ phoneNo })}
-                onFocus={() => focusField("phoneNo")}
-                onOpenCountryPicker={() => {
-                  setFocusedField("phoneNo");
-                  scrollFieldIntoView("phoneNo");
-                }}
-                showFormatWarning
-                value={form.phoneNo}
-              />
+            <FieldLabel>Vet Contact</FieldLabel>
+            <View style={styles.compactFieldGroup}>
+              <View ref={setFieldRef("clinicName")}>
+                <TextInput
+                multiline={false}
+                scrollEnabled
+                numberOfLines={1} lineBreakModeIOS="tail" lineBreakStrategyIOS="none"
+                textBreakStrategy="simple" onBlur={() => setFocusedField(null)} onChangeText={(clinicName) => updateForm({ clinicName })} onFocus={() => focusField("clinicName")} onSubmitEditing={() => preferredVetInputRef.current?.focus()} placeholder="Clinic name" placeholderTextColor={huddleColors.mutedText} returnKeyType="next" style={[styles.input, focusedField === "clinicName" ? styles.inputFocused : null]} value={form.clinicName} />
+              </View>
+              <View ref={setFieldRef("preferredVet")}>
+                <TextInput
+                multiline={false}
+                scrollEnabled
+                numberOfLines={1} lineBreakModeIOS="tail" lineBreakStrategyIOS="none"
+                textBreakStrategy="simple" ref={preferredVetInputRef} onBlur={() => setFocusedField(null)} onChangeText={(preferredVet) => updateForm({ preferredVet })} onFocus={() => focusField("preferredVet")} placeholder="Preferred vet" placeholderTextColor={huddleColors.mutedText} returnKeyType="done" onSubmitEditing={Keyboard.dismiss} style={[styles.input, focusedField === "preferredVet" ? styles.inputFocused : null]} value={form.preferredVet} />
+              </View>
+              <View ref={setFieldRef("phoneNo")}>
+                <NativePhoneField
+                  defaultCountryCode={defaultPhoneCountryCode}
+                  onChangeText={(phoneNo) => updateForm({ phoneNo })}
+                  onFocus={() => focusField("phoneNo")}
+                  onOpenCountryPicker={() => {
+                    setFocusedField("phoneNo");
+                    scrollFieldIntoView("phoneNo");
+                  }}
+                  showFormatWarning
+                  value={form.phoneNo}
+                />
+              </View>
             </View>
           </View>
 
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>HEALTH</Text>
+            <FieldLabel>Health Record</FieldLabel>
 	            <View style={styles.subCard}>
 	              <View style={styles.subCardHeader}>
 	                <Text style={styles.subCardTitle}>Vet Visit Records</Text>
@@ -1906,8 +2426,8 @@ export function NativeSetPetScreen({
                   style={styles.listRow}
                 >
                   <View style={styles.flexOne}>
-                    <Text style={styles.listTitle}>{visit.reason === "Others" ? visit.customReason || "Others" : visit.reason}</Text>
-                    <Text style={styles.listMeta}>{[visit.visitDate, visit.vaccine].filter(Boolean).join(" • ")}</Text>
+                    <Text ellipsizeMode="tail" numberOfLines={1} style={styles.listTitle}>{visit.reason === "Others" ? visit.customReason || "Others" : visit.reason}</Text>
+                    <Text ellipsizeMode="tail" numberOfLines={1} style={styles.listMeta}>{[visit.visitDate, visit.vaccine].filter(Boolean).join(" • ")}</Text>
                   </View>
                   <Pressable onPress={() => updateForm({ vetVisitRecords: form.vetVisitRecords.filter((_, entryIndex) => entryIndex !== index) })} style={styles.smallIcon}>
                     <Feather color={huddleColors.validationRed} name="x" size={18} />
@@ -1916,8 +2436,8 @@ export function NativeSetPetScreen({
               ))}
 	              {showVisitEditor ? (
 	                <View style={styles.editorStack}>
-	                  <Pressable ref={setFieldRef("visitReason")} onPress={() => toggleSelectField("visitReason")} style={[styles.selectField, selectTarget === "visitReason" || focusedField === "visitReason" ? styles.inputFocused : null]}>
-	                    <Text style={[styles.selectText, !visitDraft.reason ? styles.placeholder : null]}>{visitDraft.reason || "Select"}</Text>
+		                  <Pressable ref={setFieldRef("visitReason")} onPress={() => toggleSelectField("visitReason")} style={[styles.selectField, selectTarget === "visitReason" || focusedField === "visitReason" ? styles.fieldFocusedOutline : null]}>
+	                    <Text ellipsizeMode="tail" numberOfLines={1} style={[styles.selectText, !visitDraft.reason ? styles.placeholder : null]}>{visitDraft.reason || "Select"}</Text>
 	                    <Feather color={huddleColors.mutedText} name="chevron-down" size={18} />
 	                  </Pressable>
                     <InlineSelectMenu
@@ -1930,19 +2450,23 @@ export function NativeSetPetScreen({
                       visible={selectTarget === "visitReason"}
                     />
 	                  <View ref={setFieldRef("visitDate")}>
-	                    <DateField focused={dateTarget === "visitDate" || focusedField === "visitDate"} onBlur={() => setFocusedField(null)} onChangeText={(visitDate) => setVisitDraft((current) => ({ ...current, visitDate }))} onToggle={() => toggleDateField("visitDate")} value={visitDraft.visitDate} />
+	                    <DateField focused={dateTarget === "visitDate" || focusedField === "visitDate"} onBlur={() => { setFocusedField(null); setDateTarget(null); }} onChangeText={(visitDate) => setVisitDraft((current) => ({ ...current, visitDate }))} onFocus={() => focusField("visitDate")} onToggle={() => toggleDateField("visitDate")} value={visitDraft.visitDate} />
 	                  </View>
                     <InlineDatePicker onChange={handleDateSelect} value={activeDateValue} visible={dateTarget === "visitDate"} />
 	                  {visitDraft.reason === "Others" ? (
 	                    <View ref={setFieldRef("visitCustomReason")}>
-	                      <TextInput onBlur={() => setFocusedField(null)} onChangeText={(customReason) => setVisitDraft((current) => ({ ...current, customReason }))} onFocus={() => focusField("visitCustomReason")} placeholder="Custom reason" placeholderTextColor={huddleColors.mutedText} returnKeyType="done" style={[styles.input, focusedField === "visitCustomReason" ? styles.inputFocused : null]} value={visitDraft.customReason || ""} />
+	                      <TextInput
+                multiline={false}
+                scrollEnabled
+                numberOfLines={1} lineBreakModeIOS="tail" lineBreakStrategyIOS="none"
+                textBreakStrategy="simple" onBlur={() => setFocusedField(null)} onChangeText={(customReason) => setVisitDraft((current) => ({ ...current, customReason }))} onFocus={() => focusField("visitCustomReason")} placeholder="Custom reason" placeholderTextColor={huddleColors.mutedText} returnKeyType="done" onSubmitEditing={Keyboard.dismiss} style={[styles.input, focusedField === "visitCustomReason" ? styles.inputFocused : null]} value={visitDraft.customReason || ""} />
 	                    </View>
 	                  ) : null}
 	                  {visitDraft.reason === "Vaccination" ? (
 	                    vaccineOptions ? (
                         <>
-	                        <Pressable ref={setFieldRef("vaccine")} onPress={() => toggleSelectField("vaccine")} style={[styles.selectField, selectTarget === "vaccine" || focusedField === "vaccine" ? styles.inputFocused : null]}>
-	                          <Text style={[styles.selectText, !visitDraft.vaccine ? styles.placeholder : null]}>{visitDraft.vaccine || "Select"}</Text>
+		                        <Pressable ref={setFieldRef("vaccine")} onPress={() => toggleSelectField("vaccine")} style={[styles.selectField, selectTarget === "vaccine" || focusedField === "vaccine" ? styles.fieldFocusedOutline : null]}>
+	                          <Text ellipsizeMode="tail" numberOfLines={1} style={[styles.selectText, !visitDraft.vaccine ? styles.placeholder : null]}>{visitDraft.vaccine || "Select"}</Text>
 	                          <Feather color={huddleColors.mutedText} name="chevron-down" size={18} />
 	                        </Pressable>
                           <InlineSelectMenu
@@ -1957,7 +2481,11 @@ export function NativeSetPetScreen({
                         </>
 	                    ) : (
 	                      <View ref={setFieldRef("vaccine")}>
-	                        <TextInput onBlur={() => setFocusedField(null)} onChangeText={(vaccine) => setVisitDraft((current) => ({ ...current, vaccine }))} onFocus={() => focusField("vaccine")} placeholder="Vaccine" placeholderTextColor={huddleColors.mutedText} returnKeyType="done" style={[styles.input, focusedField === "vaccine" ? styles.inputFocused : null]} value={visitDraft.vaccine || ""} />
+	                        <TextInput
+                multiline={false}
+                scrollEnabled
+                numberOfLines={1} lineBreakModeIOS="tail" lineBreakStrategyIOS="none"
+                textBreakStrategy="simple" onBlur={() => setFocusedField(null)} onChangeText={(vaccine) => setVisitDraft((current) => ({ ...current, vaccine }))} onFocus={() => focusField("vaccine")} placeholder="Vaccine" placeholderTextColor={huddleColors.mutedText} returnKeyType="done" onSubmitEditing={Keyboard.dismiss} style={[styles.input, focusedField === "vaccine" ? styles.inputFocused : null]} value={visitDraft.vaccine || ""} />
 	                      </View>
 	                    )
 	                  ) : null}
@@ -2009,8 +2537,8 @@ export function NativeSetPetScreen({
                   style={styles.listRow}
                 >
                   <View style={styles.flexOne}>
-                    <Text style={styles.listTitle}>{reminder.reason === "Others" ? reminder.customReason || "Others" : reminder.reason}</Text>
-                    <Text style={styles.listMeta}>{reminder.reminderDate}</Text>
+                    <Text ellipsizeMode="tail" numberOfLines={1} style={styles.listTitle}>{reminder.reason === "Others" ? reminder.customReason || "Others" : reminder.reason}</Text>
+                    <Text ellipsizeMode="tail" numberOfLines={1} style={styles.listMeta}>{reminder.reminderDate}</Text>
                   </View>
                   <Pressable onPress={() => updateForm({ reminders: form.reminders.filter((_, entryIndex) => entryIndex !== index) })} style={styles.smallIcon}>
                     <Feather color={huddleColors.validationRed} name="x" size={18} />
@@ -2019,8 +2547,8 @@ export function NativeSetPetScreen({
               ))}
 	              {showReminderEditor ? (
 	                <View style={styles.editorStack}>
-	                  <Pressable ref={setFieldRef("reminderReason")} onPress={() => toggleSelectField("reminderReason")} style={[styles.selectField, selectTarget === "reminderReason" || focusedField === "reminderReason" ? styles.inputFocused : null]}>
-	                    <Text style={[styles.selectText, !reminderDraft.reason ? styles.placeholder : null]}>{reminderDraft.reason || "Select"}</Text>
+		                  <Pressable ref={setFieldRef("reminderReason")} onPress={() => toggleSelectField("reminderReason")} style={[styles.selectField, selectTarget === "reminderReason" || focusedField === "reminderReason" ? styles.fieldFocusedOutline : null]}>
+	                    <Text ellipsizeMode="tail" numberOfLines={1} style={[styles.selectText, !reminderDraft.reason ? styles.placeholder : null]}>{reminderDraft.reason || "Select"}</Text>
 	                    <Feather color={huddleColors.mutedText} name="chevron-down" size={18} />
 	                  </Pressable>
                     <InlineSelectMenu
@@ -2033,12 +2561,16 @@ export function NativeSetPetScreen({
                       visible={selectTarget === "reminderReason"}
                     />
 	                  <View ref={setFieldRef("reminderDate")}>
-	                    <DateField focused={dateTarget === "reminderDate" || focusedField === "reminderDate"} onBlur={() => setFocusedField(null)} onChangeText={(reminderDate) => setReminderDraft((current) => ({ ...current, reminderDate }))} onToggle={() => toggleDateField("reminderDate")} value={reminderDraft.reminderDate} />
+	                    <DateField focused={dateTarget === "reminderDate" || focusedField === "reminderDate"} onBlur={() => { setFocusedField(null); setDateTarget(null); }} onChangeText={(reminderDate) => setReminderDraft((current) => ({ ...current, reminderDate }))} onFocus={() => focusField("reminderDate")} onToggle={() => toggleDateField("reminderDate")} value={reminderDraft.reminderDate} />
 	                  </View>
                     <InlineDatePicker futureYearLimit={3} minDate={tomorrowIsoDate()} onChange={handleDateSelect} value={activeDateValue} visible={dateTarget === "reminderDate"} />
 	                  {reminderDraft.reason === "Others" ? (
 	                    <View ref={setFieldRef("reminderCustomReason")}>
-	                      <TextInput onBlur={() => setFocusedField(null)} onChangeText={(customReason) => setReminderDraft((current) => ({ ...current, customReason }))} onFocus={() => focusField("reminderCustomReason")} placeholder="Custom reason" placeholderTextColor={huddleColors.mutedText} returnKeyType="done" style={[styles.input, focusedField === "reminderCustomReason" ? styles.inputFocused : null]} value={reminderDraft.customReason || ""} />
+	                      <TextInput
+                multiline={false}
+                scrollEnabled
+                numberOfLines={1} lineBreakModeIOS="tail" lineBreakStrategyIOS="none"
+                textBreakStrategy="simple" onBlur={() => setFocusedField(null)} onChangeText={(customReason) => setReminderDraft((current) => ({ ...current, customReason }))} onFocus={() => focusField("reminderCustomReason")} placeholder="Custom reason" placeholderTextColor={huddleColors.mutedText} returnKeyType="done" onSubmitEditing={Keyboard.dismiss} style={[styles.input, focusedField === "reminderCustomReason" ? styles.inputFocused : null]} value={reminderDraft.customReason || ""} />
 	                    </View>
 	                  ) : null}
 	                  {errors.reminder ? <ErrorText>{errors.reminder}</ErrorText> : null}
@@ -2089,8 +2621,8 @@ export function NativeSetPetScreen({
                   style={styles.listRow}
                 >
                   <View style={styles.flexOne}>
-                    <Text style={styles.listTitle}>{medication.name}</Text>
-                    <Text style={styles.listMeta}>
+                    <Text ellipsizeMode="tail" numberOfLines={1} style={styles.listTitle}>{medication.name}</Text>
+                    <Text ellipsizeMode="tail" numberOfLines={1} style={styles.listMeta}>
                       {[
                         medication.dose_amount != null && medication.dose_unit ? `${medication.dose_amount}${medication.dose_unit}` : "",
                         medication.frequency_value != null && medication.frequency_unit ? `Every ${medication.frequency_value} ${medication.frequency_unit}` : "",
@@ -2105,12 +2637,20 @@ export function NativeSetPetScreen({
 	              {showMedicationEditor ? (
 	                <View style={styles.editorStack}>
 	                  <View ref={setFieldRef("medicationName")}>
-	                    <TextInput onBlur={() => setFocusedField(null)} onChangeText={(name) => setMedicationDraft((current) => ({ ...current, name }))} onFocus={() => focusField("medicationName")} placeholder="Medication name" placeholderTextColor={huddleColors.mutedText} returnKeyType="done" style={[styles.input, focusedField === "medicationName" ? styles.inputFocused : null]} value={medicationDraft.name} />
+	                    <TextInput
+                multiline={false}
+                scrollEnabled
+                numberOfLines={1} lineBreakModeIOS="tail" lineBreakStrategyIOS="none"
+                textBreakStrategy="simple" onBlur={() => setFocusedField(null)} onChangeText={(name) => setMedicationDraft((current) => ({ ...current, name }))} onFocus={() => focusField("medicationName")} placeholder="Medication name" placeholderTextColor={huddleColors.mutedText} returnKeyType="done" onSubmitEditing={Keyboard.dismiss} style={[styles.input, focusedField === "medicationName" ? styles.inputFocused : null]} value={medicationDraft.name} />
 	                  </View>
 	                  <View style={styles.medicationCompositeRow}>
 	                    <View ref={setFieldRef("doseAmount")} style={styles.medicationCompositeBlock}>
-	                      <View style={[styles.compositeField, focusedField === "doseAmount" || selectTarget === "doseUnit" ? styles.inputFocused : null]}>
+		                      <View style={[styles.compositeField, focusedField === "doseAmount" || selectTarget === "doseUnit" ? styles.fieldFocusedOutline : null]}>
 	                        <TextInput
+                multiline={false}
+                scrollEnabled
+                numberOfLines={1} lineBreakModeIOS="tail" lineBreakStrategyIOS="none"
+                textBreakStrategy="simple"
 	                          keyboardType="decimal-pad"
 	                          onBlur={() => setFocusedField(null)}
 	                          onChangeText={(value) => setMedicationDraft((current) => ({ ...current, dose_amount: parseMedicationNumericInput(value, current.dose_amount, true) }))}
@@ -2121,7 +2661,7 @@ export function NativeSetPetScreen({
 	                          value={medicationDraft.dose_amount == null ? "" : String(medicationDraft.dose_amount)}
 	                        />
 	                        <Pressable onPress={() => toggleSelectField("doseUnit")} style={styles.compositeFieldSelect}>
-	                          <Text style={[styles.compositeFieldSelectText, !medicationDraft.dose_unit ? styles.placeholder : null]}>{medicationDraft.dose_unit || "Select"}</Text>
+	                          <Text ellipsizeMode="tail" numberOfLines={1} style={[styles.compositeFieldSelectText, !medicationDraft.dose_unit ? styles.placeholder : null]}>{medicationDraft.dose_unit || "Select"}</Text>
 	                        </Pressable>
 	                      </View>
 	                      <InlineSelectMenu
@@ -2135,8 +2675,12 @@ export function NativeSetPetScreen({
 	                      />
 	                    </View>
 	                    <View ref={setFieldRef("frequencyValue")} style={styles.medicationCompositeBlock}>
-	                      <View style={[styles.compositeField, focusedField === "frequencyValue" || selectTarget === "frequencyUnit" ? styles.inputFocused : null]}>
+		                      <View style={[styles.compositeField, focusedField === "frequencyValue" || selectTarget === "frequencyUnit" ? styles.fieldFocusedOutline : null]}>
 	                        <TextInput
+                multiline={false}
+                scrollEnabled
+                numberOfLines={1} lineBreakModeIOS="tail" lineBreakStrategyIOS="none"
+                textBreakStrategy="simple"
 	                          keyboardType="number-pad"
 	                          onBlur={() => setFocusedField(null)}
 	                          onChangeText={(value) => setMedicationDraft((current) => ({ ...current, frequency_value: parseMedicationNumericInput(value, current.frequency_value, false) }))}
@@ -2147,7 +2691,7 @@ export function NativeSetPetScreen({
 	                          value={medicationDraft.frequency_value == null ? "" : String(medicationDraft.frequency_value)}
 	                        />
 	                        <Pressable onPress={() => toggleSelectField("frequencyUnit")} style={styles.compositeFieldSelect}>
-	                          <Text style={[styles.compositeFieldSelectText, !medicationDraft.frequency_unit ? styles.placeholder : null]}>{medicationDraft.frequency_unit || "Select"}</Text>
+	                          <Text ellipsizeMode="tail" numberOfLines={1} style={[styles.compositeFieldSelectText, !medicationDraft.frequency_unit ? styles.placeholder : null]}>{medicationDraft.frequency_unit || "Select"}</Text>
 	                        </Pressable>
 	                      </View>
 	                      <InlineSelectMenu
@@ -2181,15 +2725,21 @@ export function NativeSetPetScreen({
 	              ) : null}
 	            </View>
           </View>
+          </NativeCollapsibleSection>
 
           <View style={styles.switchStack}>
-            <View style={styles.switchRow}>
-              <View style={styles.flexOne}>
-                <Text style={styles.switchTitle}>Still Active</Text>
-                <Text style={styles.switchHelp}>Is this pet still with you?</Text>
+            {familyPetContext?.family_linked && familyPetContext.is_creator ? (
+              <View style={styles.switchRow}>
+                <View style={styles.flexOne}>
+                  <Text style={styles.switchTitle}>Share with family</Text>
+                </View>
+                <InlineToggle
+                  checked={form.shareWithFamily}
+                  disabled={!familyPetContext.can_share_with_family}
+                  onPress={() => updateForm({ shareWithFamily: !form.shareWithFamily })}
+                />
               </View>
-              <InlineToggle checked={form.isActive} onPress={() => updateForm({ isActive: !form.isActive })} />
-            </View>
+            ) : null}
             <View style={styles.switchRow}>
               <View style={styles.flexOne}>
                 <Text style={styles.switchTitle}>Public Profile</Text>
@@ -2197,13 +2747,20 @@ export function NativeSetPetScreen({
               </View>
               <InlineToggle checked={form.isPublic} onPress={() => updateForm({ isPublic: !form.isPublic })} />
             </View>
+            <View style={styles.switchRow}>
+              <View style={styles.flexOne}>
+                <Text style={styles.switchTitle}>Still Active</Text>
+                <Text style={styles.switchHelp}>Is this pet still with you?</Text>
+              </View>
+              <InlineToggle checked={form.isActive} onPress={() => updateForm({ isActive: !form.isActive })} />
+            </View>
+            {!onboardingMode && profileMode === "edit" && savedPetId && !isNewPet ? (
+              <Pressable disabled={saving} onPress={familyPetContext?.is_family_shared ? () => void removeSharedPet() : confirmRemovePet} style={({ pressed }) => [styles.removeInlineButton, pressed && !saving ? styles.pressed : null, saving ? styles.disabled : null]}>
+                <Text style={styles.removeInlineButtonText}>{familyPetContext?.is_family_shared ? "Remove from my profile" : "Remove Pet"}</Text>
+              </Pressable>
+            ) : null}
           </View>
           {message ? <Text style={message === "Draft saved" ? styles.successText : styles.errorText}>{message}</Text> : null}
-          {!onboardingMode && profileMode === "edit" && savedPetId && !isNewPet ? (
-            <Pressable disabled={saving} onPress={confirmRemovePet} style={({ pressed }) => [styles.removeInlineButton, pressed && !saving ? styles.pressed : null, saving ? styles.disabled : null]}>
-              <Text style={styles.removeInlineButtonText}>Remove Pet</Text>
-            </Pressable>
-          ) : null}
             </>
           )}
         </ScrollView>
@@ -2222,9 +2779,9 @@ export function NativeSetPetScreen({
 
         {onboardingMode && profileMode === "edit" ? (
           <View style={[styles.footer, { paddingBottom: insets.bottom + huddleSpacing.x3 }]}>
-            <Animated.View style={{ transform: [{ translateX: saveShakeAnim }] }}>
+            <Animated.View style={saveShakeStyle}>
               <Pressable disabled={saving} onPress={() => void savePet(false)} style={({ pressed }) => [styles.primaryButton, pressed && !saving ? styles.pressed : null, saving ? styles.disabled : null]}>
-                {saving ? <ActivityIndicator color={huddleColors.onPrimary} /> : <Text style={styles.primaryButtonText}>Complete profile</Text>}
+                {saving ? <NativeSpinner tone="primary" /> : <Text style={styles.primaryButtonText}>Complete profile</Text>}
               </Pressable>
             </Animated.View>
             <Pressable disabled={saving} onPress={() => void savePet(true)} style={({ pressed }) => [styles.draftButton, pressed && !saving ? styles.pressed : null, saving ? styles.disabled : null]}>
@@ -2233,6 +2790,22 @@ export function NativeSetPetScreen({
           </View>
         ) : null}
       </KeyboardAvoidingView>
+
+      <NativeMediaImageCropper
+        asset={petCropAsset}
+        aspect="4/5"
+        onCancel={() => {
+          void cleanupNativeProfilePhotoTemporaryAsset(petCropAsset);
+          setPetCropAsset(null);
+          setEditingExistingPetPhoto(false);
+        }}
+        onError={(message) => setMessage(message)}
+        onSave={handlePetPhotoCropped}
+        initialPresentationCrop={homeCrop}
+        presentationCropAspect={huddlePetPhoto.bannerAspect}
+        presentationCropLabel="Home banner"
+        title="Adjust pet photo"
+      />
     </SafeAreaView>
   );
 }
@@ -2265,8 +2838,7 @@ const styles = StyleSheet.create({
     paddingBottom: huddleSpacing.x3,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: huddleColors.divider,
-    backgroundColor: huddleColors.glassChrome,
-    ...huddleShadows.glassHeader,
+    backgroundColor: huddleColors.canvas,
   },
   backButton: {
     width: huddleLayout.minTouch,
@@ -2308,6 +2880,9 @@ const styles = StyleSheet.create({
 	    padding: huddleSpacing.x4,
 	    gap: huddleSpacing.x5,
 	  },
+  petViewContent: {
+    gap: 0,
+  },
   contentScroller: {
     backgroundColor: huddleColors.canvas,
   },
@@ -2340,43 +2915,26 @@ const styles = StyleSheet.create({
 	    color: huddleColors.text,
 	  },
   photoWrap: {
-    alignSelf: "center",
-    width: 112,
-    height: 112,
-    borderRadius: 56,
-    position: "relative",
-  },
-  photo: {
-    width: "100%",
-    height: "100%",
-    borderRadius: 56,
-    backgroundColor: huddleColors.mutedCanvas,
-  },
-  photoPlaceholder: {
-    width: "100%",
-    height: "100%",
-    borderRadius: 56,
-    borderWidth: 2,
-    borderStyle: "dashed",
-    borderColor: huddleColors.photoBorder,
-    backgroundColor: huddleColors.mutedCanvas,
     alignItems: "center",
-    justifyContent: "center",
   },
-	  photoBadge: {
-	    position: "absolute",
-	    right: 2,
-	    bottom: 2,
-	    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: huddleColors.blue,
-	    alignItems: "center",
-	    justifyContent: "center",
-	  },
 	  section: {
-	    gap: huddleSpacing.x3,
+	    gap: huddleSpacing.x2,
 	  },
+  sectionBody: {
+    gap: huddleSpacing.x5,
+    paddingBottom: huddleSpacing.x2,
+  },
+  identityFieldGroup: {
+    gap: huddleSpacing.x1,
+  },
+  petSizeField: {
+    // The parent group already adds x1; add the remainder so Breed-to-label matches Gender's x5 boundary.
+    marginTop: huddleSpacing.x5 - huddleSpacing.x1,
+    gap: huddleSpacing.x1,
+  },
+  compactFieldGroup: {
+    gap: huddleSpacing.x1,
+  },
   sectionTitle: {
     color: huddleColors.mutedText,
     fontFamily: "Urbanist-700",
@@ -2384,24 +2942,37 @@ const styles = StyleSheet.create({
     letterSpacing: 0.8,
   },
   label: {
-    color: huddleColors.text,
-    fontFamily: "Urbanist-600",
+    color: huddleColors.mutedText,
+    fontFamily: "Urbanist-700",
     fontSize: huddleType.label,
     lineHeight: huddleType.labelLine,
+    letterSpacing: 1,
+    textTransform: "uppercase",
   },
   input: {
+    flexShrink: 1,
+    minWidth: 0,
     minHeight: huddleLayout.fieldHeight,
     borderRadius: huddleRadii.field,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: huddleColors.fieldBorder,
-    backgroundColor: huddleColors.canvas,
+    borderWidth: 1,
+    borderColor: huddleColors.glassBorder,
+    backgroundColor: huddleFormFields.background,
     paddingHorizontal: huddleSpacing.x4,
     color: huddleColors.text,
     fontFamily: "Urbanist-500",
-    fontSize: 15,
-    lineHeight: 20,
+    fontSize: huddleFormFields.valueSize,
+    lineHeight: huddleFormFields.valueLine,
+    shadowColor: huddleColors.neutralShadow,
+    shadowOpacity: huddleFormFields.shadowOpacity,
+    shadowRadius: 6,
+    shadowOffset: { width: huddleFormFields.shadowOffset, height: huddleFormFields.shadowOffset },
+    elevation: 1,
+    overflow: "hidden",
   },
   inputFocused: {
+    ...huddleFieldStates.focused,
+  },
+  fieldFocusedOutline: {
     ...huddleFieldStates.focused,
   },
   microchipInput: {
@@ -2411,12 +2982,14 @@ const styles = StyleSheet.create({
     }),
   },
   textArea: {
-    minHeight: 112,
+    height: huddleFormFields.multilineHeight,
+    maxHeight: huddleFormFields.multilineHeight,
     paddingTop: huddleSpacing.x3,
     textAlignVertical: "top",
   },
 	  textAreaSmall: {
-	    minHeight: 96,
+	    height: huddleFormFields.multilineHeight,
+	    maxHeight: huddleFormFields.multilineHeight,
 	    paddingTop: huddleSpacing.x3,
 	    textAlignVertical: "top",
 	  },
@@ -2448,7 +3021,10 @@ const styles = StyleSheet.create({
 	    paddingHorizontal: huddleSpacing.x4,
 	    alignItems: "center",
     justifyContent: "center",
-    backgroundColor: huddleColors.mutedCanvas,
+    borderWidth: 1,
+    borderColor: huddleColors.glassBorder,
+    backgroundColor: huddleColors.glassChrome,
+    ...huddleShadows.glassElevation1,
   },
   chipSelected: {
     backgroundColor: huddleColors.blue,
@@ -2465,27 +3041,45 @@ const styles = StyleSheet.create({
 	    flex: 1,
 	    minHeight: 40,
 	    borderRadius: huddleRadii.card,
-	    paddingHorizontal: huddleSpacing.x4,
+	    paddingHorizontal: huddleSpacing.x2,
 	    alignItems: "center",
 	    justifyContent: "center",
-	    backgroundColor: huddleColors.mutedCanvas,
+	    borderWidth: 1,
+	    borderColor: huddleColors.glassBorder,
+	    backgroundColor: huddleColors.glassChrome,
+	    ...huddleShadows.glassElevation1,
 	  },
   twoColumn: {
     flexDirection: "row",
     gap: huddleSpacing.x3,
     alignItems: "flex-start",
   },
+  dateWeightRow: {
+    alignItems: "flex-start",
+  },
+  dateOfBirthColumn: {
+    flex: 1.25,
+    minWidth: 0,
+  },
+  weightColumn: {
+    flex: 0.75,
+    minWidth: 0,
+  },
   flexOne: {
     flex: 1,
+    minWidth: 0,
   },
   fieldStack: {
-    gap: huddleSpacing.x3,
+    gap: huddleSpacing.x2,
   },
 	  switchCard: {
 	    minHeight: 40,
 	    flex: 1,
 	    borderRadius: huddleRadii.pill,
-	    backgroundColor: huddleColors.mutedCanvas,
+	    borderWidth: 1,
+	    borderColor: huddleColors.glassBorder,
+	    backgroundColor: huddleColors.glassChrome,
+	    ...huddleShadows.glassElevation1,
 	    paddingHorizontal: huddleSpacing.x4,
     flexDirection: "row",
     alignItems: "center",
@@ -2500,17 +3094,18 @@ const styles = StyleSheet.create({
   },
   checkboxPill: {
     minHeight: 40,
-    flex: 1,
+    alignSelf: "flex-end",
     borderRadius: huddleRadii.pill,
-    backgroundColor: huddleColors.mutedCanvas,
-    paddingHorizontal: huddleSpacing.x4,
+    borderWidth: 1,
+    borderColor: huddleColors.glassBorder,
+    backgroundColor: huddleColors.glassChrome,
+    ...huddleShadows.glassElevation1,
+    paddingHorizontal: huddleSpacing.x3,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
     gap: huddleSpacing.x2,
   },
   checkboxPillLabel: {
-    flex: 1,
     color: huddleColors.text,
     fontFamily: "Urbanist-600",
     fontSize: 13,
@@ -2532,19 +3127,25 @@ const styles = StyleSheet.create({
   inputWithUnit: {
     height: huddleLayout.fieldHeight,
     borderRadius: huddleRadii.field,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: huddleColors.fieldBorder,
-    backgroundColor: huddleColors.canvas,
+    borderWidth: 1,
+    borderColor: huddleColors.glassBorder,
+    backgroundColor: huddleFormFields.background,
     flexDirection: "row",
     alignItems: "center",
     paddingLeft: huddleSpacing.x4,
+    shadowColor: huddleColors.neutralShadow,
+    shadowOpacity: huddleFormFields.shadowOpacity,
+    shadowRadius: 6,
+    shadowOffset: { width: huddleFormFields.shadowOffset, height: huddleFormFields.shadowOffset },
+    elevation: 1,
   },
   unitInput: {
     flex: 1,
     height: huddleLayout.fieldHeight,
     color: huddleColors.text,
     fontFamily: "Urbanist-500",
-    fontSize: 15,
+    fontSize: huddleFormFields.valueSize,
+    lineHeight: huddleFormFields.valueLine,
   },
   unitPill: {
     minWidth: 44,
@@ -2553,30 +3154,64 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     marginRight: huddleSpacing.x2,
-    backgroundColor: huddleColors.mutedCanvas,
+    borderWidth: 1,
+    borderColor: huddleColors.glassBorder,
+    backgroundColor: huddleColors.glassChrome,
+    ...huddleShadows.glassElevation1,
   },
   unitText: {
     color: huddleColors.text,
     fontFamily: "Urbanist-700",
-    fontSize: 12,
+    fontSize: huddleFormFields.valueSize,
+    lineHeight: huddleFormFields.valueLine,
   },
   selectField: {
     height: huddleLayout.fieldHeight,
     borderRadius: huddleRadii.field,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: huddleColors.fieldBorder,
-    backgroundColor: huddleColors.canvas,
+    borderWidth: 1,
+    borderColor: huddleColors.glassBorder,
+    backgroundColor: huddleFormFields.background,
     paddingHorizontal: huddleSpacing.x4,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     gap: huddleSpacing.x2,
+    shadowColor: huddleColors.neutralShadow,
+    shadowOpacity: huddleFormFields.shadowOpacity,
+    shadowRadius: 6,
+    shadowOffset: { width: huddleFormFields.shadowOffset, height: huddleFormFields.shadowOffset },
+    elevation: 1,
   },
   selectText: {
     flex: 1,
     color: huddleColors.text,
     fontFamily: "Urbanist-500",
-    fontSize: 15,
+    fontSize: huddleFormFields.valueSize,
+    lineHeight: huddleFormFields.valueLine,
+  },
+  petTypeSelectTrigger: {
+    minHeight: huddleLayout.fieldHeight - 2,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: huddleSpacing.x2,
+  },
+  petTypeSelectValueRow: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: huddleSpacing.x2,
+  },
+  petTypeEmoji: {
+    fontSize: 17,
+    lineHeight: 20,
+  },
+  petTypeSelectValue: {
+    flex: 1,
+    color: huddleColors.text,
+    fontFamily: "Urbanist-500",
+    fontSize: huddleFormFields.valueSize,
+    lineHeight: huddleFormFields.valueLine,
   },
   inlinePopover: {
     overflow: "hidden",
@@ -2585,6 +3220,9 @@ const styles = StyleSheet.create({
     borderColor: huddleFormControls.select.menuBorderColor,
     backgroundColor: huddleColors.canvas,
     ...huddleShadows.glassElevation1,
+  },
+  inlinePopoverBorderless: {
+    borderWidth: 0,
   },
   inlinePopoverScroll: {
     maxHeight: huddleFormControls.select.menuMaxHeight,
@@ -2599,6 +3237,17 @@ const styles = StyleSheet.create({
     color: huddleColors.blue,
     fontFamily: "Urbanist-700",
   },
+  optionLabelRow: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: huddleSpacing.x2,
+  },
+  optionEmoji: {
+    fontSize: 17,
+    lineHeight: 20,
+  },
   optionCheckSpacer: {
     width: huddleFormControls.select.checkSlot,
     height: huddleFormControls.select.checkSlot,
@@ -2606,21 +3255,30 @@ const styles = StyleSheet.create({
   dateField: {
     height: huddleLayout.fieldHeight,
     borderRadius: huddleRadii.field,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: huddleColors.fieldBorder,
-    backgroundColor: huddleColors.canvas,
+    borderWidth: 1,
+    borderColor: huddleColors.glassBorder,
+    backgroundColor: huddleFormFields.background,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     gap: huddleSpacing.x2,
+    shadowColor: huddleColors.neutralShadow,
+    shadowOpacity: huddleFormFields.shadowOpacity,
+    shadowRadius: 6,
+    shadowOffset: { width: huddleFormFields.shadowOffset, height: huddleFormFields.shadowOffset },
+    elevation: 1,
   },
   dateFieldInput: {
     flex: 1,
+    minWidth: 0,
+    flexShrink: 1,
     height: huddleLayout.fieldHeight,
     paddingHorizontal: huddleSpacing.x4,
     color: huddleColors.text,
     fontFamily: "Urbanist-500",
-    fontSize: 15,
+    fontSize: huddleFormFields.valueSize,
+    lineHeight: huddleFormFields.valueLine,
+    overflow: "hidden",
   },
   dateIconButton: {
     width: 40,
@@ -2682,11 +3340,14 @@ const styles = StyleSheet.create({
   compositeFieldInput: {
     flex: 1,
     minWidth: 0,
+    flexShrink: 1,
     height: huddleLayout.fieldHeight,
     paddingHorizontal: huddleSpacing.x3,
     color: huddleColors.text,
     fontFamily: "Urbanist-500",
-    fontSize: 15,
+    fontSize: huddleFormFields.valueSize,
+    lineHeight: huddleFormFields.valueLine,
+    overflow: "hidden",
   },
   compositeFieldSelect: {
     alignSelf: "stretch",
@@ -2700,13 +3361,17 @@ const styles = StyleSheet.create({
   compositeFieldSelectText: {
     color: huddleColors.mutedText,
     fontFamily: "Urbanist-600",
-    fontSize: 12,
+    fontSize: huddleFormFields.valueSize,
+    lineHeight: huddleFormFields.valueLine,
   },
   subCard: {
     gap: huddleSpacing.x3,
     borderRadius: huddleRadii.card,
     padding: huddleSpacing.x3,
-    backgroundColor: huddleColors.mutedCanvas,
+    borderWidth: 1,
+    borderColor: huddleColors.glassBorder,
+    backgroundColor: huddleColors.glassOverlay,
+    ...huddleShadows.glassElevation1,
   },
   subCardHeader: {
     flexDirection: "row",
@@ -2780,7 +3445,10 @@ const styles = StyleSheet.create({
     minHeight: 72,
     borderRadius: huddleRadii.card,
     padding: huddleSpacing.x4,
-    backgroundColor: huddleColors.mutedCanvas,
+    borderWidth: 1,
+    borderColor: huddleColors.glassBorder,
+    backgroundColor: huddleColors.glassChrome,
+    ...huddleShadows.glassElevation1,
     flexDirection: "row",
     alignItems: "center",
     gap: huddleSpacing.x3,
@@ -2793,18 +3461,17 @@ const styles = StyleSheet.create({
   switchHelp: {
     color: huddleColors.mutedText,
     fontFamily: "Urbanist-500",
-    fontSize: 12,
-    marginTop: 2,
+    fontSize: huddleType.label,
+    lineHeight: huddleType.labelLine,
+    marginTop: huddleSpacing.x1,
   },
   webToggleTrack: {
+    ...huddleGlassControls.toggleSurface,
     width: 50,
     height: 28,
     borderRadius: huddleRadii.pill,
-    backgroundColor: huddleColors.toggleOff,
     justifyContent: "center",
     paddingHorizontal: 3,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: huddleColors.fieldBorderSoft,
   },
   webToggleTrackChecked: {
     backgroundColor: huddleColors.blue,
@@ -2823,9 +3490,9 @@ const styles = StyleSheet.create({
   errorText: {
     color: huddleColors.validationRed,
     fontFamily: "Urbanist-600",
-    fontSize: 12,
-    lineHeight: 16,
-    marginTop: 2,
+    fontSize: huddleType.label,
+    lineHeight: huddleType.labelLine,
+    marginTop: -huddleSpacing.x1,
   },
   warningText: {
     color: huddleColors.mutedText,
@@ -2875,16 +3542,17 @@ const styles = StyleSheet.create({
     color: huddleColors.onPrimary,
   },
   removeInlineButton: {
-    minHeight: 48,
-    alignItems: "center",
+    alignSelf: "flex-start",
+    minHeight: huddleLayout.minTouch,
     justifyContent: "center",
-    borderRadius: huddleRadii.button,
-    backgroundColor: huddleColors.validationSoft,
-    ...huddleFieldStates.error,
+    paddingHorizontal: huddleSpacing.x1,
   },
   removeInlineButtonText: {
-    ...huddleButtons.label,
+    fontFamily: "Urbanist-600",
+    fontSize: huddleType.label,
+    lineHeight: huddleType.labelLine,
     color: huddleColors.validationRed,
+    textDecorationLine: "underline",
   },
   disabled: {
     ...huddleButtons.disabled,

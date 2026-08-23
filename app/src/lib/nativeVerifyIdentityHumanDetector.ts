@@ -117,6 +117,15 @@ export type NativeHumanDetectorResult = {
   status: string;
 };
 
+export const NATIVE_HUMAN_SIDE_YAW_MIN_DEGREES = 10;
+
+export const getNativeHumanMovementThresholds = (
+  sideYawMinDegrees = NATIVE_HUMAN_SIDE_YAW_MIN_DEGREES,
+) => ({
+  horizontalShift: (sideYawMinDegrees * 2) / 90,
+  sideTravel: sideYawMinDegrees / 45,
+});
+
 export const createNativeHumanDetectionState = (): NativeHumanDetectionState => ({
   callbackFrames: 0,
   centerFrames: 0,
@@ -467,7 +476,7 @@ export const processNativeHumanDetectorFrame = (
       nextPoseStep: poseStep,
       passed: false,
       reason: "no_face",
-      status: "No face detected. Move closer and center your face.",
+      status: "No face detected. Make sure your face is visible and the lighting is clear.",
       debug: {
         facesCount: faces.length,
         poseStep,
@@ -604,33 +613,34 @@ export const processNativeHumanDetectorFrame = (
   }
 
   if (poseStep === "left") {
-    if (yaw >= config.sideYawMin) {
+    if (absYaw < config.sideYawMin) {
       resetStepTimer(next, poseStep);
       return {
         state: next,
         nextPoseStep: poseStep,
         passed: false,
         reason: null,
-        status: "Turn the other way.",
+        status: "Turn a little more left.",
         debug,
       };
     }
 
-    if (yaw > -config.sideYawMin) {
+    const yawSign = yaw < 0 ? -1 : 1;
+    if (next.firstYawSign !== 0 && next.firstYawSign !== yawSign) {
       resetStepTimer(next, poseStep);
       return {
         state: next,
         nextPoseStep: poseStep,
         passed: false,
         reason: null,
-        status: "Turn a bit more left.",
+        status: "Hold the same left turn.",
         debug,
       };
     }
 
     next.sideOneFrames += 1;
     next.maxSideOneYaw = Math.max(next.maxSideOneYaw, absYaw);
-    if (next.firstYawSign === 0) next.firstYawSign = -1;
+    if (next.firstYawSign === 0) next.firstYawSign = yawSign;
     const stepTiming = markStepValid(next, poseStep, nowMs);
     const stepDebug = {
       ...debug,
@@ -666,30 +676,16 @@ export const processNativeHumanDetectorFrame = (
   }
 
   if (poseStep === "right") {
-    if (yaw <= -config.sideYawMin) {
-      next.lastRejectReason = "same_side_repeat";
-      resetStepTimer(next, poseStep);
-      return {
-        state: next,
-        nextPoseStep: poseStep,
-        passed: false,
-        reason: "same_side_repeat",
-        status: "Now turn the other way.",
-        debug: {
-          ...debug,
-          reason: "same_side_repeat",
-        },
-      };
-    }
-
-    if (yaw < config.sideYawMin) {
+    const expectedRightSign = next.firstYawSign === -1 ? 1 : next.firstYawSign === 1 ? -1 : yaw < 0 ? -1 : 1;
+    const yawSign = yaw < 0 ? -1 : 1;
+    if (absYaw < config.sideYawMin || yawSign !== expectedRightSign) {
       resetStepTimer(next, poseStep);
       return {
         state: next,
         nextPoseStep: poseStep,
         passed: false,
         reason: null,
-        status: "Turn a bit more right.",
+        status: absYaw < config.sideYawMin ? "Turn a little more right." : "Turn the other way.",
         debug,
       };
     }
@@ -768,16 +764,17 @@ export const getNativeHumanMovementMetrics = (state: NativeHumanDetectionState) 
 
 export const hasNativeHumanLivenessPass = (
   state: NativeHumanDetectionState,
-  _config?: NativeHumanDetectorConfig,
+  config?: NativeHumanDetectorConfig,
 ) => {
   const movement = getNativeHumanMovementMetrics(state);
+  const thresholds = getNativeHumanMovementThresholds(config?.sideYawMin);
   return (
     state.centerPassedAtMs > 0 &&
     state.sideOnePassedAtMs > 0 &&
     state.sideTwoPassedAtMs > 0 &&
-    movement.horizontalShift >= 0.36 &&
-    movement.leftTravel >= 0.12 &&
-    movement.rightTravel >= 0.12
+    movement.horizontalShift >= thresholds.horizontalShift &&
+    movement.leftTravel >= thresholds.sideTravel &&
+    movement.rightTravel >= thresholds.sideTravel
   );
 };
 

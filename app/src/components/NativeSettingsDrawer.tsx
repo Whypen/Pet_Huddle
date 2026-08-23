@@ -1,29 +1,53 @@
 import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
+import { fetchNativeResponseWithTimeout as fetch } from "../lib/nativeTimeout";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Image as ExpoImage } from "expo-image";
+import { NativeSpinner } from "./NativeSpinner";
+import { NativePetMultiSelectCarousel } from "./NativePetMultiSelectCarousel";
+import { NativeProfileAvatar } from "./NativeProfileAvatar";
+import { NativeVerifiedBadge } from "./NativeVerifiedBadge";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import Animated, { FadeInRight, FadeOutLeft, LinearTransition, runOnJS, useAnimatedStyle, useReducedMotion, useSharedValue, withTiming } from "react-native-reanimated";
 import {
   fetchNativeProfileSummary,
+  clearNativeProfileSummaryCache,
   readCachedNativeProfileSummary,
+  patchNativeProfileSummaryCache,
   subscribeNativeProfileSummary,
   type NativeProfileSummary as NativeProfile,
   type NativeQuotaSnapshot,
 } from "../lib/nativeProfileSummary";
+import { ensureNativeDirectChatRoom, matchedSummaryToInboxRow, resolveNativeChatInboxRowNavigation } from "../lib/nativeChat";
+import { writeNativeChatSelectedRowHandoff } from "../lib/nativeChatHandoff";
+import { freshnessRegistry } from "../lib/nativeFreshnessRegistry";
 import { nativeExactTokenRpc } from "../lib/nativeExactTokenRequest";
+import { addNativeFamilySharedPets, fetchNativeFamilySharedPetCandidates, type NativeFamilySharedPet } from "../lib/nativeFamilyPets";
+import { createNativeAuthenticatedHeaders, getFreshNativeAccessToken } from "../lib/nativeFunctionClient";
+import { readCachedNativeHuddleRewardProgress, refreshNativeHuddleRewardProgress, type NativeHuddleRewardProgress } from "../lib/nativeHuddleRewards";
+import { markNativeHuddleRewardCelebrated, resolveNativeHuddleRewardCelebration, type NativeHuddleRewardCelebrationTarget } from "../lib/nativeHuddleRewardCelebration";
+import { NativeHuddleRewardCelebration } from "./NativeHuddleRewardCelebration";
+import { supabaseAnonKey, supabaseUrl } from "../lib/supabase";
 import { haptic } from "../lib/nativeHaptics";
+import { nativeFreshImageKey, nativeFreshImageUri } from "../lib/nativeImageFreshness";
+import { normalizeNativeProfilePhotoPresentationCrop } from "../lib/nativeProfilePhotos";
 import { resolveNativeProfileImageUrlAsync } from "../lib/nativeStorageUrlCache";
+import { formatNativeAddonPrice, loadNativeStoreProducts, type NativeStoreProductId, type NativeStoreProductState } from "../lib/nativeStoreSubscriptions";
 import { isNativeVerifiedProfile } from "../lib/nativeVerificationGate";
-import { huddleButtons, huddleColors, huddleFieldStates, huddleRadii, huddleShadows, huddleSpacing, huddleType } from "../theme/huddleDesignTokens";
+import { subscribeNativeVerifyIdentityUpdated } from "../lib/nativeVerifyIdentity";
+import { huddleButtons, huddleColors, huddleFamilyAccount, huddleFieldStates, huddleFormFields, huddleGlassControls, huddleLayers, huddleLayout, huddleMotion, huddleRadii, huddleShadows, huddleSpacing, huddleType } from "../theme/huddleDesignTokens";
 import { NativePublicProfileModal } from "./profile/NativePublicProfileModal";
-import { AppDestructiveSlideConfirm } from "./nativeModalPrimitives";
-import { nativeModalStyles } from "./nativeModalPrimitives.styles";
-import { huddleModalTokens, styles as modalPrimitiveStyles } from "../../huddle Design System/native-modal-primitives.styles";
+import { NativeSupportScreen } from "../screens/NativeSupportScreen";
+import { NativeHuddleFriendsSheet, type NativeHuddleFriendsSegment } from "./friends/NativeHuddleFriendsSheet";
+import { AppModalActionRow, AppModalButton, AppModalCloseButton, AppModalField, AppModalToggleRow, SlideToConfirm } from "./nativeModalPrimitives";
+import { huddleModalTokens, nativeModalStyles, nativeModalStyles as modalPrimitiveStyles } from "./nativeModalPrimitives.styles";
 
 type NativeSettingsDrawerProps = {
   accessToken?: string | null;
+  careMarketIsActive?: boolean;
   openFamilyIntent?: number;
+  openAddFriendCodeIntent?: { code: string; invite?: string; nonce: number } | null;
   open: boolean;
   sessionKey?: string | null;
   userId: string | null;
@@ -47,7 +71,7 @@ type SettingsRow = {
 
 const tierLabel = (value?: string | null) => {
   const tier = String(value || "free").toLowerCase();
-  if (tier === "gold" || tier === "huddle gold" || tier.startsWith("gold_")) return "Huddle Gold";
+  if (tier === "gold" || tier === "huddle＊" || tier.startsWith("gold_")) return "huddle＊";
   if (
     tier === "plus" ||
     tier === "premium" ||
@@ -55,13 +79,13 @@ const tierLabel = (value?: string | null) => {
     tier === "huddle plus" ||
     tier.startsWith("plus_") ||
     tier.startsWith("premium_")
-  ) return "Huddle+";
+  ) return "huddle+";
   return "Free";
 };
 
 const normalizedTier = (value?: string | null) => {
   const tier = String(value || "free").toLowerCase();
-  if (tier === "gold" || tier === "huddle gold" || tier.startsWith("gold_")) return "gold";
+  if (tier === "gold" || tier === "huddle＊" || tier.startsWith("gold_")) return "gold";
   if (tier === "plus" || tier === "premium" || tier === "huddle+" || tier === "huddle plus" || tier.startsWith("plus_") || tier.startsWith("premium_")) return "plus";
   return "free";
 };
@@ -74,25 +98,13 @@ const starQuotaLimit = (value?: string | null) => {
 };
 
 const numberValue = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : 0);
-const cleanToken = (value?: string | null) => String(value || "").trim();
-
-const requireNativeFamilyAccessToken = (accessToken?: string | null) => {
-  const token = cleanToken(accessToken);
-  if (!token) throw new Error("missing_access_token");
-  return token;
-};
-
 const nativeFamilyRpc = async <T,>(fn: string, params: Record<string, unknown>, accessToken?: string | null) => {
-  const { data, error } = await nativeExactTokenRpc<T>(fn, params, requireNativeFamilyAccessToken(accessToken));
+  const { data, error } = await nativeExactTokenRpc<T>(fn, params, accessToken);
   if (error) throw error;
   return data as T;
 };
 
 const MAX_FAMILY_MEMBERS = 4;
-const SHARE_PERKS_FALLBACK_PRICE = 4.99;
-const SHARE_PERKS_FALLBACK_CURRENCY = "US$";
-const SHARE_PERKS_LIME = "#7CFF6B";
-
 type NativeFamilyViewerRole = "owner" | "member" | "invitee" | "none";
 
 type NativeFamilyProfileLite = {
@@ -204,6 +216,12 @@ const searchNativeFamilyInviteCandidates = (query: string, accessToken?: string 
     p_limit: 10,
   }, accessToken);
 
+const createNativeFamilyInvite = (inviteeUserId: string, allowPetSharing: boolean, accessToken?: string | null) =>
+  nativeFamilyRpc<NativeFamilyActionResult>("create_native_family_invite", {
+    p_invitee_user_id: inviteeUserId,
+    p_allow_pet_sharing: allowPetSharing,
+  }, accessToken);
+
 const runNativeFamilyAction = async (
   fn: string,
   params: Record<string, unknown>,
@@ -261,7 +279,7 @@ function NativeFamilyAvatarButton({
       style={styles.familyMemberAvatar}
     >
       {resolvedUrl ? (
-        <ExpoImage accessibilityIgnoresInvertColors source={{ uri: resolvedUrl }} style={styles.familyMemberAvatarImage} contentFit="cover" cachePolicy="memory-disk" transition={120} />
+        <ExpoImage accessibilityIgnoresInvertColors key={nativeFreshImageKey(resolvedUrl, avatarUrl || resolvedUrl)} source={{ uri: nativeFreshImageUri(resolvedUrl, avatarUrl || resolvedUrl) }} style={styles.familyMemberAvatarImage} contentFit="cover" cachePolicy="memory-disk" transition={120} />
       ) : (
         <Feather color={huddleColors.mutedText} name="user" size={18} />
       )}
@@ -269,16 +287,54 @@ function NativeFamilyAvatarButton({
   );
 }
 
-export function NativeSettingsDrawer({ accessToken, openFamilyIntent, open, sessionKey, userId, onClose, onOpen, onNavigate, onOpenSupport, onSignOut }: NativeSettingsDrawerProps) {
+const DRAWER_PANEL_OFFSCREEN = 320;
+
+export function NativeSettingsDrawer({ accessToken, careMarketIsActive = false, openAddFriendCodeIntent, openFamilyIntent, open, sessionKey, userId, onClose, onOpen, onNavigate, onSignOut }: NativeSettingsDrawerProps) {
   const insets = useSafeAreaInsets();
+  const reduceMotion = useReducedMotion();
+  // Right-slide drawer animation. `rendered` keeps the Modal mounted through the
+  // close animation; panelX slides the right-anchored panel in/out, backdrop fades.
+  const [rendered, setRendered] = useState(open);
+  const panelX = useSharedValue(open ? 0 : DRAWER_PANEL_OFFSCREEN);
+  const backdropOpacity = useSharedValue(open ? 1 : 0);
+  useEffect(() => {
+    if (open) {
+      setRendered(true);
+      panelX.value = withTiming(0, { duration: reduceMotion ? 0 : 240 });
+      backdropOpacity.value = withTiming(1, { duration: reduceMotion ? 0 : 180 });
+    } else {
+      backdropOpacity.value = withTiming(0, { duration: reduceMotion ? 0 : 160 });
+      panelX.value = withTiming(DRAWER_PANEL_OFFSCREEN, { duration: reduceMotion ? 0 : 200 }, (finished) => {
+        if (finished) runOnJS(setRendered)(false);
+      });
+    }
+  }, [open, reduceMotion, panelX, backdropOpacity]);
+  const panelAnimStyle = useAnimatedStyle(() => ({ transform: [{ translateX: panelX.value }] }));
+  const backdropAnimStyle = useAnimatedStyle(() => ({ opacity: backdropOpacity.value }));
   const [profile, setProfile] = useState<NativeProfile | null>(null);
   const [quota, setQuota] = useState<NativeQuotaSnapshot | null>(null);
+  const [profileHydratedForOpen, setProfileHydratedForOpen] = useState(false);
   const [familyStatePreview, setFamilyStatePreview] = useState<NativeFamilyState | null>(null);
   const [familySummary, setFamilySummary] = useState<NativeFamilySummary | null>(null);
   const [legalOpen, setLegalOpen] = useState(false);
   const [familyOpen, setFamilyOpen] = useState(false);
+  const [huddleFriendsOpen, setHuddleFriendsOpen] = useState(false);
+  const [huddleFriendsSegment, setHuddleFriendsSegment] = useState<NativeHuddleFriendsSegment>("code");
+  const [huddleFriendsNonce, setHuddleFriendsNonce] = useState(0);
+  const [addFriendInitialCode, setAddFriendInitialCode] = useState("");
+  const [addFriendInviteToken, setAddFriendInviteToken] = useState("");
   const [carerGateOpen, setCarerGateOpen] = useState(false);
+  const [supportOpen, setSupportOpen] = useState(false);
+  const [huddleRewardsOpen, setHuddleRewardsOpen] = useState(false);
+  const [huddleRewardProgress, setHuddleRewardProgress] = useState<NativeHuddleRewardProgress | null>(null);
+  const [celebrationTarget, setCelebrationTarget] = useState<NativeHuddleRewardCelebrationTarget | null>(null);
+  const [hasCarerProfile, setHasCarerProfile] = useState(false);
+  const [hasListedCarerProfile, setHasListedCarerProfile] = useState(false);
   const [familyInviteProfileUserId, setFamilyInviteProfileUserId] = useState<string | null>(null);
+  const [familyInviteProfileFallbackData, setFamilyInviteProfileFallbackData] = useState<Record<string, unknown> | null>(null);
+  // One NativePublicProfileModal serves both callers. Family invites open it
+  // read-only; a friend opens it with the same actions Chats gives a matched peer.
+  const [profileSheetSource, setProfileSheetSource] = useState<"family" | "friend">("family");
   const consumedFamilyIntentRef = useRef(0);
   const refreshErrorRef = useRef<{ family?: string; profile?: string }>({});
 
@@ -311,7 +367,7 @@ export function NativeSettingsDrawer({ accessToken, openFamilyIntent, open, sess
   }, []);
 
   const loadDrawerFamilyState = useCallback(async () => {
-    if (!userId || !accessToken) {
+    if (!userId) {
       applyFamilyStatePreview(null);
       return null;
     }
@@ -334,19 +390,26 @@ export function NativeSettingsDrawer({ accessToken, openFamilyIntent, open, sess
       return;
     }
     let cancelled = false;
-    const applyProfileSummary = ({ profile: nextProfile, quota: nextQuota }: { profile: NativeProfile | null; quota: NativeQuotaSnapshot | null }) => {
+    let freshProfileApplied = false;
+    const applyProfileSummary = (
+      { profile: nextProfile, quota: nextQuota }: { profile: NativeProfile | null; quota: NativeQuotaSnapshot | null },
+      source: "cache" | "fresh",
+    ) => {
       if (cancelled) return;
+      if (source === "cache" && freshProfileApplied) return;
+      if (source === "fresh") freshProfileApplied = true;
       setProfile(nextProfile);
       setQuota(nextQuota);
+      setProfileHydratedForOpen(true);
       if (nextProfile?.avatar_url) {
-        void ExpoImage.prefetch(nextProfile.avatar_url);
+        void ExpoImage.prefetch(nativeFreshImageUri(nextProfile.avatar_url, nextProfile.avatar_url));
       }
     };
 
     void readCachedNativeProfileSummary(userId, { sessionKey }).then((cached) => {
-      if (cached) applyProfileSummary(cached);
+      if (cached) applyProfileSummary(cached, "cache");
     });
-    void fetchNativeProfileSummary(userId, { force: false, accessToken, sessionKey }).then(applyProfileSummary, () => {
+    void fetchNativeProfileSummary(userId, { force: true, accessToken, sessionKey }).then((summary) => applyProfileSummary(summary, "fresh"), () => {
       if (!cancelled) {
         refreshErrorRef.current = { ...refreshErrorRef.current, profile: "profile_refresh_failed" };
       }
@@ -361,24 +424,74 @@ export function NativeSettingsDrawer({ accessToken, openFamilyIntent, open, sess
     return subscribeNativeProfileSummary(userId, ({ profile: nextProfile, quota: nextQuota }) => {
       setProfile(nextProfile);
       setQuota(nextQuota);
+    }, { sessionKey });
+  }, [sessionKey, shouldHydrateProfile, userId]);
+
+  // Verification refreshes are authoritative server results. Keep the drawer's
+  // retained profile state in step with that result, including a downgrade, so
+  // reopening Settings cannot briefly show a badge the identity screen removed.
+  useEffect(() => {
+    if (!userId) return undefined;
+    return subscribeNativeVerifyIdentityUpdated((event) => {
+      if (event.userId !== userId || typeof event.verified !== "boolean") return;
+      const verificationStatus = event.verified ? "verified" : (event.snapshot?.verificationStatus || "pending");
+      const verificationPatch = { is_verified: event.verified, verification_status: verificationStatus };
+      setProfile((current) => current ? { ...current, ...verificationPatch } : current);
+      void patchNativeProfileSummaryCache(userId, verificationPatch, { sessionKey });
     });
-  }, [shouldHydrateProfile, userId]);
+  }, [sessionKey, userId]);
+
+  // Existing profiles remain accessible even if identity verification later changes.
+  // Listed state separately controls the orange active-carer icon.
+  useEffect(() => {
+    if (!shouldHydrateProfile || !userId) {
+      setHasCarerProfile(false);
+      setHasListedCarerProfile(false);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const token = await getFreshNativeAccessToken(accessToken);
+        if (!token || cancelled) return;
+        // Orange = an *active/listed* carer profile (not a half-saved draft).
+        const url = `${supabaseUrl}/rest/v1/pet_care_profiles?select=user_id,listed&user_id=eq.${encodeURIComponent(userId)}&limit=1`;
+        const response = await fetch(url, { headers: createNativeAuthenticatedHeaders(token) });
+        if (!response.ok || cancelled) return;
+        const rows = (await response.json().catch(() => [])) as Array<{ listed?: boolean | null }>;
+        if (!cancelled) {
+          const carerProfile = Array.isArray(rows) ? rows[0] : null;
+          setHasCarerProfile(Boolean(carerProfile));
+          setHasListedCarerProfile(carerProfile?.listed === true);
+        }
+      } catch {
+        // Non-critical: leave the icon in its default state on failure.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [accessToken, shouldHydrateProfile, userId]);
 
   useEffect(() => {
-    if (!userId || !accessToken) return;
+    if ((!open && !familyOpen) || !userId) return;
     void loadDrawerFamilyState();
-  }, [accessToken, loadDrawerFamilyState, userId]);
+  }, [familyOpen, loadDrawerFamilyState, open, userId]);
 
   useEffect(() => {
     if (!open) {
+      setProfileHydratedForOpen(false);
       setLegalOpen(false);
+      setFamilyOpen(false);
+      setHuddleFriendsOpen(false);
+      setCarerGateOpen(false);
+      setSupportOpen(false);
+      setHuddleRewardsOpen(false);
     }
   }, [open]);
 
   const displayName = profile?.display_name || profile?.email || "User";
-  const tierValue = quota?.effective_tier || quota?.tier || profile?.effective_tier || profile?.tier;
+  const tierValue = profileHydratedForOpen ? quota?.effective_tier || quota?.tier || profile?.effective_tier || profile?.tier : null;
   const starTierValue = profile?.tier || "free";
-  const membershipLabel = tierLabel(tierValue);
+  const membershipLabel = profileHydratedForOpen ? tierLabel(tierValue) : "Loading";
   const membershipTier = normalizedTier(tierValue);
   const realTier = normalizedTier(starTierValue);
   const starUsed = numberValue(quota?.stars_used_cycle ?? quota?.stars_month_used);
@@ -391,7 +504,7 @@ export function NativeSettingsDrawer({ accessToken, openFamilyIntent, open, sess
     ? familySummary.showQuota ? `(${familySummary.usedSlots}/${familySummary.totalSlots})` : String(familySummary.usedSlots)
     : undefined;
   const familyInviteBadge = familySummary?.hasPendingInvite ? "You're invited" : undefined;
-  const isVerified = isNativeVerifiedProfile(profile);
+  const isVerified = profileHydratedForOpen && isNativeVerifiedProfile(profile);
 
   const openPath = useCallback((path: string) => {
     haptic.selectTab();
@@ -401,15 +514,23 @@ export function NativeSettingsDrawer({ accessToken, openFamilyIntent, open, sess
 
   const openSupportModal = useCallback(() => {
     haptic.selectTab();
-    onClose();
-    onOpenSupport?.();
-  }, [onClose, onOpenSupport]);
+    setLegalOpen(false);
+    setSupportOpen(true);
+  }, []);
 
   const openFamilyAccount = useCallback(() => {
     setLegalOpen(false);
     setFamilyOpen(true);
-    onClose();
-  }, [onClose]);
+  }, []);
+
+  const openHuddleFriends = useCallback((segment: NativeHuddleFriendsSegment = "code", code = "", invite = "") => {
+    setLegalOpen(false);
+    setAddFriendInitialCode(code);
+    setAddFriendInviteToken(invite);
+    setHuddleFriendsSegment(segment);
+    setHuddleFriendsNonce((value) => value + 1);
+    setHuddleFriendsOpen(true);
+  }, []);
 
   const openFamilyUpgrade = useCallback(() => {
     setFamilyOpen(false);
@@ -417,41 +538,91 @@ export function NativeSettingsDrawer({ accessToken, openFamilyIntent, open, sess
   }, [openPath]);
 
   const openCarerProfile = useCallback(() => {
-    if (isVerified) {
+    if (isVerified || hasCarerProfile) {
       openPath("/carerprofile");
       return;
     }
-    onClose();
+    setLegalOpen(false);
     setCarerGateOpen(true);
-  }, [isVerified, onClose, openPath]);
+  }, [hasCarerProfile, isVerified, openPath]);
 
   const openVerifyIdentity = useCallback(() => {
     setCarerGateOpen(false);
     openPath("/verify-identity");
   }, [openPath]);
 
+  useEffect(() => {
+    if (!shouldHydrateProfile || !userId) {
+      setHuddleRewardProgress(null);
+      return;
+    }
+    let cancelled = false;
+    void readCachedNativeHuddleRewardProgress(userId, { sessionKey }).then((cached) => {
+      if (!cancelled && cached) setHuddleRewardProgress(cached);
+    });
+    void refreshNativeHuddleRewardProgress(userId, { accessToken, force: true, sessionKey }).then((progress) => {
+      if (!cancelled) setHuddleRewardProgress(progress);
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [accessToken, sessionKey, shouldHydrateProfile, userId]);
+
+  // The promo engine rolls `state` back to "progress" as soon as a higher
+  // milestone exists, so the reward moment is driven off a newly granted
+  // reward rather than off `state === "completed"`.
+  useEffect(() => {
+    if (!open || !userId || !huddleRewardProgress) return undefined;
+    let cancelled = false;
+    void resolveNativeHuddleRewardCelebration(userId, huddleRewardProgress).then((target) => {
+      if (cancelled || !target) return;
+      setCelebrationTarget(target);
+      void markNativeHuddleRewardCelebrated(userId, target.key);
+      // The grant is already authoritative in Postgres. Force every shared
+      // profile/quota consumer onto that new tier now, rather than waiting for
+      // a stale six-hour profile cache or the next app foreground.
+      freshnessRegistry.invalidate(sessionKey, [
+        "profile_summary",
+        "tier_quota_restrictions",
+        "viewer_location_scope",
+        "map_shell",
+        "discover_cards",
+      ]);
+      void clearNativeProfileSummaryCache(userId)
+        .then(() => fetchNativeProfileSummary(userId, { force: true, accessToken, sessionKey }))
+        .catch(() => undefined);
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [accessToken, huddleRewardProgress, open, sessionKey, userId]);
+
   const mainRows = useMemo<Array<SettingsRow[]>>(
     () => [
       [
         { label: "Manage Membership", icon: "star", onPress: () => openPath("/premium") },
         { label: "Family Account", icon: "users", badge: familyInviteBadge, value: familySummaryLabel, onPress: openFamilyAccount },
+        { label: "huddle friends", icon: "user-plus", onPress: () => openHuddleFriends("code") },
       ],
       [
         {
           label: "Identity Verification",
           iconNode: (
-            <View style={[styles.identityIconBadge, isVerified ? styles.identityIconBadgeVerified : styles.identityIconBadgeUnverified]}>
-              <Feather color={huddleColors.onPrimary} name="shield" size={12} />
+            <View style={[styles.identityIconBadge, isVerified ? styles.identityIconBadgeVerified : null]}>
+              <Feather color={isVerified ? huddleColors.onPrimary : huddleColors.iconMuted} name="shield" size={isVerified ? 12 : 18} />
             </View>
           ),
           value: isVerified ? "Verified" : undefined,
           onPress: () => openPath("/verify-identity?from=settings"),
         },
-        {
+        ...(careMarketIsActive ? [{
           label: "Care Profile",
-          icon: "heart",
+          // Filled coral heart once a carer profile exists ("active carer"); grey outline otherwise.
+          iconNode: (
+            <MaterialCommunityIcons
+              color={hasListedCarerProfile ? huddleColors.coral : huddleColors.iconMuted}
+              name={hasListedCarerProfile ? "heart" : "heart-outline"}
+              size={18}
+            />
+          ),
           onPress: openCarerProfile,
-        },
+        } as SettingsRow] : []),
         { label: "Account Settings", icon: "user", onPress: () => openPath("/settings") },
       ],
       [
@@ -460,7 +631,7 @@ export function NativeSettingsDrawer({ accessToken, openFamilyIntent, open, sess
       ],
       [{ label: "Log out", icon: "log-out", danger: true, onPress: onSignOut }],
     ],
-    [familyInviteBadge, familySummaryLabel, isVerified, onSignOut, openCarerProfile, openFamilyAccount, openPath, openSupportModal],
+    [careMarketIsActive, familyInviteBadge, familySummaryLabel, hasListedCarerProfile, isVerified, onSignOut, openCarerProfile, openFamilyAccount, openHuddleFriends, openPath, openSupportModal],
   );
 
 
@@ -468,27 +639,27 @@ export function NativeSettingsDrawer({ accessToken, openFamilyIntent, open, sess
     () => [
       { label: "Privacy Policy", icon: "shield", onPress: () => openPath("/privacy") },
       { label: "Privacy Choices", icon: "shield", onPress: () => openPath("/privacy-choices") },
+      { label: "Personal Information Collection Notice", icon: "file-text", onPress: () => openPath("/collection-notice") },
       { label: "Terms of Service", icon: "file-text", onPress: () => openPath("/terms") },
       { label: "Community Guidelines", icon: "file-text", onPress: () => openPath("/community-guidelines") },
       { label: "Cookies and Similar Technologies Notice", icon: "file-text", onPress: () => openPath("/cookies") },
-      {
-        label: "Care Provider Agreement",
+      ...(careMarketIsActive ? [{
+        label: "Care Agreement",
         iconNode: <MaterialCommunityIcons color={huddleColors.iconMuted} name="paw-outline" size={18} />,
         onPress: () => openPath("/service-provider-agreement"),
-      },
+      } as SettingsRow,
       {
         label: "Care Service Booking Terms",
         iconNode: <MaterialCommunityIcons color={huddleColors.iconMuted} name="paw-outline" size={18} />,
         onPress: () => openPath("/booking-terms"),
-      },
+      } as SettingsRow] : []),
     ],
-    [openPath],
+    [careMarketIsActive, openPath],
   );
 
   const closeFamilyAccount = useCallback(() => {
     setFamilyOpen(false);
-    onOpen();
-  }, [onOpen]);
+  }, []);
 
   const closeFamilyAccountForMembership = useCallback(() => {
     setFamilyOpen(false);
@@ -500,15 +671,23 @@ export function NativeSettingsDrawer({ accessToken, openFamilyIntent, open, sess
     if (consumedFamilyIntentRef.current === openFamilyIntent) return;
     consumedFamilyIntentRef.current = openFamilyIntent;
     setLegalOpen(false);
-    void loadDrawerFamilyState();
     onOpen();
-  }, [loadDrawerFamilyState, onOpen, openFamilyIntent]);
+  }, [onOpen, openFamilyIntent]);
+
+  useEffect(() => {
+    const code = String(openAddFriendCodeIntent?.code || "").replace(/\D/g, "").slice(0, 6);
+    const invite = String(openAddFriendCodeIntent?.invite || "");
+    if (!openAddFriendCodeIntent?.nonce || (!code && !invite)) return;
+    openHuddleFriends("scan", code, invite);
+    onOpen();
+  }, [onOpen, openAddFriendCodeIntent?.code, openAddFriendCodeIntent?.invite, openAddFriendCodeIntent?.nonce, openHuddleFriends]);
 
   return (
     <>
-      <Modal animationType="slide" onRequestClose={onClose} transparent visible={open}>
-        <Pressable accessibilityLabel="Close settings" onPress={onClose} style={styles.backdrop}>
-          <Pressable onPress={(event) => event.stopPropagation()} style={styles.panel}>
+      <Modal animationType="none" onRequestClose={onClose} transparent visible={rendered}>
+        <Animated.View style={[styles.backdrop, backdropAnimStyle]}>
+          <Pressable accessibilityLabel="Close settings" onPress={onClose} style={StyleSheet.absoluteFill} />
+          <Animated.View style={[styles.panel, panelAnimStyle]}>
             <ScrollView contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + huddleSpacing.x7 + huddleSpacing.x5 }]} showsVerticalScrollIndicator={false}>
               {legalOpen ? (
                 <>
@@ -526,25 +705,19 @@ export function NativeSettingsDrawer({ accessToken, openFamilyIntent, open, sess
                 <>
                   <Pressable accessibilityLabel="Edit profile" onPress={() => openPath("/edit-profile")} style={styles.profileRow}>
                     <View>
-                      <View style={[styles.avatar, isVerified && styles.avatarVerified]}>
-                        {profile?.avatar_url ? (
-                          <ExpoImage
-                            source={{ uri: profile.avatar_url }}
-                            style={styles.avatarImage}
-                            contentFit="cover"
-                            cachePolicy="memory-disk"
-                            transition={120}
-                          />
-                        ) : (
-                          <>
-                            <Feather color={huddleColors.mutedText} name="user" size={24} />
-                            <Text style={styles.avatarHiddenText}>{displayName.trim().slice(0, 1).toUpperCase() || "U"}</Text>
-                          </>
-                        )}
-                      </View>
-                      <View style={[styles.avatarBadge, isVerified && styles.avatarBadgeVerified]}>
-                        <Feather color={isVerified ? huddleColors.onPrimary : huddleColors.mutedText} name="shield" size={12} />
-                      </View>
+                      <NativeProfileAvatar
+                        uri={profile?.avatar_url}
+                        presentationCrop={normalizeNativeProfilePhotoPresentationCrop((profile?.photos as Record<string, unknown> | null)?.avatar_presentation)}
+                        userId={profile?.id}
+                        version={profile?.updated_at}
+                        size={48}
+                        verified={isVerified}
+                        name={displayName}
+                        engagement={profile?.engagement ?? null}
+                      />
+                      {isVerified ? (
+                        <NativeVerifiedBadge compact size={20} style={styles.avatarBadge} />
+                      ) : null}
                     </View>
                     <View style={styles.profileText}>
                       <Text numberOfLines={1} style={styles.profileName}>{displayName}</Text>
@@ -572,6 +745,76 @@ export function NativeSettingsDrawer({ accessToken, openFamilyIntent, open, sess
                     <Feather color={huddleColors.mutedText} name="chevron-right" size={17} />
                   </Pressable>
 
+                  {huddleRewardProgress?.visible ? (
+                    <Pressable
+                      accessibilityLabel={`Open Huddle Rewards. ${Math.max(0, huddleRewardProgress.friend_count ?? 0)} of ${huddleRewardProgress.friend_target ?? 0} friends added.`}
+                      accessibilityRole="button"
+                      onPress={() => setHuddleRewardsOpen(true)}
+                      style={styles.huddleRewardsBanner}
+                    >
+                      {huddleRewardProgress.goal_type === "add_friend" && huddleRewardProgress.friend_target ? (
+                        <Text
+                          adjustsFontSizeToFit
+                          minimumFontScale={0.65}
+                          numberOfLines={1}
+                          style={[
+                            styles.huddleRewardsRemaining,
+                            huddleRewardProgress.state === "completed" ? { color: promoAccentColor(huddleRewardProgress) } : null,
+                          ]}
+                        >
+                          {huddleRewardProgress.state === "completed"
+                            ? Math.max(1, huddleRewardProgress.reward_months ?? 1)
+                            : Math.max(0, huddleRewardProgress.friend_target - (huddleRewardProgress.friend_count ?? 0))}
+                        </Text>
+                      ) : null}
+                      <View style={styles.huddleRewardsCopy}>
+                        <Text adjustsFontSizeToFit minimumFontScale={0.78} numberOfLines={1} style={styles.huddleRewardsTitle}>
+                          {huddleRewardProgress.state === "completed" && huddleRewardProgress.reward_tier === "gold"
+                            ? `${Math.max(1, huddleRewardProgress.reward_months ?? 1) === 1 ? "month" : "months"} of`
+                            : huddleRewardProgress.state === "completed"
+                              ? "Bonus unlocked"
+                              : (huddleRewardProgress.drawer_headline || "Friends to add")}
+                        </Text>
+                        {huddleRewardProgress.state === "completed" ? (
+                          <Text numberOfLines={1} style={styles.huddleRewardsMeta}>
+                            {huddleRewardProgress.reward_tier === "gold"
+                              ? <><Text style={[styles.huddleRewardsAccent, { color: promoAccentColor(huddleRewardProgress) }]}>huddle＊</Text> · free</>
+                              : "Your reward is active"}
+                          </Text>
+                        ) : huddleRewardProgress.goal_type === "add_friend" && huddleRewardProgress.friend_target ? (
+                          <>
+                            <Text adjustsFontSizeToFit minimumFontScale={0.82} numberOfLines={1} style={styles.huddleRewardsMeta}>
+                              for <Text style={[styles.huddleRewardsAccent, { color: promoAccentColor(huddleRewardProgress) }]}>{huddleRewardProgress.reward_tier === "gold" ? "huddle＊" : "huddle+"}</Text>
+                            </Text>
+                            <View style={styles.huddleRewardsSegments}>
+                              {Array.from({ length: 10 }, (_, index) => (
+                                <View
+                                  key={index}
+                                  style={[
+                                    styles.huddleRewardsSegment,
+                                    index < Math.round(Math.min(1, Math.max(0,
+                                      ((huddleRewardProgress.friend_count ?? 0) - (huddleRewardProgress.friend_progress_start ?? 0))
+                                      / Math.max(1, (huddleRewardProgress.friend_target ?? 1) - (huddleRewardProgress.friend_progress_start ?? 0)),
+                                    )) * 10)
+                                      ? { backgroundColor: promoAccentColor(huddleRewardProgress) }
+                                      : null,
+                                  ]}
+                                />
+                              ))}
+                            </View>
+                          </>
+                        ) : (
+                          <Text adjustsFontSizeToFit minimumFontScale={0.82} numberOfLines={1} style={styles.huddleRewardsMeta}>
+                            Earn <Text style={styles.huddleRewardsAccent}>{huddleRewardProgress.reward_tier === "gold" ? "huddle＊" : "huddle+"}</Text>
+                          </Text>
+                        )}
+                      </View>
+                      <View pointerEvents="none" style={styles.huddleRewardsChevron}>
+                        <Feather color={huddleColors.onPrimary} name="chevron-right" size={18} />
+                      </View>
+                    </Pressable>
+                  ) : null}
+
                   {mainRows.map((group, groupIndex) => (
                     <View key={groupIndex} style={styles.group}>
                       {group.map((row, index) => (
@@ -582,35 +825,134 @@ export function NativeSettingsDrawer({ accessToken, openFamilyIntent, open, sess
                 </>
               )}
             </ScrollView>
-          </Pressable>
-        </Pressable>
+          </Animated.View>
+          <NativeCarerGateModal
+            isOpen={carerGateOpen}
+            onClose={() => setCarerGateOpen(false)}
+            onVerify={openVerifyIdentity}
+          />
+          <NativeSupportDrawerModal
+            accessToken={accessToken}
+            accountEmail={profile?.email ?? null}
+            isOpen={supportOpen}
+            onClose={() => setSupportOpen(false)}
+          />
+          <NativeHuddleRewardCelebration
+            accentColor={celebrationTarget
+              ? promoAccentForTier(huddleRewardProgress?.accent_template, celebrationTarget.rewardTier)
+              : huddleColors.lime}
+            target={celebrationTarget}
+            onClose={() => {
+              setCelebrationTarget(null);
+              if (!userId) return;
+              void refreshNativeHuddleRewardProgress(userId, { accessToken, force: true, sessionKey })
+                .then(setHuddleRewardProgress)
+                .catch(() => undefined);
+            }}
+          />
+          <NativeHuddleRewardsSheet
+            progress={huddleRewardProgress}
+            isOpen={huddleRewardsOpen}
+            onClose={() => setHuddleRewardsOpen(false)}
+            onOpenAddFriend={() => {
+              setHuddleRewardsOpen(false);
+              openHuddleFriends("code");
+            }}
+            onNavigate={(path) => {
+              setHuddleRewardsOpen(false);
+              onClose();
+              onNavigate(path);
+            }}
+          />
+          <NativeFamilyAccountSheet
+            accessToken={accessToken}
+            currentProfile={profile}
+            currentUserId={userId}
+            initialState={familyStatePreview}
+            isOpen={familyOpen}
+            quotaTier={tierValue}
+            familySummary={familySummary}
+            onFamilySummaryChange={setFamilySummary}
+            onClose={closeFamilyAccount}
+            onOpenMembership={closeFamilyAccountForMembership}
+            onOpenProfile={(profileRow) => {
+              setFamilyInviteProfileFallbackData({
+                id: profileRow.id,
+                avatar_url: profileRow.avatar_url,
+                display_name: profileRow.display_name,
+                social_id: profileRow.social_id,
+                effective_tier: profileRow.effective_tier,
+                tier: profileRow.tier,
+              });
+              setProfileSheetSource("family");
+              setFamilyInviteProfileUserId(profileRow.id);
+            }}
+          />
+          <NativeHuddleFriendsSheet
+            accessToken={accessToken}
+            currentProfile={profile}
+            currentUserId={userId}
+            initialCode={addFriendInitialCode}
+            initialInviteToken={addFriendInviteToken}
+            initialSegment={huddleFriendsSegment}
+            isOpen={huddleFriendsOpen}
+            onClose={() => setHuddleFriendsOpen(false)}
+            onDiscoveryChanged={(enabled) => {
+              setProfile((current) => current ? { ...current, contact_discovery_enabled: enabled } : current);
+              if (userId) void patchNativeProfileSummaryCache(userId, { contact_discovery_enabled: enabled }, { sessionKey });
+            }}
+            onNeedsPhoneVerification={() => { setHuddleFriendsOpen(false); openPath("/settings"); }}
+            onOpenChatRoom={(roomId, peerUserId) => {
+              setHuddleFriendsOpen(false);
+              onClose();
+              onNavigate(`/chat-dialogue?room=${encodeURIComponent(roomId)}&with=${encodeURIComponent(peerUserId)}&returnTo=${encodeURIComponent("/chats?tab=friends")}`);
+            }}
+            onOpenPeerChat={(peer) => {
+              // Same link Chats uses, so a friend with no room yet still opens one.
+              const row = matchedSummaryToInboxRow(peer);
+              // Chats hands the dialogue its row before navigating. Without it the
+              // header mounts with no peer data, shows the route avatar, then swaps
+              // to the "Animal Friend" fallback once the profile fetch lands.
+              writeNativeChatSelectedRowHandoff({ row, sessionKey, userId });
+              void resolveNativeChatInboxRowNavigation(
+                row,
+                (targetUserId, targetName) => ensureNativeDirectChatRoom(targetUserId, targetName, { accessToken, actorId: userId }),
+              ).then((path) => {
+                setHuddleFriendsOpen(false);
+                onClose();
+                onNavigate(path);
+              }).catch(() => undefined);
+            }}
+            onOpenPeerProfile={(peer) => {
+              setProfileSheetSource("friend");
+              setFamilyInviteProfileFallbackData({
+                id: peer.peerUserId,
+                display_name: peer.displayName,
+                avatar_url: peer.avatarUrl,
+                is_verified: peer.isVerified,
+                social_id: peer.socialId,
+                updated_at: peer.matchedAt,
+              });
+              setFamilyInviteProfileUserId(peer.peerUserId);
+            }}
+            openNonce={huddleFriendsNonce}
+          />
+        </Animated.View>
       </Modal>
-      <NativeFamilyAccountSheet
-        accessToken={accessToken}
-        currentProfile={profile}
-        currentUserId={userId}
-        isOpen={familyOpen}
-        quotaTier={tierValue}
-        familySummary={familySummary}
-        onFamilySummaryChange={setFamilySummary}
-        onClose={closeFamilyAccount}
-        onOpenMembership={closeFamilyAccountForMembership}
-        onOpenProfile={setFamilyInviteProfileUserId}
-      />
-      <NativeCarerGateModal
-        isOpen={carerGateOpen}
-        onClose={() => setCarerGateOpen(false)}
-        onVerify={openVerifyIdentity}
-      />
       <NativePublicProfileModal
         accessToken={accessToken ?? null}
-        currentUserId={userId}
-        hideActions
-        onClose={() => setFamilyInviteProfileUserId(null)}
+        viewerUserId={userId}
+        fallbackData={familyInviteProfileFallbackData}
+        hideActions={profileSheetSource === "family"}
+        hideMatchedActions={profileSheetSource === "friend"}
+        onClose={() => {
+          setFamilyInviteProfileUserId(null);
+          setFamilyInviteProfileFallbackData(null);
+        }}
         onNavigate={onNavigate}
         open={Boolean(familyInviteProfileUserId)}
+        profileUserId={familyInviteProfileUserId}
         sessionKey={sessionKey}
-        userId={familyInviteProfileUserId}
       />
     </>
   );
@@ -625,9 +967,9 @@ function DrawerRow({ row, last }: { row: SettingsRow; last: boolean }) {
   return (
     <Pressable onPress={onRowPress} style={[styles.row, !last && styles.rowBorder]}>
       {row.iconNode ?? (row.icon ? <Feather color={row.danger ? huddleColors.validationRed : row.muted ? huddleColors.mutedText : huddleColors.iconMuted} name={row.icon} size={17} /> : null)}
-      <Text style={[styles.rowLabel, row.danger && styles.rowDanger, row.muted && styles.rowMuted]}>{row.label}</Text>
-      {row.badge ? <Text style={styles.rowBadge}>{row.badge}</Text> : null}
-      {row.value ? <Text style={styles.rowValue}>{row.value}</Text> : null}
+      <Text ellipsizeMode="tail" numberOfLines={1} style={[styles.rowLabel, row.danger && styles.rowDanger, row.muted && styles.rowMuted]}>{row.label}</Text>
+      {row.badge ? <Text ellipsizeMode="tail" numberOfLines={1} style={styles.rowBadge}>{row.badge}</Text> : null}
+      {row.value ? <Text ellipsizeMode="tail" numberOfLines={1} style={styles.rowValue}>{row.value}</Text> : null}
     </Pressable>
   );
 }
@@ -635,24 +977,163 @@ function DrawerRow({ row, last }: { row: SettingsRow; last: boolean }) {
 function NativeCarerGateModal({ isOpen, onClose, onVerify }: { isOpen: boolean; onClose: () => void; onVerify: () => void }) {
   if (!isOpen) return null;
   return (
-    <Modal animationType="slide" onRequestClose={onClose} transparent visible={isOpen}>
-      <Pressable onPress={onClose} style={[styles.familyModalBackdrop, modalPrimitiveStyles.appModalSafeArea]}>
-        <Pressable onPress={(event) => event.stopPropagation()} style={[modalPrimitiveStyles.appModalCard, styles.carerGateCard]}>
-          <View style={styles.carerGateCopy}>
-            <Text style={styles.carerGateTitle}>Identity verification required</Text>
-            <Text style={styles.carerGateBody}>Finish verification to start offering trusted pet care.</Text>
-          </View>
-          <View style={styles.carerGateActions}>
-            <Pressable onPress={onClose} style={styles.carerGateSecondary}>
-              <Text style={styles.carerGateSecondaryText}>Not now</Text>
-            </Pressable>
-            <Pressable onPress={onVerify} style={styles.carerGatePrimary}>
-              <Text style={styles.carerGatePrimaryText}>Verify now</Text>
-            </Pressable>
-          </View>
-        </Pressable>
+    <View style={[styles.carerGateOverlay, modalPrimitiveStyles.appModalSafeArea]}>
+      <Pressable onPress={onClose} style={StyleSheet.absoluteFill} />
+      <Pressable onPress={(event) => event.stopPropagation()} style={[modalPrimitiveStyles.appModalCard, styles.carerGateCard]}>
+        <View style={styles.carerGateCopy}>
+          <Text style={styles.carerGateTitle}>Identity verification required</Text>
+          <Text style={styles.carerGateBody}>Finish verification to start offering trusted pet care.</Text>
+        </View>
+        <View style={styles.carerGateActions}>
+          <Pressable onPress={onClose} style={styles.carerGateSecondary}>
+            <Text style={styles.carerGateSecondaryText}>Not now</Text>
+          </Pressable>
+          <Pressable onPress={onVerify} style={styles.carerGatePrimary}>
+            <Text style={styles.carerGatePrimaryText}>Verify now</Text>
+          </Pressable>
+        </View>
       </Pressable>
-    </Modal>
+    </View>
+  );
+}
+
+function NativeSupportDrawerModal({
+  accessToken,
+  accountEmail,
+  isOpen,
+  onClose,
+}: {
+  accessToken?: string | null;
+  accountEmail?: string | null;
+  isOpen: boolean;
+  onClose: () => void;
+}) {
+  if (!isOpen) return null;
+  return (
+    <View style={styles.supportDrawerOverlay}>
+      <Pressable onPress={onClose} style={StyleSheet.absoluteFill} />
+      <Pressable onPress={(event) => event.stopPropagation()} style={styles.supportDrawerCard}>
+        <Pressable
+          accessibilityLabel="Close support modal"
+          accessibilityRole="button"
+          onPress={onClose}
+          style={styles.supportDrawerClose}
+        >
+          <Feather color={huddleColors.iconMuted} name="x" size={22} />
+        </Pressable>
+        <NativeSupportScreen
+          accessToken={accessToken}
+          accountEmail={accountEmail}
+          onCancel={onClose}
+        />
+      </Pressable>
+    </View>
+  );
+}
+
+const promoAccentForTier = (template: NativeHuddleRewardProgress["accent_template"], tier: NativeHuddleRewardProgress["reward_tier"]) => {
+  if (template === "orange") return huddleColors.coral;
+  if (template === "lime") return huddleColors.lime;
+  return tier === "gold" ? huddleColors.coral : huddleColors.lime;
+};
+const promoAccentColor = (progress: NativeHuddleRewardProgress) => promoAccentForTier(progress.accent_template, progress.reward_tier);
+
+function NativeHuddleRewardsSheet({
+  progress,
+  isOpen,
+  onClose,
+  onOpenAddFriend,
+  onNavigate,
+}: {
+  progress: NativeHuddleRewardProgress | null;
+  isOpen: boolean;
+  onClose: () => void;
+  onOpenAddFriend: () => void;
+  onNavigate: (path: string) => void;
+}) {
+  if (!isOpen || !progress?.visible) return null;
+  const goalRoutes: Record<string, string> = {
+    get_verified: "/verify-identity",
+    complete_profile: "/edit-profile",
+    add_first_pet: "/edit-pet-profile",
+    become_listed_carer: "/carerprofile",
+    complete_care_booking: "/service",
+  };
+  const goalRoute = goalRoutes[progress.goal_type || ""];
+  const tierLabel = progress.reward_tier === "gold" ? "huddle＊" : "huddle+";
+  const isNumericGoal = progress.goal_type === "add_friend" && Boolean(progress.friend_target);
+  const currentCount = Math.max(0, progress.friend_count ?? 0);
+  const progressStart = Math.max(0, progress.friend_progress_start ?? 0);
+  const targetCount = Math.max(1, progress.friend_target ?? 1);
+  const remainingCount = Math.max(0, targetCount - currentCount);
+  const progressPercent = Math.min(100, Math.max(0, ((currentCount - progressStart) / Math.max(1, targetCount - progressStart)) * 100));
+  const accentColor = promoAccentColor(progress);
+  const ctaForeground = accentColor === huddleColors.coral ? huddleColors.onPrimary : huddleColors.text;
+  return (
+    <View style={styles.rewardsOverlay}>
+      <Pressable onPress={onClose} style={StyleSheet.absoluteFill} />
+      <Pressable onPress={(event) => event.stopPropagation()} style={styles.rewardsCard}>
+        <View style={styles.rewardsBody}>
+          <Pressable accessibilityLabel="Close huddle Rewards" onPress={onClose} style={styles.rewardsClose}>
+            <Feather color={huddleColors.onPrimary} name="x" size={24} />
+          </Pressable>
+          {progress.state !== "completed" && isNumericGoal ? (
+            <View style={styles.rewardsMetricRow}>
+              <Text
+                numberOfLines={1} lineBreakMode="tail" lineBreakStrategyIOS="none"
+                style={[
+                  styles.rewardsMetric,
+                  { color: accentColor },
+                  remainingCount >= 1000 ? styles.rewardsMetricFourDigits : remainingCount >= 100 ? styles.rewardsMetricThreeDigits : null,
+                ]}
+              >
+                {remainingCount}
+              </Text>
+              <Text style={styles.rewardsMetricUnit}>friends{"\n"}to go</Text>
+            </View>
+          ) : null}
+          <Text numberOfLines={2} style={styles.rewardsTitle}>
+            {progress.state === "completed" ? "Bonus unlocked." : (progress.title || "Grow your Huddle.")}
+          </Text>
+          <Text numberOfLines={1} style={[styles.rewardsRewardLine, { color: accentColor }]}>
+            {progress.state === "completed" ? `${tierLabel} is active.` : `Earn ${tierLabel}.`}
+          </Text>
+          {progress.state !== "completed" && isNumericGoal ? (
+            <View style={styles.rewardsSegments}>
+              {Array.from({ length: 10 }, (_, index) => (
+                <View
+                  key={index}
+                  style={[
+                    styles.rewardsSegment,
+                    index < Math.round((progressPercent / 100) * 10) ? { backgroundColor: accentColor } : null,
+                  ]}
+                />
+              ))}
+            </View>
+          ) : null}
+        </View>
+        {progress.state === "completed" ? null : progress.goal_type === "add_friend" || goalRoute ? (
+          <Pressable
+            accessibilityRole="button"
+            onPress={progress.goal_type === "add_friend" ? onOpenAddFriend : () => onNavigate(goalRoute)}
+            style={[styles.rewardsCta, { backgroundColor: accentColor }]}
+          >
+            <Text numberOfLines={1} style={[styles.rewardsCtaText, { color: ctaForeground }]}>{progress.cta_label || "Get started"}</Text>
+            <Feather color={ctaForeground} name="arrow-right" size={22} />
+          </Pressable>
+        ) : null}
+        <View style={styles.rewardsFooter}>
+          <Text numberOfLines={2} style={styles.rewardsFooterText}>
+            {progress.state === "completed"
+              ? `Your ${tierLabel} reward is already active.`
+              : (progress.body || `${progress.reward_months || 1} month of ${tierLabel}, on the house.`)}
+          </Text>
+          {progress.eligibility_terms ? (
+            <Text numberOfLines={3} style={styles.rewardsTermsText}>{progress.eligibility_terms}</Text>
+          ) : null}
+        </View>
+      </Pressable>
+    </View>
   );
 }
 
@@ -660,6 +1141,7 @@ function NativeFamilyAccountSheet({
   accessToken,
   currentProfile,
   currentUserId,
+  initialState,
   isOpen,
   quotaTier,
   familySummary,
@@ -671,14 +1153,16 @@ function NativeFamilyAccountSheet({
   accessToken?: string | null;
   currentProfile: NativeProfile | null;
   currentUserId: string | null;
+  initialState?: NativeFamilyState | null;
   isOpen: boolean;
   quotaTier?: string | null;
   familySummary?: NativeFamilySummary | null;
   onFamilySummaryChange?: (summary: NativeFamilySummary | null) => void;
   onClose: () => void;
   onOpenMembership: () => void;
-  onOpenProfile?: (userId: string) => void;
+  onOpenProfile?: (profile: NativeFamilyProfileLite) => void;
 }) {
+  const reduceFamilyMotion = useReducedMotion();
   const [familyState, setFamilyState] = useState<NativeFamilyState | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
@@ -688,10 +1172,17 @@ function NativeFamilyAccountSheet({
   const [searchFocused, setSearchFocused] = useState(false);
   const [results, setResults] = useState<NativeFamilySearchResult[]>([]);
   const [inviting, setInviting] = useState<string | null>(null);
+  const [inviteTarget, setInviteTarget] = useState<NativeFamilySearchResult | null>(null);
+  const [allowPetSharing, setAllowPetSharing] = useState(false);
+  const [sharedPetCandidates, setSharedPetCandidates] = useState<NativeFamilySharedPet[]>([]);
+  const [sharedPetStepOpen, setSharedPetStepOpen] = useState(false);
+  const [selectedSharedPetIds, setSelectedSharedPetIds] = useState<string[]>([]);
+  const [addingSharedPets, setAddingSharedPets] = useState(false);
   const [mutatingMemberId, setMutatingMemberId] = useState<string | null>(null);
   const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
+  const [storeProducts, setStoreProducts] = useState<Record<NativeStoreProductId, NativeStoreProductState> | null>(null);
 
-  const loadFamilyState = useCallback(async () => {
+  const loadFamilyState = useCallback(async (includeSharedPetCandidates = true) => {
     const uid = String(currentUserId || "").trim();
     if (!uid) return;
     setLoading(true);
@@ -714,6 +1205,12 @@ function NativeFamilyAccountSheet({
       };
       setFamilyState(state);
       onFamilySummaryChange?.(nextSummary);
+      if (includeSharedPetCandidates && (state?.viewer_role === "owner" || state?.viewer_role === "member")) {
+        const candidates = await fetchNativeFamilySharedPetCandidates(accessToken).catch(() => [] as NativeFamilySharedPet[]);
+        setSharedPetCandidates(Array.isArray(candidates) ? candidates : []);
+      } else if (includeSharedPetCandidates) {
+        setSharedPetCandidates([]);
+      }
     } catch {
       setLoadError("Could not load Family Account. Please try again.");
     } finally {
@@ -723,8 +1220,23 @@ function NativeFamilyAccountSheet({
 
   useEffect(() => {
     if (!isOpen) return;
+    if (initialState) {
+      setFamilyState(initialState);
+      setLoadError("");
+    }
     void loadFamilyState();
-  }, [isOpen, loadFamilyState]);
+  }, [initialState, isOpen, loadFamilyState]);
+
+  useEffect(() => {
+    if (!slotOpen) return undefined;
+    let active = true;
+    void loadNativeStoreProducts({ allowCache: true }).then((products) => {
+      if (active) setStoreProducts(products);
+    }).catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [slotOpen]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -734,6 +1246,12 @@ function NativeFamilyAccountSheet({
       setSearchFocused(false);
       setResults([]);
       setInviting(null);
+      setInviteTarget(null);
+      setAllowPetSharing(false);
+      setSharedPetCandidates([]);
+      setSharedPetStepOpen(false);
+      setSelectedSharedPetIds([]);
+      setAddingSharedPets(false);
       setMutatingMemberId(null);
       setLeaveConfirmOpen(false);
       setLoadError("");
@@ -865,7 +1383,16 @@ function NativeFamilyAccountSheet({
         { p_family_member_id: familyMemberId },
         accessToken,
       );
-      await loadFamilyState();
+      if (action === "accept") {
+        const candidates = await fetchNativeFamilySharedPetCandidates(accessToken).catch(() => [] as NativeFamilySharedPet[]);
+        await loadFamilyState(false);
+        const nextCandidates = Array.isArray(candidates) ? candidates : [];
+        setSharedPetCandidates(nextCandidates);
+        setSharedPetStepOpen(nextCandidates.length > 0);
+        setSelectedSharedPetIds([]);
+      } else {
+        await loadFamilyState();
+      }
     } catch (error) {
       Alert.alert(action === "accept" ? "Could not join family" : "Could not update invite", familyActionMessage((error as { code?: string })?.code || (error as Error)?.message));
     } finally {
@@ -878,8 +1405,15 @@ function NativeFamilyAccountSheet({
     if (!uid) return;
     setInviting(target.id);
     try {
-      await runNativeFamilyAction("create_native_family_invite", { p_invitee_user_id: target.id }, accessToken);
+      const result = await createNativeFamilyInvite(target.id, allowPetSharing, accessToken);
+      if (result?.code !== "invited") {
+        const error = new Error(String(result?.code || "family_action_failed")) as Error & { code?: string };
+        error.code = String(result?.code || "family_action_failed");
+        throw error;
+      }
       setSearchOpen(false);
+      setInviteTarget(null);
+      setAllowPetSharing(false);
       setQuery("");
       setResults([]);
       await loadFamilyState();
@@ -888,7 +1422,22 @@ function NativeFamilyAccountSheet({
     } finally {
       setInviting(null);
     }
-  }, [accessToken, currentUserId, loadFamilyState]);
+  }, [accessToken, allowPetSharing, currentUserId, loadFamilyState]);
+
+  const addSharedPets = useCallback(async () => {
+    if (selectedSharedPetIds.length === 0) return;
+    setAddingSharedPets(true);
+    try {
+      await addNativeFamilySharedPets(selectedSharedPetIds, accessToken);
+      setSharedPetStepOpen(false);
+      setSelectedSharedPetIds([]);
+      await loadFamilyState();
+    } catch {
+      setLoadError("Please try again.");
+    } finally {
+      setAddingSharedPets(false);
+    }
+  }, [accessToken, loadFamilyState, selectedSharedPetIds]);
 
   if (!isOpen) return null;
 
@@ -900,29 +1449,72 @@ function NativeFamilyAccountSheet({
     ...(ownerTier === "gold" ? ["Top Profile Visibility"] : []),
   ];
   const isMaxFamilyCapacity = displayTotalSlots >= MAX_FAMILY_MEMBERS;
+  const sharePerksPrice = formatNativeAddonPrice("huddle_family_extra_monthly", storeProducts?.huddle_family_extra_monthly);
   const searchHasError = query.trim().length > 0 && results.length === 0;
+  const familyJourneyKey = sharedPetStepOpen && sharedPetCandidates.length > 0
+    ? "shared-pets"
+    : slotOpen
+      ? "share-perks"
+      : searchOpen && inviteTarget
+        ? "invite"
+        : searchOpen
+          ? "search"
+          : "family";
 
   return (
-    <>
-      <Modal animationType="slide" onRequestClose={slotOpen ? () => setSlotOpen(false) : onClose} transparent visible={isOpen}>
-        <Pressable onPress={slotOpen ? () => setSlotOpen(false) : onClose} style={[styles.familyModalBackdrop, modalPrimitiveStyles.appModalSafeArea]}>
+    <View style={[styles.familyModalOverlay, modalPrimitiveStyles.appModalSafeArea]}>
+        <Pressable onPress={slotOpen ? () => setSlotOpen(false) : onClose} style={StyleSheet.absoluteFill} />
           <Pressable onPress={(event) => event.stopPropagation()} style={[modalPrimitiveStyles.appModalCard, styles.familyCard, slotOpen && styles.sharePerksCard]}>
             {!slotOpen ? (
-              <Pressable
-                accessibilityLabel={searchOpen ? "Close search" : "Close family account"}
-                onPress={searchOpen ? () => setSearchOpen(false) : onClose}
-                style={modalPrimitiveStyles.appModalClose}
-              >
-                <Feather color={huddleColors.iconMuted} name="x" size={18} />
-              </Pressable>
+              <AppModalCloseButton onPress={sharedPetStepOpen ? () => {
+                setSharedPetStepOpen(false);
+                setSelectedSharedPetIds([]);
+              } : searchOpen ? () => {
+                if (inviteTarget) {
+                  setInviteTarget(null);
+                  setAllowPetSharing(false);
+                  return;
+                }
+                setSearchOpen(false);
+              } : onClose} />
             ) : null}
-            {slotOpen ? (
+            <Animated.View
+              entering={reduceFamilyMotion ? undefined : FadeInRight.duration(huddleMotion.durations.base)}
+              exiting={reduceFamilyMotion ? undefined : FadeOutLeft.duration(huddleMotion.durations.base)}
+              key={familyJourneyKey}
+              layout={reduceFamilyMotion ? undefined : LinearTransition.duration(huddleMotion.durations.base)}
+              style={styles.familyJourney}
+            >
+            {sharedPetStepOpen && sharedPetCandidates.length > 0 ? (
+              <View style={styles.familyJourneyStep}>
+                <View style={styles.familyHeader}>
+                  <View style={styles.familyHeaderCopy}>
+                    <Text style={styles.familyTitle}>Add shared pets</Text>
+                  </View>
+                </View>
+                <NativePetMultiSelectCarousel
+                  onSelect={(pet) => setSelectedSharedPetIds((current) => current.includes(pet.id)
+                    ? current.filter((id) => id !== pet.id)
+                    : [...current, pet.id])}
+                  pets={sharedPetCandidates}
+                  selectedPetIds={selectedSharedPetIds}
+                />
+                <AppModalActionRow>
+                  <AppModalButton disabled={addingSharedPets} onPress={() => {
+                    setSharedPetStepOpen(false);
+                    setSelectedSharedPetIds([]);
+                    void loadFamilyState(false);
+                  }} variant="secondary">Not now</AppModalButton>
+                  <AppModalButton disabled={selectedSharedPetIds.length === 0} loading={addingSharedPets} onPress={() => void addSharedPets()}>Add shared pets</AppModalButton>
+                </AppModalActionRow>
+              </View>
+            ) : slotOpen ? (
               <>
                 <View style={styles.sharePerksStripe}>
-                  <Feather color={huddleColors.onPrimary} name="users" size={18} />
+                  <Feather color={huddleColors.onPrimary} name="users" size={huddleFamilyAccount.headerIconSize} />
                   <Text style={styles.sharePerksTitle}>Share Perks</Text>
                   <Text style={styles.sharePerksMeta}>
-                    {isMaxFamilyCapacity ? "Max. capacity reached" : `${SHARE_PERKS_FALLBACK_CURRENCY}${SHARE_PERKS_FALLBACK_PRICE.toFixed(2)}/mo`}
+                    {isMaxFamilyCapacity ? "Max. capacity reached" : sharePerksPrice}
                   </Text>
                 </View>
                 <View style={styles.sharePerksBody}>
@@ -930,7 +1522,7 @@ function NativeFamilyAccountSheet({
                   {sharePerksFeatures.map((feature) => (
                     <View key={feature} style={styles.sharePerksFeature}>
                       <View style={styles.sharePerksCheck}>
-                        <Feather color={huddleColors.onPrimary} name="check" size={10} />
+                        <Feather color={huddleColors.onPrimary} name="check" size={huddleFamilyAccount.featureCheckIconSize} />
                       </View>
                       <Text style={styles.sharePerksFeatureText}>{feature}</Text>
                     </View>
@@ -951,48 +1543,64 @@ function NativeFamilyAccountSheet({
                   </Pressable>
                 </View>
               </>
+            ) : searchOpen && inviteTarget ? (
+              <View style={styles.familyJourneyStep}>
+                <View style={styles.familyHeader}>
+                  <View style={styles.familyHeaderCopy}>
+                    <Text style={styles.familyTitle}>Invite</Text>
+                  </View>
+                </View>
+                <View style={styles.familyMemberRow}>
+                  <NativeFamilyAvatarButton avatarUrl={inviteTarget.avatar_url} onPress={() => onOpenProfile?.(inviteTarget)} />
+                  <View style={styles.familyMemberCopy}>
+                    <Text numberOfLines={1} style={styles.familyMemberName}>{inviteTarget.display_name || "Unknown user"}</Text>
+                    {inviteTarget.social_id ? <Text ellipsizeMode="tail" numberOfLines={1} style={styles.familyMemberRole}>@{inviteTarget.social_id}</Text> : null}
+                  </View>
+                </View>
+                <AppModalToggleRow label="Allow pet sharing" onChange={setAllowPetSharing} value={allowPetSharing} />
+                <Text style={nativeModalStyles.appModalMutedBody}>You cannot change it later.</Text>
+                <AppModalButton loading={inviting === inviteTarget.id} onPress={() => void sendInvite(inviteTarget)}>Invite</AppModalButton>
+              </View>
             ) : searchOpen ? (
-              <>
+              <View style={styles.familyJourneyStep}>
                 <View style={styles.familyHeader}>
                   <View style={styles.familyHeaderCopy}>
                     <Text style={styles.familyTitle}>Search user</Text>
                   </View>
               </View>
-              <View
-                style={[
-                  styles.searchFieldWrap,
-                  searchFocused && styles.searchFieldFocused,
-                  searchHasError && styles.searchFieldError,
-                ]}
-              >
-                <Feather color={huddleColors.mutedText} name="search" size={15} />
-                <TextInput
+              <AppModalField
+                  error={searchHasError}
+                  focused={searchFocused}
+                multiline={false}
+                scrollEnabled
+                numberOfLines={1} lineBreakModeIOS="tail" lineBreakStrategyIOS="none"
+                textBreakStrategy="simple"
                   autoCapitalize="none"
                   autoCorrect={false}
                   onBlur={() => setSearchFocused(false)}
                   onChangeText={setQuery}
                   onFocus={() => setSearchFocused(true)}
                   placeholder="Username / Social ID"
-                  placeholderTextColor={huddleModalTokens.color.mutedText}
-                  style={styles.searchField}
                   value={query}
                 />
-              </View>
               <ScrollView style={styles.searchResults} keyboardShouldPersistTaps="handled">
                 {results.map((result) => (
                     <View key={result.id} style={styles.familyMemberRow}>
-                    <NativeFamilyAvatarButton avatarUrl={result.avatar_url} onPress={() => onOpenProfile?.(result.id)} />
+                    <NativeFamilyAvatarButton avatarUrl={result.avatar_url} onPress={() => onOpenProfile?.(result)} />
                     <View style={styles.familyMemberCopy}>
                       <Text numberOfLines={1} style={styles.familyMemberName}>{result.display_name || "Unknown user"}</Text>
-                      {result.social_id ? <Text style={styles.familyMemberRole}>@{result.social_id}</Text> : null}
+                      {result.social_id ? <Text ellipsizeMode="tail" numberOfLines={1} style={styles.familyMemberRole}>@{result.social_id}</Text> : null}
                     </View>
                     <Pressable
                       accessibilityLabel={inviting === result.id ? "Inviting" : `Invite ${result.display_name ?? "user"}`}
                       disabled={inviting === result.id}
-                      onPress={() => void sendInvite(result)}
+                      onPress={() => {
+                        setAllowPetSharing(false);
+                        setInviteTarget(result);
+                      }}
                       style={styles.familyInviteButton}
                     >
-                      {inviting === result.id ? <ActivityIndicator color={huddleColors.blue} size="small" /> : <Feather color={huddleColors.blue} name="user-plus" size={15} />}
+                      {inviting === result.id ? <NativeSpinner tone="accent" /> : <Feather color={huddleColors.blue} name="user-plus" size={huddleFamilyAccount.inviteIconSize} />}
                     </Pressable>
                   </View>
                 ))}
@@ -1000,7 +1608,7 @@ function NativeFamilyAccountSheet({
                   <Text style={styles.searchStateText}>No users found</Text>
                 ) : null}
               </ScrollView>
-              </>
+              </View>
             ) : (
               <>
                 <View style={styles.familyHeader}>
@@ -1012,7 +1620,7 @@ function NativeFamilyAccountSheet({
 
                 {loading ? (
                   <View style={styles.familyMembers}>
-                    <ActivityIndicator color={huddleColors.blue} />
+                    <NativeSpinner tone="accent" size="md" />
                   </View>
                 ) : loadError ? (
                   <View style={styles.familyMembers}>
@@ -1033,7 +1641,7 @@ function NativeFamilyAccountSheet({
                       return (
                         <View key={member.id}>
                           <View style={styles.familyMemberRow}>
-                            <NativeFamilyAvatarButton avatarUrl={member.avatar_url} onPress={() => onOpenProfile?.(member.id)} />
+                            <NativeFamilyAvatarButton avatarUrl={member.avatar_url} onPress={() => onOpenProfile?.(member)} />
                             <View style={styles.familyMemberCopy}>
                               <Text numberOfLines={1} style={styles.familyMemberName}>{member.display_name || "Unknown user"}</Text>
                               <Text style={styles.familyMemberRole}>{isOwner ? "Owner" : isCurrentUser ? "You" : "Member"}</Text>
@@ -1045,7 +1653,7 @@ function NativeFamilyAccountSheet({
                                 onPress={() => void removeMember(String(acceptedRow?.family_member_id || ""))}
                                 style={styles.familyRemoveButton}
                               >
-                                {mutatingMemberId === acceptedRow?.family_member_id ? <ActivityIndicator color={huddleColors.validationRed} size="small" /> : <Feather color={huddleColors.validationRed} name="user-minus" size={17} />}
+                                {mutatingMemberId === acceptedRow?.family_member_id ? <NativeSpinner tone="muted" /> : <Feather color={huddleColors.validationRed} name="user-minus" size={huddleFamilyAccount.rowActionIconSize} />}
                               </Pressable>
                             ) : null}
                             {canMemberQuitHere ? (
@@ -1056,7 +1664,7 @@ function NativeFamilyAccountSheet({
                                 onPress={openLeaveConfirm}
                                 style={styles.familyRemoveButton}
                               >
-                                {mutatingMemberId === member.id ? <ActivityIndicator color={huddleColors.validationRed} size="small" /> : <Feather color={huddleColors.validationRed} name="log-out" size={17} />}
+                                {mutatingMemberId === member.id ? <NativeSpinner tone="muted" /> : <Feather color={huddleColors.validationRed} name="log-out" size={huddleFamilyAccount.rowActionIconSize} />}
                               </Pressable>
                             ) : null}
                           </View>
@@ -1064,16 +1672,16 @@ function NativeFamilyAccountSheet({
                             <View style={styles.familyInviteBanner}>
                               <View style={styles.familyInviteBannerCopy}>
                                 <Text numberOfLines={2} style={styles.familyInviteBannerText}>
-                                  <Text style={styles.familyInviteBannerName}>{pendingInvite.owner_profile?.display_name || "A Huddle member"}</Text>
+                              <Text ellipsizeMode="tail" numberOfLines={1} style={styles.familyInviteBannerName}>{pendingInvite.owner_profile?.display_name || "A huddle member"}</Text>
                                   {" invited you to join their family!"}
                                 </Text>
                               </View>
                               <View style={styles.familyInviteBannerActions}>
-                                <Pressable accessibilityRole="button" disabled={mutatingMemberId === pendingInvite.family_member_id} onPress={() => void respondToInvite("decline")} style={styles.familyInviteBannerSecondary}>
-                                  {mutatingMemberId === pendingInvite.family_member_id ? <ActivityIndicator color={huddleColors.text} size="small" /> : <Text style={styles.familyInviteBannerSecondaryText}>Not now</Text>}
+                                <Pressable accessibilityRole="button" disabled={mutatingMemberId === pendingInvite.family_member_id} onPress={() => void respondToInvite("decline")} style={[styles.familyInviteBannerSecondary, mutatingMemberId === pendingInvite.family_member_id ? huddleButtons.disabled : null]}>
+                                  {mutatingMemberId === pendingInvite.family_member_id ? <NativeSpinner tone="secondary" /> : <Text style={styles.familyInviteBannerSecondaryText}>Not now</Text>}
                                 </Pressable>
-                                <Pressable accessibilityRole="button" disabled={mutatingMemberId === pendingInvite.family_member_id} onPress={() => void respondToInvite("accept")} style={styles.familyInviteBannerPrimary}>
-                                  {mutatingMemberId === pendingInvite.family_member_id ? <ActivityIndicator color={huddleColors.onPrimary} size="small" /> : <Text style={styles.familyInviteBannerPrimaryText}>Join</Text>}
+                                <Pressable accessibilityRole="button" disabled={mutatingMemberId === pendingInvite.family_member_id} onPress={() => void respondToInvite("accept")} style={[styles.familyInviteBannerPrimary, mutatingMemberId === pendingInvite.family_member_id ? huddleButtons.disabled : null]}>
+                                  {mutatingMemberId === pendingInvite.family_member_id ? <NativeSpinner tone="primary" /> : <Text style={styles.familyInviteBannerPrimaryText}>Join</Text>}
                                 </Pressable>
                               </View>
                             </View>
@@ -1086,7 +1694,7 @@ function NativeFamilyAccountSheet({
                       if (!member?.id) return null;
                       return (
                         <View key={row.family_member_id} style={styles.familyMemberRow}>
-                          <NativeFamilyAvatarButton avatarUrl={member.avatar_url} onPress={() => onOpenProfile?.(member.id)} />
+                          <NativeFamilyAvatarButton avatarUrl={member.avatar_url} onPress={() => onOpenProfile?.(member)} />
                           <View style={styles.familyMemberCopy}>
                             <Text numberOfLines={1} style={styles.familyMemberName}>{member.display_name || "Unknown user"}</Text>
                             <Text style={styles.familyMemberRole}>Pending</Text>
@@ -1097,7 +1705,7 @@ function NativeFamilyAccountSheet({
                             onPress={() => void cancelInvite(row.family_member_id)}
                             style={styles.familyRemoveButton}
                           >
-                            {mutatingMemberId === row.family_member_id ? <ActivityIndicator color={huddleColors.validationRed} size="small" /> : <Feather color={huddleColors.validationRed} name="x" size={17} />}
+                            {mutatingMemberId === row.family_member_id ? <NativeSpinner tone="muted" /> : <Feather color={huddleColors.validationRed} name="x" size={huddleFamilyAccount.rowActionIconSize} />}
                           </Pressable>
                         </View>
                       );
@@ -1108,6 +1716,10 @@ function NativeFamilyAccountSheet({
                   </View>
                 )}
 
+                {sharedPetCandidates.length > 0 ? (
+                  <AppModalButton onPress={() => setSharedPetStepOpen(true)} variant="secondary">Add shared pets</AppModalButton>
+                ) : null}
+
                 {(displayRole === "owner" || displayRole === "member") ? (
                   <View style={styles.familyAddRow}>
                     <Pressable
@@ -1115,24 +1727,30 @@ function NativeFamilyAccountSheet({
                       onPress={handleAddPress}
                       style={[styles.familyAddButton, displayRole === "member" && styles.familyPrimaryDisabled]}
                     >
-                      <Feather color={huddleColors.onPrimary} name="plus" size={17} />
+                      <Feather color={huddleColors.onPrimary} name="plus" size={huddleFamilyAccount.rowActionIconSize} />
                     </Pressable>
                   </View>
                 ) : null}
               </>
             )}
+            </Animated.View>
           </Pressable>
-          <AppDestructiveSlideConfirm
-            body={`Are you sure? You will lose all the perks shared by ${leaveFamilyOwnerName}.`}
-            onClose={() => setLeaveConfirmOpen(false)}
-            onConfirm={() => void quitFamily()}
-            open={leaveConfirmOpen}
-            slideLabel="Slide to Leave Family"
-            title="Leave Family?"
-          />
-        </Pressable>
-	      </Modal>
-	    </>
+        {leaveConfirmOpen ? (
+          <View style={styles.familyInlineConfirmOverlay}>
+            <Pressable onPress={() => setLeaveConfirmOpen(false)} style={StyleSheet.absoluteFill} />
+            <Pressable onPress={(event) => event.stopPropagation()} style={[modalPrimitiveStyles.appModalCard, styles.familyInlineConfirmCard]}>
+              <Text style={styles.familyInlineConfirmTitle}>Leave Family?</Text>
+              <Text style={styles.familyInlineConfirmBody}>Are you sure? You will lose all the perks shared by {leaveFamilyOwnerName}.</Text>
+              <SlideToConfirm
+                busy={mutatingMemberId === currentUserId}
+                label="Slide to Leave Family"
+                onCommit={() => void quitFamily()}
+                tone="destructive"
+              />
+            </Pressable>
+          </View>
+        ) : null}
+    </View>
 	  );
 	}
 
@@ -1164,29 +1782,6 @@ const styles = StyleSheet.create({
     gap: huddleSpacing.x3,
     paddingVertical: huddleSpacing.x2,
   },
-  avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 999,
-    overflow: "hidden",
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: huddleColors.mutedCanvas,
-  },
-  avatarVerified: {
-    borderWidth: 2,
-    borderColor: huddleColors.blue,
-  },
-  avatarHiddenText: {
-    position: "absolute",
-    width: 1,
-    height: 1,
-    opacity: 0,
-  },
-  avatarImage: {
-    width: "100%",
-    height: "100%",
-  },
   avatarBadge: {
     position: "absolute",
     right: -4,
@@ -1196,9 +1791,6 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: huddleColors.mutedCanvas,
-  },
-  avatarBadgeVerified: {
     backgroundColor: huddleColors.blue,
   },
   profileText: {
@@ -1211,6 +1803,197 @@ const styles = StyleSheet.create({
     fontSize: huddleType.body,
     lineHeight: 21,
     color: huddleColors.text,
+  },
+  huddleRewardsBanner: {
+    minHeight: 82,
+    position: "relative",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: huddleSpacing.x2,
+    borderRadius: huddleRadii.card,
+    paddingLeft: huddleSpacing.x3,
+    paddingRight: 30,
+    paddingVertical: huddleSpacing.x2,
+    backgroundColor: huddleColors.blue,
+  },
+  huddleRewardsRemaining: {
+    width: 45,
+    color: huddleColors.onPrimary,
+    fontFamily: "Urbanist-800",
+    fontSize: 38,
+    lineHeight: 42,
+    letterSpacing: -1.2,
+    textAlign: "center",
+  },
+  huddleRewardsCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  huddleRewardsTitle: {
+    fontFamily: "Urbanist-800",
+    fontSize: 15,
+    lineHeight: 18,
+    color: huddleColors.onPrimary,
+  },
+  huddleRewardsMeta: {
+    marginTop: 2,
+    fontFamily: "Urbanist-600",
+    fontSize: 13,
+    lineHeight: 16,
+    color: huddleColors.onPrimary,
+  },
+  huddleRewardsAccent: {
+    color: huddleColors.lime,
+    fontFamily: "Urbanist-800",
+  },
+  huddleRewardsSegments: {
+    height: 4,
+    flexDirection: "row",
+    gap: 4,
+    marginTop: 6,
+  },
+  huddleRewardsSegment: {
+    flex: 1,
+    minWidth: 0,
+    height: 4,
+    borderRadius: huddleRadii.pill,
+    backgroundColor: huddleColors.membershipUpgradeDivider,
+  },
+  huddleRewardsChevron: {
+    position: "absolute",
+    top: 10,
+    right: 8,
+    width: 24,
+    height: 24,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  rewardsOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 40,
+    justifyContent: "center",
+    padding: huddleSpacing.x5,
+    backgroundColor: huddleColors.backdrop,
+  },
+  rewardsCard: {
+    width: "100%",
+    maxWidth: 420,
+    overflow: "hidden",
+    alignSelf: "center",
+    borderRadius: huddleRadii.modal,
+    backgroundColor: huddleColors.blue,
+  },
+  rewardsBody: {
+    paddingHorizontal: huddleSpacing.x5,
+    paddingTop: huddleSpacing.x5,
+    paddingBottom: huddleSpacing.x4,
+  },
+  rewardsTitle: {
+    marginTop: huddleSpacing.x3,
+    fontFamily: "Urbanist-800",
+    fontSize: 30,
+    lineHeight: 33,
+    letterSpacing: -0.7,
+    color: huddleColors.onPrimary,
+  },
+  rewardsClose: {
+    width: huddleLayout.minTouch,
+    height: huddleLayout.minTouch,
+    position: "absolute",
+    zIndex: 2,
+    right: huddleSpacing.x3,
+    top: huddleSpacing.x3,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: huddleRadii.pill,
+  },
+  rewardsMetricRow: {
+    minHeight: 112,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: huddleSpacing.x3,
+    paddingRight: 48,
+  },
+  rewardsMetric: {
+    fontFamily: "Urbanist-800",
+    fontSize: 108,
+    lineHeight: 112,
+    letterSpacing: -4,
+    color: huddleColors.onPrimary,
+  },
+  rewardsMetricThreeDigits: {
+    fontSize: 88,
+    lineHeight: 96,
+    letterSpacing: -3,
+  },
+  rewardsMetricFourDigits: {
+    fontSize: 68,
+    lineHeight: 78,
+    letterSpacing: -2,
+  },
+  rewardsMetricUnit: {
+    color: huddleColors.onPrimary,
+    fontFamily: "Urbanist-700",
+    fontSize: 22,
+    lineHeight: 27,
+  },
+  rewardsRewardLine: {
+    marginTop: 2,
+    color: huddleColors.lime,
+    fontFamily: "Urbanist-800",
+    fontSize: 30,
+    lineHeight: 34,
+    letterSpacing: -0.5,
+  },
+  rewardsSegments: {
+    height: 6,
+    flexDirection: "row",
+    gap: 5,
+    marginTop: huddleSpacing.x5,
+  },
+  rewardsSegment: {
+    flex: 1,
+    minWidth: 0,
+    height: "100%",
+    borderRadius: huddleRadii.pill,
+    backgroundColor: huddleColors.membershipUpgradeDivider,
+  },
+  rewardsCta: {
+    minHeight: 64,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: huddleSpacing.x5,
+    backgroundColor: huddleColors.lime,
+  },
+  rewardsCtaText: {
+    flex: 1,
+    minWidth: 0,
+    color: huddleColors.text,
+    fontFamily: "Urbanist-800",
+    fontSize: 18,
+    lineHeight: 22,
+  },
+  rewardsFooter: {
+    minHeight: 54,
+    justifyContent: "center",
+    gap: 4,
+    paddingHorizontal: huddleSpacing.x5,
+    paddingVertical: huddleSpacing.x2,
+    backgroundColor: huddleColors.blue,
+  },
+  rewardsFooterText: {
+    color: huddleColors.membershipUpgradeTextSoft,
+    fontFamily: "Urbanist-600",
+    fontSize: 14,
+    lineHeight: 18,
+  },
+  rewardsTermsText: {
+    color: huddleColors.membershipUpgradeTextSoft,
+    fontFamily: "Urbanist-500",
+    fontSize: 11,
+    lineHeight: 14,
+    opacity: 0.76,
   },
   familyInviteBanner: {
     flexDirection: "row",
@@ -1242,7 +2025,7 @@ const styles = StyleSheet.create({
     gap: huddleSpacing.x1,
   },
   familyInviteBannerSecondary: {
-    minHeight: 34,
+    minHeight: huddleLayout.minTouch,
     alignItems: "center",
     justifyContent: "center",
     borderRadius: huddleRadii.button,
@@ -1250,7 +2033,7 @@ const styles = StyleSheet.create({
     backgroundColor: huddleColors.mutedCanvas,
   },
   familyInviteBannerPrimary: {
-    minHeight: 34,
+    minHeight: huddleLayout.minTouch,
     alignItems: "center",
     justifyContent: "center",
     borderRadius: huddleRadii.button,
@@ -1337,9 +2120,6 @@ const styles = StyleSheet.create({
   identityIconBadgeVerified: {
     backgroundColor: huddleColors.blue,
   },
-  identityIconBadgeUnverified: {
-    backgroundColor: "#A1A4A9",
-  },
   row: {
     minHeight: 52,
     flexDirection: "row",
@@ -1377,6 +2157,8 @@ const styles = StyleSheet.create({
     backgroundColor: huddleColors.blue,
   },
   rowValue: {
+    flexShrink: 1,
+    minWidth: 0,
     marginLeft: "auto",
     fontFamily: "Urbanist-500",
     fontSize: huddleType.helper,
@@ -1397,6 +2179,41 @@ const styles = StyleSheet.create({
     width: "100%",
     padding: huddleModalTokens.spacing.x5,
     gap: huddleModalTokens.spacing.x5,
+  },
+  carerGateOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 20,
+    elevation: 20,
+    backgroundColor: huddleColors.backdrop,
+  },
+  supportDrawerOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 20,
+    elevation: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(20, 24, 38, 0.42)",
+    paddingHorizontal: 18,
+  },
+  supportDrawerCard: {
+    width: "100%",
+    maxWidth: 390,
+    maxHeight: "80%",
+    overflow: "hidden",
+    borderRadius: 28,
+    backgroundColor: huddleColors.canvas,
+  },
+  supportDrawerClose: {
+    position: "absolute",
+    top: 18,
+    right: 18,
+    zIndex: 20,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(245, 247, 251, 0.95)",
   },
   carerGateCopy: {
     gap: huddleModalTokens.spacing.x2,
@@ -1439,10 +2256,42 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: huddleColors.backdrop,
   },
-  familyInlineConfirmBackdrop: {
-    zIndex: 10,
-    elevation: 10,
+  familyModalOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: huddleLayers.modalBackdrop,
+    elevation: huddleLayers.modalBackdrop,
     backgroundColor: huddleColors.backdrop,
+  },
+  familyInlineConfirmBackdrop: {
+    zIndex: huddleLayers.nestedBackdrop,
+    elevation: huddleLayers.nestedBackdrop,
+    backgroundColor: huddleColors.backdrop,
+  },
+  familyInlineConfirmOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: huddleLayers.nestedModal,
+    elevation: huddleLayers.nestedModal,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: huddleColors.backdrop,
+    paddingHorizontal: huddleModalTokens.spacing.x4,
+  },
+  familyInlineConfirmCard: {
+    width: "100%",
+    gap: huddleModalTokens.spacing.x4,
+    padding: huddleModalTokens.spacing.x5,
+  },
+  familyInlineConfirmTitle: {
+    fontFamily: "Urbanist-700",
+    fontSize: huddleType.h4,
+    lineHeight: huddleType.h4Line,
+    color: huddleColors.text,
+  },
+  familyInlineConfirmBody: {
+    fontFamily: "Urbanist-500",
+    fontSize: huddleType.label,
+    lineHeight: huddleType.labelLine,
+    color: huddleColors.subtext,
   },
   familyCard: {
     width: "100%",
@@ -1450,20 +2299,16 @@ const styles = StyleSheet.create({
     paddingTop: huddleModalTokens.spacing.x5,
     paddingBottom: huddleModalTokens.spacing.x5,
   },
+  familyJourney: {
+    width: "100%",
+  },
+  familyJourneyStep: {
+    width: "100%",
+    gap: huddleSpacing.x4,
+  },
   sharePerksCard: {
     overflow: "hidden",
     paddingBottom: huddleModalTokens.spacing.x5,
-  },
-  familyClose: {
-    position: "absolute",
-    top: 10,
-    right: 10,
-    width: 34,
-    height: 34,
-    borderRadius: 999,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: huddleColors.glassControl,
   },
   familyHeader: {
     width: "100%",
@@ -1477,16 +2322,16 @@ const styles = StyleSheet.create({
   },
   familyTitle: {
     fontFamily: "Urbanist-700",
-    fontSize: 16,
-    lineHeight: 21,
+    fontSize: huddleType.body,
+    lineHeight: huddleType.labelLine,
     color: huddleColors.text,
   },
   familyBody: {
-    marginTop: 3,
+    marginTop: huddleSpacing.x1,
     flex: 1,
     fontFamily: "Urbanist-500",
-    fontSize: 12,
-    lineHeight: 16,
+    fontSize: huddleType.helper,
+    lineHeight: huddleType.helperLine,
     color: huddleColors.mutedText,
   },
   familyMembers: {
@@ -1495,15 +2340,15 @@ const styles = StyleSheet.create({
     gap: huddleSpacing.x2,
   },
   familyMemberRow: {
-    minHeight: 44,
+    minHeight: huddleLayout.minTouch,
     flexDirection: "row",
     alignItems: "center",
     gap: huddleSpacing.x2,
   },
   familyMemberAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 999,
+    width: huddleSpacing.x7,
+    height: huddleSpacing.x7,
+    borderRadius: huddleRadii.pill,
     overflow: "hidden",
     alignItems: "center",
     justifyContent: "center",
@@ -1519,20 +2364,22 @@ const styles = StyleSheet.create({
   },
   familyMemberName: {
     fontFamily: "Urbanist-600",
-    fontSize: 13,
-    lineHeight: 17,
+    fontSize: huddleType.label,
+    lineHeight: huddleType.labelLine,
     color: huddleColors.text,
   },
   familyMemberRole: {
-    marginTop: 1,
+    flexShrink: 1,
+    marginTop: huddleSpacing.x1,
     fontFamily: "Urbanist-500",
-    fontSize: 12,
+    fontSize: huddleType.helper,
+    lineHeight: huddleType.helperLine,
     color: huddleColors.mutedText,
   },
   familyRemoveButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 999,
+    width: huddleLayout.minTouch,
+    height: huddleLayout.minTouch,
+    borderRadius: huddleRadii.pill,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: huddleColors.glassControl,
@@ -1541,7 +2388,8 @@ const styles = StyleSheet.create({
     width: "100%",
     paddingVertical: huddleSpacing.x2,
     fontFamily: "Urbanist-500",
-    fontSize: 13,
+    fontSize: huddleType.helper,
+    lineHeight: huddleType.helperLine,
     color: huddleColors.mutedText,
   },
   familyAddRow: {
@@ -1552,9 +2400,9 @@ const styles = StyleSheet.create({
     gap: huddleSpacing.x3,
   },
   familyAddButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 999,
+    width: huddleLayout.minTouch,
+    height: huddleLayout.minTouch,
+    borderRadius: huddleRadii.pill,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: huddleColors.blue,
@@ -1563,47 +2411,14 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   familyInviteButton: {
-    width: huddleModalTokens.size.minTouch,
-    height: huddleModalTokens.size.minTouch,
+    width: huddleLayout.minTouch,
+    height: huddleLayout.minTouch,
     alignItems: "center",
     justifyContent: "center",
   },
-  searchFieldWrap: {
-    width: "100%",
-    marginTop: huddleSpacing.x3,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: huddleSpacing.x2,
-    minHeight: huddleModalTokens.size.fieldHeight,
-    borderRadius: huddleModalTokens.radius.field,
-    paddingHorizontal: huddleModalTokens.spacing.x4,
-    backgroundColor: "rgba(255,255,255,0.88)",
-    borderWidth: 1,
-    borderColor: huddleModalTokens.color.fieldBorder,
-    shadowColor: huddleModalTokens.color.neutralShadow,
-    shadowOpacity: 0.8,
-    shadowRadius: 16,
-    shadowOffset: { width: 5, height: 5 },
-    elevation: 1,
-  },
-  searchFieldFocused: {
-    ...huddleFieldStates.focused,
-  },
-  searchFieldError: {
-    ...huddleFieldStates.error,
-  },
-  searchField: {
-    flex: 1,
-    minHeight: huddleModalTokens.size.fieldHeight,
-    paddingVertical: 0,
-    fontFamily: huddleModalTokens.type.bodyFamily,
-    fontSize: huddleModalTokens.type.inputSize,
-    lineHeight: huddleModalTokens.type.inputLine,
-    color: huddleModalTokens.color.text,
-  },
   searchResults: {
     width: "100%",
-    maxHeight: 220,
+    maxHeight: huddleFamilyAccount.searchResultsMaxHeight,
     marginTop: huddleSpacing.x3,
   },
   searchStateText: {
@@ -1611,7 +2426,8 @@ const styles = StyleSheet.create({
     paddingVertical: huddleSpacing.x3,
     textAlign: "center",
     fontFamily: "Urbanist-500",
-    fontSize: 13,
+    fontSize: huddleType.helper,
+    lineHeight: huddleType.helperLine,
     color: huddleColors.mutedText,
   },
   sharePerksStripe: {
@@ -1627,15 +2443,15 @@ const styles = StyleSheet.create({
     backgroundColor: huddleColors.blue,
   },
   sharePerksTitle: {
-    fontFamily: "Urbanist-700",
-    fontSize: 15,
+    ...huddleButtons.label,
     color: huddleColors.onPrimary,
   },
   sharePerksMeta: {
     marginLeft: "auto",
     fontFamily: "Urbanist-600",
-    fontSize: 12,
-    color: "rgba(255,255,255,0.82)",
+    fontSize: huddleType.helper,
+    lineHeight: huddleType.helperLine,
+    color: huddleColors.membershipUpgradeTextSoft,
   },
   sharePerksBody: {
     width: "100%",
@@ -1647,17 +2463,275 @@ const styles = StyleSheet.create({
     gap: huddleSpacing.x2,
   },
   sharePerksCheck: {
-    width: 18,
-    height: 18,
-    borderRadius: 999,
+    width: huddleFamilyAccount.featureCheckSize,
+    height: huddleFamilyAccount.featureCheckSize,
+    borderRadius: huddleRadii.pill,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: SHARE_PERKS_LIME,
+    backgroundColor: huddleColors.subscriptionAddonLime,
   },
   sharePerksFeatureText: {
     fontFamily: "Urbanist-500",
-    fontSize: 13,
+    fontSize: huddleType.label,
+    lineHeight: huddleType.labelLine,
     color: huddleColors.text,
+  },
+  addCodeOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: huddleColors.backdrop,
+    paddingHorizontal: huddleSpacing.x4,
+    paddingVertical: huddleSpacing.x4,
+  },
+  addCodeKeyboard: {
+    width: "100%",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  addCodeCard: {
+    width: "100%",
+    maxWidth: 420,
+    padding: huddleSpacing.x4,
+    borderRadius: huddleRadii.sheet,
+    backgroundColor: huddleColors.glassOverlay,
+    borderWidth: 1,
+    borderColor: huddleColors.glassBorder,
+    ...huddleShadows.glassElevation2,
+  },
+  codeIntroBanner: {
+    alignItems: "center",
+    backgroundColor: huddleColors.primarySoftFill,
+    borderColor: huddleColors.glassBorder,
+    borderRadius: huddleRadii.card,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: huddleSpacing.x2,
+    justifyContent: "space-between",
+    marginTop: huddleSpacing.x3,
+    paddingHorizontal: huddleSpacing.x3,
+    paddingVertical: huddleSpacing.x2,
+  },
+  codeIntroText: {
+    color: huddleColors.blue,
+    flex: 1,
+    fontFamily: huddleButtons.label.fontFamily,
+    fontSize: huddleType.helper,
+    lineHeight: huddleType.helperLine,
+  },
+  codeIntroClose: {
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: huddleLayout.minTouch,
+    minWidth: huddleLayout.minTouch,
+  },
+  addCodeHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: huddleSpacing.x3,
+  },
+  addCodeTitle: {
+    fontFamily: "Urbanist-700",
+    fontSize: huddleType.h4,
+    lineHeight: huddleType.h4Line,
+    color: huddleColors.text,
+  },
+  addCodeSubtitle: {
+    marginTop: 2,
+    fontFamily: "Urbanist-500",
+    fontSize: huddleType.helper,
+    lineHeight: huddleType.helperLine,
+    color: huddleColors.mutedText,
+  },
+  addCodeClose: {
+    width: huddleLayout.minTouch,
+    height: huddleLayout.minTouch,
+    borderRadius: huddleRadii.pill,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  addCodeIdentity: {
+    marginTop: huddleSpacing.x4,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: huddleSpacing.x3,
+  },
+  addCodeIdentityCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  addCodeName: {
+    fontFamily: "Urbanist-700",
+    fontSize: huddleType.body,
+    lineHeight: huddleType.labelLine,
+    color: huddleColors.text,
+  },
+  addCodeSocial: {
+    marginTop: 2,
+    fontFamily: "Urbanist-500",
+    fontSize: huddleType.helper,
+    lineHeight: huddleType.helperLine,
+    color: huddleColors.mutedText,
+  },
+  addCodeLoading: {
+    minHeight: 220,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  qrFrame: {
+    alignSelf: "center",
+    marginTop: huddleSpacing.x4,
+    padding: huddleSpacing.x4,
+    borderRadius: huddleRadii.glass,
+    backgroundColor: huddleColors.canvas,
+    borderWidth: 1,
+    borderColor: huddleColors.fieldBorderSoft,
+  },
+  huddleCodeText: {
+    marginTop: huddleSpacing.x3,
+    textAlign: "center",
+    fontFamily: "Urbanist-700",
+    fontSize: huddleType.h2,
+    lineHeight: huddleType.h2Line,
+    letterSpacing: 3,
+    color: huddleColors.text,
+  },
+  addCodeActions: {
+    marginTop: huddleSpacing.x4,
+    flexDirection: "row",
+    gap: huddleSpacing.x2,
+  },
+  addCodePrimary: {
+    flex: 1,
+    ...huddleButtons.base,
+    ...huddleButtons.primary,
+  },
+  addCodePrimaryDisabled: {
+    ...huddleButtons.disabled,
+  },
+  addCodePrimaryText: {
+    ...huddleButtons.label,
+    color: huddleColors.onPrimary,
+  },
+  addCodeSecondary: {
+    ...huddleGlassControls.surface,
+    minWidth: 96,
+    minHeight: huddleLayout.minTouch,
+    paddingHorizontal: huddleSpacing.x3,
+    borderRadius: huddleRadii.button,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: huddleSpacing.x2,
+  },
+  addCodeSecondaryText: {
+    fontFamily: "Urbanist-700",
+    fontSize: huddleType.label,
+    color: huddleColors.blue,
+  },
+  addCodeFooterActions: {
+    marginTop: huddleSpacing.x2,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  addCodeTextButton: {
+    minHeight: huddleLayout.minTouch,
+    justifyContent: "center",
+    paddingHorizontal: huddleSpacing.x2,
+  },
+  addCodeTextButtonLabel: {
+    fontFamily: "Urbanist-700",
+    fontSize: huddleType.label,
+    color: huddleColors.blue,
+  },
+  addCodeDangerText: {
+    color: huddleColors.validationRed,
+  },
+  addCodeNotice: {
+    marginTop: huddleSpacing.x2,
+    fontFamily: "Urbanist-600",
+    fontSize: huddleType.helper,
+    lineHeight: huddleType.helperLine,
+    color: huddleColors.success,
+  },
+  addCodeError: {
+    marginTop: huddleSpacing.x2,
+    fontFamily: "Urbanist-600",
+    fontSize: huddleFormFields.errorSize,
+    lineHeight: huddleFormFields.errorLine,
+    color: huddleColors.validationRed,
+  },
+  addCodeInputWrap: {
+    marginTop: huddleSpacing.x4,
+    minHeight: huddleLayout.fieldHeight,
+    borderRadius: huddleRadii.field,
+    borderWidth: 1,
+    borderColor: huddleColors.fieldBorder,
+    backgroundColor: huddleColors.canvas,
+    paddingHorizontal: huddleSpacing.x3,
+    paddingTop: huddleSpacing.x2,
+  },
+  addCodeInputLabel: {
+    fontFamily: "Urbanist-600",
+    fontSize: huddleFormFields.labelSize,
+    lineHeight: huddleFormFields.labelLine,
+    color: huddleColors.mutedText,
+  },
+  addCodeInput: {
+    flexShrink: 1,
+    minWidth: 0,
+    minHeight: 34,
+    paddingVertical: 0,
+    fontFamily: "Urbanist-700",
+    fontSize: huddleType.body,
+    lineHeight: huddleType.labelLine,
+    letterSpacing: 2,
+    color: huddleColors.text,
+    overflow: "hidden",
+  },
+  scannerOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: huddleSpacing.x4,
+    backgroundColor: "rgba(20,24,38,0.82)",
+  },
+  scannerCard: {
+    width: "100%",
+    maxWidth: 360,
+    aspectRatio: 0.72,
+    borderRadius: huddleRadii.sheet,
+    overflow: "hidden",
+    backgroundColor: huddleColors.text,
+  },
+  scannerHeader: {
+    height: 56,
+    paddingLeft: huddleSpacing.x4,
+    paddingRight: huddleSpacing.x2,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "rgba(20,24,38,0.92)",
+  },
+  scannerTitle: {
+    fontFamily: "Urbanist-700",
+    fontSize: huddleType.body,
+    color: huddleColors.onPrimary,
+  },
+  scannerCamera: {
+    flex: 1,
+  },
+  scannerReticle: {
+    position: "absolute",
+    left: "18%",
+    right: "18%",
+    top: "32%",
+    bottom: "22%",
+    borderWidth: 2,
+    borderColor: huddleColors.subscriptionAddonLime,
+    borderRadius: huddleRadii.glass,
   },
   familyPrimary: {
     width: "100%",

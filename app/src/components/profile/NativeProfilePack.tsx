@@ -1,20 +1,25 @@
 import { Feather } from "@expo/vector-icons";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
-import { Image as ExpoImage } from "expo-image";
+import { nativeFreshImageKey, nativeFreshImageUri, nativeMutableImageVersion } from "../../lib/nativeImageFreshness";
+import { nativePetPresentationImageStyle } from "../../lib/nativePetPhotoPresentation";
 import { NativePolaroidCard, nativePolaroidStyles, type NativePolaroidBadge } from "../NativePolaroidCard";
+import { NativePetImage } from "../NativePetImage";
 import {
   huddleColors,
+  huddlePolaroid,
   huddleSpacing,
   huddleType,
 } from "../../theme/huddleDesignTokens";
 
 export type NativeProfilePackPet = {
-  dob?: string | null;
+  ageYears?: number | null;
   id: string;
   isPublic?: boolean | null;
   name?: string | null;
   photoUrl?: string | null;
+  photoPosition?: { centerX: number; centerY: number; widthPct: number; sourceAspect?: number } | null;
   species?: string | null;
+  updatedAt?: string | null;
 };
 
 type NativeProfilePackProps = {
@@ -41,26 +46,13 @@ const formatSpecies = (value?: string | null) => {
     .join(" ");
 };
 
-const formatPetAge = (dob?: string | null) => {
-  if (!dob) return "";
-  const birthDate = new Date(dob);
-  if (Number.isNaN(birthDate.getTime())) return "";
-  const today = new Date();
-  let years = today.getFullYear() - birthDate.getFullYear();
-  let months = today.getMonth() - birthDate.getMonth();
-  if (today.getDate() < birthDate.getDate()) months -= 1;
-  if (months < 0) {
-    years -= 1;
-    months += 12;
-  }
-  if (years > 0) return `${years}`;
-  if (months > 0) return `${months} mo`;
-  return "";
-};
+const formatPetAge = (ageYears?: number | null) => (
+  typeof ageYears === "number" && Number.isInteger(ageYears) && ageYears >= 0 ? `${ageYears}` : ""
+);
 
 const formatPetCaption = (pet: NativeProfilePackPet) => {
   const species = formatSpecies(pet.species);
-  const age = formatPetAge(pet.dob);
+  const age = formatPetAge(pet.ageYears);
   return [species, age].filter(Boolean).join(" · ");
 };
 
@@ -135,11 +127,14 @@ export function NativeProfilePack({
                       {isPublic ? formatPetCaption(pet) : "PRIVATE"}
                     </Text>
                   )}
-                  disabled={!isPublic}
-                  onPress={isPublic ? () => onPetPress?.(pet.id, isPublic) : undefined}
-                  photo={pet.photoUrl ? (
-                    <ExpoImage accessibilityIgnoresInvertColors blurRadius={isPublic ? 0 : 12} cachePolicy="memory-disk" contentFit="cover" source={{ uri: pet.photoUrl }} style={nativePolaroidStyles.photo} transition={120} />
-                  ) : (
+	                  disabled={!isPublic}
+	                  onPress={isPublic ? () => onPetPress?.(pet.id, isPublic) : undefined}
+	                  photo={pet.photoUrl ? (() => {
+                      const photoVersion = nativeMutableImageVersion(pet.photoUrl, pet.updatedAt);
+                      return (
+	                    <NativePetImage accessibilityIgnoresInvertColors blurRadius={isPublic ? 0 : 12} cachePolicy="memory-disk" contentFit="fill" key={nativeFreshImageKey(pet.photoUrl, photoVersion)} uri={nativeFreshImageUri(pet.photoUrl, photoVersion)} style={[nativePolaroidStyles.photo, nativePetPresentationImageStyle(pet.photoPosition, huddlePolaroid.photo.aspectRatio)]} transition={120} />
+                      );
+                    })() : (
                     <View style={nativePolaroidStyles.photoPlaceholder}>
                       <Feather color={huddleColors.iconSubtle} name="image" size={30} />
                     </View>

@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from "react";
+import { fetchNativeResponseWithTimeout as fetch } from "../lib/nativeTimeout";
 import {
-  ActivityIndicator,
   Animated,
   Platform,
   Pressable,
@@ -10,18 +10,20 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import Feather from "@expo/vector-icons/Feather";
 import { NativeTurnstile } from "../components/NativeTurnstile";
-import { SlideToConfirm } from "../components/nativeModalPrimitives";
+import { AppKeyboardAvoidingView as KeyboardAvoidingView, SlideToConfirm } from "../components/nativeModalPrimitives";
 import { supabaseUrl } from "../lib/supabase";
-import { createNativeFunctionHeaders } from "../lib/nativeFunctionClient";
+import { createFreshNativeFunctionHeaders } from "../lib/nativeFunctionClient";
 import { haptic } from "../lib/nativeHaptics";
-import { useShakeAnimation } from "../lib/nativeAnimations";
+import { nativeSafeErrorCopy } from "../lib/nativeSafeErrorCopy";
+import { useErrorShake } from "../components/motion/useErrorShake";
+import { getNativeTurnstileSiteKey } from "../lib/nativeTurnstile";
 import {
   huddleButtons,
   huddleColors,
   huddleFieldStates,
+  huddleFormFields,
   huddleLayout,
   huddleRadii,
   huddleShadows,
@@ -37,10 +39,10 @@ type SupportErrors = {
 type SupportFocusedField = "subject" | "message" | "replyEmail" | null;
 
 const supportReplyEmailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const turnstileSiteKey =
-  process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY ||
-  process.env.VITE_TURNSTILE_SITE_KEY ||
-  "0x4AAAAAAC1AMILxX8-lFNmm";
+
+const nativeSupportSubmitErrorMessage = (value: unknown) => {
+  return nativeSafeErrorCopy(value, "Couldn't send your message. Please try again.");
+};
 
 export function NativeSupportScreen({ accountEmail, accessToken, onCancel }: { accountEmail?: string | null; accessToken?: string | null; onCancel?: () => void }) {
   const normalizedAccountEmail = String(accountEmail || "").trim();
@@ -55,8 +57,9 @@ export function NativeSupportScreen({ accountEmail, accessToken, onCancel }: { a
   const [turnstileError, setTurnstileError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
-  const [sendShakeAnim, triggerSendShake] = useShakeAnimation();
+  const { shake: triggerSendShake, shakeStyle: sendShakeStyle } = useErrorShake();
   const [ticketNumber, setTicketNumber] = useState<string | null>(null);
+  const [turnstileResetKey, setTurnstileResetKey] = useState(0);
   const messageInputRef = useRef<TextInput | null>(null);
   const replyEmailInputRef = useRef<TextInput | null>(null);
   const scrollRef = useRef<ScrollView | null>(null);
@@ -112,7 +115,6 @@ export function NativeSupportScreen({ accountEmail, accessToken, onCancel }: { a
     if (submitting) return;
     setSubmitError("");
     if (!validateSupportForm()) {
-      haptic.error();
       triggerSendShake();
       setSliderResetKey((current) => current + 1);
       // Scroll to first missing/invalid field
@@ -121,7 +123,6 @@ export function NativeSupportScreen({ accountEmail, accessToken, onCancel }: { a
       return;
     }
     if (!turnstileToken.trim()) {
-      haptic.error();
       triggerSendShake();
       setTurnstileError(turnstileError || "Complete human verification first.");
       setSliderResetKey((current) => current + 1);
@@ -133,7 +134,7 @@ export function NativeSupportScreen({ accountEmail, accessToken, onCancel }: { a
     try {
       const response = await fetch(`${supabaseUrl}/functions/v1/submit-support-ticket`, {
         method: "POST",
-        headers: createNativeFunctionHeaders(normalizedAccessToken),
+        headers: await createFreshNativeFunctionHeaders(normalizedAccessToken, { functionName: "submit-support-ticket", routeToken: normalizedAccessToken }),
         body: JSON.stringify({
           name: "Guest",
           email: wantsReply ? replyEmail.trim() : "noreply@huddle.pet",
@@ -145,7 +146,7 @@ export function NativeSupportScreen({ accountEmail, accessToken, onCancel }: { a
       });
       const body = (await response.json().catch(() => null)) as { ticket_number?: string; error?: string; message?: string } | null;
       if (!response.ok) {
-        throw new Error(body?.error || body?.message || `Support submit failed with HTTP ${response.status}.`);
+        throw new Error(nativeSupportSubmitErrorMessage(body?.error || body?.message || `Support submit failed with HTTP ${response.status}.`));
       }
       haptic.success();
       setTicketNumber(body?.ticket_number || "received");
@@ -156,9 +157,12 @@ export function NativeSupportScreen({ accountEmail, accessToken, onCancel }: { a
       setErrors({});
       setTurnstileToken("");
       setTurnstileError("");
+      setTurnstileResetKey((key) => key + 1);
     } catch (error) {
       haptic.error();
-      setSubmitError(error instanceof Error ? error.message : "Couldn't send your message. Please try again.");
+      setSubmitError(nativeSupportSubmitErrorMessage(error));
+      setTurnstileToken("");
+      setTurnstileResetKey((key) => key + 1);
     } finally {
       setSubmitting(false);
     }
@@ -166,7 +170,7 @@ export function NativeSupportScreen({ accountEmail, accessToken, onCancel }: { a
 
   return (
     <KeyboardAvoidingView
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      behavior="padding"
       style={styles.container}
     >
       <ScrollView
@@ -195,6 +199,10 @@ export function NativeSupportScreen({ accountEmail, accessToken, onCancel }: { a
               <View style={styles.fieldGroup}>
                 <Text style={styles.label}>Subject</Text>
                 <TextInput
+                multiline={false}
+                scrollEnabled
+                numberOfLines={1} lineBreakModeIOS="tail" lineBreakStrategyIOS="none"
+                textBreakStrategy="simple"
                   value={subject}
                   onFocus={() => setFocusedField("subject")}
                   onBlur={() => setFocusedField(null)}
@@ -270,6 +278,10 @@ export function NativeSupportScreen({ accountEmail, accessToken, onCancel }: { a
                 >
                   <Text style={styles.label}>Email</Text>
                   <TextInput
+                multiline={false}
+                scrollEnabled
+                numberOfLines={1} lineBreakModeIOS="tail" lineBreakStrategyIOS="none"
+                textBreakStrategy="simple"
                     ref={replyEmailInputRef}
                     value={replyEmail}
                     onFocus={() => setFocusedField("replyEmail")}
@@ -312,19 +324,20 @@ export function NativeSupportScreen({ accountEmail, accessToken, onCancel }: { a
                 <NativeTurnstile
                   action="support_ticket"
                   compact
+                  key={`support-turnstile-${turnstileResetKey}`}
                   onError={setTurnstileError}
                   onToken={(token) => {
                     setTurnstileToken(token);
                     if (token) setTurnstileError("");
                   }}
-                  siteKey={turnstileSiteKey}
+                  siteKey={getNativeTurnstileSiteKey()}
                 />
                 {turnstileError ? <Text style={styles.errorText}>{turnstileError}</Text> : null}
               </View>
               {submitError ? <Text style={styles.errorText}>{submitError}</Text> : null}
 
               <View style={styles.buttonStack}>
-                <Animated.View style={{ transform: [{ translateX: sendShakeAnim }] }}>
+                <Animated.View style={sendShakeStyle}>
                   <SlideToConfirm
                     busy={submitting}
                     label="Slide to Send"
@@ -374,6 +387,8 @@ const styles = StyleSheet.create({
     color: huddleColors.text,
   },
   field: {
+    flexShrink: 1,
+    minWidth: 0,
     minHeight: huddleLayout.fieldHeight,
     borderRadius: huddleRadii.field,
     borderWidth: 1,
@@ -384,6 +399,7 @@ const styles = StyleSheet.create({
     fontSize: huddleType.body,
     lineHeight: 22,
     color: huddleColors.text,
+    overflow: "hidden",
     shadowColor: huddleColors.neutralShadow,
     shadowOpacity: 0.42,
     shadowRadius: 14,
@@ -397,7 +413,8 @@ const styles = StyleSheet.create({
     ...huddleFieldStates.error,
   },
   textArea: {
-    height: 108,
+    height: huddleFormFields.multilineHeight,
+    maxHeight: huddleFormFields.multilineHeight,
     paddingTop: huddleSpacing.x3,
   },
   checkboxRow: {
@@ -432,30 +449,9 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     color: huddleColors.text,
   },
-  turnstileBox: {
-    minHeight: 74,
-    overflow: "hidden",
-  },
   turnstileGroup: {
     width: "100%",
     gap: huddleSpacing.x2,
-  },
-  turnstileContainer: {
-    height: 74,
-    backgroundColor: "transparent",
-  },
-  turnstileWebView: {
-    height: 74,
-    backgroundColor: "transparent",
-  },
-  turnstileStatus: {
-    position: "absolute",
-    left: 2,
-    bottom: 0,
-    fontFamily: "Urbanist-500",
-    fontSize: 12,
-    lineHeight: 16,
-    color: huddleColors.mutedText,
   },
   buttonStack: {
     gap: huddleSpacing.x3,
@@ -468,9 +464,6 @@ const styles = StyleSheet.create({
   primaryLabel: {
     ...huddleButtons.label,
     color: huddleColors.onPrimary,
-  },
-  disabled: {
-    ...huddleButtons.disabled,
   },
   pressed: {
     ...huddleButtons.pressed,

@@ -1,0 +1,42 @@
+export const NATIVE_CARER_OWNER_PRIVATE_COLUMNS = [
+  "stripe_account_id",
+  "stripe_details_submitted",
+  "stripe_payouts_enabled",
+  "stripe_payout_status",
+  "stripe_requirements_currently_due",
+] as const;
+
+export const NATIVE_CARER_PUBLIC_PROFILE_COLUMNS = [
+  "id",
+  "user_id",
+  "story",
+  "skills",
+  "proof_metadata",
+  "vet_license_found",
+  "days",
+  "time_blocks",
+  "other_time_from",
+  "other_time_to",
+  "emergency_readiness",
+  "min_notice_value",
+  "min_notice_unit",
+  "location_styles",
+  "area_name",
+  "area_country",
+  "area_lat",
+  "area_lng",
+  "preferred_meetup_areas",
+  "services_offered",
+  "services_other",
+  "pet_types",
+  "pet_types_other",
+  "dog_sizes",
+  "currency",
+  "starting_price",
+  "rates",
+  "agreement_accepted",
+  "agreement_accepted_at",
+  "listed",
+] as const;
+
+export const nativeCarerProfileSelectColumns = () => NATIVE_CARER_PUBLIC_PROFILE_COLUMNS.join(",");

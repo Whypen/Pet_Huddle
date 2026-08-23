@@ -6,7 +6,6 @@ export type QuotaCaps = {
   discoveryLabel: string;
   discoveryPrioritySortWeight: number;
   discoveryPriorityLabel: string | null;
-  threadPostsPerDay: number;
   starsPerMonth: number;
   starsWalletCap: number;
   broadcastAlertsPerMonth: number;
@@ -23,13 +22,6 @@ export type QuotaCaps = {
 
 export type QuotaCopy = {
   discovery: {
-    exhausted: {
-      free: string;
-      plus: string;
-      gold: string;
-    };
-  };
-  threads: {
     exhausted: {
       free: string;
       plus: string;
@@ -69,7 +61,6 @@ export type QuotaCopy = {
 export type QuotaResetRules = {
   stars: "subscription_anniversary";
   broadcasts: "subscription_anniversary";
-  threads: "local_midnight";
   discovery: "local_midnight";
   aiVet: "local_midnight";
   broadcastActiveSlots: "realtime";
@@ -88,18 +79,17 @@ export type StripePlansByTier = Record<"plus" | "gold", Record<QuotaBillingCycle
 
 const TIER_LABELS: Record<QuotaTier, string> = {
   free: "Free",
-  plus: "Huddle+",
-  gold: "Gold",
+  plus: "huddle+",
+  gold: "huddle＊",
 };
 
 const CAPS_BY_TIER: Record<QuotaTier, QuotaCaps> = {
   free: {
     aiVetUploadsPerDay: 5,
-    discoveryViewsPerDay: 100,
+    discoveryViewsPerDay: 10,
     discoveryLabel: "Limited",
     discoveryPrioritySortWeight: 1,
     discoveryPriorityLabel: null,
-    threadPostsPerDay: 10,
     starsPerMonth: 0,
     starsWalletCap: 0,
     broadcastAlertsPerMonth: 10,
@@ -115,11 +105,10 @@ const CAPS_BY_TIER: Record<QuotaTier, QuotaCaps> = {
   },
   plus: {
     aiVetUploadsPerDay: 20,
-    discoveryViewsPerDay: 250,
+    discoveryViewsPerDay: 20,
     discoveryLabel: "×2 Discovery",
     discoveryPrioritySortWeight: 2,
     discoveryPriorityLabel: null,
-    threadPostsPerDay: 30,
     starsPerMonth: 4,
     starsWalletCap: 4,
     broadcastAlertsPerMonth: 40,
@@ -135,11 +124,10 @@ const CAPS_BY_TIER: Record<QuotaTier, QuotaCaps> = {
   },
   gold: {
     aiVetUploadsPerDay: 40,
-    discoveryViewsPerDay: 400,
+    discoveryViewsPerDay: null,
     discoveryLabel: "Unlimited Discovery",
     discoveryPrioritySortWeight: 3,
     discoveryPriorityLabel: "3× visibility",
-    threadPostsPerDay: 60,
     starsPerMonth: 10,
     starsWalletCap: 10,
     broadcastAlertsPerMonth: 80,
@@ -158,22 +146,15 @@ const CAPS_BY_TIER: Record<QuotaTier, QuotaCaps> = {
 const COPY: QuotaCopy = {
   discovery: {
     exhausted: {
-      free: "Ready to expand the pack? Upgrade to Huddle+ for more or Huddle Gold for unlimited profiles.",
-      plus: "You’ve reached today’s Discover limit. Upgrade to Gold for the full daily cap.",
-      gold: "You’ve reached today’s Discover cap. More profiles will be ready tomorrow.",
-    },
-  },
-  threads: {
-    exhausted: {
-      free: "Your posts are keeping everyone busy. Upgrade to Huddle+ or Gold for more posts.",
-      plus: "Your posts are keeping everyone busy. Upgrade to Gold for more posts.",
-      gold: "Your posts are keeping everyone busy. Try again tomorrow.",
+      free: "You’ve used today’s Waves. Upgrade to huddle+ for more or huddle＊ for unlimited Waves.",
+      plus: "You’ve used today’s Waves. Upgrade to huddle＊ for unlimited Waves.",
+      gold: "Waves are unlimited with huddle＊.",
     },
   },
   aiVet: {
     exhausted: {
-      free: "Too many images keep our AI Vet busy. Upgrade to Huddle+ or Gold for more uploads.",
-      plus: "Too many images keep our AI Vet busy. Upgrade to Gold for more uploads.",
+      free: "Too many images keep our AI Vet busy. Upgrade to huddle+ or huddle＊ for more uploads.",
+      plus: "Too many images keep our AI Vet busy. Upgrade to huddle＊ for more uploads.",
       gold: "Too many images keep our AI Vet busy. More tomorrow!",
     },
   },
@@ -183,18 +164,18 @@ const COPY: QuotaCopy = {
   },
   broadcast: {
     quotaExhausted: {
-      free: "Your alerts are keeping everyone busy. Upgrade to Huddle+ or Gold for more broadcasts.",
-      plus: "Your alerts are keeping everyone busy. Upgrade to Gold for more broadcasts.",
+      free: "Your alerts are keeping everyone busy. Upgrade to huddle+ or huddle＊ for more broadcasts.",
+      plus: "Your alerts are keeping everyone busy. Upgrade to huddle＊ for more broadcasts.",
       gold: "Your alerts are keeping everyone busy. Let's do it tomorrow.",
     },
     slotsFull:
       "You have too many active broadcasts. Wait for one to expire or upgrade for more slots.",
   },
   filters: {
-    locked: "Unlock with Huddle+ or Gold to use this filter.",
+    locked: "Unlock with huddle+ or huddle＊ to use this filter.",
   },
   familyInvite: {
-    nonGold: "Upgrade to Gold for Family Sharing.",
+    nonGold: "Upgrade to huddle＊ for Family Sharing.",
     received: "<Display Name> has invited you to join their family! [Accept] [Decline]",
   },
   misc: {
@@ -206,7 +187,6 @@ const COPY: QuotaCopy = {
 const RESET_RULES: QuotaResetRules = {
   stars: "subscription_anniversary",
   broadcasts: "subscription_anniversary",
-  threads: "local_midnight",
   discovery: "local_midnight",
   aiVet: "local_midnight",
   broadcastActiveSlots: "realtime",

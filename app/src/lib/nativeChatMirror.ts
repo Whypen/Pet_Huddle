@@ -102,4 +102,8 @@ export const unreadTotalWithReadOverlay = <T extends Pick<NativeChatMirrorInboxR
   rows.reduce((sum, row) => sum + (readOverlay.has(row.chatId) ? 0 : Math.max(0, row.unreadCount)), 0)
 );
 
-export const shouldHydrateCachedMessagesBeforeMembership = (params: { withUserId?: string | null }) => Boolean(params.withUserId);
+// Pre-paint access-checked cached messages before re-verifying membership for BOTH
+// entry paths: new direct chats opened by user id, and existing rooms opened from the
+// inbox (where access is already implied). The membership/relationship check still runs
+// afterward and tears down + clears cache if access is no longer valid.
+export const shouldHydrateCachedMessagesBeforeMembership = (params: { withUserId?: string | null; roomId?: string | null }) => Boolean(params.withUserId || params.roomId);

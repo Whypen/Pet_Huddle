@@ -105,7 +105,7 @@ const DOCUMENTS: NativeLegalPageContent[] = [
       {
         "title": "8. Location and map data",
         "body": [
-          "If you pin your location on the map, the location precision you choose — such as an area or a more precise pin — is visible to other users for the duration of your pin. Public map views do not expose raw GPS coordinates beyond the selected precision. You can remove your pin at any time through the map. Location data may also be used for nearby discovery, care matching, alert features, fraud prevention, and analytics. You can manage location access in your device settings; disabling access may limit location-dependent features."
+          "If you pin your location on the map, an approximate area may be used to indicate area popularity for the duration of your pin. Public map views do not display your precise location to other users. You can remove your pin at any time through the map. Location data may also be used for nearby discovery, care matching, alert features, fraud prevention, and analytics. You can manage location access in your device settings; disabling access may limit location-dependent features."
         ]
       },
       {
@@ -123,7 +123,7 @@ const DOCUMENTS: NativeLegalPageContent[] = [
       {
         "title": "11. Age rules",
         "body": [
-          "HUDDLE is for users aged 13 and above. Discover, stranger chat, and certain social features are limited to users aged 16 and above. Identity verification and care marketplace access require users to be at least 18. HUDDLE uses age data, feature gating, and enforcement to apply these limits."
+          "HUDDLE is for users aged 13 and above. Discover and the Care marketplace are limited to users aged 16 and above. Users aged 13 to 15 may use the rest of the app. HUDDLE uses age data, feature gating, and enforcement to apply these limits."
         ]
       },
       {
@@ -177,7 +177,7 @@ const DOCUMENTS: NativeLegalPageContent[] = [
       {
         "title": "1. Who can use HUDDLE",
         "body": [
-          "HUDDLE is for users aged 13 and above. Discover and stranger chat are limited to users aged 16 and above. The care marketplace and identity verification require users to be at least 18. You must provide accurate information, keep your credentials secure, and use only your own account. HUDDLE may require phone verification, identity verification, ID/passport checks, liveness checks, payment method confirmation, or other trust steps to access or continue using certain features."
+          "HUDDLE is for users aged 13 and above. Discover and the Care marketplace are limited to users aged 16 and above. Users aged 13 to 15 may use the rest of the app. You must provide accurate information, keep your credentials secure, and use only your own account. HUDDLE may require phone verification, identity verification, ID/passport checks, liveness checks, payment method confirmation, or other trust steps to access or continue using certain features."
         ]
       },
       {
@@ -441,7 +441,7 @@ const DOCUMENTS: NativeLegalPageContent[] = [
       {
         "title": "3. Eligibility and identity verification",
         "body": [
-          "You must be at least 18 years old. You must complete all identity verification, ID/passport checks, payment method confirmation, and trust steps HUDDLE requires before accessing the care marketplace. Your marketplace access is conditional on maintaining good standing, up-to-date verification, and a valid Stripe Connect payout account. HUDDLE may pause or revoke your marketplace access if any required verification lapses or becomes invalid."
+          "You must be at least 16 years old. You must complete all identity verification, ID/passport checks, payment method confirmation, and trust steps HUDDLE requires before accessing the care marketplace. Your marketplace access is conditional on maintaining good standing, up-to-date verification, and a valid Stripe Connect payout account. HUDDLE may pause or revoke your marketplace access if any required verification lapses or becomes invalid."
         ]
       },
       {

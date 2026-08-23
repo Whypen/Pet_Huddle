@@ -19,7 +19,8 @@ export function NativeProfilePullQuote({ bio }: NativeProfilePullQuoteProps) {
 const styles = StyleSheet.create({
   section: {
     paddingHorizontal: huddleSpacing.x5,
-    paddingVertical: huddleSpacing.x7,
+    paddingTop: huddleSpacing.x2,
+    paddingBottom: huddleSpacing.x7,
   },
   quote: {
     maxWidth: 340,

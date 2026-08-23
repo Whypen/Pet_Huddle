@@ -1,7 +1,8 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { parsePhoneNumber } from "libphonenumber-js/min";
-import { createNativeFunctionHeaders } from "./nativeFunctionClient";
-import { supabase, supabaseUrl } from "./supabase";
+import { createFreshNativeFunctionHeaders, createNativeFunctionHeaders, getFreshNativeAccessToken, getFreshNativeSession } from "./nativeFunctionClient";
+import { supabaseUrl } from "./supabase";
+import { fetchNativeResponseWithTimeout as fetch } from "./nativeTimeout";
 
 type NativeOtpRateLimitReason =
   | "resend_cooldown"
@@ -18,6 +19,7 @@ type NativeSendOtpReasonCode =
   | "phone_in_use"
   | "invalid_phone"
   | "session_missing"
+  | "verification_required"
   | "provider_send_failed";
 
 type NativeVerifyOtpReasonCode =
@@ -55,7 +57,6 @@ type NativeStoredOtpChallenge = {
 
 const OTP_CHALLENGE_STORAGE_KEY = "huddle_native_phone_otp_challenge_v1";
 const DEVICE_ID_STORAGE_KEY = "huddle_native_phone_otp_device_id_v1";
-const TEST_OTP_SHORTCUT_CODE = "498005";
 
 const allowedIsoCodes = new Set(
   String(process.env.EXPO_PUBLIC_ALLOWED_SMS_COUNTRY_CODES || process.env.VITE_ALLOWED_SMS_COUNTRY_CODES || "")
@@ -64,10 +65,24 @@ const allowedIsoCodes = new Set(
     .filter(Boolean),
 );
 
-const testShortcutEnabled = String(process.env.EXPO_PUBLIC_TEST_OTP_SHORTCUT || process.env.VITE_TEST_OTP_SHORTCUT || "").toLowerCase() === "true";
 
 const normalize = (value: unknown) => String(value || "").trim().toLowerCase();
 const normalizePhoneKey = (value: string) => String(value || "").trim().replace(/[^\d+]/g, "");
+
+const readJwtSub = (token: string | null | undefined): string | null => {
+  try {
+    const payloadPart = String(token || "").trim().split(".")[1];
+    if (!payloadPart) return null;
+    const normalized = payloadPart.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized.padEnd(normalized.length + ((4 - (normalized.length % 4)) % 4), "=");
+    if (typeof atob !== "function") return null;
+    const payload = JSON.parse(atob(padded)) as { sub?: unknown };
+    const sub = String(payload.sub || "").trim();
+    return sub || null;
+  } catch {
+    return null;
+  }
+};
 
 export function isNativePhoneCountryAllowed(phone: string): boolean {
   if (allowedIsoCodes.size === 0) return true;
@@ -153,6 +168,7 @@ const mapSendOtpFailure = (
   if (statusCode === 401 || raw.includes("unauthorized") || raw.includes("jwt") || raw.includes("auth_required")) return { message: "Please sign in again and try once more.", unavailable: false };
   if (reasonCode === "phone_in_use" || raw.includes("already used by another account") || raw.includes("already in use") || raw.includes("already been registered")) return { message: "This phone number is already used by another account.", unavailable: false };
   if (reasonCode === "invalid_phone" || raw.includes("invalid phone")) return { message: "Enter a valid phone number.", unavailable: false };
+  if (reasonCode === "verification_required") return { message: "Complete identity verification first.", unavailable: false };
   if (statusCode === 403 && (raw.includes("turnstile") || raw.includes("human_verification"))) return { message: "Please complete the verification first.", unavailable: false };
   if (reasonCode === "already_verified") return { message: "This number is already verified for your account.", unavailable: false };
   if (reasonCode === "sms_region_blocked") return { message: "Phone verification is temporarily unavailable.", unavailable: true };
@@ -183,23 +199,31 @@ const mapVerifyOtpFailure = (
 
 async function postNativeOtpFunction<T>(functionName: string, body: unknown, accessToken?: string) {
   try {
+    const sessionToken = await getFreshNativeAccessToken(accessToken);
+    const requiresAuthenticatedUser =
+      body && typeof body === "object" && (body as { verification_context?: unknown }).verification_context === "verify_identity";
+    const headers = sessionToken
+      ? await createFreshNativeFunctionHeaders(sessionToken, { functionName, routeToken: accessToken })
+      : requiresAuthenticatedUser
+        ? await createFreshNativeFunctionHeaders(accessToken, { functionName, routeToken: accessToken })
+        : createNativeFunctionHeaders();
     const response = await fetch(`${supabaseUrl}/functions/v1/${functionName}`, {
       method: "POST",
-      headers: createNativeFunctionHeaders(accessToken),
+      headers,
       body: JSON.stringify(body),
     });
     const payload = (await response.json().catch(() => null)) as
-      | (T & { error?: string; message?: string; public_message?: string; details?: unknown })
+      | (T & { error?: string; message?: string; public_message?: string; details?: unknown; reason_code?: unknown; retry_after?: unknown })
       | null;
     if (!response.ok) {
       return {
         data: null,
-        details: payload?.details,
+        details: payload?.details ?? payload,
         error: String(payload?.public_message || payload?.error || payload?.message || `http_${response.status}`),
         status: response.status,
       };
     }
-    return { data: payload as T | null, details: payload?.details, error: null, status: response.status };
+    return { data: payload as T | null, details: payload?.details ?? payload, error: null, status: response.status };
   } catch (error) {
     return {
       data: null,
@@ -214,24 +238,20 @@ export async function requestNativePhoneOtp(
   phone: string,
   turnstileToken: string,
   accessTokenOverride?: string | null,
-): Promise<{ cooldownSeconds?: number; error?: string; ok: boolean; unavailable?: boolean }> {
+  options: { verificationContext?: "verify_identity" } = {},
+): Promise<{ cooldownSeconds?: number; error?: string; failureKind?: string; ok: boolean; retryAfterSeconds?: number; unavailable?: boolean }> {
   const normalized = phone.trim();
   const phoneKey = normalizePhoneKey(normalized);
   if (!normalized) return { ok: false, error: "Enter a valid phone number." };
-  if (!turnstileToken.trim()) return { ok: false, error: "Please complete the verification first." };
+  if (!turnstileToken.trim() && options.verificationContext !== "verify_identity") return { ok: false, error: "Please complete the verification first." };
   if (!isNativePhoneCountryAllowed(normalized)) return { ok: false, error: "Phone verification is not available yet.", unavailable: true };
 
-  if (testShortcutEnabled) {
-    await writeStoredOtpChallenge({ challengeId: "test-shortcut", otpType: "sms", phoneKey, ownerId: null, createdAt: new Date().toISOString(), expiresAt: null });
-    return { ok: true, cooldownSeconds: 90 };
-  }
-
-  const [{ data: sessionData }, deviceId] = await Promise.all([
-    supabase.auth.getSession(),
+  const [freshSession, deviceId] = await Promise.all([
+    getFreshNativeSession(),
     getNativeOtpDeviceId(),
   ]);
-  const sessionToken = String(accessTokenOverride || sessionData.session?.access_token || "").trim();
-  const sessionUserId = String(sessionData.session?.user?.id || "").trim() || null;
+  const sessionToken = freshSession?.accessToken || "";
+  const sessionUserId = freshSession?.userId || readJwtSub(accessTokenOverride) || readJwtSub(sessionToken) || null;
   const accessToken = sessionToken && (sessionUserId || accessTokenOverride) ? sessionToken : "";
 
   type NativeSendResponse = {
@@ -250,14 +270,22 @@ export async function requestNativePhoneOtp(
       phone: normalized,
       turnstile_action: "send_pre_signup_verify",
       turnstile_token: turnstileToken,
+      verification_context: options.verificationContext,
     },
     accessToken,
   );
 
   if (response.error || !response.data?.ok) {
     await clearStoredOtpChallenge();
-    const mapped = mapSendOtpFailure(response.status, response.error ?? response.data?.error ?? "", response.details as NativeSendOtpErrorDetails | null | undefined);
-    return { ok: false, error: mapped.message, unavailable: mapped.unavailable };
+    const details = response.details as NativeSendOtpErrorDetails | null | undefined;
+    const mapped = mapSendOtpFailure(response.status, response.error ?? response.data?.error ?? "", details);
+    return {
+      ok: false,
+      error: mapped.message,
+      failureKind: details?.reason_code ?? response.error ?? response.data?.error,
+      retryAfterSeconds: details?.retry_after,
+      unavailable: mapped.unavailable,
+    };
   }
 
   if (!response.data.challenge_id) {
@@ -280,32 +308,28 @@ export async function verifyNativePhoneOtp(
   phone: string,
   token: string,
   accessTokenOverride?: string | null,
-): Promise<{ error?: string; ok: boolean }> {
+): Promise<{ error?: string; failureKind?: string; ok: boolean; retryAfterSeconds?: number }> {
   const normalizedPhone = phone.trim();
   const normalizedToken = token.trim();
   const phoneKey = normalizePhoneKey(normalizedPhone);
   if (!normalizedPhone || !normalizedToken) return { ok: false, error: "Enter the 6-digit code." };
 
-  if (testShortcutEnabled) {
-    return normalizedToken === TEST_OTP_SHORTCUT_CODE ? { ok: true } : { ok: false, error: "Invalid code" };
-  }
-
-  const [{ data: sessionData }, challenge, deviceId] = await Promise.all([
-    supabase.auth.getSession(),
+  const [freshSession, challenge, deviceId] = await Promise.all([
+    getFreshNativeSession(),
     readStoredOtpChallenge(),
     getNativeOtpDeviceId(),
   ]);
-  const sessionToken = String(accessTokenOverride || sessionData.session?.access_token || "").trim();
-  const ownerId = String(sessionData.session?.user?.id || "").trim() || null;
+  const sessionToken = freshSession?.accessToken || "";
+  const ownerId = freshSession?.userId || readJwtSub(accessTokenOverride) || readJwtSub(sessionToken) || null;
   const accessToken = sessionToken && (ownerId || accessTokenOverride) ? sessionToken : "";
 
   if (!challenge || challenge.phoneKey !== phoneKey || (challenge.ownerId !== null && challenge.ownerId !== ownerId)) {
-    return { ok: false, error: "Your verification session expired. Request a new code." };
+    return { ok: false, error: "Your verification session expired. Request a new code.", failureKind: "challenge_expired" };
   }
 
   if (!accessToken) {
     await clearStoredOtpChallenge({ ownerId, phoneKey });
-    return { ok: false, error: "Your verification session expired. Please sign in again." };
+    return { ok: false, error: "Your verification session expired. Please sign in again.", failureKind: "session_expired" };
   }
 
   type NativeVerifyResponse = { error?: string; ok: boolean };
@@ -332,7 +356,12 @@ export async function verifyNativePhoneOtp(
     ) {
       await clearStoredOtpChallenge({ ownerId, phoneKey });
     }
-    return { ok: false, error: mapVerifyOtpFailure(response.status, response.error ?? response.data?.error ?? "", details) };
+    return {
+      ok: false,
+      error: mapVerifyOtpFailure(response.status, response.error ?? response.data?.error ?? "", details),
+      failureKind: details?.reason_code ?? response.error ?? response.data?.error,
+      retryAfterSeconds: details?.retry_after,
+    };
   }
 
   await clearStoredOtpChallenge({ ownerId, phoneKey });

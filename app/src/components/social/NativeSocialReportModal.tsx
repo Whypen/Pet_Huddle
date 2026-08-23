@@ -1,11 +1,13 @@
 import { Feather } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
+import { launchNativeImageLibraryAsync } from "../../lib/nativeMediaPermissions";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Animated, Image, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View, type ImageStyle } from "react-native";
-import { AppBottomSheet, AppBottomSheetFooter, AppBottomSheetHeader, AppBottomSheetScroll, AppModalCloseButton, SlideToConfirm } from "../nativeModalPrimitives";
+import { Animated, Image, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View, type ImageStyle } from "react-native";
+import { AppBottomSheet, AppBottomSheetFooter, AppBottomSheetHeader, AppBottomSheetScroll, AppKeyboardAvoidingView as KeyboardAvoidingView, AppModalCloseButton, SlideToConfirm } from "../nativeModalPrimitives";
 import { nativeModalStyles } from "../nativeModalPrimitives.styles";
-import { useShakeAnimation } from "../../lib/nativeAnimations";
+import { useErrorShake } from "../motion/useErrorShake";
 import { haptic } from "../../lib/nativeHaptics";
+import { nativeSafeErrorCopy } from "../../lib/nativeSafeErrorCopy";
 import { NativeFormTextField } from "../NativeFormField";
 import {
   areNativeSocialUsersBlocked,
@@ -19,6 +21,7 @@ import { createNativeProtectedActionError, getNativeProtectedActionResult, logNa
 import {
   huddleColors,
   huddleFieldStates,
+  huddleGlassControls,
   huddleMapBroadcastFooter,
   huddleRadii,
   huddleSpacing,
@@ -40,6 +43,12 @@ type NativeSocialReportTarget = {
   userId: string;
 };
 
+export type NativeReportSubject = {
+  id: string;
+  label: string;
+  type: "social_post" | "social_comment" | "social_reply" | "group_chat" | "direct_chat" | "map_alert" | "care_booking" | "profile";
+};
+
 type NativeReportInputField = "details" | "other";
 
 const toggleSetValue = (set: Set<string>, value: string) => {
@@ -59,8 +68,10 @@ export function NativeSocialReportModal({
   onSubmitStart,
   onSubmitSuccess,
   open,
+  sessionKey,
   source = NATIVE_SOCIAL_REPORT_SOURCE,
   sourceOrigin = NATIVE_SOCIAL_REPORT_SOURCE_ORIGIN,
+  subject,
   target,
 }: {
   accessToken?: string | null;
@@ -72,8 +83,10 @@ export function NativeSocialReportModal({
   onSubmitStart?: () => Promise<void> | void;
   onSubmitSuccess?: () => Promise<void> | void;
   open: boolean;
+  sessionKey?: string | null;
   source?: NativeReportSource;
   sourceOrigin?: NativeReportSourceOrigin;
+  subject?: NativeReportSubject | null;
   target: NativeSocialReportTarget | null;
 }) {
   const [categories, setCategories] = useState<Set<string>>(new Set());
@@ -81,7 +94,7 @@ export function NativeSocialReportModal({
   const [otherText, setOtherText] = useState("");
   const [uploads, setUploads] = useState<NativeSocialComposerMedia[]>([]);
   const [submitting, setSubmitting] = useState(false);
-  const [reportShakeAnim, triggerReportShake] = useShakeAnimation();
+  const { shake: triggerReportShake, shakeStyle: reportShakeStyle } = useErrorShake();
   // Broadcast-style: slide always enabled; on commit, validate; if invalid, mark category error + scroll to top + reset slider + shake
   const [categoryError, setCategoryError] = useState(false);
   const [reportSliderResetKey, setReportSliderResetKey] = useState(0);
@@ -110,19 +123,24 @@ export function NativeSocialReportModal({
     return () => {
       active = false;
     };
-  }, [currentUserId, onClose, onNotice, open, target?.userId]);
+  }, [accessToken, currentUserId, onClose, onNotice, open, target?.userId]);
 
   const pickImages = useCallback(async () => {
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) return;
-    const result = await ImagePicker.launchImageLibraryAsync({
-      allowsMultipleSelection: true,
-      mediaTypes: ["images"],
-      orderedSelection: true,
-      preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
-      quality: 0.86,
-      selectionLimit: Math.max(1, NATIVE_SOCIAL_REPORT_MAX_ATTACHMENTS - uploads.length),
-    });
+    let result: Awaited<ReturnType<typeof ImagePicker.launchImageLibraryAsync>>;
+    try {
+      // Best-effort request; PHPicker presents regardless, so never hard-block.
+      result = await launchNativeImageLibraryAsync({
+        allowsMultipleSelection: true,
+        mediaTypes: ["images"],
+        orderedSelection: true,
+        preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
+        quality: 0.86,
+        selectionLimit: Math.max(1, NATIVE_SOCIAL_REPORT_MAX_ATTACHMENTS - uploads.length),
+      });
+    } catch (error) {
+      onNotice(nativeSafeErrorCopy(error, "Couldn't open your photo library. Try again."));
+      return;
+    }
     if (result.canceled) return;
     const incoming: NativeSocialComposerMedia[] = result.assets.map((asset) => ({
       durationSeconds: null,
@@ -161,7 +179,6 @@ export function NativeSocialReportModal({
     if (submitting) return;
     if (categories.size === 0) {
       setCategoryError(true);
-      haptic.error();
       triggerReportShake();
       setReportSliderResetKey((current) => current + 1);
       onNotice(NATIVE_SOCIAL_REPORT_COPY.selectReason);
@@ -174,7 +191,7 @@ export function NativeSocialReportModal({
       await onSubmitStart?.();
       const attachmentUrls: string[] = [];
       for (const media of uploads) {
-        const uploadedUrl = await uploadNativeSocialImage(currentUserId, media, "report", accessToken);
+        const uploadedUrl = await uploadNativeSocialImage(currentUserId, media, "report", accessToken, sessionKey);
         uploadedAttachmentUrls.push(uploadedUrl);
         attachmentUrls.push(uploadedUrl);
       }
@@ -186,8 +203,10 @@ export function NativeSocialReportModal({
         other: categories.has("Others") ? otherText.trim() : "",
         chatRoomId: chatRoomId ?? null,
         reporterId: currentUserId,
+        sessionKey,
         source,
         sourceOrigin,
+        subject,
         targetName: target.author.displayName || target.author.socialId,
         targetUserId: target.userId,
       });
@@ -196,7 +215,7 @@ export function NativeSocialReportModal({
       onClose();
     } catch (error) {
       if (currentUserId && uploadedAttachmentUrls.length > 0) {
-        const cleanupResult: NativeProtectedActionCleanupResult = await cleanupNativeSocialStorageImages(uploadedAttachmentUrls, currentUserId, accessToken, "social_report_orphan_upload").catch(() => "failed" as const);
+        const cleanupResult: NativeProtectedActionCleanupResult = await cleanupNativeSocialStorageImages(uploadedAttachmentUrls, currentUserId, accessToken, "social_report_orphan_upload", sessionKey).catch(() => "failed" as const);
         logNativeProtectedActionFailure("[native.socialReport] orphan_cleanup", createNativeProtectedActionError({
           ok: false,
           stage: getNativeProtectedActionResult(error)?.stage || "domain_save",
@@ -207,11 +226,11 @@ export function NativeSocialReportModal({
       }
       logNativeProtectedActionFailure("[native.socialReport] submit_failed", error);
       await onSubmitFailure?.();
-      onNotice(NATIVE_SOCIAL_REPORT_COPY.missingTarget);
+      onNotice(nativeSafeErrorCopy(error, "Unable to submit report right now."));
     } finally {
       setSubmitting(false);
     }
-  }, [accessToken, categories, chatRoomId, currentUserId, details, onClose, onNotice, onSubmitFailure, onSubmitStart, onSubmitSuccess, otherText, source, sourceOrigin, submitting, target, triggerReportShake, uploads]);
+  }, [accessToken, categories, chatRoomId, currentUserId, details, onClose, onNotice, onSubmitFailure, onSubmitStart, onSubmitSuccess, otherText, sessionKey, source, sourceOrigin, subject, submitting, target, triggerReportShake, uploads]);
 
   return (
     <Modal animationType="slide" onRequestClose={onClose} presentationStyle="overFullScreen" transparent visible={open}>
@@ -280,6 +299,9 @@ export function NativeSocialReportModal({
                 {uploads.map((upload, index) => (
                   <View key={`${upload.uri}-${index}`} style={styles.uploadPreview}>
                     <Image accessibilityLabel={`${NATIVE_SOCIAL_REPORT_COPY.uploadAltPrefix} ${index + 1}`} accessibilityIgnoresInvertColors source={{ uri: upload.uri }} style={styles.uploadPreviewImage as ImageStyle} />
+                    <Pressable accessibilityLabel="Remove report image" accessibilityRole="button" onPress={() => setUploads((current) => current.filter((_, idx) => idx !== index))} style={styles.uploadRemoveButton}>
+                      <Feather color={huddleColors.onPrimary} name="x" size={12} />
+                    </Pressable>
                   </View>
                 ))}
               </View>
@@ -288,9 +310,9 @@ export function NativeSocialReportModal({
           <AppBottomSheetFooter>
             <View style={styles.reportFooterRow}>
               <Pressable accessibilityLabel={NATIVE_SOCIAL_REPORT_COPY.imagePickerLabel} accessibilityRole="button" onPress={pickImages} style={({ pressed }) => [styles.imageButton, pressed ? styles.pressed : null]}>
-                <Feather color={huddleColors.mutedText} name="camera" size={16} />
+                <Feather color={huddleColors.blue} name="camera" size={18} />
               </Pressable>
-              <Animated.View style={{ flex: 1, transform: [{ translateX: reportShakeAnim }] }}>
+              <Animated.View style={[{ flex: 1 }, reportShakeStyle]}>
                 <SlideToConfirm
                   busy={submitting}
                   label="Slide to Report"
@@ -379,14 +401,12 @@ const styles = StyleSheet.create({
     gap: huddleMapBroadcastFooter.gap,
   },
   imageButton: {
+    ...huddleGlassControls.borderlessSurface,
     alignItems: "center",
-    borderColor: huddleMapBroadcastFooter.cameraButtonBorderColor,
-    borderRadius: huddleMapBroadcastFooter.cameraButtonSize / 2,
-    borderWidth: 1,
-    backgroundColor: huddleMapBroadcastFooter.cameraButtonBackground,
-    height: huddleMapBroadcastFooter.cameraButtonSize,
+    borderRadius: 24,
+    height: 48,
     justifyContent: "center",
-    width: huddleMapBroadcastFooter.cameraButtonSize,
+    width: 48,
   },
   uploadGrid: {
     flexDirection: "row",
@@ -399,10 +419,22 @@ const styles = StyleSheet.create({
     borderRadius: nativeSocialReportTokens.attachmentRadius,
     height: nativeSocialReportTokens.attachmentPreviewSize,
     overflow: "hidden",
+    position: "relative",
     width: nativeSocialReportTokens.attachmentPreviewSize,
   },
   uploadPreviewImage: {
     height: "100%",
     width: "100%",
+  },
+  uploadRemoveButton: {
+    alignItems: "center",
+    backgroundColor: huddleColors.validationRed,
+    borderRadius: huddleRadii.pill,
+    height: nativeSocialReportTokens.attachmentRemoveButtonSize,
+    justifyContent: "center",
+    position: "absolute",
+    right: nativeSocialReportTokens.attachmentRemoveButtonOffset,
+    top: nativeSocialReportTokens.attachmentRemoveButtonOffset,
+    width: nativeSocialReportTokens.attachmentRemoveButtonSize,
   },
 });

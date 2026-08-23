@@ -47,25 +47,25 @@ export function careUpdateCopy(kind: CareUpdateKind): CareUpdateCopy {
     case "photo":
       return {
         sheetTitle: "Photo update",
-        sheetSubtitle: "Update with a photo with optional notes",
+        sheetSubtitle: "Send a photo, add a caption if you like",
         noteLabel: "Caption",
         notePlaceholder: "Add a caption",
-        nudgeTitle: "Time for a photo update",
+        nudgeTitle: "Time for a photo",
         nudgeBody: "The owner asked for photos during care.",
       };
     case "photo_note":
       return {
         sheetTitle: "Photo + note update",
-        sheetSubtitle: "Update with both a photo and a note",
+        sheetSubtitle: "Send a photo with a short note",
         noteLabel: "Short note",
         notePlaceholder: "Write a short note",
-        nudgeTitle: "Time for a Care Update",
+        nudgeTitle: "Time for a care update",
         nudgeBody: "The owner asked for a note with each photo.",
       };
     case "summary":
       return {
         sheetTitle: "Daily summary",
-        sheetSubtitle: "Update with a short summary with optional photo attached",
+        sheetSubtitle: "Sum up the day, add a photo if you like",
         noteLabel: "Daily summary",
         notePlaceholder: "How did the day go?",
         nudgeTitle: "Add today's summary",
@@ -78,7 +78,7 @@ export function careUpdateCopy(kind: CareUpdateKind): CareUpdateCopy {
         noteLabel: "Note",
         notePlaceholder: "Add a note",
         nudgeTitle: "Send a quick update?",
-        nudgeBody: "Pet parents love a photo during care.",
+        nudgeBody: "Owners love a photo during care.",
       };
   }
 }

@@ -4,6 +4,7 @@ import {
   type NativeCompleteHumanChallengePayload,
   type NativeHumanChallenge,
 } from "./nativeVerifyIdentity";
+import { getNativeHumanMovementThresholds } from "./nativeVerifyIdentityHumanDetector";
 
 export type NativeVerifyIdentityHumanStateName =
   | "idle"
@@ -23,6 +24,7 @@ export type NativeVerifyIdentityHumanFailure =
   | "detector_unavailable"
   | "retry"
   | "challenge_expired"
+  | "rate_limited"
   | "session_expired"
   | "network"
   | "unknown";
@@ -88,9 +90,10 @@ const humanFailureCopy: Record<NativeVerifyIdentityHumanFailure, string> = {
   poor_lighting: "Move to a brighter area and try again.",
   movement_failed: "We couldn't confirm the requested movement. Please try again.",
   timeout: "The check took too long. Please start again.",
-  detector_unavailable: "This device does not support the camera verification check.",
-  retry: "We couldn't confirm your human check. Please try again.",
+  detector_unavailable: "There seems to be an issue with the facial detector. Please try again later.",
+  retry: "We couldn't confirm facial detection. Please try again.",
   challenge_expired: "Your verification challenge expired. Start a new check.",
+  rate_limited: "Please wait a few minutes before starting another check.",
   session_expired: "Your session expired. Please sign in again.",
   network: "Verification service is temporarily unavailable. Please retry in a moment.",
   unknown: "We couldn't complete verification. Please retry.",
@@ -116,20 +119,23 @@ export const describeNativeHumanResultFailure = (
   const upTravel = Number(payload.upTravel ?? 0);
   const downTravel = Number(payload.downTravel ?? 0);
   const challengeType = normalize(payload.challengeType);
+  const movementThresholds = getNativeHumanMovementThresholds();
 
   if (reason.includes("permission")) return humanFailureCopy.permission_denied;
   if (reason.includes("no_camera")) return humanFailureCopy.no_camera;
-  if (reason.includes("face_detector_unsupported") || reason.includes("detector") || reason.includes("mediapipe")) {
-    return "We couldn't initialize face detection. Check camera permission and internet connection, then try again.";
-  }
-  if (reason.includes("lighting")) return humanFailureCopy.poor_lighting;
+  if (reason.includes("face_detector_unsupported") || reason.includes("detector") || reason.includes("mediapipe")) return humanFailureCopy.detector_unavailable;
   if (reason.includes("timeout")) return humanFailureCopy.timeout;
   if (reason.includes("movement")) return humanFailureCopy.movement_failed;
   if (reason.includes("no_face") || reason === "face_not_stably_detected" || detectedFrames < 6) {
-    return "We couldn't detect your face steadily. Keep your whole face inside the oval in a well-lit place.";
+    return "No face detected. Make sure your face is visible and the lighting is clear.";
   }
   if (reason.includes("retry") || reason.includes("unclear")) return humanFailureCopy.retry;
-  if (challengeType === "turn_left_right" && (leftTravel < 0.12 || rightTravel < 0.12 || horizontalShift < 0.36)) {
+  if (
+    challengeType === "turn_left_right" &&
+    (leftTravel < movementThresholds.sideTravel ||
+      rightTravel < movementThresholds.sideTravel ||
+      horizontalShift < movementThresholds.horizontalShift)
+  ) {
     return "Move your head left and right while staying inside the oval.";
   }
   if (challengeType === "look_up_down" && (upTravel < 0.10 || downTravel < 0.10 || verticalShift < 0.30)) {
@@ -137,7 +143,7 @@ export const describeNativeHumanResultFailure = (
   }
   return challengeInstruction
     ? `Please try again and follow: ${challengeInstruction}.`
-    : "Face verification failed. Keep your face centered in the oval and try again.";
+    : "Facial detection failed. Keep your face centered in the oval and try again.";
 };
 
 const mapHumanError = (raw: string | null | undefined): { error: string; failure: NativeVerifyIdentityHumanFailure } => {
@@ -145,11 +151,11 @@ const mapHumanError = (raw: string | null | undefined): { error: string; failure
   if (code.includes("permission") || code.includes("notallowederror")) return { error: humanFailureCopy.permission_denied, failure: "permission_denied" };
   if (code.includes("no_camera") || code.includes("camera_not_found")) return { error: humanFailureCopy.no_camera, failure: "no_camera" };
   if (code.includes("no_face")) return { error: humanFailureCopy.no_face, failure: "no_face" };
-  if (code.includes("lighting")) return { error: humanFailureCopy.poor_lighting, failure: "poor_lighting" };
   if (code.includes("movement")) return { error: humanFailureCopy.movement_failed, failure: "movement_failed" };
   if (code.includes("timeout")) return { error: humanFailureCopy.timeout, failure: "timeout" };
   if (code.includes("face_detector_unsupported") || code.includes("detector")) return { error: humanFailureCopy.detector_unavailable, failure: "detector_unavailable" };
   if (code.includes("challenge_expired") || code.includes("attempt_not_found") || code.includes("invalid_transition")) return { error: humanFailureCopy.challenge_expired, failure: "challenge_expired" };
+  if (code.includes("rate_limited") || code.includes("too many")) return { error: humanFailureCopy.rate_limited, failure: "rate_limited" };
   if (code.includes("auth") || code.includes("session") || code.includes("unauthorized")) return { error: humanFailureCopy.session_expired, failure: "session_expired" };
   if (code.includes("network") || code.includes("fetch") || code.includes("503") || code.includes("service temporarily unavailable")) return { error: humanFailureCopy.network, failure: "network" };
   return { error: humanFailureCopy.unknown, failure: "unknown" };
@@ -162,7 +168,6 @@ const classifyCaptureFailure = (
   if (reason.includes("permission")) return "permission_denied";
   if (reason.includes("no_camera")) return "no_camera";
   if (reason.includes("detector")) return "detector_unavailable";
-  if (reason.includes("lighting")) return "poor_lighting";
   if (reason.includes("movement")) return "movement_failed";
   if (reason.includes("timeout")) return "timeout";
   if (reason.includes("no_face") || Number(resultPayload?.detectedFrames || 0) <= 0) return "no_face";

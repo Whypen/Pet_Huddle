@@ -1,6 +1,8 @@
 import { Children, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode, Ref } from "react";
-import { ActivityIndicator, Animated, Modal, PanResponder, Pressable, ScrollView, StyleSheet, Text, TextInput, type StyleProp, type TextInputProps, type TextStyle, View, type ViewStyle } from "react-native";
+import type { ComponentProps, ReactNode, Ref } from "react";
+import { Animated, Keyboard, KeyboardAvoidingView as RNKeyboardAvoidingView, Modal, PanResponder, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, type StyleProp, type TextInputProps, type TextStyle, View, type ViewStyle } from "react-native";
+import { KeyboardAvoidingView as AndroidKeyboardAvoidingView, type KeyboardAvoidingViewProps } from "react-native-keyboard-controller";
+import { NativeSpinner } from "./NativeSpinner";
 import Feather from "@expo/vector-icons/Feather";
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
@@ -9,6 +11,7 @@ import { huddleModalTokens, nativeModalStyles } from "./nativeModalPrimitives.st
 import { huddleColors, huddleRadii, huddleSpacing, huddleType } from "../theme/huddleDesignTokens";
 import { springTab } from "../lib/nativeAnimations";
 import { haptic } from "../lib/nativeHaptics";
+import { canInvokeNativeSlideCommit, shouldCommitNativeSlide } from "../lib/nativeSlideToConfirm";
 
 export function AppModalCloseButton({ onPress }: { onPress: () => void }) {
   return (
@@ -21,6 +24,13 @@ export function AppModalCloseButton({ onPress }: { onPress: () => void }) {
       <Feather color={huddleModalTokens.color.text} name="x" size={24} />
     </Pressable>
   );
+}
+
+export function AppKeyboardAvoidingView(props: KeyboardAvoidingViewProps) {
+  if (Platform.OS === "android") {
+    return <AndroidKeyboardAvoidingView {...props} />;
+  }
+  return <RNKeyboardAvoidingView {...(props as ComponentProps<typeof RNKeyboardAvoidingView>)} />;
 }
 
 export function AppModalIconButton({
@@ -79,6 +89,7 @@ export function AppBottomSheet({
   mode,
   onClose,
   style,
+  swipeToCloseArea = "header",
 }: {
   children: ReactNode;
   closeDistance?: number;
@@ -88,42 +99,72 @@ export function AppBottomSheet({
   mode?: "content" | "large" | "autoMax";
   onClose?: () => void;
   style?: StyleProp<ViewStyle>;
+  swipeToCloseArea?: "sheet" | "header";
 }) {
   const resolvedMode = mode ?? (large ? "large" : "content");
   const dragY = useRef(new Animated.Value(0)).current;
   const closeRef = useRef(onClose);
+  const closingRef = useRef(false);
+  const mountedRef = useRef(true);
 
   useEffect(() => {
     closeRef.current = onClose;
   }, [onClose]);
 
+  useEffect(() => {
+    mountedRef.current = true;
+    closingRef.current = false;
+    dragY.setValue(0);
+    return () => {
+      mountedRef.current = false;
+      closingRef.current = false;
+      dragY.stopAnimation();
+    };
+  }, [dragY]);
+
   const handleClose = useCallback(() => {
     closeRef.current?.();
   }, []);
 
+  const closeFromSwipe = useCallback(() => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    dragY.stopAnimation();
+    dragY.setValue(0);
+    handleClose();
+    setTimeout(() => {
+      if (mountedRef.current) closingRef.current = false;
+    }, 350);
+  }, [dragY, handleClose]);
+
   const pullDownResponder = useMemo(
     () => PanResponder.create({
-      onMoveShouldSetPanResponder: (_, gestureState) => !disableSwipeToClose && Boolean(onClose) && gestureState.dy > 10 && Math.abs(gestureState.dx) < 18,
+      onMoveShouldSetPanResponder: (_, gestureState) => !closingRef.current && !disableSwipeToClose && Boolean(onClose) && gestureState.dy > 10 && Math.abs(gestureState.dx) < 18,
+      onPanResponderGrant: () => {
+        dragY.stopAnimation();
+      },
       onPanResponderMove: (_, gestureState) => {
+        if (closingRef.current) return;
         dragY.setValue(Math.max(0, gestureState.dy));
       },
       onPanResponderRelease: (_, gestureState) => {
+        if (closingRef.current) return;
         if (gestureState.dy > closeDistance || gestureState.vy > closeVelocity) {
-          Animated.spring(dragY, { toValue: 640, damping: 24, stiffness: 280, useNativeDriver: true }).start(() => {
-            dragY.setValue(0);
-            handleClose();
-          });
+          closeFromSwipe();
           return;
         }
         Animated.spring(dragY, { toValue: 0, damping: 24, stiffness: 280, useNativeDriver: true }).start();
       },
       onPanResponderTerminate: () => {
+        if (closingRef.current) return;
         Animated.spring(dragY, { toValue: 0, damping: 24, stiffness: 280, useNativeDriver: true }).start();
       },
     }),
-    [closeDistance, closeVelocity, disableSwipeToClose, dragY, handleClose, onClose],
+    [closeDistance, closeFromSwipe, closeVelocity, disableSwipeToClose, dragY, onClose],
   );
 
+  const canSwipeToClose = Boolean(onClose) && !disableSwipeToClose;
+  const panHandlers = canSwipeToClose ? pullDownResponder.panHandlers : {};
   const sheet = (
     <Animated.View
       style={[
@@ -134,11 +175,22 @@ export function AppBottomSheet({
           ? nativeModalStyles.appBottomSheetAutoMax
           : nativeModalStyles.appBottomSheetContent,
         style,
-        onClose && !disableSwipeToClose ? { transform: [{ translateY: dragY }] } : null,
+        canSwipeToClose ? { transform: [{ translateY: dragY }] } : null,
       ]}
-      {...(onClose && !disableSwipeToClose ? pullDownResponder.panHandlers : {})}
+      {...(canSwipeToClose && swipeToCloseArea === "sheet" ? panHandlers : {})}
     >
-      {children}
+      {canSwipeToClose ? (
+        // The handle drags too when only the header owns the gesture, otherwise
+        // the one affordance for swiping would itself be inert.
+        <View {...(swipeToCloseArea === "header" ? panHandlers : {})} style={nativeModalStyles.appBottomSheetHandleArea}>
+          <View style={nativeModalStyles.appBottomSheetHandle} />
+        </View>
+      ) : null}
+      {swipeToCloseArea === "header"
+        ? Children.map(children, (child, index) => index === 0 && canSwipeToClose && typeof child === "object" && child && "props" in child
+          ? <View {...panHandlers}>{child}</View>
+          : child)
+        : children}
     </Animated.View>
   );
   return sheet;
@@ -153,12 +205,14 @@ export function AppBottomSheetScroll({
   edgeToEdge = false,
   fill = false,
   contentContainerStyle,
+  scrollEnabled = true,
   scrollRef,
 }: {
   children: ReactNode;
   contentContainerStyle?: StyleProp<ViewStyle>;
   edgeToEdge?: boolean;
   fill?: boolean;
+  scrollEnabled?: boolean;
   scrollRef?: Ref<ScrollView>;
 }) {
   return (
@@ -170,6 +224,7 @@ export function AppBottomSheetScroll({
       keyboardShouldPersistTaps="handled"
       nestedScrollEnabled
       ref={scrollRef}
+      scrollEnabled={scrollEnabled}
       scrollEventThrottle={16}
       showsVerticalScrollIndicator={false}
       style={[nativeModalStyles.appModalScroll, nativeModalStyles.appBottomSheetScroll, fill ? nativeModalStyles.appBottomSheetScrollFill : null]}
@@ -193,9 +248,15 @@ export function AppModalField({
   return (
     <TextInput
       {...props}
+      lineBreakModeIOS={props.lineBreakModeIOS ?? (multiline ? undefined : "tail")}
+      lineBreakStrategyIOS={props.lineBreakStrategyIOS ?? (multiline ? undefined : "none")}
       multiline={multiline}
+      numberOfLines={props.numberOfLines ?? (multiline ? undefined : 1)}
+      returnKeyType={props.returnKeyType ?? (multiline ? undefined : "done")}
+      onSubmitEditing={props.onSubmitEditing ?? (multiline ? undefined : () => Keyboard.dismiss())}
       placeholderTextColor={huddleModalTokens.color.mutedText}
-      scrollEnabled={multiline}
+      scrollEnabled={props.scrollEnabled ?? true}
+      textBreakStrategy={props.textBreakStrategy ?? (multiline ? undefined : "simple")}
       style={[
         nativeModalStyles.appModalField,
         multiline ? nativeModalStyles.appModalTextArea : null,
@@ -208,10 +269,13 @@ export function AppModalField({
 }
 
 export function AppModalSelectField({
+  formatLabel,
+  fieldBlockStyle,
   label,
   labelStyle,
   open,
   options,
+  optionStyle,
   placeholder,
   textStyle,
   triggerStyle,
@@ -219,10 +283,13 @@ export function AppModalSelectField({
   onSelect,
   onToggle,
 }: {
+  formatLabel?: (value: string) => string;
+  fieldBlockStyle?: StyleProp<ViewStyle>;
   label: string;
   labelStyle?: StyleProp<TextStyle>;
   open: boolean;
   options: string[];
+  optionStyle?: StyleProp<ViewStyle>;
   placeholder: string;
   textStyle?: StyleProp<TextStyle>;
   triggerStyle?: StyleProp<ViewStyle>;
@@ -231,26 +298,26 @@ export function AppModalSelectField({
   onToggle: () => void;
 }) {
   return (
-    <View style={nativeModalStyles.appModalFieldBlock}>
+    <View style={[nativeModalStyles.appModalFieldBlock, fieldBlockStyle]}>
       <Text style={[nativeModalStyles.appModalFieldLabel, labelStyle]}>{label}</Text>
-      <Pressable accessibilityRole="button" onPress={onToggle} style={[nativeModalStyles.appModalSelectTrigger, triggerStyle]}>
+      <Pressable accessibilityRole="button" onPress={onToggle} style={[nativeModalStyles.appModalSelectTrigger, open ? nativeModalStyles.appModalFieldFocused : null, triggerStyle]}>
         <Text numberOfLines={1} style={[nativeModalStyles.appModalSelectText, !value ? nativeModalStyles.appModalSelectPlaceholder : null, textStyle]}>
-          {value || placeholder}
+          {value ? (formatLabel?.(value) ?? value) : placeholder}
         </Text>
         <Feather color={huddleModalTokens.color.mutedText} name={open ? "chevron-up" : "chevron-down"} size={16} />
       </Pressable>
       {open ? (
-        <View style={nativeModalStyles.appModalSelectMenu}>
+        <ScrollView bounces={false} keyboardShouldPersistTaps="handled" nestedScrollEnabled showsVerticalScrollIndicator={false} style={nativeModalStyles.appModalSelectMenu}>
           {options.map((option) => {
             const active = option === value;
             return (
-              <Pressable key={option} onPress={() => onSelect(option)} style={nativeModalStyles.appModalSelectOption}>
-                <Text style={[nativeModalStyles.appModalSelectOptionText, active ? nativeModalStyles.appModalSelectOptionTextActive : null]}>{option}</Text>
+              <Pressable key={option} onPress={() => onSelect(option)} style={[nativeModalStyles.appModalSelectOption, optionStyle]}>
+                <Text ellipsizeMode="tail" numberOfLines={1} style={[nativeModalStyles.appModalSelectOptionText, active ? nativeModalStyles.appModalSelectOptionTextActive : null]}>{formatLabel?.(option) ?? option}</Text>
                 {active ? <Feather color={huddleModalTokens.color.blue} name="check" size={16} /> : null}
               </Pressable>
             );
           })}
-        </View>
+        </ScrollView>
       ) : null}
     </View>
   );
@@ -258,6 +325,29 @@ export function AppModalSelectField({
 
 export function AppModalError({ children }: { children: ReactNode }) {
   return <Text style={nativeModalStyles.appModalError}>{children}</Text>;
+}
+
+export function AppModalToggleRow({ disabled, label, onChange, value }: { disabled?: boolean; label: string; onChange: (value: boolean) => void; value: boolean }) {
+  return (
+    <Pressable
+      accessibilityLabel={label}
+      accessibilityRole="switch"
+      accessibilityState={{ checked: value, disabled: Boolean(disabled) }}
+      disabled={disabled}
+      onPress={() => onChange(!value)}
+      style={({ pressed }) => [
+        nativeModalStyles.appModalToggleRow,
+        value ? nativeModalStyles.appModalToggleRowActive : null,
+        pressed && !disabled ? nativeModalStyles.pressed : null,
+        disabled ? nativeModalStyles.disabled : null,
+      ]}
+    >
+      <Text style={nativeModalStyles.appModalToggleLabel}>{label}</Text>
+      <View style={[nativeModalStyles.appModalToggleControl, value ? nativeModalStyles.appModalToggleControlActive : null]}>
+        {value ? <Feather color={huddleModalTokens.color.onPrimary} name="check" size={huddleModalTokens.spacing.x5} /> : null}
+      </View>
+    </Pressable>
+  );
 }
 
 export function AppModalActionRow({ children }: { children: ReactNode }) {
@@ -289,12 +379,14 @@ const renderAppModalButtonChild = (child: ReactNode, index: number, variant: "pr
 };
 
 export function AppModalButton({
+  accessibilityLabel,
   children,
   disabled,
   loading,
   onPress,
   variant = "primary",
 }: {
+  accessibilityLabel?: string;
   children: ReactNode;
   disabled?: boolean;
   loading?: boolean;
@@ -303,6 +395,8 @@ export function AppModalButton({
 }) {
   return (
     <Pressable
+      accessibilityLabel={accessibilityLabel}
+      accessibilityRole="button"
       disabled={disabled || loading}
       onPress={onPress}
       style={({ pressed }) => [
@@ -316,7 +410,7 @@ export function AppModalButton({
       ]}
     >
       {loading ? (
-        <ActivityIndicator color={variant === "primary" || variant === "destructive" ? huddleModalTokens.color.onPrimary : huddleModalTokens.color.blue} />
+        <NativeSpinner tone={variant === "primary" || variant === "destructive" ? "primary" : "accent"} />
       ) : (
         Children.map(children, (child, index) => renderAppModalButtonChild(child, index, variant))
       )}
@@ -329,6 +423,8 @@ export type AppActionMenuItem = {
   icon: keyof typeof Feather.glyphMap;
   onPress: () => void;
   destructive?: boolean;
+  /** Muted actions remain tappable when they need to explain why they are unavailable. */
+  muted?: boolean;
 };
 
 export function AppActionMenu({
@@ -347,13 +443,50 @@ export function AppActionMenu({
           accessibilityRole="button"
           key={item.label}
           onPress={item.onPress}
-          style={({ pressed }) => [nativeModalStyles.appActionMenuItem, pressed ? nativeModalStyles.pressed : null]}
+          style={({ pressed }) => [
+            nativeModalStyles.appActionMenuItem,
+            item.muted ? nativeModalStyles.appActionMenuItemMuted : null,
+            pressed ? nativeModalStyles.pressed : null,
+          ]}
         >
-          <Feather color={item.destructive ? huddleModalTokens.color.validationRed : huddleColors.iconMuted} name={item.icon} size={18} />
-          <Text style={[nativeModalStyles.appActionMenuText, item.destructive ? nativeModalStyles.appActionMenuTextDestructive : null, textStyle]}>{item.label}</Text>
+          <Feather color={item.muted ? huddleColors.mutedText : item.destructive ? huddleModalTokens.color.validationRed : huddleColors.iconMuted} name={item.icon} size={18} />
+          <Text style={[
+            nativeModalStyles.appActionMenuText,
+            item.destructive ? nativeModalStyles.appActionMenuTextDestructive : null,
+            item.muted ? nativeModalStyles.appActionMenuTextMuted : null,
+            textStyle,
+          ]} ellipsizeMode="tail" numberOfLines={1}>{item.label}</Text>
         </Pressable>
       ))}
     </View>
+  );
+}
+
+/** Informational popup with the same backdrop, close affordance and platform dismissal paths as every native popup. */
+export function AppNoticeModal({
+  body,
+  onClose,
+  open,
+  title,
+}: {
+  body: ReactNode;
+  onClose: () => void;
+  open: boolean;
+  title: string;
+}) {
+  if (!open) return null;
+  return (
+    <Modal animationType="fade" presentationStyle="overFullScreen" transparent visible onRequestClose={onClose}>
+      <Pressable style={[nativeModalStyles.appModalBackdrop, nativeModalStyles.appModalSafeArea]} onPress={onClose}>
+        <Pressable onPress={(event) => event.stopPropagation()} style={nativeModalStyles.appConfirmBoundary}>
+          <View style={nativeModalStyles.appConfirmCard}>
+            <AppModalCloseButton onPress={onClose} />
+            <Text style={nativeModalStyles.appConfirmTitle}>{title}</Text>
+            {typeof body === "string" ? <Text style={nativeModalStyles.appConfirmBody}>{body}</Text> : body}
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
   );
 }
 
@@ -371,6 +504,7 @@ export function AppConfirmModal({
   onCancel,
   onConfirm,
   open,
+  presentation = "modal",
   showClose,
   title,
   visible,
@@ -387,6 +521,7 @@ export function AppConfirmModal({
   onCancel: () => void;
   onConfirm: () => void;
   open?: boolean;
+  presentation?: "inline" | "modal";
   showClose?: boolean;
   title: string;
   visible?: boolean;
@@ -395,11 +530,11 @@ export function AppConfirmModal({
   const finalCancelLabel = cancel ?? cancelLabel;
   const finalConfirmLabel = confirmLabel ?? confirm ?? "Confirm";
 
-  return (
-    <Modal animationType="fade" presentationStyle="overFullScreen" transparent visible={isVisible} onRequestClose={onCancel}>
+  const content = (
       <Pressable style={[nativeModalStyles.appModalBackdrop, nativeModalStyles.appModalSafeArea]} onPress={onCancel}>
         <Pressable onPress={(event) => event.stopPropagation()} style={nativeModalStyles.appConfirmBoundary}>
           <View style={nativeModalStyles.appConfirmCard}>
+            {showClose ? <AppModalCloseButton onPress={onCancel} /> : null}
             <Text style={nativeModalStyles.appConfirmTitle}>{title}</Text>
             {typeof body === "string" ? <Text style={nativeModalStyles.appConfirmBody}>{body}</Text> : body}
             {children}
@@ -411,6 +546,15 @@ export function AppConfirmModal({
           </View>
         </Pressable>
       </Pressable>
+  );
+
+  if (presentation === "inline") {
+    return isVisible ? <View style={StyleSheet.absoluteFill}>{content}</View> : null;
+  }
+
+  return (
+    <Modal animationType="fade" presentationStyle="overFullScreen" transparent visible={isVisible} onRequestClose={onCancel}>
+      {content}
     </Modal>
   );
 }
@@ -464,9 +608,10 @@ export function SlideToConfirm({
   }, [resetKey, hitMid, translateX]);
 
   const handleCommit = useCallback(() => {
+    if (!canInvokeNativeSlideCommit({ alreadyCommitted: committedRef.current, busy, disabled })) return;
     committedRef.current = true;
     void onCommitRef.current();
-  }, []);
+  }, [busy, disabled]);
 
   const panGesture = useMemo(
     () =>
@@ -489,7 +634,7 @@ export function SlideToConfirm({
         })
         .onEnd(() => {
           "worklet";
-          if (translateX.value >= maxTranslate * 0.92) {
+          if (shouldCommitNativeSlide(translateX.value, maxTranslate)) {
             runOnJS(haptic.primaryConfirm)();
             runOnJS(handleCommit)();
           } else {
@@ -517,7 +662,7 @@ export function SlideToConfirm({
       <Text style={[slideToConfirmStyles.label, disabled ? slideToConfirmStyles.labelDisabled : null]}>{label}</Text>
       <Reanimated.View style={[slideToConfirmStyles.thumb, thumbStyle]}>
         {busy ? (
-          <ActivityIndicator color={thumbIconColor} size="small" />
+          <NativeSpinner tone={tone === "destructive" ? "muted" : "accent"} />
         ) : (
           <MaterialCommunityIcons color={thumbIconColor} name={tone === "destructive" ? "alert" : "arrow-right"} size={20} />
         )}
@@ -592,6 +737,7 @@ export function AppDestructiveSlideConfirm({
   onClose,
   onConfirm,
   open,
+  presentation = "modal",
   slideLabel,
   title,
 }: {
@@ -601,15 +747,15 @@ export function AppDestructiveSlideConfirm({
   onClose: () => void;
   onConfirm: () => void | Promise<void>;
   open: boolean;
+  presentation?: "inline" | "modal";
   slideLabel: string;
   title: string;
 }) {
   const [resetKey, setResetKey] = useState(0);
   useEffect(() => { if (!open) setResetKey((current) => current + 1); }, [open]);
 
-  return (
-    <Modal animationType="fade" presentationStyle="overFullScreen" transparent visible={open} onRequestClose={onClose}>
-      <Pressable style={[nativeModalStyles.appModalBackdrop, nativeModalStyles.appModalSafeArea]} onPress={busy ? undefined : onClose}>
+  const content = (
+    <Pressable style={[nativeModalStyles.appModalBackdrop, nativeModalStyles.appModalSafeArea]} onPress={busy ? undefined : onClose}>
         <Pressable onPress={(event) => event.stopPropagation()} style={nativeModalStyles.appConfirmBoundary}>
           <View style={[nativeModalStyles.appConfirmCard, destructiveSlideStyles.card]}>
             <AppModalCloseButton onPress={busy ? () => undefined : onClose} />
@@ -622,6 +768,15 @@ export function AppDestructiveSlideConfirm({
           </View>
         </Pressable>
       </Pressable>
+  );
+
+  if (!open) return null;
+  if (presentation === "inline") {
+    return <View style={[StyleSheet.absoluteFill, destructiveSlideStyles.inlineLayer]}>{content}</View>;
+  }
+  return (
+    <Modal animationType="fade" presentationStyle="overFullScreen" transparent visible onRequestClose={onClose}>
+      {content}
     </Modal>
   );
 }
@@ -668,6 +823,10 @@ export function AppSlideConfirm({
 }
 
 const destructiveSlideStyles = StyleSheet.create({
+  inlineLayer: {
+    zIndex: 100,
+    elevation: 100,
+  },
   card: {
     paddingTop: huddleSpacing.x8,
   },

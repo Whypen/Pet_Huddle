@@ -1,0 +1,23 @@
+{
+  "kind": "map_out_now",
+  "sessionId": "home",
+  "startedAt": "2026-07-16T00:00:00Z",
+  "progressStartedAt": "2026-07-16T00:00:00Z",
+  "expiresAt": "2026-07-16T02:00:00Z",
+  "progressPermille": 250,
+  "isOverrun": false,
+  "generation": 1,
+  "stateRevision": 1,
+  "selfAvatarUrl": "shared://self.img",
+  "avatarUrls": ["shared://friend.img"],
+  "avatarIsBlurred": [false],
+  "names": ["Friend"],
+  "totalCount": 1,
+  "friendCount": 1,
+  "nearbyUserCount": 0,
+  "deepLink": "huddle:///active-session/returned",
+  "completionRole": null,
+  "finalMessage": null,
+  "awaitingText": null,
+  "showAction": true
+}

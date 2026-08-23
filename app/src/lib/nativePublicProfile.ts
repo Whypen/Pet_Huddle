@@ -7,16 +7,21 @@ import {
 import { fetchNativeProfileSummary } from "./nativeProfileSummary";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { isNativeVerifiedProfile } from "./nativeVerificationGate";
+import { fetchNativeEngagementTiers, type NativeEngagementSummary } from "./nativeEngagement";
 import { nativeExactTokenRpc } from "./nativeExactTokenRequest";
-import { supabaseAnonKey, supabaseUrl } from "./supabase";
+import { getFreshNativeAccessToken } from "./nativeFunctionClient";
+import { formatNativePetJourney } from "./nativePetEmoji";
+import { readNativeDisplayCacheItem, readNativeDisplayCacheKeys } from "./nativeDisplayCacheStorage";
 
 export type NativePublicProfilePetHead = {
-  dob?: string | null;
+  ageYears?: number | null;
   id: string;
   isPublic?: boolean | null;
   name?: string | null;
   photoUrl?: string | null;
+  photoPosition?: { centerX: number; centerY: number; widthPct: number; sourceAspect?: number } | null;
   species?: string | null;
+  updatedAt?: string | null;
 };
 
 export type NativePublicProfileVisibility = {
@@ -41,6 +46,12 @@ export type NativeResolvedProfilePhotoUrls = {
   closer: string | null;
 };
 
+export type NativeProfileEngagementStats = {
+  groups: number;
+  friends: number;
+  likes: number;
+};
+
 export type NativePublicProfile = {
   affiliation: string;
   availabilityStatus: string[];
@@ -48,7 +59,7 @@ export type NativePublicProfile = {
   createdAt: string | null;
   degree: string;
   displayName: string;
-  dob: string;
+  ageYears: number | null;
   experienceYears: string;
   gender: string;
   hasCar: boolean;
@@ -56,13 +67,20 @@ export type NativePublicProfile = {
   isVerified: boolean;
   lastActiveAt: string | null;
   languages: string[];
+  locationCity: string;
+  locationCountry: string;
+  locationDistrict: string;
+  locationDisplay: string;
   locationName: string;
   major: string;
   memberSince: string | null;
+  memberNumber: number | null;
   membershipTier: string | null;
   nonSocial: boolean;
+  discoveryOptOut: boolean;
   occupation: string;
   orientation: string;
+  petJourney: string;
   petExperience: string[];
   petHeads: NativePublicProfilePetHead[];
   photoUrl: string | null;
@@ -72,34 +90,142 @@ export type NativePublicProfile = {
   school: string;
   socialAlbum: string[];
   socialId: string | null;
+  updatedAt: string | null;
   userId: string;
+  engagement: NativeEngagementSummary | null;
+  engagementStats: NativeProfileEngagementStats | null;
   visibility: NativePublicProfileVisibility;
 };
 
 type ProfileRow = Record<string, unknown>;
 
-const cleanString = (value: unknown) => (typeof value === "string" ? value.trim() : "");
-
-const requireNativePublicProfileAccessToken = (accessToken?: string | null) => {
-  const token = cleanString(accessToken);
-  if (!token) throw new Error("missing_access_token");
-  return token;
+export type NativeVisibleProfileTarget = {
+  fallbackData: ProfileRow;
+  profileUserId: string;
 };
 
-const nativePublicProfileHeaders = (accessToken: string, extra?: Record<string, string>) => ({
-  Authorization: `Bearer ${accessToken}`,
-  apikey: supabaseAnonKey,
-  ...extra,
-});
+type NativePublicProfileSnapshotPayload = ProfileRow | {
+  member_number?: unknown;
+  profile?: ProfileRow | null;
+};
+
+const cleanString = (value: unknown) => (typeof value === "string" ? value.trim() : "");
+
+const ageYearsFromDate = (value: unknown): number | null => {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const birth = new Date(value);
+  if (Number.isNaN(birth.getTime())) return null;
+  const today = new Date();
+  let years = today.getFullYear() - birth.getFullYear();
+  const monthDelta = today.getMonth() - birth.getMonth();
+  if (monthDelta < 0 || (monthDelta === 0 && today.getDate() < birth.getDate())) years -= 1;
+  return years >= 0 ? years : null;
+};
+
+const nullableAgeYears = (value: unknown, legacyDob?: unknown) => {
+  const parsed = typeof value === "number" ? value : Number(value);
+  if (Number.isInteger(parsed) && parsed >= 0 && parsed <= 100) return parsed;
+  return ageYearsFromDate(legacyDob);
+};
+
+export const createNativeVisibleProfileTarget = (
+  profileUserId: string | null | undefined,
+  fallbackData?: ProfileRow | null,
+  fallbackName?: string | null,
+): NativeVisibleProfileTarget | null => {
+  const cleanProfileUserId = cleanString(profileUserId);
+  if (!cleanProfileUserId) return null;
+
+  return {
+    profileUserId: cleanProfileUserId,
+    fallbackData: mergeProfileRows({ id: cleanProfileUserId, display_name: fallbackName || "User" }, fallbackData),
+  };
+};
+
+type NativePublicProfileFetchFailure = {
+  code: "missing_access_token" | "network_error" | "profile_not_found" | "profile_read_error" | "pet_read_error";
+  message: string;
+};
+
+class NativePublicProfileFetchError extends Error {
+  code: NativePublicProfileFetchFailure["code"];
+
+  constructor(failure: NativePublicProfileFetchFailure) {
+    super(failure.message);
+    this.code = failure.code;
+  }
+}
+
+const publicProfileFetchLog = (event: string, fields: Record<string, unknown>) => {
+  if (typeof __DEV__ === "boolean" && !__DEV__) return;
+  console.log("NATIVE_PUBLIC_PROFILE_FETCH", { event, ...fields });
+};
 
 const nativePublicProfileRpc = async <T = unknown>(
   fn: string,
   params: Record<string, unknown>,
   accessToken?: string | null,
 ) => {
-  const { data, error } = await nativeExactTokenRpc<T>(fn, params, requireNativePublicProfileAccessToken(accessToken));
+  const { data, error } = await nativeExactTokenRpc<T>(fn, params, accessToken);
   if (error) throw error;
   return data as T;
+};
+
+const fetchNativePublicProfileRow = async (
+  userId: string,
+  accessToken?: string | null,
+): Promise<ProfileRow | null> => {
+  const token = await getFreshNativeAccessToken(accessToken);
+  if (!token) {
+    throw new NativePublicProfileFetchError({ code: "missing_access_token", message: "missing_access_token" });
+  }
+  try {
+    const payload = await nativePublicProfileRpc<NativePublicProfileSnapshotPayload | null>("get_native_public_profile_snapshot", {
+      p_user_id: userId,
+    }, token);
+    const wrappedPayload = payload && typeof payload === "object" && "profile" in payload
+      ? payload as { member_number?: unknown; profile?: ProfileRow | null }
+      : null;
+    const profile = wrappedPayload?.profile ?? (payload as ProfileRow | null);
+    if (!profile?.id) {
+      throw new NativePublicProfileFetchError({ code: "profile_not_found", message: "profile_not_found" });
+    }
+    const canonicalProfile = {
+      ...profile,
+      bio: typeof profile.bio === "string" ? profile.bio : "",
+      show_bio: profile.show_bio !== false,
+    };
+    return wrappedPayload ? { ...canonicalProfile, member_number: wrappedPayload.member_number } : canonicalProfile;
+  } catch (error) {
+    if (error instanceof NativePublicProfileFetchError) throw error;
+    throw new NativePublicProfileFetchError({
+      code: "network_error",
+      message: error instanceof Error ? error.message : "network_error",
+    });
+  }
+};
+
+const fetchNativePublicPetRow = async ({
+  accessToken,
+  ownerId,
+  petId,
+}: {
+  accessToken?: string | null;
+  ownerId?: string | null;
+  petId?: string | null;
+}): Promise<ProfileRow | null> => {
+  const token = await getFreshNativeAccessToken(accessToken);
+  if (!token) {
+    throw new NativePublicProfileFetchError({ code: "missing_access_token", message: "missing_access_token" });
+  }
+  const cleanPetId = cleanString(petId);
+  const cleanOwnerId = cleanString(ownerId);
+  if (!cleanPetId && !cleanOwnerId) return null;
+  const pet = await nativePublicProfileRpc<ProfileRow | null>("get_native_public_profile_pet", {
+    p_owner_id: cleanOwnerId || null,
+    p_pet_id: cleanPetId || null,
+  }, token);
+  return pet?.id ? pet : null;
 };
 
 const nullableString = (value: unknown) => {
@@ -121,22 +247,16 @@ const extractNativeSocialAlbumKeyFromUrl = (value: string): string | null => {
   try {
     const url = new URL(value);
     const pathname = decodeURIComponent(url.pathname || "");
-    const socialSignMatch = pathname.match(/\/storage\/v1\/object\/sign\/social_album\/(.+)$/);
-    if (socialSignMatch?.[1]) return sanitizePathLike(socialSignMatch[1]);
-    const socialPublicMatch = pathname.match(/\/storage\/v1\/object\/public\/social_album\/(.+)$/);
-    if (socialPublicMatch?.[1]) return sanitizePathLike(socialPublicMatch[1]);
-    const profilePublicMatch = pathname.match(/\/storage\/v1\/object\/public\/(profile_photos|Profiles)\/(.+)$/);
+    const profilePublicMatch = pathname.match(/\/storage\/v1\/object\/public\/(profile_photos)\/(.+)$/);
     if (profilePublicMatch?.[1] && profilePublicMatch?.[2]) {
       const path = sanitizePathLike(profilePublicMatch[2]);
       return path.startsWith(`${profilePublicMatch[1]}/`) ? path : `${profilePublicMatch[1]}/${path}`;
     }
-    const profileSignMatch = pathname.match(/\/storage\/v1\/object\/sign\/(profile_photos|Profiles)\/(.+)$/);
+    const profileSignMatch = pathname.match(/\/storage\/v1\/object\/sign\/(profile_photos)\/(.+)$/);
     if (profileSignMatch?.[1] && profileSignMatch?.[2]) {
       const path = sanitizePathLike(profileSignMatch[2]);
       return path.startsWith(`${profileSignMatch[1]}/`) ? path : `${profileSignMatch[1]}/${path}`;
     }
-    const genericMatch = pathname.match(/\/social_album\/(.+)$/);
-    if (genericMatch?.[1]) return sanitizePathLike(genericMatch[1]);
     return null;
   } catch {
     return null;
@@ -148,10 +268,11 @@ const toNativeSocialAlbumKey = (value: string): string | null => {
   if (!raw || isDataOrBlob(raw)) return null;
   if (/^https?:\/\//i.test(raw)) {
     const extracted = extractNativeSocialAlbumKeyFromUrl(raw);
-    return extracted ? sanitizePathLike(extracted).replace(/^(social_album\/)+/i, "") : null;
+    return extracted ? sanitizePathLike(extracted) : null;
   }
   if (!raw.includes("/")) return null;
-  return sanitizePathLike(raw).replace(/^(social_album\/)+/i, "") || null;
+  const path = sanitizePathLike(raw);
+  return /^profile_photos\//i.test(path) ? path : null;
 };
 
 const mapNativePetDetailsRow = (row: ProfileRow): NativePetDetailsData => ({
@@ -163,6 +284,7 @@ const mapNativePetDetailsRow = (row: ProfileRow): NativePetDetailsData => ({
   gender: typeof row.gender === "string" ? row.gender : null,
   neutered_spayed: row.neutered_spayed === true,
   dob: typeof row.dob === "string" ? row.dob : null,
+  age_years: nullableAgeYears(row.age_years, row.dob),
   weight: typeof row.weight === "number" || typeof row.weight === "string" ? row.weight : null,
   weight_unit: typeof row.weight_unit === "string" ? row.weight_unit : "kg",
   bio: typeof row.bio === "string" ? row.bio : null,
@@ -172,10 +294,11 @@ const mapNativePetDetailsRow = (row: ProfileRow): NativePetDetailsData => ({
   temperament: isStringArray(row.temperament) ? row.temperament : null,
   vet_visit_records: Array.isArray(row.vet_visit_records) ? row.vet_visit_records as NativePetDetailsData["vet_visit_records"] : null,
   set_reminder: row.set_reminder && typeof row.set_reminder === "object" ? row.set_reminder as NativePetDetailsData["set_reminder"] : null,
-  medications: Array.isArray(row.medications) ? row.medications as NativePetDetailsData["medications"] : null,
-  photo_url: typeof row.photo_url === "string" ? row.photo_url : null,
-  is_active: row.is_active !== false,
-});
+	  medications: Array.isArray(row.medications) ? row.medications as NativePetDetailsData["medications"] : null,
+	  photo_url: typeof row.photo_url === "string" ? row.photo_url : null,
+	  is_active: row.is_active !== false,
+	  updated_at: nullableString(row.updated_at),
+	});
 
 const mergeProfileRows = (
   baseData: ProfileRow | null | undefined,
@@ -204,14 +327,20 @@ export const canonicalizeNativeSocialAlbumEntries = (entries: string[]) => (
 );
 
 export const normalizeNativeAvailabilityStatus = (row: ProfileRow): string[] => {
+  const normalizeAvailabilityRole = (value: unknown) => {
+    const role = String(value || "").trim();
+    if (!role || role.toLowerCase() === "free") return "";
+    if (/^vet$/i.test(role)) return "Veterinarian";
+    if (/^animal friend\s*\(no pet\)$/i.test(role)) return "Animal Friend";
+    const allowed = new Set(["Pet Parent", "Pet Nanny", "Animal Friend", "Veterinarian", "Pet Photographer", "Pet Groomer", "Vet Nurse", "Volunteer"]);
+    return allowed.has(role) ? role : "";
+  };
   if (Array.isArray(row.availability_status) && row.availability_status.length > 0) {
     const roles = row.availability_status
-      .map((item) => String(item || "").trim())
-      .filter((item) => Boolean(item) && item.toLowerCase() !== "free");
+      .map(normalizeAvailabilityRole)
+      .filter(Boolean);
     if (roles.length > 0) return roles;
   }
-  const socialRole = cleanString(row.social_role ?? row.user_role);
-  if (socialRole && socialRole.toLowerCase() !== "free") return [socialRole];
   if (row.has_pets === true || row.owns_pets === true || normalizeNativePetHeads(row.pet_heads).length > 0) return ["Pet Parent"];
   return ["Animal Friend"];
 };
@@ -228,18 +357,56 @@ export const normalizeNativePetHeads = (value: unknown): NativePublicProfilePetH
         id,
         name: nullableString(record.name),
         species: nullableString(record.species),
-        dob: nullableString(record.dob),
-        photoUrl: nullableString(record.photoUrl) ?? nullableString(record.photo_url),
-        isPublic: typeof record.isPublic === "boolean" ? record.isPublic : record.is_public !== false,
-      });
+        ageYears: nullableAgeYears(record.age_years, record.dob),
+        photoUrl: nullableString(record.photoUrl)
+          ?? nullableString(record.photo_url),
+        photoPosition: (() => {
+          const presentation = record.photoPresentation ?? record.photo_presentation;
+          if (!presentation || typeof presentation !== "object" || Array.isArray(presentation)) return null;
+          const home = (presentation as { home?: unknown }).home;
+          if (!home || typeof home !== "object" || Array.isArray(home)) return null;
+          const { centerX, centerY, widthPct, sourceAspect } = home as { centerX?: unknown; centerY?: unknown; widthPct?: unknown; sourceAspect?: unknown };
+          return typeof centerX === "number" && typeof centerY === "number" ? { centerX, centerY, widthPct: typeof widthPct === "number" ? widthPct : 100, ...(typeof sourceAspect === "number" ? { sourceAspect } : {}) } : null;
+        })(),
+	        isPublic: typeof record.isPublic === "boolean" ? record.isPublic : record.is_public !== false,
+	        updatedAt: nullableString(record.updatedAt) ?? nullableString(record.updated_at),
+	      });
       return null;
     });
   return heads;
 };
 
+export const fetchNativeProfileEngagementStats = async (
+  userId: string,
+  accessToken?: string | null,
+): Promise<NativeProfileEngagementStats | null> => {
+  if (!userId) return null;
+  try {
+    const data = await nativePublicProfileRpc<
+      Array<{ groups_count?: number | null; friends_count?: number | null; likes_count?: number | null }>
+      | { groups_count?: number | null; friends_count?: number | null; likes_count?: number | null }
+      | null
+    >("get_native_profile_engagement_stats", { p_user_id: userId }, accessToken);
+    const row = Array.isArray(data) ? data[0] : data;
+    return {
+      groups: Number(row?.groups_count ?? 0),
+      friends: Number(row?.friends_count ?? 0),
+      likes: Number(row?.likes_count ?? 0),
+    };
+  } catch (error) {
+    publicProfileFetchLog("engagement_stats_failed", {
+      code: typeof error === "object" && error !== null && "code" in error ? String((error as { code?: unknown }).code || "") : null,
+      message: error instanceof Error ? error.message : String(error),
+      userId,
+    });
+    return null;
+  }
+};
+
 export const mapNativePublicProfile = async (
   row: ProfileRow,
   fallbackName?: string | null,
+  accessToken?: string | null,
 ): Promise<NativePublicProfile> => {
   const userId = cleanString(row.id);
   const prefs = row.prefs && typeof row.prefs === "object" ? row.prefs as Record<string, unknown> : {};
@@ -250,6 +417,16 @@ export const mapNativePublicProfile = async (
   });
   const resolvedPhotoUrls = await resolveNativeProfilePhotos(photos);
   const experienceYearsValue = row.pet_experience_years ?? row.experience_years ?? "";
+  const petExperience = isStringArray(row.pet_experience) ? row.pet_experience : [];
+  const petHeads = normalizeNativePetHeads(row.pet_heads);
+  const petJourney = formatNativePetJourney({
+    experienceYears: experienceYearsValue,
+    petExperience,
+  });
+  const [engagement, engagementStats] = await Promise.all([
+    fetchNativeEngagementTiers([userId], accessToken).then((tiers) => tiers.get(userId) ?? null),
+    fetchNativeProfileEngagementStats(userId, accessToken),
+  ]);
 
   return {
     affiliation: cleanString(row.affiliation),
@@ -258,7 +435,7 @@ export const mapNativePublicProfile = async (
     createdAt: nullableString(row.created_at),
     degree: cleanString(row.degree),
     displayName: cleanString(row.display_name) || cleanString(fallbackName) || "User",
-    dob: cleanString(row.dob),
+    ageYears: nullableAgeYears(row.age_years, row.dob),
     experienceYears: cleanString(experienceYearsValue),
     gender: cleanString(row.gender_genre),
     hasCar: row.has_car === true,
@@ -266,15 +443,22 @@ export const mapNativePublicProfile = async (
     isVerified: isNativeVerifiedProfile(row),
     lastActiveAt: nullableString(row.last_active_at) ?? nullableString(row.updated_at),
     languages: isStringArray(row.languages) ? row.languages : [],
+    locationCity: cleanString(row.location_city),
+    locationCountry: cleanString(row.location_country),
+    locationDistrict: cleanString(row.location_district),
+    locationDisplay: cleanString(row.location_display),
     locationName: cleanString(row.location_name),
     major: cleanString(row.major),
     memberSince: nullableString(row.created_at) ?? nullableString(row.member_since),
+    memberNumber: nullablePositiveInteger(row.member_number),
     membershipTier: nullableString(row.effective_tier) ?? nullableString(row.tier),
     nonSocial: row.non_social === true,
+    discoveryOptOut: row.discovery_opt_out === true,
     occupation: cleanString(row.occupation),
     orientation: cleanString(row.orientation),
-    petExperience: isStringArray(row.pet_experience) ? row.pet_experience : [],
-    petHeads: normalizeNativePetHeads(row.pet_heads),
+    petJourney,
+    petExperience,
+    petHeads,
     photoUrl: nullableString(row.avatar_url),
     photos,
     resolvedPhotoUrls,
@@ -282,7 +466,10 @@ export const mapNativePublicProfile = async (
     school: cleanString(row.school),
     socialAlbum,
     socialId: nullableString(row.social_id),
+    updatedAt: nullableString(row.updated_at),
     userId,
+    engagement,
+    engagementStats,
     visibility: {
       show_academic: row.show_academic !== false,
       show_affiliation: row.show_affiliation !== false,
@@ -300,44 +487,15 @@ export const mapNativePublicProfile = async (
 };
 
 export async function blockNativePublicProfileUser(targetUserId: string, viewerId: string | null | undefined, accessToken: string | null) {
-  const token = requireNativePublicProfileAccessToken(accessToken);
   const { error } = await nativeExactTokenRpc("block_user", {
     p_blocked_id: targetUserId,
-  }, token);
+  }, accessToken);
   if (!error) return;
   throw new Error(error.message || "Unable to block user right now");
 }
 
-export async function fetchNativeProfileMemberNumber(userId: string, createdAt?: string | null, accessToken?: string | null): Promise<number | null> {
-  const cleanUserId = cleanString(userId);
-  const token = requireNativePublicProfileAccessToken(accessToken);
-  if (!cleanUserId) return null;
-  const cleanCreatedAt = cleanString(createdAt);
-  if (cleanCreatedAt) {
-    const url = new URL(`${supabaseUrl}/rest/v1/profiles`);
-    url.searchParams.set("created_at", `lte.${cleanCreatedAt}`);
-    url.searchParams.set("select", "id");
-    url.searchParams.set("limit", "1");
-    const response = await fetch(url.toString(), {
-      method: "HEAD",
-      headers: nativePublicProfileHeaders(token, { Prefer: "count=exact" }),
-    });
-    if (response.ok) {
-      const contentRange = response.headers.get("content-range") || "";
-      const count = Number(contentRange.split("/").pop());
-      if (Number.isFinite(count) && count > 0) return count;
-    }
-  }
-  const data = await nativePublicProfileRpc<unknown>("get_native_public_profile_snapshot", {
-    p_user_id: cleanUserId,
-  }, token);
-  const row = data && typeof data === "object" ? data as Record<string, unknown> : {};
-  const value = Number(row.member_number ?? 0);
-  return Number.isFinite(value) && value > 0 ? value : null;
-}
-
 export type SendNativePublicProfileWaveResult = {
-  status: "sent" | "duplicate" | "blocked" | "failed";
+  status: "sent" | "duplicate" | "blocked" | "quota_exhausted" | "failed";
   mutual: boolean;
   matchCreated: boolean;
 };
@@ -350,12 +508,12 @@ async function areNativeUsersBlocked(_viewerId: string, targetUserId: string, ac
   return row.blocked === true;
 }
 
-async function hasNativeActiveMatch(_viewerId: string, targetUserId: string, accessToken?: string | null) {
+export async function fetchNativePublicProfileIsFriend(targetUserId: string, accessToken?: string | null) {
   const data = await nativePublicProfileRpc<unknown>("get_native_public_profile_relationship", {
     p_target_user_id: targetUserId,
   }, accessToken);
   const row = data && typeof data === "object" ? data as Record<string, unknown> : {};
-  return row.active_match === true;
+  return row.active_match === true && row.blocked !== true;
 }
 
 async function checkNativeReciprocalWave(_viewerId: string, targetUserId: string, accessToken?: string | null) {
@@ -372,14 +530,17 @@ async function finalizeNativeMutualWave(targetUserId: string, accessToken?: stri
   return false;
 }
 
-export async function sendNativePublicProfileWave(viewerId: string, targetUserId: string, accessToken?: string | null): Promise<SendNativePublicProfileWaveResult> {
-  requireNativePublicProfileAccessToken(accessToken);
+export async function sendNativePublicProfileWave(viewerId: string, targetUserId: string, actionId: string, accessToken?: string | null): Promise<SendNativePublicProfileWaveResult> {
   try {
-    const rpcData = await nativePublicProfileRpc<unknown>("send_discovery_wave", { p_target_user_id: targetUserId }, accessToken);
-    if (Array.isArray(rpcData) && rpcData.length > 0) {
-      const row = rpcData[0] as { status?: unknown; mutual?: unknown; match_created?: unknown } | null;
+    const rpcData = await nativePublicProfileRpc<unknown>("send_native_discovery_wave_atomic", {
+      p_target_user_id: targetUserId,
+      p_action_id: actionId,
+    }, accessToken);
+    {
+      const row = (Array.isArray(rpcData) ? rpcData[0] : rpcData) as { status?: unknown; mutual?: unknown; match_created?: unknown } | null;
       const status = String(row?.status || "failed");
       if (status === "blocked") return { status: "blocked", mutual: false, matchCreated: false };
+      if (status === "quota_exhausted") return { status: "quota_exhausted", mutual: false, matchCreated: false };
       if (status === "duplicate" || status === "sent") {
         return {
           status: status as "duplicate" | "sent",
@@ -412,6 +573,11 @@ const numberValue = (value: unknown) => {
   return Number.isFinite(numeric) ? numeric : 0;
 };
 
+const nullablePositiveInteger = (value: unknown) => {
+  const numeric = Number(value ?? 0);
+  return Number.isInteger(numeric) && numeric > 0 ? numeric : null;
+};
+
 const buildNativeStarIntroPayload = (senderId: string, recipientId: string) => JSON.stringify({
   kind: "star_intro",
   sender_id: senderId,
@@ -441,12 +607,13 @@ const isNativeStarUnreachableError = (error: unknown) => {
   return /blocked_relationship|unmatched_relationship|target_unavailable|cannot_chat_with_self|target_required/.test(message);
 };
 
-export async function sendNativePublicProfileStarChat(viewerId: string, targetUserId: string, targetName: string, accessToken: string | null): Promise<SendNativePublicProfileStarResult> {
-  const token = requireNativePublicProfileAccessToken(accessToken);
+export async function sendNativePublicProfileStarChat(viewerId: string, targetUserId: string, targetName: string, actionId: string, accessToken: string | null): Promise<SendNativePublicProfileStarResult> {
   if (viewerId === targetUserId) return { status: "failed", roomId: null, reason: "Cannot send a Star to yourself." };
   try {
+    const token = await getFreshNativeAccessToken(accessToken);
+    if (!token) throw new Error("auth_required");
     const [{ profile }, quotaSnapshot] = await Promise.all([
-      fetchNativeProfileSummary(viewerId, { force: false, accessToken: token }),
+      fetchNativeProfileSummary(viewerId, { force: true, accessToken: token }),
       nativeExactTokenRpc("get_quota_snapshot", {}, token),
     ]);
     const tier = normalizeStarTier(profile?.effective_tier ?? profile?.tier);
@@ -459,29 +626,24 @@ export async function sendNativePublicProfileStarChat(viewerId: string, targetUs
     if (Math.max(0, starLimitForTier(tier) - used) + Math.max(0, extra) <= 0) {
       return { status: "exhausted", roomId: null, upgradeTier: tier === "plus" ? "gold" : null };
     }
-    const { data: atomicRoomId, error: atomicError } = await nativeExactTokenRpc("send_star_chat_atomic", {
+    const { data: atomicResult, error: atomicError } = await nativeExactTokenRpc("send_native_discovery_star_atomic", {
       p_target_user_id: targetUserId,
       p_target_name: targetName,
       p_content: buildNativeStarIntroPayload(viewerId, targetUserId),
+      p_action_id: actionId,
     }, token);
     if (atomicError) {
       if (isNativeStarUnreachableError(atomicError)) return { status: "blocked", roomId: null };
       throw atomicError;
     }
-    const roomId = String(atomicRoomId || "").trim();
-    if (!roomId) return { status: "failed", roomId: null, reason: "Unable to send Star right now. Try again in a moment." };
-    const { error: notificationError } = await nativeExactTokenRpc("enqueue_notification", {
-      p_user_id: targetUserId,
-      p_category: "chats",
-      p_kind: "star",
-      p_title: "New star",
-      p_body: "Someone sent you a Star ⭐ Tap to find out who.",
-      p_href: `/chat-dialogue?room=${roomId}&with=${viewerId}`,
-      p_data: { room_id: roomId, from_user_id: viewerId, type: "star" },
-    }, token);
-    if (notificationError) {
-      console.warn("[native.publicProfile] star_notification_enqueue_failed", notificationError);
+    const typedAtomicResult = atomicResult && typeof atomicResult === "object"
+      ? atomicResult as { status?: unknown; room_id?: unknown }
+      : {};
+    if (typedAtomicResult.status === "quota_exhausted") {
+      return { status: "exhausted", roomId: null, upgradeTier: tier === "plus" ? "gold" : null };
     }
+    const roomId = String(typedAtomicResult.room_id || "").trim();
+    if (!roomId) return { status: "failed", roomId: null, reason: "Unable to send Star right now. Try again in a moment." };
     return { status: "sent", roomId };
   } catch (error) {
     if (isNativeStarUnreachableError(error)) return { status: "blocked", roomId: null };
@@ -495,6 +657,7 @@ const publicProfileMemoryCache = new Map<string, { value: NativePublicProfile | 
 const publicProfileInFlight = new Map<string, Promise<NativePublicProfile | null>>();
 const publicPetMemoryCache = new Map<string, { value: NativePetDetailsData | null; cachedAt: number }>();
 const publicPetInFlight = new Map<string, Promise<NativePetDetailsData | null>>();
+let legacyPublicPrivacyPurge: Promise<void> | null = null;
 
 type NativePublicCacheScope = {
   sessionKey?: string | null;
@@ -508,13 +671,27 @@ const publicCacheScopeKey = (scope?: NativePublicCacheScope) => {
 };
 
 const publicProfileCacheKey = (userId: string, scope?: NativePublicCacheScope) =>
-  `native-public-profile:v2:${publicCacheScopeKey(scope)}:${userId}`;
+  `native-public-profile:v4:${publicCacheScopeKey(scope)}:${userId}`;
 const publicPetCacheKey = (petId: string, scope?: NativePublicCacheScope) =>
-  `native-public-profile-pet:v2:${publicCacheScopeKey(scope)}:${petId}`;
+  `native-public-profile-pet:v3:${publicCacheScopeKey(scope)}:${petId}`;
+
+const purgeLegacyPublicProfileCaches = () => {
+  if (legacyPublicPrivacyPurge) return legacyPublicPrivacyPurge;
+  legacyPublicPrivacyPurge = (async () => {
+    const keys = await readNativeDisplayCacheKeys();
+    const legacyKeys = keys.filter((key) => (
+      key.startsWith("native-public-profile:v2:") ||
+      key.startsWith("native-public-profile:v3:") ||
+      key.startsWith("native-public-profile-pet:v2:")
+    ));
+    if (legacyKeys.length > 0) await AsyncStorage.multiRemove(legacyKeys).catch(() => undefined);
+  })();
+  return legacyPublicPrivacyPurge;
+};
 
 const readPersistentCache = async <T,>(key: string): Promise<T | null | undefined> => {
   try {
-    const raw = await AsyncStorage.getItem(key);
+    const raw = await readNativeDisplayCacheItem(key);
     if (!raw) return undefined;
     const parsed = JSON.parse(raw) as { cachedAt?: number; value?: T | null };
     if (typeof parsed.cachedAt !== "number" || Date.now() - parsed.cachedAt > PUBLIC_PROFILE_CACHE_MAX_AGE_MS) {
@@ -544,29 +721,64 @@ const removePersistentCache = async (key: string) => {
   }
 };
 
+export const invalidateNativePublicProfileCaches = async (scope: { petId?: string | null; userId?: string | null } = {}) => {
+  const petId = cleanString(scope.petId);
+  const userId = cleanString(scope.userId);
+  if (!petId && !userId) {
+    publicProfileMemoryCache.clear();
+    publicProfileInFlight.clear();
+    publicPetMemoryCache.clear();
+    publicPetInFlight.clear();
+    return;
+  }
+
+  for (const key of Array.from(publicProfileMemoryCache.keys())) {
+    if (userId && key.endsWith(`:${userId}`)) publicProfileMemoryCache.delete(key);
+  }
+  for (const key of Array.from(publicProfileInFlight.keys())) {
+    if (userId && key.endsWith(`:${userId}`)) publicProfileInFlight.delete(key);
+  }
+  for (const key of Array.from(publicPetMemoryCache.keys())) {
+    if ((petId && key.endsWith(`:${petId}`)) || (userId && key.endsWith(`:owner:${userId}`))) publicPetMemoryCache.delete(key);
+  }
+  for (const key of Array.from(publicPetInFlight.keys())) {
+    if ((petId && key.endsWith(`:${petId}`)) || (userId && key.endsWith(`:owner:${userId}`))) publicPetInFlight.delete(key);
+  }
+
+  const keys = await readNativeDisplayCacheKeys();
+  const removals = keys.filter((key) => (
+    (userId && /^native-public-profile:v[23]:/.test(key) && key.endsWith(`:${userId}`)) ||
+    (petId && key.startsWith("native-public-profile-pet:v2:") && key.endsWith(`:${petId}`)) ||
+    (userId && key.startsWith("native-public-profile-pet:v2:") && key.endsWith(`:owner:${userId}`))
+  ));
+  if (removals.length > 0) await AsyncStorage.multiRemove(removals).catch(() => undefined);
+};
+
 export const fetchNativePublicProfile = async ({
   accessToken,
   fallbackData = null,
   fallbackName = null,
   force = false,
+  profileUserId,
+  requireCanonical = false,
   sessionKey = null,
-  userId,
   viewerId = null,
 }: {
   accessToken?: string | null;
   fallbackData?: ProfileRow | null;
   fallbackName?: string | null;
   force?: boolean;
+  profileUserId: string | null;
+  requireCanonical?: boolean;
   sessionKey?: string | null;
-  userId: string;
   viewerId?: string | null;
 }) => {
-  const cleanUserId = cleanString(userId);
+  const cleanUserId = cleanString(profileUserId);
   if (!cleanUserId) return null;
-  requireNativePublicProfileAccessToken(accessToken);
+  void purgeLegacyPublicProfileCaches();
   const cacheKey = publicProfileCacheKey(cleanUserId, { sessionKey, viewerId });
 
-  if (!force) {
+  if (!force && !requireCanonical) {
     const cachedMemory = publicProfileMemoryCache.get(cacheKey);
     if (cachedMemory?.value && Date.now() - cachedMemory.cachedAt <= PUBLIC_PROFILE_CACHE_MAX_AGE_MS) return cachedMemory.value;
 
@@ -578,20 +790,25 @@ export const fetchNativePublicProfile = async ({
   }
 
   const existing = publicProfileInFlight.get(cacheKey);
-  if (!force && existing) return existing;
+  if (!force && !requireCanonical && existing) return existing;
 
   const request = (async () => {
-    const data = await nativePublicProfileRpc<unknown>("get_native_public_profile_snapshot", {
-      p_user_id: cleanUserId,
-    }, accessToken);
-    const snapshot = data && typeof data === "object" ? data as Record<string, unknown> : {};
-    const resolvedRow = snapshot.profile && typeof snapshot.profile === "object" ? snapshot.profile as ProfileRow : null;
-
-    if (!resolvedRow && !fallbackData) {
-      publicProfileMemoryCache.delete(cacheKey);
-      void removePersistentCache(cacheKey);
-      return null;
+    let resolvedRow: ProfileRow | null = null;
+    try {
+      resolvedRow = await fetchNativePublicProfileRow(cleanUserId, accessToken);
+    } catch (error) {
+      publicProfileFetchLog("profile_row_failed", {
+        code: error instanceof NativePublicProfileFetchError ? error.code : "unknown",
+        force,
+        hasFallbackData: Boolean(fallbackData),
+        message: error instanceof Error ? error.message : String(error),
+        userId: cleanUserId,
+      });
+      resolvedRow = null;
     }
+    if (requireCanonical && !resolvedRow) return null;
+
+    const visibleFallbackData = fallbackData ?? { id: cleanUserId, display_name: fallbackName || "User" };
 
     const petHeads = (Array.isArray(resolvedRow?.pet_heads) ? resolvedRow.pet_heads as Array<Record<string, unknown>> : [])
       .filter((pet) => pet.is_active !== false)
@@ -599,14 +816,24 @@ export const fetchNativePublicProfile = async ({
         id: cleanString(pet.id),
         name: nullableString(pet.name),
         species: nullableString(pet.species),
-        dob: nullableString(pet.dob),
+        age_years: nullableAgeYears(pet.age_years, pet.dob),
         photoUrl: nullableString(pet.photo_url),
+        photoPosition: (() => {
+          const presentation = pet.photo_presentation;
+          if (!presentation || typeof presentation !== "object" || Array.isArray(presentation)) return null;
+          const home = (presentation as { home?: unknown }).home;
+          if (!home || typeof home !== "object" || Array.isArray(home)) return null;
+          const { centerX, centerY, widthPct, sourceAspect } = home as { centerX?: unknown; centerY?: unknown; widthPct?: unknown; sourceAspect?: unknown };
+          return typeof centerX === "number" && typeof centerY === "number" ? { centerX, centerY, widthPct: typeof widthPct === "number" ? widthPct : 100, ...(typeof sourceAspect === "number" ? { sourceAspect } : {}) } : null;
+        })(),
         is_public: pet.is_public === true,
+        updated_at: nullableString(pet.updated_at),
       }));
 
     const value = await mapNativePublicProfile(
-      mergeProfileRows(fallbackData, { ...(resolvedRow ?? {}), pet_heads: petHeads }),
+      mergeProfileRows(visibleFallbackData, { ...(resolvedRow ?? {}), pet_heads: petHeads }),
       fallbackName,
+      accessToken,
     );
 
     publicProfileMemoryCache.set(cacheKey, { value, cachedAt: Date.now() });
@@ -627,7 +854,7 @@ export const fetchNativePublicProfilePet = async (
 ): Promise<NativePetDetailsData | null> => {
   const cleanPetId = cleanString(petId);
   if (!cleanPetId) return null;
-  requireNativePublicProfileAccessToken(accessToken);
+  void purgeLegacyPublicProfileCaches();
   const cacheKey = publicPetCacheKey(cleanPetId, options);
 
   if (!options.force) {
@@ -645,17 +872,26 @@ export const fetchNativePublicProfilePet = async (
   if (!options.force && existing) return existing;
 
   const request = (async () => {
-    const data = await nativePublicProfileRpc<ProfileRow | null>("get_native_public_profile_pet", {
-      p_pet_id: cleanPetId,
-      p_owner_id: null,
-    }, accessToken);
+    let data: ProfileRow | null = null;
+    try {
+      data = await fetchNativePublicPetRow({ accessToken, petId: cleanPetId });
+    } catch (error) {
+      publicProfileFetchLog("pet_row_failed", {
+        code: error instanceof NativePublicProfileFetchError ? error.code : "unknown",
+        force: options.force === true,
+        message: error instanceof Error ? error.message : String(error),
+        petId: cleanPetId,
+      });
+    }
     const value = data ? mapNativePetDetailsRow(data) : null;
     if (value) {
       publicPetMemoryCache.set(cacheKey, { value, cachedAt: Date.now() });
       void writePersistentCache(cacheKey, value);
     } else {
-      publicPetMemoryCache.delete(cacheKey);
-      void removePersistentCache(cacheKey);
+      const cachedMemory = publicPetMemoryCache.get(cacheKey);
+      if (cachedMemory?.value) return cachedMemory.value;
+      const persistent = await readPersistentCache<NativePetDetailsData>(cacheKey);
+      if (persistent) return persistent;
     }
     return value;
   })().finally(() => {
@@ -673,7 +909,7 @@ export const fetchNativePublicProfileOwnerPet = async (
 ): Promise<NativePetDetailsData | null> => {
   const cleanOwnerId = cleanString(ownerId);
   if (!cleanOwnerId) return null;
-  requireNativePublicProfileAccessToken(accessToken);
+  void purgeLegacyPublicProfileCaches();
   const cacheKey = publicPetCacheKey(`owner:${cleanOwnerId}`, options);
 
   if (!options.force) {
@@ -691,17 +927,26 @@ export const fetchNativePublicProfileOwnerPet = async (
   if (!options.force && existing) return existing;
 
   const request = (async () => {
-  const data = await nativePublicProfileRpc<ProfileRow | null>("get_native_public_profile_pet", {
-    p_pet_id: null,
-    p_owner_id: cleanOwnerId,
-  }, accessToken);
+    let data: ProfileRow | null = null;
+    try {
+      data = await fetchNativePublicPetRow({ accessToken, ownerId: cleanOwnerId });
+    } catch (error) {
+      publicProfileFetchLog("owner_pet_row_failed", {
+        code: error instanceof NativePublicProfileFetchError ? error.code : "unknown",
+        force: options.force === true,
+        message: error instanceof Error ? error.message : String(error),
+        ownerId: cleanOwnerId,
+      });
+    }
     const value = data ? mapNativePetDetailsRow(data) : null;
     if (value) {
       publicPetMemoryCache.set(cacheKey, { value, cachedAt: Date.now() });
       void writePersistentCache(cacheKey, value);
     } else {
-      publicPetMemoryCache.delete(cacheKey);
-      void removePersistentCache(cacheKey);
+      const cachedMemory = publicPetMemoryCache.get(cacheKey);
+      if (cachedMemory?.value) return cachedMemory.value;
+      const persistent = await readPersistentCache<NativePetDetailsData>(cacheKey);
+      if (persistent) return persistent;
     }
     return value;
   })().finally(() => {

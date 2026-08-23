@@ -1,30 +1,36 @@
-import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
-import { BlurView } from "@react-native-community/blur";
-import { useEffect, useRef } from "react";
-import { Pressable, StyleSheet, Text, View, type LayoutChangeEvent } from "react-native";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { StyleSheet, View, type LayoutChangeEvent } from "react-native";
 import Animated, {
   useAnimatedStyle,
   useReducedMotion,
   useSharedValue,
   withSpring,
+  withTiming,
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { springTab } from "../lib/nativeAnimations";
 import { haptic } from "../lib/nativeHaptics";
+import { navMinimized, setNavMinimized } from "../lib/nativeNavScroll";
+import { NativeGlassSurface } from "./NativeGlassSurface";
+import { NativeNavIcon } from "./NativeNavIcons";
+import { NativePressable } from "./motion/NativeMotion";
 import {
   huddleColors,
   huddleLayout,
   huddleRadii,
   huddleShadows,
   huddleSpacing,
-  huddleType,
 } from "../theme/huddleDesignTokens";
 
 export type NativeBottomTab = "home" | "social" | "chats" | "service" | "map";
 
 type NativeBottomNavProps = {
   activeTab: NativeBottomTab | null;
+  careMarketIsActive?: boolean;
   chatUnreadCount?: number;
+  friendRequestUnread?: boolean;
+  /** A Star created a chat that is waiting to be opened. Gold, distinct from unread red. */
+  newChatPending?: boolean;
   onNavigate: (path: string) => void;
   onReselect?: (tab: NativeBottomTab) => void;
 };
@@ -33,111 +39,127 @@ const NAV_ITEMS: Array<{
   key: NativeBottomTab;
   label: string;
   path: string;
-  icon: keyof typeof Feather.glyphMap;
-  materialIcon?: keyof typeof MaterialCommunityIcons.glyphMap;
 }> = [
-  { key: "home", label: "Home", path: "/", icon: "home" },
-  { key: "social", label: "Social", path: "/social", icon: "message-circle" },
-  { key: "chats", label: "Chats", path: "/chats", icon: "users" },
-  { key: "service", label: "Care", path: "/service", icon: "heart" },
-  { key: "map", label: "Map", path: "/map", icon: "map-pin" },
+  { key: "home", label: "Home", path: "/" },
+  { key: "social", label: "Social", path: "/social" },
+  { key: "chats", label: "Chats", path: "/chats?tab=friends" },
+  { key: "service", label: "Care", path: "/service" },
+  { key: "map", label: "Map", path: "/map" },
 ];
 
-const INDICATOR_WIDTH = 20;
-const INDICATOR_HEIGHT = 3;
+const CAPSULE_WIDTH = 72;
+const CAPSULE_HEIGHT = 54;
 
-export function NativeBottomNav({ activeTab, chatUnreadCount = 0, onNavigate, onReselect }: NativeBottomNavProps) {
+export function NativeBottomNav({ activeTab, careMarketIsActive = false, chatUnreadCount = 0, friendRequestUnread = false, newChatPending = false, onNavigate, onReselect }: NativeBottomNavProps) {
   const insets = useSafeAreaInsets();
   const reduceMotion = useReducedMotion();
+  const [visualActiveTab, setVisualActiveTab] = useState(activeTab);
   const itemCenters = useRef<Record<NativeBottomTab, number>>({
-    home: 0,
-    social: 0,
-    chats: 0,
-    service: 0,
-    map: 0,
+    home: Number.NaN,
+    social: Number.NaN,
+    chats: Number.NaN,
+    service: Number.NaN,
+    map: Number.NaN,
   });
-  const indicatorX = useSharedValue(0);
-  const indicatorOpacity = useSharedValue(activeTab ? 1 : 0);
+  const capsuleX = useSharedValue(0);
+  const capsuleOpacity = useSharedValue(activeTab ? 1 : 0);
+
+  const moveCapsuleTo = useCallback((tab: NativeBottomTab | null) => {
+    if (!tab) {
+      capsuleOpacity.value = reduceMotion ? 0 : withTiming(0, { duration: 120 });
+      return;
+    }
+    const target = itemCenters.current[tab];
+    if (!Number.isFinite(target)) return;
+    if (reduceMotion) {
+      capsuleX.value = target;
+      capsuleOpacity.value = 1;
+    } else {
+      capsuleX.value = withTiming(target, { duration: 180 });
+      capsuleOpacity.value = withTiming(1, { duration: 120 });
+    }
+  }, [capsuleOpacity, capsuleX, reduceMotion]);
 
   const handleItemLayout = (key: NativeBottomTab, event: LayoutChangeEvent) => {
     const { x, width } = event.nativeEvent.layout;
-    itemCenters.current[key] = x + width / 2 - INDICATOR_WIDTH / 2;
-    if (key === activeTab) {
-      indicatorX.value = itemCenters.current[key];
+    itemCenters.current[key] = x + width / 2 - CAPSULE_WIDTH / 2;
+    if (key === visualActiveTab) {
+      capsuleX.value = itemCenters.current[key];
     }
   };
 
   useEffect(() => {
-    if (!activeTab) {
-      indicatorOpacity.value = reduceMotion ? 0 : withSpring(0, springTab);
-      return;
-    }
-    const target = itemCenters.current[activeTab];
-    if (typeof target !== "number" || target === 0) return;
-    if (reduceMotion) {
-      indicatorX.value = target;
-      indicatorOpacity.value = 1;
-    } else {
-      indicatorX.value = withSpring(target, springTab);
-      indicatorOpacity.value = withSpring(1, springTab);
-    }
-  }, [activeTab, reduceMotion, indicatorX, indicatorOpacity]);
+    setVisualActiveTab(activeTab);
+    moveCapsuleTo(activeTab);
+  }, [activeTab, moveCapsuleTo]);
 
-  const indicatorStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: indicatorX.value }],
-    opacity: indicatorOpacity.value,
+  const capsuleStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: capsuleX.value }],
+    opacity: capsuleOpacity.value,
   }));
+
+  // Shrink/recede the whole pill on scroll-down (driven by navMinimized 0..1).
+  const minimizeStyle = useAnimatedStyle(() => ({
+    transform: [
+      { scale: 1 - navMinimized.value * 0.2 },
+      { translateY: navMinimized.value * 14 },
+    ],
+    opacity: 1 - navMinimized.value * 0.06,
+  }));
+
+  // Always restore the nav to full size when switching tabs.
+  useEffect(() => {
+    setNavMinimized(false);
+  }, [activeTab]);
 
   return (
     <View pointerEvents="box-none" style={[styles.wrapper, { bottom: Math.max(huddleSpacing.x2, insets.bottom + 8) }]}>
-      <View style={styles.nav}>
-        <BlurView
-          blurAmount={20}
-          blurType="light"
-          pointerEvents="none"
-          reducedTransparencyFallbackColor="rgba(255,255,255,0.88)"
-          style={StyleSheet.absoluteFill}
-        />
-        <View pointerEvents="none" style={styles.glassTint} />
-        {NAV_ITEMS.map((item) => {
-          const active = item.key === activeTab;
-          const showChatBadge = item.key === "chats" && chatUnreadCount > 0;
-          return (
-            <Pressable
-              accessibilityLabel={item.label}
-              accessibilityState={{ selected: active }}
-              key={item.key}
-              onLayout={(event) => handleItemLayout(item.key, event)}
-              onPress={() => {
-                if (active) {
-                  onReselect?.(item.key);
-                } else {
-                  haptic.selectTab();
-                  onNavigate(item.path);
-                }
-              }}
-              style={styles.item}
-            >
-              {item.materialIcon ? (
-                <MaterialCommunityIcons
-                  color={active ? huddleColors.blue : huddleColors.mutedText}
-                  name={item.materialIcon}
-                  size={22}
-                />
-              ) : (
-                <Feather color={active ? huddleColors.blue : huddleColors.mutedText} name={item.icon} size={22} />
-              )}
-              <Text maxFontSizeMultiplier={1.1} numberOfLines={1} style={[styles.label, active && styles.labelActive]}>
-                {item.label}
-              </Text>
-              {showChatBadge ? (
-                <View accessibilityLabel="Unread chats" pointerEvents="none" style={styles.chatBadge} />
-              ) : null}
-            </Pressable>
-          );
-        })}
-        <Animated.View pointerEvents="none" style={[styles.indicator, indicatorStyle]} />
-      </View>
+      <Animated.View style={minimizeStyle}>
+        <NativeGlassSurface glassFillStyle={styles.glassFill} style={styles.nav}>
+          <Animated.View pointerEvents="none" style={[styles.capsule, capsuleStyle]} />
+          {NAV_ITEMS.filter((item) => item.key !== "service" || careMarketIsActive).map((item) => {
+            const active = item.key === visualActiveTab;
+            // Gold outranks red: a brand-new chat is the rarer, more specific signal.
+            const showStarDot = item.key === "chats" && newChatPending === true;
+            const showChatBadge = item.key === "chats" && !showStarDot && (chatUnreadCount > 0 || friendRequestUnread);
+            return (
+              <NativePressable
+                accessibilityLabel={item.label}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                key={item.key}
+                onLayout={(event) => handleItemLayout(item.key, event)}
+                onPress={() => {
+                  if (active) {
+                    onReselect?.(item.key);
+                  } else {
+                    setVisualActiveTab(item.key);
+                    moveCapsuleTo(item.key);
+                    haptic.selectTab();
+                    const path = item.key === "chats" && chatUnreadCount <= 0 && !friendRequestUnread && !newChatPending ? "/chats?tab=discover" : item.path;
+                    onNavigate(path);
+                  }
+                }}
+                style={({ pressed }) => [styles.item, pressed ? styles.itemPressed : null]}
+              >
+                <View style={styles.iconAnchor}>
+                  <NativeNavIcon
+                    color={active ? huddleColors.blue : huddleColors.mutedText}
+                    size={24}
+                    tab={item.key}
+                  />
+                  {showChatBadge ? (
+                    <View accessibilityLabel="Unread chats" pointerEvents="none" style={styles.chatBadge} />
+                  ) : null}
+                  {showStarDot ? (
+                    <View accessibilityLabel="New chat waiting" pointerEvents="none" style={[styles.chatBadge, styles.chatBadgeNew]} />
+                  ) : null}
+                </View>
+              </NativePressable>
+            );
+          })}
+        </NativeGlassSurface>
+      </Animated.View>
     </View>
   );
 }
@@ -145,8 +167,8 @@ export function NativeBottomNav({ activeTab, chatUnreadCount = 0, onNavigate, on
 const styles = StyleSheet.create({
   wrapper: {
     position: "absolute",
-    right: huddleSpacing.x4,
-    left: huddleSpacing.x4,
+    right: huddleSpacing.x6,
+    left: huddleSpacing.x6,
     zIndex: 18,
   },
   nav: {
@@ -157,56 +179,62 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-around",
-    paddingHorizontal: huddleSpacing.x2,
+    paddingHorizontal: huddleSpacing.x4,
     borderRadius: huddleRadii.sheet,
     borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.50)",
+    borderColor: "rgba(255, 255, 255, 0.62)",
     backgroundColor: "transparent",
     overflow: "hidden",
     ...huddleShadows.glassElevation2,
   },
-  glassTint: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(255, 255, 255, 0.68)",
+  glassFill: {
+    borderRadius: huddleRadii.sheet,
+  },
+  capsule: {
+    position: "absolute",
+    left: 0,
+    top: (huddleLayout.navHeight - CAPSULE_HEIGHT) / 2,
+    width: CAPSULE_WIDTH,
+    height: CAPSULE_HEIGHT,
+    borderRadius: CAPSULE_HEIGHT / 2,
+    backgroundColor: "rgba(33, 69, 207, 0.18)",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(255, 255, 255, 0.76)",
   },
   item: {
+    flex: 1,
     minWidth: 58,
     minHeight: 52,
     alignItems: "center",
     justifyContent: "center",
-    gap: 4,
     paddingHorizontal: 6,
     paddingVertical: huddleSpacing.x1,
   },
-  chatBadge: {
-    position: "absolute",
-    top: 7,
-    right: 11,
-    width: 9,
-    height: 9,
+  itemPressed: {
+    opacity: 0.6,
+    transform: [{ scale: 0.92 }],
+  },
+  iconAnchor: {
+    width: 24,
+    height: 24,
     alignItems: "center",
     justifyContent: "center",
+  },
+  chatBadgeNew: {
+    backgroundColor: huddleColors.premiumGold,
+    shadowColor: huddleColors.premiumGold,
+    shadowOpacity: 0.55,
+    shadowRadius: 5,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 3,
+  },
+  chatBadge: {
+    position: "absolute",
+    top: -4,
+    right: -5,
+    width: 9,
+    height: 9,
     borderRadius: huddleRadii.pill,
     backgroundColor: huddleColors.validationRed,
-  },
-  label: {
-    fontFamily: "Urbanist-600",
-    fontSize: huddleType.meta,
-    lineHeight: 12,
-    color: huddleColors.mutedText,
-    letterSpacing: 0.6,
-    textTransform: "uppercase",
-  },
-  labelActive: {
-    color: huddleColors.blue,
-  },
-  indicator: {
-    position: "absolute",
-    left: 0,
-    bottom: huddleSpacing.x1,
-    width: INDICATOR_WIDTH,
-    height: INDICATOR_HEIGHT,
-    borderRadius: 2,
-    backgroundColor: huddleColors.blue,
   },
 });

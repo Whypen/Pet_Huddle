@@ -15,14 +15,24 @@ type NativeTurnstileProps = {
   action: NativeTurnstileAction;
   error?: boolean;
   compact?: boolean;
+  hidden?: boolean;
   siteKey: string;
   onError: (message: string) => void;
   onToken: (token: string) => void;
 };
 
-export function NativeTurnstile({ action, compact = false, error = false, siteKey, onError, onToken }: NativeTurnstileProps) {
+const turnstileUserCopy = (value: unknown) => {
+  const raw = String(value || "").toLowerCase();
+  if (raw.includes("not configured")) return "Security check is unavailable. Please update the app.";
+  if (raw.includes("timed out") || raw.includes("timeout")) return "Security check timed out. Try again.";
+  if (raw.includes("expired")) return "Security check expired. Try again.";
+  if (raw.includes("network") || raw.includes("fetch")) return "Security check could not connect. Check your connection.";
+  return "Security check failed to load. Try again.";
+};
+
+export function NativeTurnstile({ action, compact = false, error = false, hidden = false, siteKey, onError, onToken }: NativeTurnstileProps) {
   const [rendered, setRendered] = useState(false);
-  const source = useMemo(() => createNativeTurnstileSource(siteKey, action), [action, siteKey]);
+  const source = useMemo(() => createNativeTurnstileSource(siteKey, action, hidden), [action, hidden, siteKey]);
 
   const handleMessage = useCallback((rawMessage: string) => {
     let payload: NativeTurnstileMessage = {};
@@ -45,19 +55,28 @@ export function NativeTurnstile({ action, compact = false, error = false, siteKe
 
     if (payload.type === "turnstile-expired") {
       onToken("");
-      onError("Verification expired. Please complete it again.");
+      onError("Security check expired. Try again.");
       return;
     }
 
     if (payload.type === "turnstile-error") {
+      const message = turnstileUserCopy(payload.message);
       onToken("");
-      onError(payload.message || "Verification failed to load. Please retry.");
+      onError(message);
     }
   }, [onError, onToken]);
 
   return (
-    <View style={[styles.box, compact ? styles.boxCompact : null, error ? styles.boxError : null]}>
-      <WebView
+    <View
+      pointerEvents={hidden ? "none" : "auto"}
+      style={[
+        styles.box,
+        compact ? styles.boxCompact : null,
+        hidden ? styles.boxHidden : null,
+        error && !hidden ? styles.boxError : null,
+      ]}
+    >
+      {siteKey ? <WebView
         bounces={false}
         cacheEnabled
         containerStyle={styles.container}
@@ -68,10 +87,11 @@ export function NativeTurnstile({ action, compact = false, error = false, siteKe
         scrollEnabled={false}
         sharedCookiesEnabled
         source={source}
-        style={[styles.webView, compact ? styles.webViewCompact : null]}
+        style={[styles.webView, compact ? styles.webViewCompact : null, hidden ? styles.webViewHidden : null]}
         thirdPartyCookiesEnabled
-      />
-      {!rendered ? <Text style={styles.status}>Preparing verification…</Text> : null}
+      /> : null}
+      {!hidden && !siteKey ? <Text style={styles.unavailable}>Security check is unavailable. Please update the app.</Text> : null}
+      {!hidden && siteKey && !rendered ? <Text style={styles.status}>Preparing verification…</Text> : null}
     </View>
   );
 }
@@ -87,6 +107,14 @@ const styles = StyleSheet.create({
   },
   boxCompact: {
     minHeight: 76,
+    overflow: "hidden",
+  },
+  boxHidden: {
+    height: 1,
+    minHeight: 1,
+    maxHeight: 1,
+    overflow: "hidden",
+    opacity: 0,
   },
   boxError: {
     ...huddleFieldStates.error,
@@ -104,6 +132,10 @@ const styles = StyleSheet.create({
     width: "116%",
     marginLeft: "-8%",
   },
+  webViewHidden: {
+    height: 1,
+    width: 1,
+  },
   status: {
     position: "absolute",
     left: 14,
@@ -111,5 +143,12 @@ const styles = StyleSheet.create({
     color: huddleColors.mutedText,
     fontSize: huddleType.helper,
     fontWeight: "600",
+  },
+  unavailable: {
+    color: huddleColors.validationRed,
+    fontSize: huddleType.helper,
+    fontWeight: "600",
+    paddingHorizontal: 14,
+    paddingVertical: 12,
   },
 });

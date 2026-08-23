@@ -2,6 +2,7 @@ import { forwardRef } from "react";
 import type { ReactNode } from "react";
 import { useState } from "react";
 import {
+  Keyboard,
   StyleSheet,
   Text,
   TextInput,
@@ -24,6 +25,7 @@ type NativeFormFieldShellProps = {
   fieldAccessory?: ReactNode;
   focused?: boolean;
   label: string;
+  leftAccessory?: ReactNode;
   readOnly?: boolean;
   rightAccessory?: ReactNode;
 };
@@ -39,6 +41,7 @@ export function NativeFormFieldShell({
   fieldAccessory,
   focused,
   label,
+  leftAccessory,
   readOnly,
   rightAccessory,
 }: NativeFormFieldShellProps) {
@@ -49,10 +52,7 @@ export function NativeFormFieldShell({
           {label ? (
             <Text
               numberOfLines={1}
-              style={[
-                styles.label,
-                error ? styles.labelError : null,
-              ]}
+              style={styles.label}
             >
               {label}
             </Text>
@@ -69,6 +69,7 @@ export function NativeFormFieldShell({
         ]}
       >
         <View style={styles.fieldRow}>
+          {leftAccessory}
           <View style={styles.fieldContent}>
             {children}
           </View>
@@ -85,6 +86,7 @@ export const NativeFormTextField = forwardRef<TextInput, TextInputProps & {
   error?: string;
   fieldAccessory?: ReactNode;
   label: string;
+  leftAccessory?: ReactNode;
   multiline?: boolean;
   prefix?: string;
   rightAccessory?: ReactNode;
@@ -93,6 +95,7 @@ export const NativeFormTextField = forwardRef<TextInput, TextInputProps & {
   error,
   fieldAccessory,
   label,
+  leftAccessory,
   multiline = false,
   prefix,
   rightAccessory,
@@ -108,12 +111,18 @@ export const NativeFormTextField = forwardRef<TextInput, TextInputProps & {
       fieldAccessory={fieldAccessory}
       focused={focused}
       label={label}
+      leftAccessory={leftAccessory}
       rightAccessory={rightAccessory}
     >
       <TextInput
         ref={ref}
         {...props}
+        lineBreakModeIOS={props.lineBreakModeIOS ?? (multiline ? undefined : "tail")}
+        lineBreakStrategyIOS={props.lineBreakStrategyIOS ?? (multiline ? undefined : "none")}
         multiline={multiline}
+        numberOfLines={props.numberOfLines ?? (multiline ? undefined : 1)}
+        returnKeyType={props.returnKeyType ?? (multiline ? undefined : "done")}
+        onSubmitEditing={props.onSubmitEditing ?? (multiline ? undefined : () => Keyboard.dismiss())}
         onBlur={(event) => {
           setFocused(false);
           props.onBlur?.(event);
@@ -123,7 +132,8 @@ export const NativeFormTextField = forwardRef<TextInput, TextInputProps & {
           props.onFocus?.(event);
         }}
         placeholderTextColor={huddleColors.mutedText}
-        scrollEnabled={multiline}
+        scrollEnabled
+        textBreakStrategy={props.textBreakStrategy ?? (multiline ? undefined : "simple")}
         style={[styles.input, prefix ? styles.inputWithPrefix : null, multiline ? styles.textArea : null, style]}
       />
       {prefix ? <Text pointerEvents="none" style={styles.inputPrefix}>{prefix}</Text> : null}
@@ -200,7 +210,7 @@ const styles = StyleSheet.create({
     ...huddleFieldStates.error,
   },
   labelRow: {
-    minHeight: huddleSpacing.x5,
+    minHeight: 20,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
@@ -214,13 +224,12 @@ const styles = StyleSheet.create({
     fontFamily: "Urbanist-700",
     fontSize: 14,
     lineHeight: 20,
-    color: huddleColors.text,
+    letterSpacing: 1,
+    textTransform: "uppercase",
+    color: huddleColors.mutedText,
   },
   labelSpacer: {
     flex: 1,
-  },
-  labelError: {
-    color: huddleColors.validationRed,
   },
   fieldRow: {
     minHeight: huddleLayout.fieldHeight - 2,
@@ -232,19 +241,26 @@ const styles = StyleSheet.create({
     position: "relative",
     flex: 1,
     minWidth: 0,
+    overflow: "hidden",
     justifyContent: "center",
   },
   input: {
-    height: huddleLayout.fieldHeight - 2,
+    flexShrink: 1,
+    minWidth: 0,
+    height: huddleFormFields.valueLine,
     padding: 0,
     fontFamily: "Urbanist-500",
-    fontSize: 15,
+    fontSize: huddleFormFields.valueSize,
     lineHeight: huddleFormFields.valueLine,
     includeFontPadding: false,
     textAlignVertical: "center",
     color: huddleColors.text,
+    overflow: "hidden",
   },
   inputWithPrefix: {
+    flexShrink: 1,
+    minWidth: 0,
+    overflow: "hidden",
     paddingLeft: huddleSpacing.x5,
   },
   inputPrefix: {
@@ -254,20 +270,23 @@ const styles = StyleSheet.create({
     height: huddleFormFields.valueLine,
     textAlignVertical: "center",
     fontFamily: "Urbanist-500",
-    fontSize: 15,
+    fontSize: huddleFormFields.valueSize,
     lineHeight: huddleFormFields.valueLine,
     includeFontPadding: false,
     color: huddleColors.mutedText,
   },
   textArea: {
-    height: undefined,
-    minHeight: huddleLayout.fieldHeight * 2,
+    flexShrink: 1,
+    minWidth: 0,
+    height: huddleFormFields.multilineHeight,
+    maxHeight: huddleFormFields.multilineHeight,
     paddingTop: huddleSpacing.x2,
     textAlignVertical: "top",
+    overflow: "hidden",
   },
   value: {
     fontFamily: "Urbanist-500",
-    fontSize: 15,
+    fontSize: huddleFormFields.valueSize,
     lineHeight: huddleFormFields.valueLine,
     includeFontPadding: false,
     color: huddleColors.text,
