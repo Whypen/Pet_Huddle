@@ -109,7 +109,7 @@ describe("PostMediaCarousel", () => {
     expect(screen.getByRole("button", { name: "Close media viewer" })).toBeInTheDocument();
   });
 
-  it("reveals sensitive media on a stationary mobile pointer release", () => {
+  it("keeps mobile pointer capture on the slide so tap-to-reveal receives pointerup", () => {
     render(
       <PostMediaCarousel
         isSensitive
@@ -118,11 +118,16 @@ describe("PostMediaCarousel", () => {
     );
 
     const media = screen.getByAltText("Sensitive mobile").parentElement as HTMLElement;
-    fireEvent.pointerDown(media, { pointerId: 7, clientX: 120 });
-    fireEvent.pointerUp(media, { pointerId: 7, clientX: 120 });
+    const rail = media.parentElement as HTMLElement;
+    const captureOnSlide = vi.fn();
+    const captureOnRail = vi.fn();
+    Object.defineProperty(media, "setPointerCapture", { configurable: true, value: captureOnSlide });
+    Object.defineProperty(rail, "setPointerCapture", { configurable: true, value: captureOnRail });
+    const down = createEvent.pointerDown(media);
+    Object.defineProperties(down, { pointerId: { value: 7 }, clientX: { value: 120 } });
+    fireEvent(media, down);
 
-    expect(screen.queryByText("Tap to view")).not.toBeInTheDocument();
-    expect(screen.getByText("Tap again to enlarge")).toBeInTheDocument();
-    expect(screen.getByAltText("Sensitive mobile")).toHaveStyle({ filter: "blur(0px)" });
+    expect(captureOnSlide).toHaveBeenCalledWith(7);
+    expect(captureOnRail).not.toHaveBeenCalled();
   });
 });
