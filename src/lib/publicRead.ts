@@ -111,17 +111,22 @@ const fetchResource = <T,>(path: string, key: string): Promise<T[]> => {
   return request;
 };
 
-const usePublicResource = <T,>(path: string, key: string): State<T> => {
-  const id = resourceId(path, key);
+const usePublicResource = <T,>(path: string | null, key: string): State<T> => {
+  const id = resourceId(path || "", key);
   const cached = readCached<T>(id);
   const stored = readStored<T>(id);
   const [state, setState] = useState<ResourceState<T>>({
     data: cached ?? stored ?? [],
-    loading: cached === null && stored === null,
+    // With no path there is nothing to wait for, so the spinner never starts.
+    loading: Boolean(path) && cached === null && stored === null,
     failed: false,
   });
 
   useEffect(() => {
+    if (!path) {
+      setState({ data: [], loading: false, failed: false });
+      return;
+    }
     const fresh = readCached<T>(id);
     if (fresh) {
       setState({ data: fresh, loading: false, failed: false });
@@ -148,6 +153,7 @@ const usePublicResource = <T,>(path: string, key: string): State<T> => {
   }, [id, key, path]);
 
   const refresh = useCallback(async () => {
+    if (!path) return;
     resourceCache.delete(id);
     setState((current) => ({ ...current, loading: true, failed: false }));
     try {
@@ -164,6 +170,21 @@ const usePublicResource = <T,>(path: string, key: string): State<T> => {
 export const usePublicFeed = (sort: "Latest" | "Trending" = "Latest") =>
   usePublicResource<PublicPost>(`/api/public-feed?sort=${encodeURIComponent(sort)}&limit=50`, "posts");
 export const usePublicAlerts = () => usePublicResource<PublicAlert>("/api/public-alerts", "alerts");
+
+/**
+ * One post or one alert, for a shared link.
+ *
+ * A shared post is often far down the ranked feed and a shared alert is usually
+ * outside the visitor's bounding box, so neither list endpoint can be filtered
+ * down to the shared item. These ask for it by id.
+ *
+ * An empty `id` still calls the hook — hooks cannot be conditional — but with a
+ * path of `null` the resource layer never fetches.
+ */
+export const usePublicPostById = <T,>(id: string | null) =>
+  usePublicResource<T>(id ? `/api/public-feed?id=${encodeURIComponent(id)}` : null, "posts");
+export const usePublicAlertById = <T,>(id: string | null) =>
+  usePublicResource<T>(id ? `/api/public-alerts?id=${encodeURIComponent(id)}` : null, "alerts");
 export const usePublicGroups = () => usePublicResource<PublicGroup>("/api/public-groups", "groups");
 
 export const relativeTime = (iso: string): string => {
