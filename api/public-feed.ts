@@ -1,6 +1,7 @@
 import {
   clampLimit,
   fetchPublicProjection,
+  resolvePublicCountry,
   resolvePublicReadConfig,
   setPublicCacheHeaders,
   type ResponseShape,
@@ -34,11 +35,7 @@ type PublicPost = {
 
 const visitorCountry = (req: RequestShape): string => {
   const raw = req.headers?.["x-vercel-ip-country"];
-  // Pass the edge's ISO code to the database unchanged. The app's own
-  // normalize_country_key function owns code-to-country normalization; doing
-  // it again in JavaScript produced "Hong Kong SAR China" instead of the
-  // canonical "Hong Kong" key.
-  return String((Array.isArray(raw) ? raw[0] : raw) || "").trim().toUpperCase();
+  return resolvePublicCountry(raw);
 };
 
 export default async function handler(req: RequestShape, res: ResponseShape) {

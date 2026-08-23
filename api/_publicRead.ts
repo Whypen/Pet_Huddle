@@ -10,6 +10,24 @@ export type ResponseShape = {
 export const PUBLIC_READ_TIMEOUT_MS = 8_000;
 
 /**
+ * Vercel identifies visitors with ISO 3166-1 alpha-2 codes while native
+ * Huddle stores the user-facing country label. Convert once at the public API
+ * boundary so every country uses the same projection contract.
+ */
+export const resolvePublicCountry = (raw: unknown): string => {
+  const value = String(Array.isArray(raw) ? raw[0] : raw || "").trim();
+  if (!value) return "";
+  const code = value.toUpperCase();
+  if (!/^[A-Z]{2}$/.test(code)) return value;
+  if (code === "HK") return "Hong Kong";
+  try {
+    return new Intl.DisplayNames(["en"], { type: "region" }).of(code) || value;
+  } catch {
+    return value;
+  }
+};
+
+/**
  * Public projections authenticate exactly as a logged-out Supabase client.
  * A service-role key is deliberately neither read nor accepted here.
  */

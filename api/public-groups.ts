@@ -1,5 +1,6 @@
 import {
   fetchPublicProjection,
+  resolvePublicCountry,
   resolvePublicReadConfig,
   setPublicCacheHeaders,
   type ResponseShape,
@@ -46,15 +47,15 @@ export default async function handler(req: RequestShape, res: ResponseShape) {
     return;
   }
 
-  // Hong Kong and other country-level regions may not receive a separate
-  // country-region header. The native projection accepts ISO country codes.
-  const p_country = header(req, "x-vercel-ip-country-region") || header(req, "x-vercel-ip-country");
+  // Country is the public projection boundary. `x-vercel-ip-country-region`
+  // is a subdivision (for example `ENG` in the UK), not a country.
+  const p_country = resolvePublicCountry(header(req, "x-vercel-ip-country"));
   if (!p_country) {
     setPublicCacheHeaders(res);
     res.status(200).json({ groups: [] });
     return;
   }
-  const p_district = header(req, "x-vercel-ip-city") || null;
+  const p_district = header(req, "x-vercel-ip-city") || header(req, "x-vercel-ip-country-region") || null;
   const { rows, failed } = await fetchPublicProjection<PublicGroup>(
     config,
     "get_public_groups_nearby",

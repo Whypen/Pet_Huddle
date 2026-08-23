@@ -99,11 +99,22 @@ describe("public Social", () => {
     const captured = {} as Captured;
     await publicFeed({ query: {}, headers: { "x-vercel-ip-country": "HK" } }, makeRes(captured));
     expect(projectionRequest().url).toMatch(/\/rpc\/get_public_social_feed$/);
-    expect(projectionRequest().body).toEqual({ p_limit: 20, p_cursor: { country: "HK", sort: "Latest" } });
+    expect(projectionRequest().body).toEqual({ p_limit: 20, p_cursor: { country: "Hong Kong", sort: "Latest" } });
     expect(Object.keys((captured.body.posts as Record<string, unknown>[])[0]).sort()).toEqual([
       "author_avatar_url", "author_name", "author_social_id", "category", "content",
       "created_at", "id", "images", "is_sensitive", "likes", "title",
     ]);
+  });
+
+  it("converts an edge ISO country code to the native country label", async () => {
+    await publicFeed(
+      { query: {}, headers: { "x-vercel-ip-country": "GB" } },
+      makeRes({} as Captured),
+    );
+    expect(projectionRequest().body).toEqual({
+      p_limit: 20,
+      p_cursor: { country: "United Kingdom", sort: "Latest" },
+    });
   });
 
   it("caps the feed limit at 50 inside the RPC request body", async () => {
@@ -149,7 +160,7 @@ describe("public Chats", () => {
   it("uses only get_public_groups_nearby and returns covers/events without chat data", async () => {
     const captured = {} as Captured;
     await publicGroups(
-      { headers: { "x-vercel-ip-country-region": "Hong%20Kong", "x-vercel-ip-city": "Central" } },
+      { headers: { "x-vercel-ip-country": "HK", "x-vercel-ip-country-region": "Hong%20Kong", "x-vercel-ip-city": "Central" } },
       makeRes(captured),
     );
     expect(projectionRequest().url).toMatch(/\/rpc\/get_public_groups_nearby$/);
@@ -160,6 +171,21 @@ describe("public Chats", () => {
     ]);
     expect(captured.body.groups).toHaveLength(2);
     expect((captured.body.groups as Record<string, unknown>[])[0].name).toBe("Sheung Wan Dogs");
+  });
+
+  it("uses the visitor country rather than the country subdivision for UK groups", async () => {
+    const captured = {} as Captured;
+    await publicGroups(
+      {
+        headers: {
+          "x-vercel-ip-country": "GB",
+          "x-vercel-ip-country-region": "ENG",
+          "x-vercel-ip-city": "London",
+        },
+      },
+      makeRes(captured),
+    );
+    expect(projectionRequest().body).toEqual({ p_country: "United Kingdom", p_district: "London" });
   });
 });
 
