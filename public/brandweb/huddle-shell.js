@@ -82,7 +82,15 @@
     if (n.id === page) a.setAttribute("aria-current", "page");
     return a;
   }));
-  const cta = h("a", { href: "/#download", class: "nav-cta", text: "Get the app ↓" });
+  // The web door. Ghost against the solid CTA beside it — both doors open, the
+  // app the recommendation. Targets /social, the live product.
+  const webDoor = h("a", { href: "/social", class: "nav-web", "aria-label": "Open huddle on the web" }, [
+    h("img", { src: asset("wm-white.png"), alt: "huddle", class: "nav-web-mark on-dark" }),
+    h("img", { src: asset("wm-blue.png"), alt: "huddle", class: "nav-web-mark on-light" }),
+    h("span", { text: "web" }),
+    h("span", { class: "nav-web-arrow", text: "↗", "aria-hidden": "true" }),
+  ]);
+  const cta = h("a", { href: "/get", class: "nav-cta", text: "Get the app" });
   const menuBtn = h("button", { type: "button", class: "nav-menu-btn", id: "nav-menu-btn", "aria-label": "Open menu", "aria-controls": "huddle-drawer", "aria-expanded": "false" }, [
     h("span"), h("span"), h("span"),
   ]);
@@ -90,7 +98,7 @@
   const hasInlineNav = !!document.querySelector('nav#nav');
   let nav = null;
   if (!hasInlineNav) {
-    nav = h("nav", { class: "huddle-nav" + (forceSolid ? " solid" : ""), id: "huddle-nav" }, [brand, links, cta, menuBtn]);
+    nav = h("nav", { class: "huddle-nav" + (forceSolid ? " solid" : ""), id: "huddle-nav" }, [brand, links, webDoor, cta, menuBtn]);
     body.insertBefore(nav, body.firstChild);
     if (!forceSolid) {
       addEventListener("scroll", () => nav.classList.toggle("scrolled", scrollY > 60), { passive: true });
@@ -101,6 +109,7 @@
   const DRAWER_GROUPS = [
     { title: "Product", items: [
       ["/", "Home"],
+      ["/social", "Open huddle on the web"],
       ["/live-map", "Live Map"],
       ["/community", "Community"],
       ["/care", "Care"],
@@ -134,9 +143,13 @@
       h("ul", {}, g.items.map(([href, label]) => h("li", {}, [h("a", { href: href, text: label })]))),
     ])
   ));
-  const drawerCTA = h("a", { href: "/#download", class: "drawer-cta", text: "Get the app — free ↓" });
+  const drawerCTA = h("a", { href: "/get", class: "drawer-cta", text: "Get the app — free" });
+  const drawerWeb = h("a", { href: "/social", class: "drawer-web" }, [
+    h("img", { src: asset("wm-blue.png"), alt: "huddle", class: "nav-web-mark" }),
+    h("span", { text: "web ↗" }),
+  ]);
   const drawer = h("aside", { class: "huddle-drawer", id: "huddle-drawer", role: "dialog", "aria-modal": "true", "aria-label": "Site menu", "aria-hidden": "true" }, [
-    drawerClose, drawerTagline, drawerGroups, drawerCTA,
+    drawerClose, drawerTagline, drawerGroups, drawerCTA, drawerWeb,
   ]);
   body.appendChild(drawerOverlay);
   body.appendChild(drawer);
@@ -189,10 +202,10 @@
     h("p", { text: "An app for every pet — even the ones on the streets. Every pet deserves more. We leave no pet behind." }),
     h("a", { href: "/waitlist", class: "footer-waitlist-link", text: "Join the waitlist →" }),
     h("div", { class: "footer-stores" }, [
-      h("a", { href: "/#download", class: "btn-store-sm", "aria-label": "Download on the App Store" }, [
+      h("a", { href: "/get", class: "btn-store-sm", "aria-label": "Download on the App Store" }, [
         h("img", { src: asset("badge-appstore.svg"), alt: "Download on the App Store", class: "store-badge-img" }),
       ]),
-      h("a", { href: "/#download", class: "btn-store-sm", "aria-label": "Get it on Google Play" }, [
+      h("a", { href: "/get", class: "btn-store-sm", "aria-label": "Get it on Google Play" }, [
         h("img", { src: asset("badge-googleplay.png"), alt: "Get it on Google Play", class: "store-badge-img" }),
       ]),
     ]),
@@ -201,6 +214,7 @@
   const top = h("div", { class: "footer-top" }, [
     brandCol,
     col("Product", [
+      ["/social", "huddle on the web"],
       ["/live-map", "Live Map"],
       ["/community", "Community"],
       ["/care", "Care"],

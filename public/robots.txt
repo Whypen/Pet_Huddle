@@ -15,6 +15,7 @@ Disallow: /reset-password-direct
 Disallow: /reset-password-inline
 Disallow: /reset-password-inline-healthaction
 Disallow: /update-password
+Disallow: /security/secure
 Disallow: /signup/
 Disallow: /verify
 Disallow: /join/
@@ -24,6 +25,16 @@ Disallow: /api/
 
 # Don't index Vite build artefacts or asset caches
 Disallow: /assets/
+
+# The web product and the district pages are the point — crawl them.
+# /pet-alerts/* is served by a function but lives on a public path precisely so
+# the Disallow: /api/ above does not block it.
+Allow: /social
+Allow: /map
+Allow: /groups
+Allow: /get
+Allow: /share
+Allow: /pet-alerts/
 
 # Major AI training & answer engines — allowed explicitly so they can cite huddle
 User-agent: GPTBot
@@ -72,3 +83,5 @@ User-agent: CCBot
 Allow: /
 
 Sitemap: https://huddle.pet/sitemap.xml
+Sitemap: https://huddle.pet/sitemap-pages.xml
+Sitemap: https://huddle.pet/sitemap-alerts.xml

@@ -20,6 +20,7 @@ import { useNavigate } from "react-router-dom";
 import { GlassModal } from "@/components/ui/GlassModal";
 import { X } from "lucide-react";
 import { writeAuthIntent, writeAuthReturnTo, type AuthIntent, type AuthIntentType } from "@/lib/authIntent";
+import { APP_BETTER_REASON } from "@/lib/authIntentSurface";
 import { resolveAuthWallCopy } from "./authWallCopy";
 
 export type AuthWallProps = {
@@ -45,6 +46,7 @@ export type AuthWallProps = {
 export function AuthWall({ isOpen, onClose, intent, targetId, returnTo, context }: AuthWallProps) {
   const navigate = useNavigate();
   const copy = resolveAuthWallCopy(intent);
+  const appReason = intent ? APP_BETTER_REASON[intent] : undefined;
   const titleId = useId();
   const descriptionId = useId();
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -196,6 +198,21 @@ export function AuthWall({ isOpen, onClose, intent, targetId, returnTo, context 
             Sign in
           </button>
         </div>
+
+        {/* The app, only where the app is actually the better answer. On every
+            other intent the web does the job completely and this stays silent —
+            see `authIntentSurface.ts`. "Create account" is always primary. */}
+        {appReason ? (
+          <div className="mt-5 border-t border-white/50 pt-4">
+            <p className="text-[13px] font-medium leading-snug text-muted-foreground text-pretty">{appReason}</p>
+            <a
+              href="/get"
+              className="mt-2.5 inline-flex h-11 w-full items-center justify-center rounded-[14px] border border-white/60 bg-white/60 text-[14px] font-bold text-brandText no-underline transition-all hover:bg-white hover:text-brandBlue"
+            >
+              Get the app
+            </a>
+          </div>
+        ) : null}
       </div>
     </div>
   );

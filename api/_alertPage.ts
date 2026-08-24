@@ -167,11 +167,16 @@ const staticMapUrl = (area: string, country: string, mapboxToken: string): strin
   return `https://api.mapbox.com/geocoding/v5/mapbox.places/${place}.json?types=place,district,locality,neighborhood&limit=1&language=en&access_token=${mapboxToken}`;
 };
 
-export const resolveStaticMapImage = async (
+/**
+ * A district name to its centroid. Shared by the alert page's static map and the
+ * `/pet-alerts/*` district pages, which both need to turn "Kowloon City" into a
+ * point before they can ask for anything nearby.
+ */
+export const resolveAreaCentroid = async (
   area: string,
   country: string,
   mapboxToken: string,
-): Promise<string | null> => {
+): Promise<{ lat: number; lng: number } | null> => {
   const geocodeUrl = staticMapUrl(area, country, mapboxToken);
   if (!geocodeUrl) return null;
   try {
@@ -181,19 +186,81 @@ export const resolveStaticMapImage = async (
     const centre = data?.features?.[0]?.center;
     if (!Array.isArray(centre) || centre.length !== 2) return null;
     const [lng, lat] = centre;
-    // zoom 12 ≈ neighbourhood. No marker overlay, deliberately.
-    return (
-      `https://api.mapbox.com/styles/v1/whypen/cmpx5mu4m000l01sb5fmm2imv/static/` +
-      `${lng},${lat},12,0/640x260@2x?logo=false&attribution=false&access_token=${mapboxToken}`
-    );
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    return { lat, lng };
   } catch {
     return null;
   }
 };
 
+export const staticMapImageForCentroid = (
+  centre: { lat: number; lng: number },
+  mapboxToken: string,
+): string =>
+  // zoom 12 ≈ neighbourhood. No marker overlay, deliberately.
+  `https://api.mapbox.com/styles/v1/whypen/cmpx5mu4m000l01sb5fmm2imv/static/` +
+  `${centre.lng},${centre.lat},12,0/640x260@2x?logo=false&attribution=false&access_token=${mapboxToken}`;
+
+export const resolveStaticMapImage = async (
+  area: string,
+  country: string,
+  mapboxToken: string,
+): Promise<string | null> => {
+  const centre = await resolveAreaCentroid(area, country, mapboxToken);
+  if (!centre) return null;
+  return staticMapImageForCentroid(centre, mapboxToken);
+};
+
 const RESOLVED_COPY = {
   headline: "This alert has been resolved.",
   body: "The neighbour who raised it has closed it. Thanks for checking — that instinct is exactly what huddle is for.",
+};
+
+/**
+ * Structured data for a live alert.
+ *
+ * `SpecialAnnouncement` rather than `Article`: schema.org has no lost-pet type,
+ * and an alert is precisely what SpecialAnnouncement describes — a time-bounded
+ * public notice about a specific place. It carries `spatialCoverage` and
+ * `datePosted` natively, which is what an answer engine needs to decide the
+ * notice is relevant to "lost dog near me" and still current.
+ *
+ * DISTRICT ONLY. `spatialCoverage` gets the same area string the page already
+ * shows. The alert's real coordinates are never selected on this path and must
+ * never appear here — structured data is read by machines at scale, which makes
+ * it the worst possible place to leak a precise location.
+ *
+ * Archived alerts get no JSON-LD at all: there is nothing current to announce,
+ * and marking a resolved notice as live would be a lie told in a format built
+ * for machines to trust.
+ */
+const renderAlertJsonLd = (input: {
+  data: AlertPageData;
+  shareUrl: string;
+  title: string;
+  description: string;
+  image: string | null;
+}): string => {
+  if (input.data.archived) return "";
+  const payload: Record<string, unknown> = {
+    "@context": "https://schema.org",
+    "@type": "SpecialAnnouncement",
+    name: input.title,
+    text: input.description,
+    url: input.shareUrl,
+    datePosted: input.data.createdAt,
+    category: "https://www.wikidata.org/wiki/Q39201",
+    isPartOf: { "@type": "WebSite", name: "huddle", url: "https://huddle.pet" },
+  };
+  if (input.data.area) {
+    payload.spatialCoverage = { "@type": "Place", name: input.data.area };
+  }
+  if (input.image) payload.image = input.image;
+  // JSON inside a <script> block: the only escape that matters is the closing
+  // tag, which would otherwise end the script early and turn user-written alert
+  // text into live markup.
+  const json = JSON.stringify(payload).replace(/</g, "\\u003c");
+  return `<script type="application/ld+json">${json}</script>`;
 };
 
 export const renderAlertPage = (input: {
@@ -202,13 +269,15 @@ export const renderAlertPage = (input: {
   staticMapImage: string | null;
   iosDownloadUrl: string;
   androidDownloadUrl: string;
+  /** Web map URL for this alert, opened with its detail showing. */
+  webDestination: string | null;
   ogImage: string | null;
   title: string;
   description: string;
   /** Inline SVG for the desktop CTA; null degrades to Copy link alone. */
   qrSvg: string | null;
 }): string => {
-  const { data, shareUrl, staticMapImage, iosDownloadUrl, androidDownloadUrl } = input;
+  const { data, shareUrl, staticMapImage, iosDownloadUrl, androidDownloadUrl, webDestination } = input;
   const colour = chipColor(data.alertType);
   const chipLabel = String(data.alertType || "Alert").toUpperCase();
 
@@ -275,6 +344,8 @@ export const renderAlertPage = (input: {
     ${renderOgImageTags(ogImage, escapeHtml)}
     <meta name="twitter:title" content="${escapeHtml(metaTitle)}" />
     <meta name="twitter:description" content="${escapeHtml(metaDescription)}" />
+    <link rel="canonical" href="${escapeHtml(shareUrl)}" />
+    ${renderAlertJsonLd({ data, shareUrl, title: metaTitle, description: metaDescription, image: ogImage })}
     <link rel="icon" type="image/png" sizes="32x32" href="/huddle-favicon-32-v5.png" />
     <link rel="icon" type="image/png" href="/huddle-favicon-v5.png" />
     <link rel="apple-touch-icon" href="/huddle-apple-touch-icon-v5.png" />
@@ -313,7 +384,10 @@ export const renderAlertPage = (input: {
       <article class="card">
         ${body}
         <div class="actions">
-          <a class="cta mobile-only" id="open-app" href="${escapeHtml(iosDownloadUrl)}" data-track="open_app">Get huddle</a>
+          ${webDestination
+            ? `<a class="cta mobile-only" id="open-web" href="${escapeHtml(webDestination)}" data-track="open_web">Open on the map</a>`
+            : ""}
+          <a class="cta secondary mobile-only" id="open-app" href="${escapeHtml(iosDownloadUrl)}" data-track="open_app">Get huddle</a>
           <div class="desktop-only">
             <p class="qr-label">huddle is a mobile app — scan to open this alert on your phone:</p>
             ${input.qrSvg ? `<div class="qr">${input.qrSvg}</div>` : ""}
@@ -333,9 +407,29 @@ export const renderAlertPage = (input: {
         const openApp = document.getElementById("open-app");
         if (openApp) openApp.href = store;
 
-        // NOTE: the old stub auto-redirected mobile visitors to the store after
-        // 80ms. That is removed on purpose — the whole point of this page is
-        // that a shared alert shows the pet before anyone is asked to install.
+        // A verified-only alert's single-use token lives on the URL the reader
+        // opened. Read it from the live location so the map link keeps working
+        // regardless of how the platform rewrites the request.
+        const openWeb = document.getElementById("open-web");
+        const access = new URLSearchParams(window.location.search).get("access");
+        if (openWeb && access) openWeb.href += "&access=" + encodeURIComponent(access);
+
+        // NO INTERMEDIATE PAGE FOR A HUMAN, EVER - the only exception in the
+        // whole share surface is a carer link, which has no web page to send
+        // anyone to at all. A recipient with the app never reaches this page -
+        // the universal link opens it first. A recipient without it goes
+        // straight to the same alert on huddle.pet/map, already open. Resolved
+        // alerts forward too: SharedAlertDetail on /map now renders the same
+        // honest resolved message this page shows, from the same archived
+        // field the public-alerts endpoint already returns - so forwarding a
+        // resolved alert no longer risks showing stale detail as active.
+        //
+        // This page still has a job even though a human never sees it settle:
+        // crawlers read its Open Graph tags over plain HTTP and never run this
+        // script at all.
+        if (openWeb) {
+          window.location.replace(openWeb.href);
+        }
 
         const beacon = (event) => {
           try {

@@ -2,7 +2,7 @@ import { createHmac } from 'node:crypto';
 
 type MaybeString = string | string[] | undefined;
 type RequestShape = { headers?: Record<string, MaybeString> };
-export type IngressScope = 'public-feed' | 'public-groups' | 'public-alerts' | 'share';
+export type IngressScope = 'public-feed' | 'public-groups' | 'public-alerts' | 'share' | 'area';
 export type RateLimitDecision = { ok: true } | { ok: false; retryAfter: number; unavailable?: boolean };
 
 const first = (value: MaybeString) => (Array.isArray(value) ? value[0] || '' : value || '');

@@ -26,9 +26,10 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { Bell, ChevronLeft, ChevronRight, MoreHorizontal, PenSquare } from "lucide-react";
+import { Bell, ChevronLeft, ChevronRight, Info, MoreHorizontal, PenSquare } from "lucide-react";
 import { HuddleWordmark } from "@/components/brand/HuddleWordmark";
 import { WebBrandMedia } from "@/components/brand/WebBrandMedia";
+import { AppPromoCta } from "@/components/web/AppPromoCta";
 import { useAuthGate } from "@/components/auth/authGateContext";
 import { HuddleGlyph, HuddleNavIcon } from "@/components/icons/HuddleIcons";
 import { NAV_DESTINATIONS, isNavDestinationActive, type NavDestinationId } from "@/components/layout/navDestinations";
@@ -64,8 +65,7 @@ export const PublicTopBar = ({
   const [hoverExpanded, setHoverExpanded] = useState(false);
   const suppressHoverExpansionRef = useRef(false);
   const railExpanded = !railCollapsed || hoverExpanded;
-  const params = new URLSearchParams(search);
-  const isGroupsExplore = pathname.startsWith("/chats") && params.get("tab") === "groups" && params.get("view") === "explore";
+  const isGroupsExplore = pathname.startsWith("/groups");
   const createIntent = pathname.startsWith("/map") ? "broadcast" : isGroupsExplore ? "create-group" : pathname.startsWith("/chats") ? null : "post";
   const createLabel = pathname.startsWith("/map") ? "Create Broadcast" : isGroupsExplore ? "Create Group" : "Create";
 
@@ -101,7 +101,13 @@ export const PublicTopBar = ({
           <button aria-label="Notifications" type="button" onClick={() => requireAuth("notifications", () => {})} className="flex h-12 items-center gap-4 rounded-xl px-3 text-[16px] font-semibold text-brandText/75 hover:bg-muted/60 hover:text-brandText"><Bell className="h-[22px] w-[22px] shrink-0"/>{railExpanded ? <span>Notifications</span> : null}</button>
           {createIntent ? <button aria-label={createLabel} type="button" onClick={() => requireAuth(createIntent, () => {})} className="flex h-12 items-center gap-4 rounded-xl px-3 text-[16px] font-semibold text-brandText/75 hover:bg-muted/60 hover:text-brandText"><PenSquare className="h-[22px] w-[22px] shrink-0"/>{railExpanded ? <span>{createLabel}</span> : null}</button> : null}
         </nav>
-        <button aria-label="More" type="button" onClick={() => requireAuth("settings", () => {})} className="mt-auto flex h-12 items-center gap-4 rounded-xl px-3 text-[16px] font-semibold text-brandText/75 hover:bg-muted/60 hover:text-brandText"><MoreHorizontal className="h-[22px] w-[22px] shrink-0"/>{railExpanded ? <span>More</span> : null}</button>
+        <div className="mt-auto flex flex-col gap-1">
+          <AppPromoCta variant="rail" collapsed={!railExpanded} />
+          {/* Back to brandweb. Without it the public surfaces are a dead end for
+              anyone who arrived on a shared link and wants to know what huddle is. */}
+          <a href="/" className="flex h-12 items-center gap-4 rounded-xl px-3 text-[16px] font-semibold text-brandText/75 no-underline transition-colors hover:bg-muted/60 hover:text-brandText"><Info className="h-[22px] w-[22px] shrink-0"/>{railExpanded ? <span>About huddle</span> : null}</a>
+          <button aria-label="More" type="button" onClick={() => requireAuth("settings", () => {})} className="flex h-12 items-center gap-4 rounded-xl px-3 text-[16px] font-semibold text-brandText/75 hover:bg-muted/60 hover:text-brandText"><MoreHorizontal className="h-[22px] w-[22px] shrink-0"/>{railExpanded ? <span>More</span> : null}</button>
+        </div>
       </aside>
 
       <header className="sticky top-0 z-40 h-14 border-b border-border/60 bg-background/95 backdrop-blur-xl">
@@ -157,6 +163,12 @@ export const PublicTopBar = ({
           <p className="mt-0.5 text-[13px] font-medium text-muted-foreground text-pretty">{subtitle}</p>
         </div>
       ) : null}
+
+      {/* Sits below the title, above the feed — in the reading order, never over
+          it. Scrolls away with the content and stays dismissed once dismissed. */}
+      <div className="px-4 pt-3 lg:hidden">
+        <AppPromoCta variant="bar" />
+      </div>
     </>
   );
 };

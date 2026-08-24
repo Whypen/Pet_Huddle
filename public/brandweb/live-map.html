@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="apple-itunes-app" content="app-id=6766207079">
 <meta name="google-play-app" content="app-id=pet.huddle">
-<title>Live Map &amp; Broadcast Alerts — Real-time pet safety · huddle</title>
-<meta name="description" content="huddle Live Map drops location-based pins for lost pets, strays, hazards and more. Broadcast Alerts reach nearby members instantly — from 5km up to 50km on Super Broadcast.">
+<title>Live Pet Alert Map — see lost pets near you in your browser · huddle</title>
+<meta name="description" content="See lost pets, strays and hazards reported near you on the huddle Live Map — open it in your browser, no app required. Broadcast Alerts reach nearby members instantly, from 5km up to 50km on Super Broadcast.">
 <meta name="theme-color" content="#2145CF">
 <link rel="canonical" href="https://huddle.pet/live-map">
 
@@ -73,7 +73,7 @@
     "https://www.threads.net/@huddle.pet",
     "https://twitter.com/huddlepet",
     "https://www.tiktok.com/@huddlepet",
-    "https://apps.apple.com/app/huddle",
+    "https://apps.apple.com/app/id6766207079",
     "https://play.google.com/store/apps/details?id=pet.huddle"
   ]
 }
@@ -257,8 +257,77 @@
     <div class="eyebrow">A voice for the voiceless</div>
     <h1>See it.<br>Pin it.<br><span class="coral">Help the pack.</span></h1>
     <p class="lead">You walked past a stray. You lost your dog. You saw the bait on the path. You felt angry, then helpless. huddle gives that feeling somewhere to go — a pin on the map, a Broadcast to the block, a neighbourhood that's already looking.</p>
+
+    <!-- Both doors, in the hero. The web link is a real anchor in static markup:
+         it is how a crawler and an answer engine learn the map is reachable
+         without an install, and how a reader gets to it in one tap. -->
+    <div class="hero-doors">
+      <a href="/map" class="hero-door-primary">Open the Live Map on the web →</a>
+      <a href="/get" class="hero-door-secondary">Get the app</a>
+    </div>
+    <p class="hero-live" id="live-alert-strip" hidden>
+      <span class="pulse" aria-hidden="true"></span>
+      <span><span id="live-alert-count"></span> <a href="/map" id="live-alert-link">see them on the map</a></span>
+    </p>
   </div>
 </div>
+<style>
+  .hero-doors { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 30px; }
+  .hero-door-primary {
+    display: inline-flex; align-items: center; background: var(--white); color: var(--blue);
+    border-radius: 999px; padding: 14px 26px; font-size: 15.5px; font-weight: 800;
+    letter-spacing: -0.01em; box-shadow: 0 8px 26px -8px rgba(0,0,0,0.35);
+    transition: transform 0.25s var(--ease), background 0.2s, color 0.2s;
+  }
+  .hero-door-primary:hover { transform: translateY(-2px); background: var(--coral); color: var(--white); }
+  .hero-door-secondary {
+    display: inline-flex; align-items: center; border: 1.5px solid rgba(255,255,255,0.6);
+    color: var(--white); border-radius: 999px; padding: 13px 24px;
+    font-size: 15.5px; font-weight: 700; letter-spacing: -0.01em;
+    transition: background 0.2s var(--ease), border-color 0.2s;
+  }
+  .hero-door-secondary:hover { background: rgba(255,255,255,0.16); border-color: var(--white); }
+  .hero-live {
+    margin-top: 18px; font-size: 14.5px; font-weight: 600; color: rgba(255,255,255,0.9);
+    display: flex; align-items: center; gap: 9px;
+  }
+  .hero-live[hidden] { display: none; }
+  .hero-live a { color: var(--white); text-decoration: underline; }
+  .hero-live .pulse {
+    width: 9px; height: 9px; border-radius: 50%; background: var(--lime);
+    box-shadow: 0 0 0 4px rgba(191,255,0,0.22); flex-shrink: 0;
+  }
+</style>
+<script>
+  /* Live proof, not a screenshot. Reads the same public endpoint the web map
+     uses. Silent on failure — an empty strip is never worse than a wrong count,
+     and the page has already made its case without it.
+
+     Text is written with textContent into markup that already exists, so no
+     response value is ever parsed as HTML. */
+  (function () {
+    var strip = document.getElementById("live-alert-strip");
+    var countEl = document.getElementById("live-alert-count");
+    if (!strip || !countEl || !navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(function (pos) {
+      var lat = pos.coords.latitude;
+      var lng = pos.coords.longitude;
+      fetch("/api/public-alerts?lat=" + encodeURIComponent(lat) + "&lng=" + encodeURIComponent(lng), {
+        headers: { accept: "application/json" },
+      })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (data) {
+          if (!data) return;
+          var list = Array.isArray(data) ? data : Array.isArray(data.alerts) ? data.alerts : [];
+          var count = list.length;
+          if (!count) return;
+          countEl.textContent = count + " active " + (count === 1 ? "alert" : "alerts") + " near you right now —";
+          strip.hidden = false;
+        })
+        .catch(function () { /* no count is fine; the page stands without it */ });
+    }, function () {}, { timeout: 6000, maximumAge: 300000 });
+  })();
+</script>
 <div class="hero-wave-out">
   <svg viewBox="0 0 1440 110" preserveAspectRatio="none" aria-hidden="true">
     <path d="M0,40 C240,110 480,0 720,40 C960,80 1200,10 1440,50 L1440,110 L0,110 Z" fill="#142E99"/>
@@ -488,11 +557,12 @@
   <div class="container">
     <div class="reveal" style="text-align:center;max-width:600px;margin:0 auto">
       <h2 class="s-title" style="color:var(--white)">No pet left<br>behind.</h2>
-      <p style="color:rgba(255,255,255,0.92);font-size:17px;font-weight:500;margin-top:20px;margin-bottom:32px">Download huddle and join the neighbours who show up when it counts.</p>
+      <p style="color:rgba(255,255,255,0.92);font-size:17px;font-weight:500;margin-top:20px;margin-bottom:32px">Get the app and be told the moment something happens near you. Or open the map in your browser and have a look right now.</p>
       <div style="display:flex;gap:14px;justify-content:center;flex-wrap:wrap">
-        <a href="/#download" class="btn btn-white">⌘ App Store</a>
-        <a href="/#download" class="btn btn-white">▸ Google Play</a>
+        <a href="/get" class="btn btn-white">⌘ App Store</a>
+        <a href="/get" class="btn btn-white">▸ Google Play</a>
       </div>
+      <p style="margin-top:22px"><a href="/map" style="color:var(--white);font-weight:700;font-size:15.5px;border-bottom:1.5px solid rgba(255,255,255,0.5);padding-bottom:2px">Open the Live Map on the web →</a></p>
     </div>
   </div>
 </section>

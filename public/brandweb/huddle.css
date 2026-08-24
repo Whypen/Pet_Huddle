@@ -73,6 +73,40 @@ nav.huddle-nav.solid .nav-cta, nav.huddle-nav.scrolled .nav-cta { background: va
 nav.huddle-nav.solid .nav-cta:hover, nav.huddle-nav.scrolled .nav-cta:hover { background: var(--coral); }
 @media (max-width: 800px) { nav.huddle-nav .nav-links { display: none; } }
 
+/* ── WEB DOOR ──
+   The lockup that opens the product itself at /social. A ghost pill against the
+   solid "Get the app" CTA: both doors always open, the app always the
+   recommendation. The wordmark repeats here on purpose — it is the same mark the
+   web product renders in its own header, so arriving at /social is continuous
+   rather than a link away. */
+.nav-web {
+  display: inline-flex; align-items: center; gap: 7px;
+  border: 1.5px solid rgba(255,255,255,0.55); color: var(--white);
+  border-radius: 999px; padding: 8.5px 15px;
+  font-size: 13.5px; font-weight: 700; letter-spacing: -0.01em;
+  transition: background 0.2s var(--ease), border-color 0.2s var(--ease), color 0.2s var(--ease), transform 0.25s var(--ease);
+}
+.nav-web .nav-web-mark { height: 13px; width: auto; display: block; }
+.nav-web .nav-web-mark.on-light { display: none; }
+.nav-web .nav-web-arrow { font-size: 12px; opacity: 0.72; }
+.nav-web:hover { background: rgba(255,255,255,0.16); border-color: var(--white); transform: translateY(-1px); }
+nav.solid .nav-web, nav.scrolled .nav-web { border-color: rgba(33,69,207,0.32); color: var(--blue); }
+nav.solid .nav-web:hover, nav.scrolled .nav-web:hover { background: rgba(33,69,207,0.07); border-color: var(--blue); }
+nav.solid .nav-web .nav-web-mark.on-dark, nav.scrolled .nav-web .nav-web-mark.on-dark { display: none; }
+nav.solid .nav-web .nav-web-mark.on-light, nav.scrolled .nav-web .nav-web-mark.on-light { display: block; }
+@media (max-width: 560px) { .nav-web { display: none; } }
+
+/* Web door inside the drawer — where the small-screen visitor finds it. */
+.drawer-web {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  border: 1.5px solid rgba(33,69,207,0.3); color: var(--blue);
+  border-radius: 999px; padding: 13px 22px; margin-top: 10px;
+  font-size: 15px; font-weight: 700; letter-spacing: -0.01em;
+  transition: background 0.2s var(--ease), border-color 0.2s var(--ease);
+}
+.drawer-web:hover { background: rgba(33,69,207,0.07); border-color: var(--blue); }
+.drawer-web .nav-web-mark { height: 14px; width: auto; display: block; }
+
 /* ── HAMBURGER MENU BUTTON ── */
 .nav-menu-btn, nav#nav .nav-menu-btn {
   background: transparent; border: 0; cursor: pointer;
@@ -464,3 +498,67 @@ section.s.lime .eyebrow { color: var(--ink); }
 .reveal-l.visible { opacity: 1; transform: translateX(0); }
 .reveal-r { opacity: 0; transform: translateX(36px); transition: opacity 0.9s var(--ease), transform 0.9s var(--ease); }
 .reveal-r.visible { opacity: 1; transform: translateX(0); }
+
+/* ── TWO WAYS IN ── */
+.doors-wrap { background: var(--cream); }
+.doors-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 52px; }
+@media (max-width: 860px) { .doors-grid { grid-template-columns: 1fr; } }
+.door {
+  background: var(--white); border-radius: 24px; padding: 34px 32px;
+  border: 1px solid rgba(33,69,207,0.08); display: flex; flex-direction: column;
+  transition: transform 0.4s var(--ease), box-shadow 0.4s;
+}
+.door:hover { transform: translateY(-6px); box-shadow: 0 26px 52px -22px rgba(20,46,153,0.2); }
+.door.is-app { background: var(--blue); border-color: var(--blue); color: var(--white); }
+.door-kicker {
+  font-size: 11.5px; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--blue); margin-bottom: 14px;
+}
+.door.is-app .door-kicker { color: var(--lime); }
+.door-name {
+  font-size: 27px; font-weight: 800; letter-spacing: -0.03em; line-height: 1.08;
+  color: var(--ink); margin-bottom: 12px;
+}
+.door.is-app .door-name { color: var(--white); }
+.door-body { font-size: 15.5px; font-weight: 500; line-height: 1.55; color: var(--fg1); margin-bottom: 26px; }
+.door.is-app .door-body { color: rgba(255,255,255,0.85); }
+.door-action { margin-top: auto; }
+.door-btn {
+  display: inline-flex; align-items: center; gap: 8px; border-radius: 999px;
+  padding: 13px 24px; font-size: 15px; font-weight: 700; letter-spacing: -0.01em;
+  border: 1.5px solid var(--blue); color: var(--blue); background: transparent;
+  transition: background 0.22s var(--ease), color 0.22s var(--ease);
+}
+.door-btn:hover { background: var(--blue); color: var(--white); }
+.door.is-app .door-btn {
+  background: var(--white); color: var(--blue); border-color: var(--white);
+}
+.door.is-app .door-btn:hover { background: var(--lime); border-color: var(--lime); color: var(--ink); }
+.door-note { margin-top: 12px; font-size: 13px; font-weight: 500; color: var(--fg1); opacity: 0.72; }
+.door.is-app .door-note { color: rgba(255,255,255,0.72); }
+
+.matrix-wrap { margin-top: 28px; overflow-x: auto; border-radius: 22px; border: 1px solid rgba(33,69,207,0.1); background: var(--white); }
+.matrix { border-collapse: collapse; width: 100%; min-width: 520px; }
+.matrix caption {
+  text-align: left; padding: 22px 26px 16px; font-size: 12px; font-weight: 800;
+  letter-spacing: 0.13em; text-transform: uppercase; color: var(--fg1); opacity: 0.6;
+}
+.matrix th, .matrix td { padding: 14px 26px; text-align: left; border-top: 1px solid rgba(33,69,207,0.07); }
+.matrix thead th {
+  font-size: 11.5px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--fg1); opacity: 0.65;
+}
+.matrix th.col, .matrix td.col { text-align: center; width: 104px; }
+.matrix tbody th { font-size: 15px; font-weight: 600; color: var(--ink); }
+.matrix .has { color: var(--blue); font-weight: 800; font-size: 17px; }
+.matrix .hasnt { color: rgba(66,73,101,0.32); font-weight: 700; font-size: 17px; }
+.matrix tbody tr.app-only th { color: var(--ink); }
+.matrix tbody tr.app-only { background: rgba(33,69,207,0.028); }
+
+/* Web-access note on the pricing plans — every tier includes the browser. */
+.plan-web-note {
+  margin-top: 14px; font-size: 13px; font-weight: 500; line-height: 1.45;
+  color: var(--fg1); opacity: 0.78; text-align: center;
+}
+.plan-web-note a { color: var(--blue); font-weight: 700; }
+.plan-web-note a:hover { text-decoration: underline; }
