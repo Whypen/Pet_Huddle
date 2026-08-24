@@ -138,8 +138,10 @@ describe("web tier discovery contract", () => {
     expect(share).toContain('<link rel="canonical"');
     expect(share).toContain("DiscussionForumPosting");
     expect(share).toContain("ProfilePage");
-    // The instant forward for humans is untouched.
-    expect(share).toContain("window.location.replace(target || store)");
+    // Adding crawler metadata must not add a redirect. The share stub shows the
+    // recipient what they were sent and lets them choose; `sharePreviewContract`
+    // owns that rule, and this guards the SEO work from quietly breaking it.
+    expect(share).not.toContain("location.replace");
   });
 
   it("serves district pages on a public path robots.txt allows", () => {

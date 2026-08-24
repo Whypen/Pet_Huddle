@@ -32,11 +32,10 @@ import { checkDistributedRateLimit } from './_distributedRateLimit.js';
 /**
  * Structured data for the non-alert share types.
  *
- * These pages forward instantly, so no person ever reads them — but a crawler
- * runs no JavaScript and therefore sees only this static document. Without a
- * canonical and a type, a shared thread is an untyped redirect stub as far as
- * search and answer engines are concerned, which is why huddle's own content
- * has never been findable through the links its members send each other.
+ * These pages are a crawler surface, and a crawler runs no JavaScript. Without
+ * a canonical and a type, a shared thread is an untyped stub as far as search
+ * and answer engines are concerned, which is why huddle's own content has never
+ * been findable through the links its members send each other.
  *
  * Only what the preview builders already decided to expose is described here.
  * Redaction happened upstream in `previewFromAlertRow` and its siblings, and
@@ -577,32 +576,6 @@ export default async function handler(req: RequestShape, res: ResponseShape) {
   const image = cappedOgImage(previewImage, null, ogSize);
   const shareId = effectiveContentId ? buildCanonicalShareId(effectiveType, effectiveContentId) : "";
   const shareUrl = shareId ? `${origin}/share/${encodeURIComponent(shareId)}` : `${origin}/share`;
-  /**
-   * WHERE A HUMAN ACTUALLY GOES.
-   *
-   * `/share/{id}` is a crawler surface, not a destination. Someone with the app
-   * never reaches it — the universal link opens the app first. Someone without
-   * it should land on the WEB version of the same thing, already open on the
-   * item they were sent, not on a stub and not in the App Store.
-   *
-   * Profiles and carers have no public web page yet, so they keep the stub.
-   */
-  // Built WITHOUT the access token: whether a rewrite merges the original query
-  // into `req.query` is a platform detail this must not depend on. The browser
-  // knows its own URL, so the token is appended client-side below — the server
-  // only ever emits the token-free base.
-  const webDestination = effectiveContentId
-    ? effectiveType === "alert"
-      ? `${origin}/map?alert=${encodeURIComponent(effectiveContentId)}`
-      : effectiveType === "thread"
-        ? `${origin}/social?focus=${encodeURIComponent(effectiveContentId)}`
-        // A profile opens its card over Social, which is the base page in every
-        // state. Carer has no web surface, so it stays on this page and offers
-        // the app instead.
-        : effectiveType === "profile"
-          ? `${origin}/social?profile=${encodeURIComponent(effectiveContentId)}`
-          : null
-    : null;
   const fallbackDownloadUrl = `${origin}/waitlist`;
   const iosDownloadUrl = String(process.env.HUDDLE_IOS_DOWNLOAD_URL || "").trim() || fallbackDownloadUrl;
   const androidDownloadUrl = String(process.env.HUDDLE_ANDROID_DOWNLOAD_URL || "").trim() || fallbackDownloadUrl;
@@ -626,7 +599,6 @@ export default async function handler(req: RequestShape, res: ResponseShape) {
           staticMapImage,
           iosDownloadUrl,
           androidDownloadUrl,
-          webDestination,
           ogImage: cappedOgImage(alertData.photoUrl, image),
           title,
           description,
@@ -681,36 +653,27 @@ export default async function handler(req: RequestShape, res: ResponseShape) {
         ${image ? `<div class="preview"><img src="${escapeHtml(image)}" alt="huddle preview" /></div>` : ""}
         <h1 class="title">${escapeHtml(title)}</h1>
         <p class="desc">${escapeHtml(description)}</p>
-        <a class="cta" id="continue-web" href="${escapeHtml(webDestination || iosDownloadUrl)}">${webDestination ? "Open on the web" : "Get huddle"}</a>
+        <a class="cta" id="download-app" href="${escapeHtml(iosDownloadUrl)}">Get huddle</a>
         ${qrSvg ? `<div class="desktop-only"><p class="qr-label">Scan to open this on your phone:</p><div class="qr">${qrSvg}</div></div>` : ""}
       </article>
     </main>
     <script>
       (() => {
-        const web = ${JSON.stringify(webDestination)};
-        const android = /Android/i.test(navigator.userAgent || "");
+        const ua = navigator.userAgent || "";
+        const android = /Android/i.test(ua);
         const store = android
           ? ${JSON.stringify(androidDownloadUrl)}
           : ${JSON.stringify(iosDownloadUrl)};
-        // The token rides on the URL the reader actually opened, so it is read
-        // from the live location rather than from anything the server parsed.
-        const access = new URLSearchParams(window.location.search).get("access");
-        const target = web && access ? web + "&access=" + encodeURIComponent(access) : web;
-        const cta = document.getElementById("continue-web");
-        if (cta) cta.href = target || store;
+        document.getElementById("download-app").href = store;
 
-        // NEVER AN INTERMEDIATE PAGE. A recipient with the app never runs this
-        // script at all - the universal link opened the app first.
+        // NO AUTO-REDIRECT TO THE STORE.
         //
-        // Without the app: posts, alerts and profiles forward to the SAME item
-        // already open on the web, so nobody is asked to install before they
-        // see what they were sent. A replace() keeps Back returning to the chat
-        // they came from rather than trapping them on this page.
-        //
-        // CARER IS THE ONE EXCEPTION, and deliberately so: there is no web
-        // carer surface to send anyone to, so a carer link goes to the store
-        // rather than parking on a card that cannot lead anywhere.
-        window.location.replace(target || store);
+        // This page used to replace itself with the App Store 80ms after load,
+        // so a recipient tapped a preview card and landed in the store without
+        // ever seeing what they had been sent. If the app is installed the
+        // universal link opens it before this page renders at all; if it is
+        // not, the reader should see the content first and choose the app
+        // afterwards. Same rule as the public alert page.
       })();
     </script>
   </body>

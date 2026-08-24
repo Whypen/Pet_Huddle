@@ -269,15 +269,13 @@ export const renderAlertPage = (input: {
   staticMapImage: string | null;
   iosDownloadUrl: string;
   androidDownloadUrl: string;
-  /** Web map URL for this alert, opened with its detail showing. */
-  webDestination: string | null;
   ogImage: string | null;
   title: string;
   description: string;
   /** Inline SVG for the desktop CTA; null degrades to Copy link alone. */
   qrSvg: string | null;
 }): string => {
-  const { data, shareUrl, staticMapImage, iosDownloadUrl, androidDownloadUrl, webDestination } = input;
+  const { data, shareUrl, staticMapImage, iosDownloadUrl, androidDownloadUrl } = input;
   const colour = chipColor(data.alertType);
   const chipLabel = String(data.alertType || "Alert").toUpperCase();
 
@@ -384,10 +382,7 @@ export const renderAlertPage = (input: {
       <article class="card">
         ${body}
         <div class="actions">
-          ${webDestination
-            ? `<a class="cta mobile-only" id="open-web" href="${escapeHtml(webDestination)}" data-track="open_web">Open on the map</a>`
-            : ""}
-          <a class="cta secondary mobile-only" id="open-app" href="${escapeHtml(iosDownloadUrl)}" data-track="open_app">Get huddle</a>
+          <a class="cta mobile-only" id="open-app" href="${escapeHtml(iosDownloadUrl)}" data-track="open_app">Get huddle</a>
           <div class="desktop-only">
             <p class="qr-label">huddle is a mobile app — scan to open this alert on your phone:</p>
             ${input.qrSvg ? `<div class="qr">${input.qrSvg}</div>` : ""}
@@ -407,29 +402,9 @@ export const renderAlertPage = (input: {
         const openApp = document.getElementById("open-app");
         if (openApp) openApp.href = store;
 
-        // A verified-only alert's single-use token lives on the URL the reader
-        // opened. Read it from the live location so the map link keeps working
-        // regardless of how the platform rewrites the request.
-        const openWeb = document.getElementById("open-web");
-        const access = new URLSearchParams(window.location.search).get("access");
-        if (openWeb && access) openWeb.href += "&access=" + encodeURIComponent(access);
-
-        // NO INTERMEDIATE PAGE FOR A HUMAN, EVER - the only exception in the
-        // whole share surface is a carer link, which has no web page to send
-        // anyone to at all. A recipient with the app never reaches this page -
-        // the universal link opens it first. A recipient without it goes
-        // straight to the same alert on huddle.pet/map, already open. Resolved
-        // alerts forward too: SharedAlertDetail on /map now renders the same
-        // honest resolved message this page shows, from the same archived
-        // field the public-alerts endpoint already returns - so forwarding a
-        // resolved alert no longer risks showing stale detail as active.
-        //
-        // This page still has a job even though a human never sees it settle:
-        // crawlers read its Open Graph tags over plain HTTP and never run this
-        // script at all.
-        if (openWeb) {
-          window.location.replace(openWeb.href);
-        }
+        // NOTE: the old stub auto-redirected mobile visitors to the store after
+        // 80ms. That is removed on purpose — the whole point of this page is
+        // that a shared alert shows the pet before anyone is asked to install.
 
         const beacon = (event) => {
           try {
