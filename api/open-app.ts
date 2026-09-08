@@ -16,9 +16,10 @@
 
 import { renderQrSvg } from "./_alertPage.js";
 import { escapeHtml } from "./_shareHtml.js";
+import { getStoreLinks } from "./_storeLinks.js";
 
 type MaybeString = string | string[] | undefined;
-type RequestShape = { headers?: Record<string, MaybeString> };
+type RequestShape = { headers?: Record<string, MaybeString>; query?: Record<string, MaybeString> };
 type ResponseShape = {
   setHeader: (key: string, value: string) => void;
   status: (code: number) => { send: (body: string) => void };
@@ -121,12 +122,13 @@ const renderGetPage = (input: {
 
 export default async function handler(req: RequestShape, res: ResponseShape) {
   const userAgent = String(req.headers?.["user-agent"] || "");
-  const fallback = "https://huddle.pet/waitlist";
-  const iosStoreUrl = String(process.env.HUDDLE_IOS_DOWNLOAD_URL || "").trim() || fallback;
-  const androidStoreUrl = String(process.env.HUDDLE_ANDROID_DOWNLOAD_URL || "").trim() || fallback;
+  const { ios: iosStoreUrl, android: androidStoreUrl } = getStoreLinks();
+  const platform = req.query?.platform;
+  const explicitPlatform = platform === "ios" || platform === "android" ? platform : null;
 
-  if (isMobileUserAgent(userAgent)) {
-    const destination = /android/i.test(userAgent) ? androidStoreUrl : iosStoreUrl;
+  if (explicitPlatform || isMobileUserAgent(userAgent)) {
+    const android = explicitPlatform ? explicitPlatform === "android" : /android/i.test(userAgent);
+    const destination = android ? androidStoreUrl : iosStoreUrl;
     res.setHeader("Location", destination);
     res.setHeader("Cache-Control", "private, no-store");
     res.status(307).send("");

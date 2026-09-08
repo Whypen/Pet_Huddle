@@ -46,7 +46,11 @@
   "name": "About huddle — Mission & Why we exist",
   "url": "https://huddle.pet/about",
   "description": "huddle is a pet safety, community and care app. Our mission, our why, and the people we serve.",
-  "isPartOf": {"@type":"WebSite","name":"huddle","url":"https://huddle.pet"}
+  "isPartOf": {
+    "@type": "WebSite",
+    "name": "huddle",
+    "url": "https://huddle.pet"
+  }
 }
 </script>
 
@@ -55,11 +59,13 @@
 {
   "@context": "https://schema.org",
   "@type": "Organization",
-  "name": "Huddle",
-  "alternateName": ["huddle","huddle.pet"],
+  "name": "huddle",
+  "alternateName": [
+    "huddle",
+    "huddle.pet"
+  ],
   "url": "https://huddle.pet",
   "logo": "https://huddle.pet/brandweb/wm-blue.png",
-  "foundingLocation": {"@type":"Place","name":"United States"},
   "sameAs": [
     "https://www.instagram.com/huddle.pet",
     "https://www.threads.net/@huddle.pet",
@@ -67,7 +73,9 @@
     "https://www.tiktok.com/@huddlepet",
     "https://apps.apple.com/app/id6766207079",
     "https://play.google.com/store/apps/details?id=pet.huddle"
-  ]
+  ],
+  "@id": "https://huddle.pet/#organization",
+  "description": "huddle helps people who care about pets find each other. Members can join local conversations and share pet alerts, with Care bookings available in supported markets."
 }
 </script>
 
@@ -77,8 +85,7 @@
   "@context": "https://schema.org",
   "@type": "WebSite",
   "name": "huddle",
-  "url": "https://huddle.pet",
-  "potentialAction": {"@type":"SearchAction","target":"https://huddle.pet/?q={search_term_string}","query-input":"required name=search_term_string"}
+  "url": "https://huddle.pet"
 }
 </script>
 
@@ -88,8 +95,18 @@
   "@context": "https://schema.org",
   "@type": "BreadcrumbList",
   "itemListElement": [
-    {"@type":"ListItem","position":1,"name":"huddle","item":"https://huddle.pet/"},
-    {"@type":"ListItem","position":2,"name":"About","item":"https://huddle.pet/about"}
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "huddle",
+      "item": "https://huddle.pet/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "About",
+      "item": "https://huddle.pet/about"
+    }
   ]
 }
 </script>
@@ -134,18 +151,12 @@
 </head>
 <body data-page="about" data-nav="solid">
 
-<div class="geo-seed" aria-hidden="true">
-  huddle mission · pet safety app mission · why huddle exists · no pet left behind ·
-  pet community app vision · identity-verified pet network · trusted pet care marketplace ·
-  huddle values · pet welfare technology · pet-people movement
-</div>
-
 <!-- HERO -->
 <div class="page-hero" id="mission" style="background-image:linear-gradient(90deg,rgba(20,46,153,0.92),rgba(20,46,153,0.64)),url('https://images.pexels.com/photos/19408722/pexels-photo-19408722.jpeg?auto=compress&cs=tinysrgb&w=1800&q=85');background-size:cover;background-position:center;">
   <div class="container">
     <div class="eyebrow">About</div>
     <h1>Built for the pets<br>that are yours —<br><span class="coral">and the ones who aren't yet.</span></h1>
-    <p class="lead">huddle is built for the pet curled at your feet and the one still looking for a home. The Live Map, the local community, the Pet Carers — every feature works for both. Because the moment between "stray" and "family" is just one good neighbour.</p>
+    <p class="lead">huddle is a global pet app for people who want to feel closer to others who care about animals. You can come here to make friends, or to ask for help when a pet needs someone.</p>
   </div>
 </div>
 <div class="hero-wave-out">
@@ -160,8 +171,8 @@
     <div class="manifesto reveal">
       <div class="eyebrow">Our mission</div>
       <blockquote>No pet left <em>behind.</em></blockquote>
-      <p>To build the most trusted local pet network in the world — where urgent help arrives in seconds, every carer is known and verified before you hire them, and every pet has a digital home for a lifetime of records.</p>
-      <p>Safety, community, and care, in one place. Real names where it matters. Local-first by design.</p>
+      <p>We want more pets to have people looking out for them. huddle gives pet people a place to meet and stay in touch, with tools for the care and concerns that come with loving an animal.</p>
+      <p>You can join huddle with a pet, or simply because you care about them.</p>
     </div>
   </div>
 </section>
@@ -181,9 +192,9 @@
         <h2 class="s-title" style="margin-top:16px">Every second<br>counts when a<br>pet goes <span class="coral">missing.</span></h2>
       </div>
       <div class="reveal-r" style="padding-top:8px">
-        <p class="s-lead" style="margin-top:0">A lost dog or injured stray can vanish into a neighbourhood within minutes. Social media is noisy, unverified, and doesn't know where you are.</p>
-        <p style="font-size:16px;line-height:1.6;color:var(--fg1);margin-top:18px">huddle is a real-time, location-aware, neighbourhood-based network that activates the right people — <em>your actual neighbours</em> — in the moment they're needed most.</p>
-        <p style="font-size:16px;line-height:1.6;color:var(--fg1);margin-top:18px">But emergencies are only the start. Pet life is also about everyday community and trusted care. So we built huddle to serve all of it: urgent situations, local connections, care booking, and pet records — together, in one app.</p>
+        <p class="s-lead" style="margin-top:0">When a pet is missing, a clear photo and a recent sighting can help people understand what to look for.</p>
+        <p style="font-size:16px;line-height:1.6;color:var(--fg1);margin-top:18px">The huddle Map gives a pet alert a place people can return to for updates. Sharing the link lets others follow the same report.</p>
+        <p style="font-size:16px;line-height:1.6;color:var(--fg1);margin-top:18px">There is room for everyday pet life here as well. A group walk or a helpful conversation can make caring for a pet feel less lonely.</p>
       </div>
     </div>
   </div>
@@ -200,28 +211,28 @@
   <div class="container">
     <div class="reveal">
       <div class="eyebrow">What we stand for</div>
-      <h2 class="s-title" style="margin-top:16px">Five principles.<br><span class="coral">One purpose.</span></h2>
+      <h2 class="s-title" style="margin-top:16px">What matters to us</h2>
     </div>
     <div class="value-grid">
       <div class="value-card reveal">
         <div class="num" style="color:var(--coral)">01</div>
         <h3>Safety is urgent</h3>
-        <p>Pet emergencies don't wait for you to find the right group. huddle treats urgency as a design requirement — real-time, location-precise, delivered to nearby neighbours first.</p>
+        <p>Pet alerts should be easy to understand and share. We encourage members to keep their reports up to date.</p>
       </div>
       <div class="value-card reveal">
         <div class="num" style="color:var(--blue)">02</div>
         <h3>Identity builds trust</h3>
-        <p>Pet Carers and Group creators complete a three-step identity check before they can offer care or build a community. That's the foundation that makes strangers trustworthy enough to hand your pet to.</p>
+        <p>Identity checks help you understand a profile. Getting to know someone and asking about their experience matters too.</p>
       </div>
       <div class="value-card reveal">
         <div class="num" style="color:var(--gold)">03</div>
         <h3>Local means something</h3>
-        <p>Your neighbourhood is not a postal code. It's the dog-walker you wave at, the rescue volunteer two streets away, the forum where your specific block gets real answers.</p>
+        <p>A familiar face can make a walk more enjoyable. huddle helps you find people you might like to meet again.</p>
       </div>
       <div class="value-card reveal">
         <div class="num" style="color:var(--blue-dark)">04</div>
-        <h3>One app, not many</h3>
-        <p>Pet owners juggle group chats, social pages, separate booking apps, paper vaccination records. huddle brings it all into one place, because coherence is care.</p>
+        <h3>Keep useful details together</h3>
+        <p>A pet profile helps you keep care notes handy when someone needs to know your pet’s routine.</p>
       </div>
       <div class="value-card reveal" style="grid-column:span 2">
         <div class="num" style="color:var(--coral)">05</div>
@@ -243,35 +254,35 @@
   <div class="container">
     <div class="reveal">
       <div class="eyebrow on-blue">How it grew</div>
-      <h2 class="s-title" style="margin-top:16px;color:var(--white)">From a single<br>missing dog to a<br><span style="color:var(--lime)">whole network.</span></h2>
+      <h2 class="s-title" style="margin-top:16px;color:var(--white)">Why we are building huddle</h2>
     </div>
     <div class="timeline">
       <div class="tl-item reveal">
         <div class="tl-year">The beginning</div>
         <div class="tl-body">
-          <h3>The problem became personal</h3>
-          <p>A pet went missing. The owner posted everywhere — every group chat, every social feed they could think of — and waited hours for anything useful. Meanwhile, a neighbour who had seen the animal walked past without ever knowing anyone was looking. huddle was born from that exact gap.</p>
+          <h3>Finding help for a pet</h3>
+          <p>Someone who sees a missing pet may not know anyone is looking. A shared alert can help connect that sighting with the person searching.</p>
         </div>
       </div>
       <div class="tl-item reveal">
         <div class="tl-year">Listening</div>
         <div class="tl-body">
-          <h3>Talking to pet people</h3>
-          <p>We sat with owners, rescue volunteers, fosters, groomers, dog walkers, and shelter staff. The same themes surfaced over and over: fragmentation, verification anxiety, the exhaustion of managing care across a dozen platforms.</p>
+          <h3>Feeling at home with pet people</h3>
+          <p>It feels good to talk with someone who understands life with a pet. huddle makes space for those conversations and for friendships that can grow from them.</p>
         </div>
       </div>
       <div class="tl-item reveal">
         <div class="tl-year">Building</div>
         <div class="tl-body">
-          <h3>Safety first. Community second. Care third.</h3>
-          <p>We sequenced huddle deliberately. Real-time safety features (Live Map, Broadcast Alerts) came first — because they had to work before anything else mattered. Then the social fabric (Forum, Discover, Groups, Chats). Then trusted care booking and pet records. Each layer reinforces the others.</p>
+          <h3>Making care arrangements clearer</h3>
+          <p>Care lets a pet owner and carer discuss what is needed before agreeing to a booking. Clear expectations help both people prepare.</p>
         </div>
       </div>
       <div class="tl-item reveal">
         <div class="tl-year">Today</div>
         <div class="tl-body">
           <h3>Built for pet people everywhere</h3>
-          <p>huddle is a native iOS and Android app. We're growing city by city — because local trust is the only foundation that scales. The team works close to the streets the product is built for, and close to the NGOs and shelters doing the hardest work.</p>
+          <p>huddle is a global pet app for iPhone and Android. You can also browse public content on the web.</p>
         </div>
       </div>
     </div>
@@ -291,8 +302,8 @@
       <h2 class="s-title" style="color:var(--white);margin-top:16px">Every neighbourhood<br>needs this.</h2>
       <p style="color:rgba(255,255,255,0.9);font-size:17px;font-weight:500;line-height:1.55;margin-top:20px;margin-bottom:32px">Most core features are free. Download the app and be part of the local network your pets deserve.</p>
       <div style="display:flex;gap:14px;justify-content:center;flex-wrap:wrap">
-        <a href="/get" class="btn btn-white">⌘ App Store</a>
-        <a href="/get" class="btn btn-white">▸ Google Play</a>
+        <a href="/get?platform=ios" class="btn btn-white">⌘ App Store</a>
+        <a href="/get?platform=android" class="btn btn-white">▸ Google Play</a>
       </div>
     </div>
   </div>

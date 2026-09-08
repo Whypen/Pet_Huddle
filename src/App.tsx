@@ -1,3 +1,4 @@
+import { PublicPageMetadata } from "@/components/web/PublicPageMetadata";
 import { AppBackground } from "@/components/ui/AppBackground";
 import { ErrorBoundary } from "@/components/error/ErrorBoundary";
 import { NativeRuntimeBridge } from "@/components/native/NativeRuntimeBridge";
@@ -55,6 +56,7 @@ const App = () => {
           v7_relativeSplatPath: true,
         }}
       >
+        <PublicPageMetadata />
         <AuthProvider>
           <SignupProvider>
             {/* AuthGateProvider must sit inside AuthProvider (it reads the

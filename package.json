@@ -6,8 +6,8 @@
   "scripts": {
     "dev": "vite",
     "dev:fn": "supabase functions serve --env-file supabase/functions/.env",
-    "build": "vite build",
-    "build:dev": "vite build --mode development",
+    "build": "npm run seo:check && vite build && node scripts/build-public-metadata.mjs && node scripts/check-public-seo.mjs --built",
+    "build:dev": "npm run seo:check && vite build --mode development && node scripts/build-public-metadata.mjs && node scripts/check-public-seo.mjs --built",
     "typecheck": "npm --prefix app run typecheck",
     "ops:edge:harden": "bash scripts/ops/harden-local-edge-runtime.sh",
     "audit:map": "node scripts/self_audit_map.mjs",
@@ -21,7 +21,8 @@
     "lint": "npm run lint:signup-mailto && eslint .",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "seo:check": "node scripts/check-public-seo.mjs"
   },
   "dependencies": {
     "@fingerprintjs/fingerprintjs": "^4.4.2",
@@ -60,6 +61,7 @@
     "@supabase/supabase-js": "^2.93.1",
     "@turf/distance": "^7.3.4",
     "@turf/helpers": "^7.3.4",
+    "@vercel/analytics": "^2.0.1",
     "browser-image-compression": "^2.0.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

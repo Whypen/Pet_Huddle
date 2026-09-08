@@ -272,6 +272,8 @@ nav#nav.scrolled .nav-menu-btn:hover { background: rgba(33,69,207,0.08); }
   color: rgba(255,255,255,0.85); max-width: 56ch;
 }
 
+.page-hero .lead a { text-decoration: underline; }
+
 /* Bottom wave after page hero */
 .hero-wave-out {
   position: relative;

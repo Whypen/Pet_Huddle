@@ -120,7 +120,7 @@
       ["/about", "About huddle"],
       ["/faq", "FAQ"],
       ["/contact", "Contact"],
-      ["/waitlist", "Join the waitlist"],
+      ["/get", "Get the app"],
     ]},
     { title: "Legal", items: [
       ["/legal/privacy", "Privacy policy"],
@@ -199,13 +199,13 @@
   }
   const brandCol = h("div", { class: "footer-brand" }, [
     h("img", { src: asset("wm-coral-shadow-alt.png"), alt: "huddle", class: "footer-logo" }),
-    h("p", { text: "An app for every pet — even the ones on the streets. Every pet deserves more. We leave no pet behind." }),
-    h("a", { href: "/waitlist", class: "footer-waitlist-link", text: "Join the waitlist →" }),
+    h("p", { text: "huddle is a global pet app for finding people who care about animals as much as you do." }),
+    h("a", { href: "/get", class: "footer-waitlist-link", text: "Get huddle →" }),
     h("div", { class: "footer-stores" }, [
-      h("a", { href: "/get", class: "btn-store-sm", "aria-label": "Download on the App Store" }, [
+      h("a", { href: "/get?platform=ios", class: "btn-store-sm", "aria-label": "Download on the App Store" }, [
         h("img", { src: asset("badge-appstore.svg"), alt: "Download on the App Store", class: "store-badge-img" }),
       ]),
-      h("a", { href: "/get", class: "btn-store-sm", "aria-label": "Get it on Google Play" }, [
+      h("a", { href: "/get?platform=android", class: "btn-store-sm", "aria-label": "Get it on Google Play" }, [
         h("img", { src: asset("badge-googleplay.png"), alt: "Get it on Google Play", class: "store-badge-img" }),
       ]),
     ]),
@@ -274,9 +274,7 @@
     try { localStorage.setItem(CONSENT_KEY, JSON.stringify(payload)); } catch (_) {}
     document.documentElement.setAttribute("data-consent-analytics", state.analytics ? "1" : "0");
     document.documentElement.setAttribute("data-consent-marketing", state.marketing ? "1" : "0");
-    // Hooks for tag managers — gated firing:
-    //   if (state.analytics) loadAnalytics();
-    //   if (state.marketing) loadMarketingPixels();
+    window.dispatchEvent(new Event("huddle:consent-change"));
   }
   if (stored) {
     document.documentElement.setAttribute("data-consent-analytics", stored.analytics ? "1" : "0");
@@ -362,4 +360,24 @@
     hideModal();
   });
   reopener.addEventListener("click", function () { showModal(); });
+})();
+
+(function () {
+  // Addressable help answers keep shared links useful without a new page.
+  function openLinkedAnswer() {
+    let id;
+    try { id = decodeURIComponent(window.location.hash.slice(1)); } catch { return; }
+    const answer = document.getElementById(id);
+    if (answer && answer.tagName === 'DETAILS') answer.open = true;
+  }
+  openLinkedAnswer();
+  window.addEventListener('hashchange', openLinkedAnswer);
+})();
+
+(function () {
+  // This local bundle waits for Analytics consent before loading the provider.
+  var script = document.createElement("script");
+  script.src = "/brandweb/huddle-analytics.js";
+  script.defer = true;
+  document.head.appendChild(script);
 })();

@@ -120,6 +120,9 @@
         "Cache-Control": "public, max-age=300, must-revalidate"
       }
     },
+    { "src": "^/social/?$", "dest": "/search-pages/social.html" },
+    { "src": "^/map/?$", "dest": "/search-pages/map.html" },
+    { "src": "^/groups/?$", "dest": "/search-pages/groups.html" },
     { "handle": "filesystem" },
     {
       "src": "^/carerprofile/(stripe-return|stripe-refresh)(?:/)?$",

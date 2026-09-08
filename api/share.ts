@@ -1,3 +1,4 @@
+import { getStoreLinks } from "./_storeLinks.js";
 type MaybeString = string | string[] | undefined;
 type RequestShape = {
   headers?: Record<string, MaybeString>;
@@ -576,9 +577,7 @@ export default async function handler(req: RequestShape, res: ResponseShape) {
   const image = cappedOgImage(previewImage, null, ogSize);
   const shareId = effectiveContentId ? buildCanonicalShareId(effectiveType, effectiveContentId) : "";
   const shareUrl = shareId ? `${origin}/share/${encodeURIComponent(shareId)}` : `${origin}/share`;
-  const fallbackDownloadUrl = `${origin}/waitlist`;
-  const iosDownloadUrl = String(process.env.HUDDLE_IOS_DOWNLOAD_URL || "").trim() || fallbackDownloadUrl;
-  const androidDownloadUrl = String(process.env.HUDDLE_ANDROID_DOWNLOAD_URL || "").trim() || fallbackDownloadUrl;
+  const { ios: iosDownloadUrl, android: androidDownloadUrl } = getStoreLinks();
   // The public alert page is a real page, not an OG stub: full detail, and no
   // auto-redirect to the store. Other share types keep the existing card.
   const restricted = Boolean(preview && "restricted" in preview && preview.restricted);
